@@ -668,7 +668,6 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
       </div>
       </div>
     </div>
-    </div>
   );
 }
 
