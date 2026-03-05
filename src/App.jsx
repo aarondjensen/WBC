@@ -3050,7 +3050,14 @@ export default function WBCApp() {
 
         // Load tournament players
         const tpRows = await sb.get("tournament_players", `tournament_id=eq.${TOURNAMENT_ID}&order=player_id`);
-        if (tpRows?.length) setTPlayers(tpRows.map(r => ({ id: r.id, tournament_id: r.tournament_id, player_id: r.player_id, handicap_index: parseFloat(r.handicap_index) || 0, status: r.status || "active" })));
+        if (tpRows?.length) {
+          setTPlayers(tpRows.map(r => ({ id: r.id, tournament_id: r.tournament_id, player_id: r.player_id, handicap_index: parseFloat(r.handicap_index) || 0, status: r.status || "active" })));
+        } else if (playerRows?.length) {
+          // No tournament_players yet — seed from players table with HI=0
+          const seeded = playerRows.map(r => ({ id: `tp_2026_${r.id}`, tournament_id: TOURNAMENT_ID, player_id: r.id, handicap_index: 0, status: "active" }));
+          setTPlayers(seeded);
+          for (const tp of seeded) await sb.upsert("tournament_players", tp, "id");
+        }
 
         // Load tournament rounds
         const trRows = await sb.get("tournament_rounds", `tournament_id=eq.${TOURNAMENT_ID}&order=round_number`);
@@ -3189,7 +3196,7 @@ export default function WBCApp() {
   };
 
   const startFresh = async () => {
-    // Clear scores, rounds, pairings, tees — keep players & HIs
+    // Clear scores, rounds, pairings, tees — keep tournament_players (roster + HIs)
     try {
       await sb.delete("hole_scores", `tournament_id=eq.${TOURNAMENT_ID}`);
       await sb.delete("pairings", `tournament_id=eq.${TOURNAMENT_ID}`);
@@ -3198,7 +3205,7 @@ export default function WBCApp() {
       await sb.delete("tournament_state", `tournament_id=eq.${TOURNAMENT_ID}`);
       await sb.delete("skins", `tournament_round_id=like.tr_2026%`);
     } catch(e) { console.error("Start fresh clear failed:", e); }
-    // Keep tPlayers (roster + HIs) and passwords — clear everything else
+    // Keep tPlayers (roster + HIs) and passwords intact — clear everything else
     setTRounds([]);
     setCourseList([]);
     setHoleData({});
