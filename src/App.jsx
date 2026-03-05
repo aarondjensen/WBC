@@ -802,28 +802,23 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
     }
   }, [round, JSON.stringify(myPresetGroup)]);
 
-  // When group is set, resume at first unscored hole if player has existing scores
+  // When group is set, resume at correct hole
   useEffect(() => {
     if (!group || !course) return;
     const gPlayers = group.map(id => players.find(p => p.id === id)).filter(Boolean);
-    // Check if user has any scores for this round
-    const userKey = `${user.id}_${round}`;
-    const userScores = holeData[userKey] || {};
-    const hasExistingScores = Object.values(userScores).some(v => v > 0);
-    if (hasExistingScores) {
-      // Find first hole where not all group members have scored
-      for (let i = 0; i < 18; i++) {
-        const allDone = gPlayers.every(p => {
-          const key = `${p.id}_${round}`;
-          return (holeData[key] || {})[i] > 0;
-        });
-        if (!allDone) {
-          setCurrentHole(i);
-          return;
-        }
+    // Find first incomplete hole
+    for (let i = 0; i < 18; i++) {
+      const allDone = gPlayers.every(p => (holeData[`${p.id}_${round}`] || {})[i] > 0);
+      if (!allDone) {
+        setCurrentHole(i);
+        setNavSource("manual"); // prevent auto-advance on load
+        return;
       }
-      setCurrentHole(0); // all complete — show from hole 1 (finalized state handles the lock)
     }
+    // All 18 complete — land on hole 18, mark as editing so auto-advance doesn't fire
+    setCurrentHole(17);
+    setNavSource("manual");
+    setEditingCompleted(true);
   }, [group]);
 
   // Note: round changes from other tabs should NOT reset scoring state
@@ -883,9 +878,33 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
     setCurrentHole(next);
   };
 
+  // All 18 holes complete for the group
+  const allRoundComplete = group ? (() => {
+    const gPlayers = group.map(id => players.find(p => p.id === id)).filter(Boolean);
+    return gPlayers.every(p => {
+      for (let h = 0; h < 18; h++) { if (!((holeData[`${p.id}_${round}`] || {})[h] > 0)) return false; }
+      return true;
+    });
+  })() : false;
+
+  // When all 18 complete and not finalized, auto-show finalize prompt (only once)
+  const shownFinalizeRef = useRef(false);
+  useEffect(() => {
+    if (!group) return;
+    const groupKey = `${round}_${group.slice().sort().join(",")}`;
+    const isFinalized = finalizedRounds[groupKey] || finalizedRounds[round];
+    if (allRoundComplete && !isFinalized && !shownFinalizeRef.current) {
+      shownFinalizeRef.current = true;
+      setCurrentHole(17);
+      setNavSource("manual");
+      setTimeout(() => setShowFinalize(true), 400);
+    }
+    if (!allRoundComplete) shownFinalizeRef.current = false;
+  }, [allRoundComplete, JSON.stringify(group), round]);
+
   // Auto-advance after short delay when all scored (only on fresh scoring, not editing)
   useEffect(() => {
-    if (allScored && currentHole < 17 && navSource === "auto" && !editingCompleted) {
+    if (allScored && currentHole < 17 && navSource === "auto" && !editingCompleted && !allRoundComplete) {
       const timer = setTimeout(() => {
         setTransitionDir(1);
         setHoleTransition("out");
@@ -983,10 +1002,48 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
   );
 
   if (!group) {
-    if (myPresetGroup) {
-      // Auto-assign should have fired, but just in case
+    if (myPresetGroup && !manualOverride) {
       setGroup(myPresetGroup);
       return null;
+    }
+    // Directors can pick any group to score
+    if (user.isDirector && presetGroups.length > 0) {
+      return (
+        <div style={{ padding: "16px 0" }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: K.t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 12 }}>Select Group to Score</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {presetGroups.map((grp, gi) => {
+              const grpPlayers = grp.map(id => players.find(p => p.id === id)).filter(Boolean);
+              const grpKey = `${round}_${grp.slice().sort().join(",")}`;
+              const isFinalized = finalizedRounds[grpKey] || finalizedRounds[round];
+              const holesScored = Math.max(...grpPlayers.map(p => {
+                const s = holeData[`${p.id}_${round}`] || {};
+                return Object.values(s).filter(v => v > 0).length;
+              }), 0);
+              return (
+                <button key={gi} onClick={() => { setGroup(grp); setManualOverride(true); }} style={{
+                  background: K.card, border: `1px solid ${K.bdr}`, borderRadius: 12,
+                  padding: "12px 16px", cursor: "pointer", textAlign: "left",
+                  display: "flex", justifyContent: "space-between", alignItems: "center",
+                }}>
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: K.acc, marginBottom: 4 }}>Group {gi + 1}</div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: K.t1 }}>{grpPlayers.map(p => p.name.split(" ")[0]).join(", ")}</div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    {isFinalized
+                      ? <span style={{ fontSize: 10, fontWeight: 700, color: K.acc, background: K.accGlow, padding: "3px 8px", borderRadius: 6 }}>Final</span>
+                      : holesScored > 0
+                        ? <span style={{ fontSize: 10, fontWeight: 600, color: K.warn }}>Thru {holesScored}</span>
+                        : <span style={{ fontSize: 10, color: K.t3 }}>Not started</span>
+                    }
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      );
     }
     return (
       <div style={{ textAlign: "center", padding: "40px 20px" }}>
@@ -1033,6 +1090,13 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
 
   return (
     <div>
+      {/* Director: back to group picker */}
+      {user.isDirector && presetGroups.length > 1 && (
+        <button onClick={() => { setGroup(null); setManualOverride(false); }} style={{
+          background: "transparent", border: "none", color: K.acc, fontSize: 12,
+          fontWeight: 600, cursor: "pointer", padding: "0 0 10px 0", display: "flex", alignItems: "center", gap: 4,
+        }}>← All Groups</button>
+      )}
       {/* Round banner */}
       {(() => {
         const tr = tRounds.find(t => t.round_number === round);
