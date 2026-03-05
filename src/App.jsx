@@ -2781,17 +2781,22 @@ export default function WBCApp() {
   useEffect(() => {
     // Set tab title
     document.title = "WBC 2026";
-    // Set favicon from logo
-    const link = document.querySelector("link[rel*='icon']") || document.createElement("link");
-    link.type = "image/png";
-    link.rel = "shortcut icon";
-    link.href = WBC_LOGO;
-    document.head.appendChild(link);
-    // Also set apple touch icon for bookmarks
-    const apple = document.querySelector("link[rel='apple-touch-icon']") || document.createElement("link");
-    apple.rel = "apple-touch-icon";
-    apple.href = WBC_LOGO;
-    document.head.appendChild(apple);
+    // Set favicon with black circle background
+    const canvas = document.createElement("canvas");
+    canvas.width = 64; canvas.height = 64;
+    const ctx = canvas.getContext("2d");
+    ctx.beginPath(); ctx.arc(32, 32, 32, 0, Math.PI * 2); ctx.fillStyle = "#000"; ctx.fill();
+    const img = new Image();
+    img.onload = () => {
+      ctx.drawImage(img, 8, 8, 48, 48);
+      const link = document.querySelector("link[rel*='icon']") || document.createElement("link");
+      link.type = "image/png"; link.rel = "shortcut icon"; link.href = canvas.toDataURL();
+      document.head.appendChild(link);
+      const apple = document.querySelector("link[rel='apple-touch-icon']") || document.createElement("link");
+      apple.rel = "apple-touch-icon"; apple.href = canvas.toDataURL();
+      document.head.appendChild(apple);
+    };
+    img.src = WBC_LOGO;
   }, []);
 
   // Set viewport meta to prevent zoom on mobile
