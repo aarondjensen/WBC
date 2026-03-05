@@ -2012,8 +2012,22 @@ function TeeAssigner({ activePlayers, numRounds, tRounds, courses, teeData, setT
   const course = tr ? courses.find(c => c.id === tr.course_id) : null;
   const tees = course?.tee_boxes || [];
   const assignments = (teeData || {})[editRound] || {};
+  const [chDeltas, setChDeltas] = useState({});
 
   const assign = (pid, teeName) => {
+    // Compute delta vs current CH
+    const oldTeeObj = tees.find(t => t.name === (assignments[pid] || getDefaultTee(tees)?.name || tees[0]?.name));
+    const newTeeObj = tees.find(t => t.name === teeName);
+    const player = activePlayers.find(p => p.id === pid);
+    if (oldTeeObj && newTeeObj && player) {
+      const oldCH = calcCH(player.handicap_index, oldTeeObj.slope, oldTeeObj.rating, oldTeeObj.par);
+      const newCH = calcCH(player.handicap_index, newTeeObj.slope, newTeeObj.rating, newTeeObj.par);
+      const delta = newCH - oldCH;
+      if (delta !== 0) {
+        setChDeltas(prev => ({ ...prev, [pid]: delta }));
+        setTimeout(() => setChDeltas(prev => { const n = {...prev}; delete n[pid]; return n; }), 2000);
+      }
+    }
     setTeeBulk(editRound, { ...assignments, [pid]: teeName });
     if (teesSaved && teesSaved[editRound]) onTeesModify && onTeesModify(editRound);
   };
@@ -2089,7 +2103,14 @@ function TeeAssigner({ activePlayers, numRounds, tRounds, courses, teeData, setT
                 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
                     <span style={{ fontWeight: 600, fontSize: 12 }}>{p.name}</span>
-                    <span style={{ fontSize: 9, color: K.t2 }}>HI {p.handicap_index} · CH {ch}</span>
+                    <span style={{ fontSize: 9, color: K.t2, display: "flex", alignItems: "center", gap: 3 }}>
+                      HI {p.handicap_index} · CH {ch}
+                      {chDeltas[p.id] !== undefined && (
+                        <span style={{ fontSize: 9, fontWeight: 700, color: chDeltas[p.id] > 0 ? "#22c55e" : "#ef4444", display: "flex", alignItems: "center", gap: 1 }}>
+                          {chDeltas[p.id] > 0 ? "▲" : "▼"}{Math.abs(chDeltas[p.id])}
+                        </span>
+                      )}
+                    </span>
                   </div>
                   <div style={{ display: "flex", gap: 2 }}>
                     {tees.map(tee => {
