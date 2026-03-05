@@ -23,7 +23,8 @@ const TROPHY_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 260
 const TROPHY_SVG_URL = `data:image/svg+xml;utf8,${encodeURIComponent(TROPHY_SVG)}`;
 
 // Demo data simulating what's in Supabase
-const DEMO_PLAYERS = [
+// Player registry — loaded from Supabase players table on mount
+let DEMO_PLAYERS = [
   { id: "aaron_j", name: "Aaron J" }, { id: "bob_b", name: "Bob B" },
   { id: "brian_k", name: "Brian K" }, { id: "eric_o", name: "Eric O" },
   { id: "joe_s", name: "Joe S" }, { id: "john_c", name: "John C" },
@@ -2292,7 +2293,7 @@ function TeeAssigner({ activePlayers, numRounds, tRounds, courses, teeData, setT
   );
 }
 
-function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, passwords, setPasswords, holeData, finalizedRounds, onFinalizeRound, getPlayerTee, resetToDemo, externalSettingsOpen, externalSettingsTab, onExternalSettingsHandled }) {
+function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, passwords, setPasswords, holeData, finalizedRounds, onFinalizeRound, getPlayerTee, resetToDemo, startFresh, externalSettingsOpen, externalSettingsTab, onExternalSettingsHandled }) {
   const [tab, setTab] = useState("tees");
   const [teesSaved, setTeesSaved] = useState({});
   const [teesModified, setTeesModified] = useState({});
@@ -2813,12 +2814,17 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                 </div>
               )}
 
-              {/* Reset to demo data */}
-              <div style={{ marginTop: 16, paddingTop: 12, borderTop: `1px solid ${K.bdr}30` }}>
+              {/* Reset options */}
+              <div style={{ marginTop: 16, paddingTop: 12, borderTop: `1px solid ${K.bdr}30`, display: "flex", flexDirection: "column", gap: 8 }}>
+                <button onClick={() => { if (confirm("Clear all scores, rounds, pairings and tee assignments? Player roster and handicaps will be preserved. This cannot be undone.")) { startFresh(); setSettingsOpen(false); } }} style={{
+                  width: "100%", padding: "10px 0", borderRadius: 8,
+                  background: K.danger + "15", border: `1px solid ${K.danger}60`,
+                  color: K.danger, fontSize: 12, fontWeight: 700, cursor: "pointer",
+                }}>🗑 Start Fresh — Clear All Data</button>
                 <button onClick={() => { if (confirm("Reset all data to demo defaults? This cannot be undone.")) { resetToDemo(); setSettingsOpen(false); } }} style={{
                   width: "100%", padding: "10px 0", borderRadius: 8, background: "transparent",
-                  border: `1px solid ${K.danger}40`, color: K.danger, fontSize: 11, fontWeight: 600, cursor: "pointer",
-                }}>🔄 Reset to Demo Data</button>
+                  border: `1px solid ${K.bdr}`, color: K.t3, fontSize: 11, fontWeight: 600, cursor: "pointer",
+                }}>🔄 Load Demo Data</button>
               </div>
             </div>
           </div>
@@ -3036,6 +3042,12 @@ export default function WBCApp() {
       try {
         setSyncing(true);
 
+        // Load player registry (names) from players table
+        const playerRows = await sb.get("players", "order=name");
+        if (playerRows?.length) {
+          DEMO_PLAYERS = playerRows.map(r => ({ id: r.id, name: r.name }));
+        }
+
         // Load tournament players
         const tpRows = await sb.get("tournament_players", `tournament_id=eq.${TOURNAMENT_ID}&order=player_id`);
         if (tpRows?.length) setTPlayers(tpRows.map(r => ({ id: r.id, tournament_id: r.tournament_id, player_id: r.player_id, handicap_index: parseFloat(r.handicap_index) || 0, status: r.status || "active" })));
@@ -3174,6 +3186,30 @@ export default function WBCApp() {
     await sb.upsert("tournament_rounds", { id: "tr_2026_r1", tournament_id: TOURNAMENT_ID, round_number: 1, course_id: "demo_course_1" }, "id");
     await saveTournamentState({}, pw);
     notify("Reset to demo data");
+  };
+
+  const startFresh = async () => {
+    // Clear scores, rounds, pairings, tees — keep players & HIs
+    try {
+      await sb.delete("hole_scores", `tournament_id=eq.${TOURNAMENT_ID}`);
+      await sb.delete("pairings", `tournament_id=eq.${TOURNAMENT_ID}`);
+      await sb.delete("tee_assignments", `tournament_id=eq.${TOURNAMENT_ID}`);
+      await sb.delete("tournament_rounds", `tournament_id=eq.${TOURNAMENT_ID}`);
+      await sb.delete("tournament_state", `tournament_id=eq.${TOURNAMENT_ID}`);
+      await sb.delete("skins", `tournament_round_id=like.tr_2026%`);
+    } catch(e) { console.error("Start fresh clear failed:", e); }
+    // Keep tPlayers (roster + HIs) and passwords — clear everything else
+    setTRounds([]);
+    setCourseList([]);
+    setHoleData({});
+    setCtpData({});
+    setPairingsData({});
+    setTeeData({});
+    setTeeTimesData({});
+    setFinalizedRounds({});
+    setRound(1);
+    await saveTournamentState({}, passwords);
+    notify("Scorecards cleared — player roster preserved");
   };
 
   const notify = m => { setNotif(m); setTimeout(() => setNotif(null), 2500); };
@@ -3348,6 +3384,7 @@ export default function WBCApp() {
   const addPlayerToTournament = async (name, hi) => {
     const id = name.toLowerCase().replace(/\s+/g, "_");
     if (!DEMO_PLAYERS.find(p => p.id === id)) DEMO_PLAYERS.push({ id, name });
+    await sb.upsert("players", { id, name }, "id").catch(() => {});
     const newTp = { id: `tp_2026_${id}`, tournament_id: TOURNAMENT_ID, player_id: id, handicap_index: hi, status: "active" };
     setTPlayers(prev => [...prev, newTp]);
     await sb.upsert("tournament_players", newTp, "id");
@@ -3384,8 +3421,8 @@ export default function WBCApp() {
   const updateName = async (pid, newName) => {
     const p = DEMO_PLAYERS.find(pl => pl.id === pid);
     if (p) p.name = newName;
+    else DEMO_PLAYERS.push({ id: pid, name: newName });
     setTPlayers(prev => [...prev]); // trigger re-render
-    // Update in players table if it exists
     await sb.upsert("players", { id: pid, name: newName }, "id").catch(() => {});
     notify("Name updated");
   };
@@ -3660,7 +3697,7 @@ export default function WBCApp() {
                 });
                 return next;
               });
-            }} passwords={passwords} setPasswords={async pw => { setPasswords(pw); await saveTournamentState(finalizedRounds, pw); }} holeData={holeData} finalizedRounds={finalizedRounds} onFinalizeRound={async rnd => { const nf = { ...finalizedRounds, [rnd]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); if (rnd < 4) setRound(rnd + 1); }} getPlayerTee={getPlayerTee} resetToDemo={resetToDemo} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); }} /> : (
+            }} passwords={passwords} setPasswords={async pw => { setPasswords(pw); await saveTournamentState(finalizedRounds, pw); }} holeData={holeData} finalizedRounds={finalizedRounds} onFinalizeRound={async rnd => { const nf = { ...finalizedRounds, [rnd]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); if (rnd < 4) setRound(rnd + 1); }} getPlayerTee={getPlayerTee} resetToDemo={resetToDemo} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); }} /> : (
           <div style={{ textAlign: "center", padding: "40px 20px" }}>
             <div style={{ fontSize: 40, marginBottom: 12 }}>🔒</div>
             <div style={{ fontSize: 16, fontWeight: 700, color: K.t1, marginBottom: 6 }}>Directors Only</div>
