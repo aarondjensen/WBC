@@ -2002,7 +2002,6 @@ function PairingsEditor({ activePlayers, numRounds, pairingsData, setPairings, t
       })}
       </div>
     </div>
-    </div>
   );
 }
 
@@ -2767,7 +2766,6 @@ function PlayerRow({ player, onUpdateHI, onUpdateName, onRemove, onSavePassword,
       <div style={{ flex: "0 0 15%", display: "flex", justifyContent: "flex-end" }}>
         <button onClick={() => { setEditing(true); setHi(String(player.handicap_index)); setName(player.name); setPw(password || "wbc2026"); }} style={{ padding: "3px 10px", borderRadius: 6, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t3, fontSize: 10, fontWeight: 600, cursor: "pointer" }}>Edit</button>
       </div>
-    </div>
     </div>
   );
 }
