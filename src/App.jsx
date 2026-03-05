@@ -1504,7 +1504,6 @@ function GroupSetup({ user, players, onStart, presetGroup }) {
         })}
       </div>
     </div>
-    </div>
   );
 }
 
