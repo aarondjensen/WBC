@@ -668,6 +668,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
       </div>
       </div>
     </div>
+    </div>
   );
 }
 
@@ -1504,6 +1505,7 @@ function GroupSetup({ user, players, onStart, presetGroup }) {
         })}
       </div>
     </div>
+    </div>
   );
 }
 
@@ -2001,6 +2003,7 @@ function PairingsEditor({ activePlayers, numRounds, pairingsData, setPairings, t
         );
       })}
       </div>
+    </div>
     </div>
   );
 }
@@ -2767,6 +2770,7 @@ function PlayerRow({ player, onUpdateHI, onUpdateName, onRemove, onSavePassword,
         <button onClick={() => { setEditing(true); setHi(String(player.handicap_index)); setName(player.name); setPw(password || "wbc2026"); }} style={{ padding: "3px 10px", borderRadius: 6, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t3, fontSize: 10, fontWeight: 600, cursor: "pointer" }}>Edit</button>
       </div>
     </div>
+    </div>
   );
 }
 
@@ -3269,7 +3273,8 @@ export default function WBCApp() {
   ];
 
   return (
-    <div style={{ height: "100vh", overflow: "hidden", background: K.bg, fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", color: K.t1, maxWidth: 500, margin: "0 auto", position: "relative", paddingBottom: 80 }}>
+    <div style={{ minHeight: "100vh", background: "#030810", display: "flex", alignItems: "flex-start", justifyContent: "center" }}>
+    <div style={{ height: "100vh", overflow: "hidden", background: K.bg, fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", color: K.t1, width: "100%", maxWidth: 480, position: "relative", paddingBottom: 80, boxShadow: "0 0 80px rgba(0,0,0,0.8)" }}>
       <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
 
       {notif && <div style={{ position: "fixed", top: 16, left: "50%", transform: "translateX(-50%)", background: K.accDim, color: "white", padding: "10px 24px", borderRadius: 12, fontSize: 13, fontWeight: 600, zIndex: 1000, boxShadow: "0 8px 32px rgba(0,0,0,0.4)" }}>{notif}</div>}
@@ -3384,6 +3389,7 @@ export default function WBCApp() {
           );
         })}
       </div>
+    </div>
     </div>
   );
 }
