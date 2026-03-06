@@ -3615,6 +3615,42 @@ export default function WBCApp() {
           </div>
         )}
 
+        {loginPrompt && (
+          <div style={{ position: "fixed", top: 0, bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 480, background: "rgba(0,0,0,0.85)", zIndex: 998, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+            <div style={{ background: K.card, borderRadius: 16, border: `1px solid ${K.bdr}`, width: "100%", maxWidth: 320, padding: 24, textAlign: "center" }}>
+              <div style={{ fontSize: 18, fontWeight: 800, color: K.t1, marginBottom: 4 }}>{loginPrompt.name}</div>
+              {loginPrompt.isDirector && <div style={{ fontSize: 10, color: K.acc, fontWeight: 700, marginBottom: 12 }}>DIRECTOR</div>}
+              <div style={{ fontSize: 12, color: K.t3, marginBottom: 16 }}>Enter your password</div>
+              <input
+                type="password"
+                value={loginPin}
+                onChange={e => setLoginPin(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && tryLogin()}
+                autoFocus
+                placeholder="Password"
+                style={{
+                  width: "100%", boxSizing: "border-box", padding: "12px 16px",
+                  background: K.inp, border: `2px solid ${loginError ? K.danger : K.bdr}`,
+                  borderRadius: 10, color: K.t1, fontSize: 16, textAlign: "center",
+                  marginBottom: 12, fontFamily: "inherit",
+                  animation: loginError ? "shake 0.4s ease" : "none",
+                }}
+              />
+              {loginError && <div style={{ fontSize: 11, color: K.danger, marginBottom: 8 }}>Incorrect password</div>}
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={() => { setLoginPrompt(null); setLoginPin(""); setLoginError(false); }} style={{
+                  flex: 1, padding: "12px 0", borderRadius: 10, background: K.inp,
+                  border: `1px solid ${K.bdr}`, color: K.t2, fontSize: 13, fontWeight: 600, cursor: "pointer",
+                }}>Cancel</button>
+                <button onClick={tryLogin} style={{
+                  flex: 1, padding: "12px 0", borderRadius: 10, background: K.acc,
+                  border: "none", color: K.bg, fontSize: 13, fontWeight: 700, cursor: "pointer",
+                }}>Login</button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div style={{ width: "100%", maxWidth: 420, textAlign: "center" }}>
           <div style={{ width: 80, height: 100, margin: "0 auto 20px", display: "flex", alignItems: "center", justifyContent: "center" }}>
             <img src={WBC_LOGO} alt="WBC" style={{ height: 90, filter: "drop-shadow(0 4px 16px rgba(34,211,167,0.3))" }} />
