@@ -2395,31 +2395,26 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
     searchTimerRef.current = setTimeout(async () => {
       setSearchLoading(true);
       try {
-        // GolfCourseAPI.com integration
-        const res = await fetch(`https://golfcourseapi.com/api/courses?search=${encodeURIComponent(query.trim())}&limit=10`);
-        if (!res.ok) throw new Error("API error");
-        const data = await res.json();
-        const apiCourses = (data.courses || data.results || data || []).map(c => ({
-          id: c.id || c.course_id || `api_${Math.random().toString(36).slice(2,8)}`,
-          name: c.name || c.course_name || "Unknown",
-          city: c.city || c.location?.city || "",
-          state: c.state || c.location?.state || "",
-          par: c.par || c.scorecard?.par || 72,
-          slope: c.slope || c.scorecard?.slope || 113,
-          rating: c.rating || c.scorecard?.rating || 72.0,
-          hole_pars: c.hole_pars || c.scorecard?.hole_pars || c.holes?.map(h => h.par) || [],
-          hole_handicaps: c.hole_handicaps || c.scorecard?.hole_handicaps || c.holes?.map(h => h.handicap) || [],
-          tee_boxes: (c.tee_boxes || c.tees || []).map((t, ti) => ({ ...t, color: resolveTeeColor(t, ti) })),
-        }));
-        setSearchResults(apiCourses);
+        // Search Supabase courses table (14 years of WBC course history)
+        const q = encodeURIComponent(query.trim());
+        const rows = await sb.get("courses", `or=(name.ilike.*${query.trim()}*,city.ilike.*${query.trim()}*,state.ilike.*${query.trim()}*)&order=name&limit=20`);
+        if (rows?.length) {
+          // Also fetch tee boxes for each result
+          const ids = rows.map(r => r.id).join(",");
+          const tbRows = await sb.get("tee_boxes", `course_id=in.(${ids})`);
+          const results = rows.map((c, ci) => ({
+            ...c,
+            hole_pars: c.hole_pars || [],
+            hole_handicaps: c.hole_handicaps || [],
+            tee_boxes: (tbRows || []).filter(t => t.course_id === c.id).map((t, ti) => ({ ...t, color: resolveTeeColor(t, ti) })),
+          }));
+          setSearchResults(results);
+        } else {
+          setSearchResults([]);
+        }
       } catch (err) {
-        console.log("GolfCourseAPI fetch failed, falling back to demo:", err);
-        // Fallback to demo courses for offline/demo mode
-        const q = query.toLowerCase();
-        const fallback = ALL_DEMO_COURSES
-          .filter(c => !courses.find(ex => ex.id === c.id))
-          .filter(c => c.name.toLowerCase().includes(q) || c.city.toLowerCase().includes(q) || c.state.toLowerCase().includes(q));
-        setSearchResults(fallback);
+        console.log("Course search failed:", err);
+        setSearchResults([]);
       }
       setSearchLoading(false);
     }, 400);
@@ -3605,14 +3600,18 @@ export default function WBCApp() {
               </div>
             ) : (
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
-              {activePlayers.map(p => (
-                <button key={p.id} onClick={() => setLoginAnim({ id: p.id, name: p.name, isDirector: p.name === "Aaron J" || p.name === "Scott R" })}
-                  style={{ background: K.card, border: `1px solid ${K.bdr}`, borderRadius: 10, padding: "12px 6px", cursor: "pointer", color: K.t1, fontSize: 13, fontWeight: 600, textAlign: "center", transition: "all 0.15s" }}
-                  onMouseEnter={e => { e.currentTarget.style.borderColor = K.acc; e.currentTarget.style.background = K.hover; }}
-                  onMouseLeave={e => { e.currentTarget.style.borderColor = K.bdr; e.currentTarget.style.background = K.card; }}>
-                  {p.name}
-                </button>
-              ))}
+              {activePlayers.map(p => {
+                const isDirector = p.id === "aaron_j" || p.id === "scott_r";
+                return (
+                  <button key={p.id} onClick={() => setLoginPrompt({ id: p.id, name: p.name, isDirector })}
+                    style={{ background: K.card, border: `1px solid ${isDirector ? K.acc + "60" : K.bdr}`, borderRadius: 10, padding: "12px 6px", cursor: "pointer", color: K.t1, fontSize: 13, fontWeight: 600, textAlign: "center", transition: "all 0.15s" }}
+                    onMouseEnter={e => { e.currentTarget.style.borderColor = K.acc; e.currentTarget.style.background = K.hover; }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = isDirector ? K.acc + "60" : K.bdr; e.currentTarget.style.background = K.card; }}>
+                    {p.name}
+                    {isDirector && <div style={{ fontSize: 8, color: K.acc, fontWeight: 700, marginTop: 2 }}>DIRECTOR</div>}
+                  </button>
+                );
+              })}
             </div>
             )}
           </div>
