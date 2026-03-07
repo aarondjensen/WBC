@@ -24,7 +24,14 @@ const TROPHY_SVG_URL = `data:image/svg+xml;utf8,${encodeURIComponent(TROPHY_SVG)
 
 // Demo data simulating what's in Supabase
 // Player registry — loaded from Supabase players table on mount
-
+let DEMO_PLAYERS = [
+  { id: "aaron_j", name: "Aaron J" }, { id: "bob_b", name: "Bob B" },
+  { id: "brian_k", name: "Brian K" }, { id: "eric_o", name: "Eric O" },
+  { id: "joe_s", name: "Joe S" }, { id: "john_c", name: "John C" },
+  { id: "matt_v", name: "Matt V" }, { id: "scott_r", name: "Scott R" },
+  { id: "jeff_b", name: "Jeff B" }, { id: "ray_h", name: "Ray H" },
+  { id: "russ_w", name: "Russ W" }, { id: "steve_v", name: "Steve V" },
+];
 
 const DEMO_TP = [
   { id: "tp1", tournament_id: "wbc_2026", player_id: "aaron_j", handicap_index: 15.2, status: "active" },
@@ -224,6 +231,10 @@ const sb = {
 };
 
 // Helper: convert Supabase hole_scores rows → holeData format { "pid_round": { holeIdx: score } }
+const extractRound = (roundScoreId) => {
+  const m = roundScoreId?.match(/_r(\d+)_/);
+  return m ? parseInt(m[1]) : 1;
+};
 const rowsToHoleData = (rows) => {
   const hd = {};
   rows.forEach(r => {
@@ -232,10 +243,6 @@ const rowsToHoleData = (rows) => {
     hd[key][r.hole_number - 1] = r.score;
   });
   return hd;
-};
-const extractRound = (roundScoreId) => {
-  const m = roundScoreId?.match(/_r(\d+)_/);
-  return m ? parseInt(m[1]) : 1;
 };
 // Convert holeData entry to Supabase row
 const holeDataToRow = (pid, rnd, holeIdx, score, courseId) => ({
@@ -2286,6 +2293,109 @@ function TeeAssigner({ activePlayers, numRounds, tRounds, courses, teeData, setT
   );
 }
 
+function PasswordRow({ player, password, onSave, isLast, ac }) {
+  const [editing, setEditing] = useState(false);
+  const [pw, setPw] = useState(password);
+  const [show, setShow] = useState(false);
+  const c = ac || K.acc;
+
+  const save = () => {
+    if (pw.trim()) onSave(player.id, pw.trim());
+    setEditing(false);
+  };
+
+  return (
+    <div style={{ padding: "8px 14px", display: "flex", alignItems: "center", borderBottom: !isLast ? `1px solid ${K.bdr}10` : "none" }}>
+      <span style={{ flex: 1, fontWeight: 600, fontSize: 13 }}>{player.name}</span>
+      {editing ? (
+        <>
+          <div style={{ width: 120, display: "flex", justifyContent: "center" }}>
+            <input value={pw} onChange={e => setPw(e.target.value)} autoFocus
+              onKeyDown={e => { if (e.key === "Enter") save(); }}
+              style={{ width: 110, padding: "5px 8px", background: K.inp, border: `1px solid ${c}40`, borderRadius: 6, color: K.t1, fontSize: 12, textAlign: "center", fontWeight: 600 }} />
+          </div>
+          <div style={{ width: 40, display: "flex", justifyContent: "center" }}>
+            <button onClick={save} style={{ padding: "4px 8px", background: c, color: K.bg, border: "none", borderRadius: 5, fontWeight: 700, cursor: "pointer", fontSize: 10 }}>✓</button>
+          </div>
+        </>
+      ) : (
+        <>
+          <div style={{ width: 120, display: "flex", justifyContent: "center", alignItems: "center", gap: 4 }}>
+            <span style={{ fontSize: 12, color: K.t2, fontWeight: 500, fontFamily: "monospace" }}>{show ? password : "••••••"}</span>
+            <button onClick={() => setShow(!show)} style={{ background: "transparent", border: "none", color: K.t3, fontSize: 9, cursor: "pointer", padding: "0 2px" }}>{show ? "hide" : "show"}</button>
+          </div>
+          <div style={{ width: 40, display: "flex", justifyContent: "center" }}>
+            <button onClick={() => { setEditing(true); setPw(password); }} style={{ background: "transparent", border: "none", color: K.t3, fontSize: 10, cursor: "pointer" }}>Edit</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function PlayerRow({ player, onUpdateHI, onUpdateName, onRemove, onSavePassword, password, isLast, ac }) {
+  const [editing, setEditing] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [hi, setHi] = useState(String(player.handicap_index));
+  const [name, setName] = useState(player.name);
+  const [pw, setPw] = useState(password);
+  const [showPw, setShowPw] = useState(false);
+  const c = ac || K.acc;
+
+  const save = () => {
+    if (name.trim() && name.trim() !== player.name) onUpdateName(player.id, name.trim());
+    if (parseFloat(hi) !== player.handicap_index) onUpdateHI(player.id, parseFloat(hi));
+    if (pw.trim() && onSavePassword) onSavePassword(player.id, pw.trim());
+    setEditing(false);
+  };
+
+  if (confirming) {
+    return (
+      <div style={{ padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: !isLast ? `1px solid ${K.bdr}10` : "none", background: K.danger + "08" }}>
+        <span style={{ fontSize: 12, color: K.danger, fontWeight: 600 }}>Remove {player.name}?</span>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button onClick={() => setConfirming(false)} style={{ padding: "5px 12px", borderRadius: 6, background: K.card, border: `1px solid ${K.bdr}`, color: K.t2, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>No</button>
+          <button onClick={() => onRemove(player.id)} style={{ padding: "5px 12px", borderRadius: 6, background: K.danger, border: "none", color: "#fff", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>Yes</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (editing) {
+    return (
+      <div style={{ padding: "8px 14px", display: "flex", alignItems: "center", gap: 4, borderBottom: !isLast ? `1px solid ${K.bdr}10` : "none", background: c + "06" }}>
+        <button onClick={() => setConfirming(true)} style={{ background: "transparent", border: "none", color: K.danger, fontSize: 14, cursor: "pointer", padding: 0, lineHeight: 1, flexShrink: 0, marginRight: 4 }}>✕</button>
+        <div style={{ flex: "0 0 36%", minWidth: 0 }}>
+          <input value={name} onChange={e => setName(e.target.value)} style={{ width: "100%", boxSizing: "border-box", padding: "6px 8px", background: K.inp, border: `1px solid ${c}40`, borderRadius: 6, color: K.t1, fontSize: 13, fontWeight: 600 }} />
+        </div>
+        <div style={{ flex: "0 0 13%", display: "flex", justifyContent: "center" }}>
+          <input value={hi} onChange={e => setHi(e.target.value)} type="number" step="0.1" style={{ width: "85%", padding: "6px 2px", background: K.inp, border: `1px solid ${c}40`, borderRadius: 6, color: K.t1, fontSize: 12, textAlign: "center" }} />
+        </div>
+        <div style={{ flex: "0 0 28%", display: "flex", justifyContent: "center" }}>
+          <input value={pw} onChange={e => setPw(e.target.value)} placeholder="password" style={{ width: "95%", padding: "6px 6px", background: K.inp, border: `1px solid ${c}40`, borderRadius: 6, color: K.t1, fontSize: 12 }} />
+        </div>
+        <div style={{ flex: "0 0 13%", display: "flex", justifyContent: "flex-end" }}>
+          <button onClick={save} style={{ padding: "5px 10px", background: c, color: K.bg, border: "none", borderRadius: 6, fontWeight: 700, cursor: "pointer", fontSize: 10 }}>Save</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ padding: "10px 14px", display: "flex", alignItems: "center", borderBottom: !isLast ? `1px solid ${K.bdr}10` : "none" }}>
+      <span style={{ flex: "0 0 40%", fontWeight: 600, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{player.name}</span>
+      <span style={{ flex: "0 0 15%", textAlign: "center", fontSize: 12, color: K.t2 }}>{player.handicap_index}</span>
+      <div style={{ flex: "0 0 30%", display: "flex", alignItems: "center", justifyContent: "center", gap: 3 }}>
+        <span style={{ fontSize: 11, color: K.t2, fontFamily: "monospace" }}>{showPw ? (password || "wbc2026") : "••••••"}</span>
+        <button onClick={() => setShowPw(!showPw)} style={{ background: "transparent", border: "none", color: K.t3, fontSize: 9, cursor: "pointer", padding: "0 1px" }}>{showPw ? "hide" : "show"}</button>
+      </div>
+      <div style={{ flex: "0 0 15%", display: "flex", justifyContent: "flex-end" }}>
+        <button onClick={() => { setEditing(true); setHi(String(player.handicap_index)); setName(player.name); setPw(password || "wbc2026"); }} style={{ padding: "3px 10px", borderRadius: 6, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t3, fontSize: 10, fontWeight: 600, cursor: "pointer" }}>Edit</button>
+      </div>
+    </div>
+  );
+}
+
 function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, passwords, setPasswords, holeData, finalizedRounds, onFinalizeRound, getPlayerTee, resetToDemo, startFresh, externalSettingsOpen, externalSettingsTab, onExternalSettingsHandled }) {
   const [tab, setTab] = useState("tees");
   const [teesSaved, setTeesSaved] = useState({});
@@ -2635,9 +2745,9 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
           const teesSet = teesSaved[editRound] && !teesModified[editRound] && activePlayers.every(p => ((teeData[editRound] || {})[p.id]));
           const groupsDone = _rg.length > 0 && _rg.flat().length === activePlayers.length;
           const teeTimesDone = _rg.length > 0 && _rg.every((_, gi) => _rt[gi] && _rt[gi].trim() !== "");
-          if (!teesSet) items.push({ text: "Tee assignments incomplete", action: "Go to Tees →", onClick: () => setTab("tees") });
-          if (!groupsDone) items.push({ text: "Pairings not set", action: "Go to Pairings →", onClick: () => setTab("pairings") });
-          if (!teeTimesDone) items.push({ text: "Tee times missing", action: "Add tee times →", onClick: () => setTab("pairings") });
+          if (!teesSet) items.push({ text: "Tee assignments incomplete" });
+          if (!groupsDone) items.push({ text: "Pairings not set" });
+          if (!teeTimesDone) items.push({ text: "Tee times missing" });
         }
         if (items.length === 0) return null;
         return (
@@ -2883,108 +2993,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
   );
 }
 
-function PasswordRow({ player, password, onSave, isLast, ac }) {
-  const [editing, setEditing] = useState(false);
-  const [pw, setPw] = useState(password);
-  const [show, setShow] = useState(false);
-  const c = ac || K.acc;
 
-  const save = () => {
-    if (pw.trim()) onSave(player.id, pw.trim());
-    setEditing(false);
-  };
-
-  return (
-    <div style={{ padding: "8px 14px", display: "flex", alignItems: "center", borderBottom: !isLast ? `1px solid ${K.bdr}10` : "none" }}>
-      <span style={{ flex: 1, fontWeight: 600, fontSize: 13 }}>{player.name}</span>
-      {editing ? (
-        <>
-          <div style={{ width: 120, display: "flex", justifyContent: "center" }}>
-            <input value={pw} onChange={e => setPw(e.target.value)} autoFocus
-              onKeyDown={e => { if (e.key === "Enter") save(); }}
-              style={{ width: 110, padding: "5px 8px", background: K.inp, border: `1px solid ${c}40`, borderRadius: 6, color: K.t1, fontSize: 12, textAlign: "center", fontWeight: 600 }} />
-          </div>
-          <div style={{ width: 40, display: "flex", justifyContent: "center" }}>
-            <button onClick={save} style={{ padding: "4px 8px", background: c, color: K.bg, border: "none", borderRadius: 5, fontWeight: 700, cursor: "pointer", fontSize: 10 }}>✓</button>
-          </div>
-        </>
-      ) : (
-        <>
-          <div style={{ width: 120, display: "flex", justifyContent: "center", alignItems: "center", gap: 4 }}>
-            <span style={{ fontSize: 12, color: K.t2, fontWeight: 500, fontFamily: "monospace" }}>{show ? password : "••••••"}</span>
-            <button onClick={() => setShow(!show)} style={{ background: "transparent", border: "none", color: K.t3, fontSize: 9, cursor: "pointer", padding: "0 2px" }}>{show ? "hide" : "show"}</button>
-          </div>
-          <div style={{ width: 40, display: "flex", justifyContent: "center" }}>
-            <button onClick={() => { setEditing(true); setPw(password); }} style={{ background: "transparent", border: "none", color: K.t3, fontSize: 10, cursor: "pointer" }}>Edit</button>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-function PlayerRow({ player, onUpdateHI, onUpdateName, onRemove, onSavePassword, password, isLast, ac }) {
-  const [editing, setEditing] = useState(false);
-  const [confirming, setConfirming] = useState(false);
-  const [hi, setHi] = useState(String(player.handicap_index));
-  const [name, setName] = useState(player.name);
-  const [pw, setPw] = useState(password);
-  const [showPw, setShowPw] = useState(false);
-  const c = ac || K.acc;
-
-  const save = () => {
-    if (name.trim() && name.trim() !== player.name) onUpdateName(player.id, name.trim());
-    if (parseFloat(hi) !== player.handicap_index) onUpdateHI(player.id, parseFloat(hi));
-    if (pw.trim() && onSavePassword) onSavePassword(player.id, pw.trim());
-    setEditing(false);
-  };
-
-  if (confirming) {
-    return (
-      <div style={{ padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: !isLast ? `1px solid ${K.bdr}10` : "none", background: K.danger + "08" }}>
-        <span style={{ fontSize: 12, color: K.danger, fontWeight: 600 }}>Remove {player.name}?</span>
-        <div style={{ display: "flex", gap: 6 }}>
-          <button onClick={() => setConfirming(false)} style={{ padding: "5px 12px", borderRadius: 6, background: K.card, border: `1px solid ${K.bdr}`, color: K.t2, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>No</button>
-          <button onClick={() => onRemove(player.id)} style={{ padding: "5px 12px", borderRadius: 6, background: K.danger, border: "none", color: "#fff", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>Yes</button>
-        </div>
-      </div>
-    );
-  }
-
-  if (editing) {
-    return (
-      <div style={{ padding: "8px 14px", display: "flex", alignItems: "center", gap: 4, borderBottom: !isLast ? `1px solid ${K.bdr}10` : "none", background: c + "06" }}>
-        <button onClick={() => setConfirming(true)} style={{ background: "transparent", border: "none", color: K.danger, fontSize: 14, cursor: "pointer", padding: 0, lineHeight: 1, flexShrink: 0, marginRight: 4 }}>✕</button>
-        <div style={{ flex: "0 0 36%", minWidth: 0 }}>
-          <input value={name} onChange={e => setName(e.target.value)} onKeyDown={e => { if (e.key === "Enter") save(); }} style={{ width: "100%", boxSizing: "border-box", padding: "6px 8px", background: K.inp, border: `1px solid ${c}40`, borderRadius: 6, color: K.t1, fontSize: 13, fontWeight: 600 }} />
-        </div>
-        <div style={{ flex: "0 0 13%", display: "flex", justifyContent: "center" }}>
-          <input value={hi} onChange={e => setHi(e.target.value)} onKeyDown={e => { if (e.key === "Enter") save(); }} type="number" step="0.1" style={{ width: "85%", padding: "6px 2px", background: K.inp, border: `1px solid ${c}40`, borderRadius: 6, color: K.t1, fontSize: 12, textAlign: "center" }} />
-        </div>
-        <div style={{ flex: "0 0 28%", display: "flex", justifyContent: "center" }}>
-          <input value={pw} onChange={e => setPw(e.target.value)} onKeyDown={e => { if (e.key === "Enter") save(); }} placeholder="password" style={{ width: "95%", padding: "6px 6px", background: K.inp, border: `1px solid ${c}40`, borderRadius: 6, color: K.t1, fontSize: 12 }} />
-        </div>
-        <div style={{ flex: "0 0 13%", display: "flex", justifyContent: "flex-end" }}>
-          <button onClick={save} style={{ padding: "5px 10px", background: c, color: K.bg, border: "none", borderRadius: 6, fontWeight: 700, cursor: "pointer", fontSize: 10 }}>Save</button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ padding: "10px 14px", display: "flex", alignItems: "center", borderBottom: !isLast ? `1px solid ${K.bdr}10` : "none" }}>
-      <span style={{ flex: "0 0 40%", fontWeight: 600, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{player.name}</span>
-      <span style={{ flex: "0 0 15%", textAlign: "center", fontSize: 12, color: K.t2 }}>{player.handicap_index}</span>
-      <div style={{ flex: "0 0 30%", display: "flex", alignItems: "center", justifyContent: "center", gap: 3 }}>
-        <span style={{ fontSize: 11, color: K.t2, fontFamily: "monospace" }}>{showPw ? (password || "wbc2026") : "••••••"}</span>
-        <button onClick={() => setShowPw(!showPw)} style={{ background: "transparent", border: "none", color: K.t3, fontSize: 9, cursor: "pointer", padding: "0 1px" }}>{showPw ? "hide" : "show"}</button>
-      </div>
-      <div style={{ flex: "0 0 15%", display: "flex", justifyContent: "flex-end" }}>
-        <button onClick={() => { setEditing(true); setHi(String(player.handicap_index)); setName(player.name); setPw(password || "wbc2026"); }} style={{ padding: "3px 10px", borderRadius: 6, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t3, fontSize: 10, fontWeight: 600, cursor: "pointer" }}>Edit</button>
-      </div>
-    </div>
-  );
-}
 
 // ── MAIN APP ──
 export default function WBCApp() {
@@ -2998,7 +3007,7 @@ export default function WBCApp() {
     // Set tab title
     document.title = "WBC 2026";
     // Set favicon to WBC trophy
-    const FAVICON = WBC_TROPHY;
+    const FAVICON = "data:image/png;base64,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";
     const link = document.querySelector("link[rel*='icon']") || document.createElement("link");
     link.type = "image/png"; link.rel = "shortcut icon"; link.href = FAVICON;
     document.head.appendChild(link);
@@ -3028,15 +3037,16 @@ export default function WBCApp() {
     return () => { document.head.removeChild(style); };
   }, []);
 
-  const [players, setPlayers] = useState([]);
-  const [tPlayers, setTPlayers] = useState([]);
-  const [tRounds, setTRounds] = useState([]);
-  const [courseList, setCourseList] = useState([]);
-  const [holeData, setHoleData] = useState({});
+  const [tPlayers, setTPlayers] = useState(DEMO_TP);
+  const [tRounds, setTRounds] = useState([
+    { id: "tr1", tournament_id: "wbc_2026", round_number: 1, course_id: "demo_course_1" },
+  ]);
+  const [courseList, setCourseList] = useState(ALL_DEMO_COURSES);
+  const [holeData, setHoleData] = useState(DEMO_HOLE_DATA);
   const [ctpData, setCtpData] = useState({});
-  const [pairingsData, setPairingsData] = useState({});
-  const [teeData, setTeeData] = useState({});
-  const [teeTimesData, setTeeTimesData] = useState({});
+  const [pairingsData, setPairingsData] = useState(DEMO_PAIRINGS);
+  const [teeData, setTeeData] = useState(DEMO_TEE_ASSIGNMENTS);
+  const [teeTimesData, setTeeTimesData] = useState(DEMO_TEE_TIMES);
   const [finalizedRounds, setFinalizedRounds] = useState({});
   // Auto-advance round when finalization changes
   useEffect(() => {
@@ -3048,7 +3058,11 @@ export default function WBCApp() {
   }, [JSON.stringify(finalizedRounds)]);
   const [adminSettingsOpen, setAdminSettingsOpen] = useState(false);
   const [adminSettingsTab, setAdminSettingsTab] = useState("players");
-  const [passwords, setPasswords] = useState({});
+  const [passwords, setPasswords] = useState(() => {
+    const pw = {};
+    DEMO_TP.forEach(tp => { pw[tp.player_id] = "wbc2026"; });
+    return pw;
+  });
   const [storageLoaded, setStorageLoaded] = useState(false);
   const [syncing, setSyncing] = useState(false);
 
@@ -3061,7 +3075,7 @@ export default function WBCApp() {
         // Load player registry (names) from players table
         const playerRows = await sb.get("players", "order=name");
         if (playerRows?.length) {
-          setPlayers(playerRows.map(r => ({ id: r.id, name: r.name })));
+          DEMO_PLAYERS = playerRows.map(r => ({ id: r.id, name: r.name }));
         }
 
         // Load tournament players
@@ -3180,9 +3194,38 @@ export default function WBCApp() {
     }, "tournament_id");
   };
 
-  const resetToDemo = startFresh;
+  const resetToDemo = async () => {
+    // Clear wbc_2026 data from Supabase
+    try {
+      await sb.delete("hole_scores", `tournament_id=eq.${TOURNAMENT_ID}`);
+      await sb.delete("pairings", `tournament_id=eq.${TOURNAMENT_ID}`);
+      await sb.delete("tee_assignments", `tournament_id=eq.${TOURNAMENT_ID}`);
+      await sb.delete("tournament_players", `tournament_id=eq.${TOURNAMENT_ID}`);
+      await sb.delete("tournament_rounds", `tournament_id=eq.${TOURNAMENT_ID}`);
+      await sb.delete("tournament_state", `tournament_id=eq.${TOURNAMENT_ID}`);
+    } catch(e) { console.error("Reset clear failed:", e); }
+    // Reset local state to demo defaults
+    setTPlayers(DEMO_TP);
+    setTRounds([{ id: "tr_2026_r1", tournament_id: TOURNAMENT_ID, round_number: 1, course_id: "demo_course_1" }]);
+    setCourseList(ALL_DEMO_COURSES);
+    setHoleData(DEMO_HOLE_DATA);
+    setCtpData({});
+    setPairingsData(DEMO_PAIRINGS);
+    setTeeData(DEMO_TEE_ASSIGNMENTS);
+    setTeeTimesData(DEMO_TEE_TIMES);
+    setFinalizedRounds({});
+    setRound(1);
+    const pw = {};
+    DEMO_TP.forEach(tp => { pw[tp.player_id] = "wbc2026"; });
+    setPasswords(pw);
+    // Re-seed demo data to Supabase
+    for (const tp of DEMO_TP) await sb.upsert("tournament_players", tp, "id");
+    await sb.upsert("tournament_rounds", { id: "tr_2026_r1", tournament_id: TOURNAMENT_ID, round_number: 1, course_id: "demo_course_1" }, "id");
+    await saveTournamentState({}, pw);
+    notify("Reset to demo data");
+  };
 
-    const startFresh = async () => {
+  const startFresh = async () => {
     // Clear scores, rounds, pairings, tees — keep tournament_players (roster + HIs)
     try {
       await sb.delete("hole_scores", `tournament_id=eq.${TOURNAMENT_ID}`);
@@ -3210,18 +3253,18 @@ export default function WBCApp() {
 
   const activePlayers = useMemo(() => {
     return tPlayers.filter(tp => tp.status !== "WD").map(tp => {
-      const p = players.find(pl => pl.id === tp.player_id);
+      const p = DEMO_PLAYERS.find(pl => pl.id === tp.player_id);
       return p ? { ...p, handicap_index: parseFloat(tp.handicap_index) || 0, tp_id: tp.id } : null;
     }).filter(Boolean).sort((a,b) => a.name.localeCompare(b.name));
-  }, [tPlayers, players]);
+  }, [tPlayers]);
 
   // All players including WD — used for leaderboard display
   const allPlayers = useMemo(() => {
     return tPlayers.map(tp => {
-      const p = players.find(pl => pl.id === tp.player_id);
+      const p = DEMO_PLAYERS.find(pl => pl.id === tp.player_id);
       return p ? { ...p, handicap_index: parseFloat(tp.handicap_index) || 0, tp_id: tp.id, isWD: tp.status === "WD" } : null;
     }).filter(Boolean).sort((a,b) => a.name.localeCompare(b.name));
-  }, [tPlayers, players]);
+  }, [tPlayers]);
 
   const currentTR = tRounds.find(r => r.round_number === round);
   const currentCourse = currentTR ? courseList.find(c => c.id === currentTR.course_id) : null;
@@ -3377,7 +3420,7 @@ export default function WBCApp() {
 
   const addPlayerToTournament = async (name, hi) => {
     const id = name.toLowerCase().replace(/\s+/g, "_");
-    setPlayers(prev => prev.find(p => p.id === id) ? prev : [...prev, { id, name }]);
+    if (!DEMO_PLAYERS.find(p => p.id === id)) DEMO_PLAYERS.push({ id, name });
     await sb.upsert("players", { id, name }, "id").catch(() => {});
     const newTp = { id: `tp_2026_${id}`, tournament_id: TOURNAMENT_ID, player_id: id, handicap_index: hi, status: "active" };
     setTPlayers(prev => [...prev, newTp]);
@@ -3413,7 +3456,9 @@ export default function WBCApp() {
   };
 
   const updateName = async (pid, newName) => {
-    setPlayers(prev => prev.map(p => p.id === pid ? { ...p, name: newName } : p));
+    const p = DEMO_PLAYERS.find(pl => pl.id === pid);
+    if (p) p.name = newName;
+    else DEMO_PLAYERS.push({ id: pid, name: newName });
     setTPlayers(prev => [...prev]); // trigger re-render
     await sb.upsert("players", { id: pid, name: newName }, "id").catch(() => {});
     notify("Name updated");
@@ -3593,11 +3638,12 @@ export default function WBCApp() {
               {activePlayers.map(p => {
                 const isDirector = p.id === "aaron_j" || p.id === "scott_r";
                 return (
-                  <button key={p.id} onClick={() => setLoginAnim({ id: p.id, name: p.name, isDirector })}
-                    style={{ background: K.card, border: `1px solid ${K.bdr}`, borderRadius: 10, padding: "12px 6px", cursor: "pointer", color: K.t1, fontSize: 13, fontWeight: 600, textAlign: "center", transition: "all 0.15s" }}
+                  <button key={p.id} onClick={() => setLoginPrompt({ id: p.id, name: p.name, isDirector })}
+                    style={{ background: K.card, border: `1px solid ${isDirector ? K.acc + "60" : K.bdr}`, borderRadius: 10, padding: "12px 6px", cursor: "pointer", color: K.t1, fontSize: 13, fontWeight: 600, textAlign: "center", transition: "all 0.15s" }}
                     onMouseEnter={e => { e.currentTarget.style.borderColor = K.acc; e.currentTarget.style.background = K.hover; }}
-                    onMouseLeave={e => { e.currentTarget.style.borderColor = K.bdr; e.currentTarget.style.background = K.card; }}>
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = isDirector ? K.acc + "60" : K.bdr; e.currentTarget.style.background = K.card; }}>
                     {p.name}
+                    {isDirector && <div style={{ fontSize: 8, color: K.acc, fontWeight: 700, marginTop: 2 }}>DIRECTOR</div>}
                   </button>
                 );
               })}
@@ -3676,7 +3722,7 @@ export default function WBCApp() {
         </div>
         {view === "skins" && <SkinsCtpView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} teeData={teeData} getPlayerTee={getPlayerTee} />}
         {view === "groups" && <GroupsView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} pairingsData={pairingsData} teeTimesData={teeTimesData} teeData={teeData} getPlayerTee={getPlayerTee} user={user} />}
-        {view === "admin" && (user.isDirector ? <AdminView players={players} activePlayers={activePlayers} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
+        {view === "admin" && (user.isDirector ? <AdminView players={DEMO_PLAYERS} activePlayers={activePlayers} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
               setTeeTimesData(prev => {
                 const next = typeof updater === "function" ? updater(prev) : updater;
                 // Fire-and-forget: update tee times on pairings rows in Supabase
