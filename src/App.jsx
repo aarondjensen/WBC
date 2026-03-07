@@ -24,14 +24,8 @@ const TROPHY_SVG_URL = `data:image/svg+xml;utf8,${encodeURIComponent(TROPHY_SVG)
 
 // Demo data simulating what's in Supabase
 // Player registry — loaded from Supabase players table on mount
-let DEMO_PLAYERS = [
-  { id: "aaron_j", name: "Aaron J" }, { id: "bob_b", name: "Bob B" },
-  { id: "brian_k", name: "Brian K" }, { id: "eric_o", name: "Eric O" },
-  { id: "joe_s", name: "Joe S" }, { id: "john_c", name: "John C" },
-  { id: "matt_v", name: "Matt V" }, { id: "scott_r", name: "Scott R" },
-  { id: "jeff_b", name: "Jeff B" }, { id: "ray_h", name: "Ray H" },
-  { id: "russ_w", name: "Russ W" }, { id: "steve_v", name: "Steve V" },
-];
+// Player registry — loaded from Supabase at runtime
+let DEMO_PLAYERS = [];
 
 const DEMO_TP = [
   { id: "tp1", tournament_id: "wbc_2026", player_id: "aaron_j", handicap_index: 15.2, status: "active" },
@@ -415,12 +409,11 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
       const viewH = window.innerHeight;
       const containerTop = containerRef.current.getBoundingClientRect().top;
       const headerH = headerRef.current.offsetHeight;
-      const navEl = document.querySelector("[data-bottom-nav]");
-      const navH = navEl ? navEl.offsetHeight : 60;
-      const contentPadding = 28;
-      const available = viewH - containerTop - headerH - navH - contentPadding;
+      const navH = 60;
+      const bottomPad = 80;
+      const available = viewH - containerTop - headerH - navH - bottomPad - 8;
       const perRow = Math.floor(available / lb.length);
-      const clampedPerRow = Math.min(Math.max(perRow, 10), 56);
+      const clampedPerRow = Math.min(perRow, 36); // never taller than 36px per row
       const vPad = Math.max(0, Math.floor((clampedPerRow - 14) / 2));
       const fSize = clampedPerRow >= 32 ? 13 : clampedPerRow >= 26 ? 12 : clampedPerRow >= 18 ? 11 : 10;
       setRowStyle({ padding: `${vPad}px 12px`, fontSize: fSize, lineHeight: 1 });
@@ -2415,47 +2408,28 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
           const apiRes = await fetch(`/api/courses?search=${encodeURIComponent(q)}`);
           if (apiRes.ok) {
             const apiData = await apiRes.json();
-            // Log first result so we can see the actual field structure
-            const rawCourses = Array.isArray(apiData) ? apiData : (apiData.courses || apiData.data || []);
-            if (rawCourses[0]) console.log("GolfCourseAPI sample course:", JSON.stringify(rawCourses[0]).slice(0, 1000));
-            const apiCourses = rawCourses
-              .filter(c => !results.find(r => r.name.toLowerCase() === (c.club_name || c.course_name || c.name || "").toLowerCase()))
+            const apiCourses = (apiData.courses || [])
+              .filter(c => !results.find(r => r.name.toLowerCase() === (c.club_name || c.course_name || "").toLowerCase()))
               .map((c, ci) => {
-                // tees can be array or object keyed by tee name/color
-                const rawTees = Array.isArray(c.tees) ? c.tees
-                  : (c.tees && typeof c.tees === "object") ? Object.values(c.tees)
-                  : [];
-                const tees = rawTees.map((t, ti) => {
-                  // GolfCourseAPI field names vary — try all known variants
-                  const slopVal = parseInt(t.slope_rating ?? t.slope ?? t.bogey_rating ?? 0);
-                  const ratingVal = parseFloat(t.course_rating ?? t.rating ?? t.men_rating ?? 0);
-                  const parVal = parseInt(t.par ?? t.total_par ?? 0);
-                  const yardsVal = parseInt(t.total_yards ?? t.yardage ?? t.yards ?? t.total_yardage ?? 0);
-                  return {
-                    name: t.tee_name ?? t.name ?? t.color ?? "Default",
-                    color: resolveTeeColor({ name: t.tee_name ?? t.name ?? t.color ?? "", color: t.color ?? "" }, ti),
-                    rating: ratingVal || 72.0,
-                    slope: slopVal || 113,
-                    par: parVal || 72,
-                    yardage: yardsVal || 0,
-                  };
-                });
-                const firstTee = rawTees[0];
-                const holes = c.holes ?? firstTee?.holes ?? [];
-                // Course-level slope/rating — try direct fields first, then first tee
-                const courseSlope = parseInt(c.slope ?? c.slope_rating ?? firstTee?.slope_rating ?? firstTee?.slope ?? 0) || 113;
-                const courseRating = parseFloat(c.rating ?? c.course_rating ?? firstTee?.course_rating ?? firstTee?.rating ?? 0) || 72.0;
-                const coursePar = parseInt(c.par ?? c.total_par ?? firstTee?.par ?? 0) || 72;
+                const tees = (c.tees || []).map((t, ti) => ({
+                  name: t.tee_name || t.name || "Default",
+                  color: resolveTeeColor({ name: t.tee_name || t.name || "", color: "" }, ti),
+                  rating: parseFloat(t.course_rating) || 72.0,
+                  slope: parseInt(t.slope_rating) || 113,
+                  par: parseInt(t.par) || 72,
+                  yardage: parseInt(t.total_yards) || 0,
+                }));
+                const firstTee = c.tees?.[0];
                 return {
                   id: `gc_${c.id || ci}`,
-                  name: c.club_name ?? c.course_name ?? c.name ?? "Unknown",
-                  city: c.city ?? c.location?.city ?? "",
-                  state: c.state ?? c.location?.state ?? "",
-                  par: coursePar,
-                  slope: courseSlope,
-                  rating: courseRating,
-                  hole_pars: holes.map(h => parseInt(h.par) || 4),
-                  hole_handicaps: holes.map(h => parseInt(h.handicap ?? h.hdcp) || 0),
+                  name: c.club_name || c.course_name || "Unknown",
+                  city: c.location?.city || "",
+                  state: c.location?.state || "",
+                  par: parseInt(firstTee?.par) || 72,
+                  slope: parseInt(firstTee?.slope_rating) || 113,
+                  rating: parseFloat(firstTee?.course_rating) || 72.0,
+                  hole_pars: firstTee?.holes?.map(h => h.par) || [],
+                  hole_handicaps: firstTee?.holes?.map(h => h.handicap) || [],
                   tee_boxes: tees,
                 };
               });
@@ -3732,7 +3706,7 @@ export default function WBCApp() {
       </div>
       )}
 
-      <div data-scroll-content style={{ padding: "14px 20px", flex: 1, overflowY: "hidden", overflowX: "hidden" }}>
+      <div style={{ padding: "14px 20px", flex: 1, overflowY: "auto", overflowX: "hidden" }}>
         {view === "leaderboard" && <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} teeData={teeData} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} />}
         <div style={{ display: view === "scoring" ? "block" : "none" }}>
           <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeData={teeData} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onNavigate={setView} onGoToAdminCourses={() => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); }} markPlayerWD={markPlayerWD} />
@@ -3764,7 +3738,7 @@ export default function WBCApp() {
         ))}
       </div>
 
-      <div data-bottom-nav style={{ position: "sticky", bottom: 0, width: "100%", display: "flex", background: "rgba(14,24,41,0.97)", borderTop: `1px solid ${K.bdr}`, zIndex: 100, marginTop: "auto" }}>
+      <div style={{ position: "sticky", bottom: 0, width: "100%", display: "flex", background: "rgba(14,24,41,0.97)", borderTop: `1px solid ${K.bdr}`, zIndex: 100, marginTop: "auto" }}>
         {navItems.map(item => {
           const active = view === item.key;
           const clr = active ? K.acc : K.t3;
