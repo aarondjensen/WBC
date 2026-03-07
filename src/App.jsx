@@ -412,14 +412,12 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
   useEffect(() => {
     const calc = () => {
       if (!containerRef.current || !headerRef.current || lb.length === 0) return;
-      // Walk up to find the scrollable content wrapper and bottom nav
-      const scrollEl = containerRef.current.closest("[data-scroll-content]");
-      const navEl = document.querySelector("[data-bottom-nav]");
-      const navH = navEl ? navEl.offsetHeight : 60;
-      const contentPadding = 28; // 14px top + 14px bottom
       const viewH = window.innerHeight;
       const containerTop = containerRef.current.getBoundingClientRect().top;
       const headerH = headerRef.current.offsetHeight;
+      const navEl = document.querySelector("[data-bottom-nav]");
+      const navH = navEl ? navEl.offsetHeight : 60;
+      const contentPadding = 28;
       const available = viewH - containerTop - headerH - navH - contentPadding;
       const perRow = Math.floor(available / lb.length);
       const clampedPerRow = Math.min(Math.max(perRow, 10), 56);
@@ -428,7 +426,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
       setRowStyle({ padding: `${vPad}px 12px`, fontSize: fSize, lineHeight: 1 });
     };
     calc();
-    const t = setTimeout(calc, 150);
+    const t = setTimeout(calc, 100);
     window.addEventListener("resize", calc);
     return () => { clearTimeout(t); window.removeEventListener("resize", calc); };
   }, [lb.length]);
@@ -2417,34 +2415,47 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
           const apiRes = await fetch(`/api/courses?search=${encodeURIComponent(q)}`);
           if (apiRes.ok) {
             const apiData = await apiRes.json();
-            console.log("GolfCourseAPI raw:", JSON.stringify(apiData).slice(0, 600));
+            // Log first result so we can see the actual field structure
             const rawCourses = Array.isArray(apiData) ? apiData : (apiData.courses || apiData.data || []);
+            if (rawCourses[0]) console.log("GolfCourseAPI sample course:", JSON.stringify(rawCourses[0]).slice(0, 1000));
             const apiCourses = rawCourses
               .filter(c => !results.find(r => r.name.toLowerCase() === (c.club_name || c.course_name || c.name || "").toLowerCase()))
               .map((c, ci) => {
+                // tees can be array or object keyed by tee name/color
                 const rawTees = Array.isArray(c.tees) ? c.tees
                   : (c.tees && typeof c.tees === "object") ? Object.values(c.tees)
                   : [];
-                const tees = rawTees.map((t, ti) => ({
-                  name: t.tee_name || t.name || t.color || "Default",
-                  color: resolveTeeColor({ name: t.tee_name || t.name || t.color || "", color: t.color || "" }, ti),
-                  rating: parseFloat(t.course_rating || t.rating) || 72.0,
-                  slope: parseInt(t.slope_rating || t.slope) || 113,
-                  par: parseInt(t.par) || 72,
-                  yardage: parseInt(t.total_yards || t.yardage || t.yards) || 0,
-                }));
+                const tees = rawTees.map((t, ti) => {
+                  // GolfCourseAPI field names vary — try all known variants
+                  const slopVal = parseInt(t.slope_rating ?? t.slope ?? t.bogey_rating ?? 0);
+                  const ratingVal = parseFloat(t.course_rating ?? t.rating ?? t.men_rating ?? 0);
+                  const parVal = parseInt(t.par ?? t.total_par ?? 0);
+                  const yardsVal = parseInt(t.total_yards ?? t.yardage ?? t.yards ?? t.total_yardage ?? 0);
+                  return {
+                    name: t.tee_name ?? t.name ?? t.color ?? "Default",
+                    color: resolveTeeColor({ name: t.tee_name ?? t.name ?? t.color ?? "", color: t.color ?? "" }, ti),
+                    rating: ratingVal || 72.0,
+                    slope: slopVal || 113,
+                    par: parVal || 72,
+                    yardage: yardsVal || 0,
+                  };
+                });
                 const firstTee = rawTees[0];
-                const holes = c.holes || firstTee?.holes || [];
+                const holes = c.holes ?? firstTee?.holes ?? [];
+                // Course-level slope/rating — try direct fields first, then first tee
+                const courseSlope = parseInt(c.slope ?? c.slope_rating ?? firstTee?.slope_rating ?? firstTee?.slope ?? 0) || 113;
+                const courseRating = parseFloat(c.rating ?? c.course_rating ?? firstTee?.course_rating ?? firstTee?.rating ?? 0) || 72.0;
+                const coursePar = parseInt(c.par ?? c.total_par ?? firstTee?.par ?? 0) || 72;
                 return {
                   id: `gc_${c.id || ci}`,
-                  name: c.club_name || c.course_name || c.name || "Unknown",
-                  city: c.city || c.location?.city || "",
-                  state: c.state || c.location?.state || "",
-                  par: parseInt(c.par || firstTee?.par) || 72,
-                  slope: parseInt(c.slope || firstTee?.slope_rating || firstTee?.slope) || 113,
-                  rating: parseFloat(c.rating || firstTee?.course_rating || firstTee?.rating) || 72.0,
+                  name: c.club_name ?? c.course_name ?? c.name ?? "Unknown",
+                  city: c.city ?? c.location?.city ?? "",
+                  state: c.state ?? c.location?.state ?? "",
+                  par: coursePar,
+                  slope: courseSlope,
+                  rating: courseRating,
                   hole_pars: holes.map(h => parseInt(h.par) || 4),
-                  hole_handicaps: holes.map(h => parseInt(h.handicap || h.hdcp) || 0),
+                  hole_handicaps: holes.map(h => parseInt(h.handicap ?? h.hdcp) || 0),
                   tee_boxes: tees,
                 };
               });
