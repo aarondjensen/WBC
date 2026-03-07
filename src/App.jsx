@@ -415,11 +415,12 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
       const viewH = window.innerHeight;
       const containerTop = containerRef.current.getBoundingClientRect().top;
       const headerH = headerRef.current.offsetHeight;
-      const navH = 60;
-      const bottomPad = 80;
-      const available = viewH - containerTop - headerH - navH - bottomPad - 8;
+      const navEl = document.querySelector("[data-bottom-nav]");
+      const navH = navEl ? navEl.offsetHeight : 60;
+      // 2px for container border, 4px breathing room
+      const available = viewH - containerTop - headerH - navH - 6;
       const perRow = Math.floor(available / lb.length);
-      const clampedPerRow = Math.min(perRow, 36); // never taller than 36px per row
+      const clampedPerRow = Math.min(perRow, 56);
       const vPad = Math.max(0, Math.floor((clampedPerRow - 14) / 2));
       const fSize = clampedPerRow >= 32 ? 13 : clampedPerRow >= 26 ? 12 : clampedPerRow >= 18 ? 11 : 10;
       setRowStyle({ padding: `${vPad}px 12px`, fontSize: fSize, lineHeight: 1 });
@@ -560,17 +561,6 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
 
   return (
     <div style={{ position: "relative" }}>
-      {/* Giant trophy silhouette behind entire leaderboard */}
-      <img src={WBC_TROPHY_SILHOUETTE} alt="" style={{
-        position: "absolute", top: "50%", left: trophyLeft,
-        transform: "translate(-50%, -50%)",
-        width: "100%", height: "100%",
-        opacity: 0.08,
-        pointerEvents: "none",
-        userSelect: "none",
-        zIndex: 0,
-        objectFit: "contain",
-      }} />
       <div style={{ position: "relative", zIndex: 1 }}>
       {/* Title inline with stacked pills */}
       <div style={{ display: "flex", alignItems: "center", marginBottom: 10, gap: 8 }}>
@@ -629,7 +619,19 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
           </div>
         </div>
       </div>
-      <div ref={containerRef} style={{ background: "transparent", borderRadius: 12, border: `1px solid ${K.bdr}`, overflow: "hidden" }}>
+      <div ref={containerRef} style={{ position: "relative", background: "transparent", borderRadius: 12, border: `1px solid ${K.bdr}`, overflow: "hidden" }}>
+        {/* Giant trophy silhouette centered within the rows area */}
+        <img src={WBC_TROPHY_SILHOUETTE} alt="" style={{
+          position: "absolute", top: "50%", left: trophyLeft,
+          transform: "translate(-50%, -50%)",
+          width: "100%", height: "100%",
+          opacity: 0.08,
+          pointerEvents: "none",
+          userSelect: "none",
+          zIndex: 0,
+          objectFit: "contain",
+        }} />
+          <div style={{ position: "relative", zIndex: 1 }}>
         {/* Build dynamic grid: #, Player, Total, Thru, Rd, [8px gap], prior rounds */}
         {(() => {
           const allPriorRounds = [1, 2, 3, 4];
@@ -754,6 +756,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
             </>
           );
         })()}
+          </div>
       </div>
       </div>
     </div>
@@ -2412,7 +2415,6 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
         }
         // Then search GolfCourseAPI via proxy
         // API spec: tees: { male: TeeBox[], female: TeeBox[] }
-        // TeeBox fields: tee_name, slope_rating, course_rating, par_total, total_yards, holes: [{par, yardage, handicap}]
         try {
           const stateParam = courseStateFilter?.trim() ? `&state=${encodeURIComponent(courseStateFilter.trim())}` : "";
           const apiRes = await fetch(`/api/courses?search=${encodeURIComponent(q)}${stateParam}`);
@@ -2756,31 +2758,9 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                           <div style={{ padding: "10px 14px", display: "flex", alignItems: "center", gap: 8 }}>
                             <button onClick={() => setExpandedCourse(expandedCourse === c.id ? null : c.id)} style={{ flex: 1, background: "transparent", border: "none", cursor: "pointer", textAlign: "left", color: K.t1, padding: 0 }}>
                               <div style={{ fontWeight: 600, fontSize: 13 }}>{c.name}</div>
-                              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                                <span style={{ fontSize: 10, color: K.t3 }}>{c.city}, {c.state} · Par {c.par} · Slope {c.slope}</span>
-                                {(c.slope === 113 || !c.hole_pars?.length) && (
-                                  <span style={{ fontSize: 8, fontWeight: 700, color: "#f59e0b", background: "#f59e0b18", border: "1px solid #f59e0b40", borderRadius: 3, padding: "1px 4px" }}>
-                                    {!c.hole_pars?.length && c.slope === 113 ? "⚠ Missing data" : c.slope === 113 ? "⚠ Slope?" : "⚠ No hole data"}
-                                  </span>
-                                )}
-                              </div>
+                              <div style={{ fontSize: 10, color: K.t3 }}>{c.city}, {c.state} · Par {c.par} · Slope {c.slope}</div>
                             </button>
-                            <div style={{ display: "flex", gap: 3, alignItems: "center" }}>
-                              {(c.slope === 113 || !c.hole_pars?.length) && (
-                                <button onClick={() => {
-                                  setExpandedCourse(c.id);
-                                  setEditingCourse({
-                                    id: c.id,
-                                    par: c.par ?? 72,
-                                    slope: c.slope ?? 113,
-                                    rating: c.rating ?? 72.0,
-                                    hole_pars: c.hole_pars?.length === 18 ? [...c.hole_pars] : Array(18).fill(4),
-                                    hole_handicaps: c.hole_handicaps?.length === 18 ? [...c.hole_handicaps] : Array.from({ length: 18 }, (_, i) => i + 1),
-                                  });
-                                }} style={{ padding: "3px 7px", borderRadius: 4, background: "#f59e0b18", border: "1px solid #f59e0b60", color: "#f59e0b", fontSize: 9, fontWeight: 700, cursor: "pointer" }}>
-                                  ✏ Fix
-                                </button>
-                              )}
+                            <div style={{ display: "flex", gap: 3 }}>
                               {Array.from({ length: numRounds }, (_, ri) => ri + 1).map(r => {
                                 const isAssigned = assignedRounds.includes(r);
                                 const tr = tRounds.find(t => t.round_number === r);
@@ -3795,7 +3775,7 @@ export default function WBCApp() {
         ))}
       </div>
 
-      <div style={{ position: "sticky", bottom: 0, width: "100%", display: "flex", background: "rgba(14,24,41,0.97)", borderTop: `1px solid ${K.bdr}`, zIndex: 100, marginTop: "auto" }}>
+      <div data-bottom-nav style={{ position: "sticky", bottom: 0, width: "100%", display: "flex", background: "rgba(14,24,41,0.97)", borderTop: `1px solid ${K.bdr}`, zIndex: 100, marginTop: "auto" }}>
         {navItems.map(item => {
           const active = view === item.key;
           const clr = active ? K.acc : K.t3;
