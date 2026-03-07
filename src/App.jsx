@@ -24,7 +24,7 @@ const TROPHY_SVG_URL = `data:image/svg+xml;utf8,${encodeURIComponent(TROPHY_SVG)
 
 // Demo data simulating what's in Supabase
 // Player registry — loaded from Supabase players table on mount
-// Player registry is stored in React state (players) — no hardcoded list
+// Player registry lives in React state (players) — loaded from Supabase
 
 const DEMO_TP = [
   { id: "tp1", tournament_id: "wbc_2026", player_id: "aaron_j", handicap_index: 15.2, status: "active" },
@@ -2635,9 +2635,9 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
           const teesSet = teesSaved[editRound] && !teesModified[editRound] && activePlayers.every(p => ((teeData[editRound] || {})[p.id]));
           const groupsDone = _rg.length > 0 && _rg.flat().length === activePlayers.length;
           const teeTimesDone = _rg.length > 0 && _rg.every((_, gi) => _rt[gi] && _rt[gi].trim() !== "");
-          if (!teesSet) items.push({ text: "Tee assignments incomplete" });
-          if (!groupsDone) items.push({ text: "Pairings not set" });
-          if (!teeTimesDone) items.push({ text: "Tee times missing" });
+          if (!teesSet) items.push({ text: "Tee assignments incomplete", action: "Go to Tees →", onClick: () => setTab("tees") });
+          if (!groupsDone) items.push({ text: "Pairings not set", action: "Go to Pairings →", onClick: () => setTab("pairings") });
+          if (!teeTimesDone) items.push({ text: "Tee times missing", action: "Add tee times →", onClick: () => setTab("pairings") });
         }
         if (items.length === 0) return null;
         return (
@@ -2956,13 +2956,13 @@ function PlayerRow({ player, onUpdateHI, onUpdateName, onRemove, onSavePassword,
       <div style={{ padding: "8px 14px", display: "flex", alignItems: "center", gap: 4, borderBottom: !isLast ? `1px solid ${K.bdr}10` : "none", background: c + "06" }}>
         <button onClick={() => setConfirming(true)} style={{ background: "transparent", border: "none", color: K.danger, fontSize: 14, cursor: "pointer", padding: 0, lineHeight: 1, flexShrink: 0, marginRight: 4 }}>✕</button>
         <div style={{ flex: "0 0 36%", minWidth: 0 }}>
-          <input value={name} onChange={e => setName(e.target.value)} style={{ width: "100%", boxSizing: "border-box", padding: "6px 8px", background: K.inp, border: `1px solid ${c}40`, borderRadius: 6, color: K.t1, fontSize: 13, fontWeight: 600 }} />
+          <input value={name} onChange={e => setName(e.target.value)} onKeyDown={e => { if (e.key === "Enter") save(); }} style={{ width: "100%", boxSizing: "border-box", padding: "6px 8px", background: K.inp, border: `1px solid ${c}40`, borderRadius: 6, color: K.t1, fontSize: 13, fontWeight: 600 }} />
         </div>
         <div style={{ flex: "0 0 13%", display: "flex", justifyContent: "center" }}>
-          <input value={hi} onChange={e => setHi(e.target.value)} type="number" step="0.1" style={{ width: "85%", padding: "6px 2px", background: K.inp, border: `1px solid ${c}40`, borderRadius: 6, color: K.t1, fontSize: 12, textAlign: "center" }} />
+          <input value={hi} onChange={e => setHi(e.target.value)} onKeyDown={e => { if (e.key === "Enter") save(); }} type="number" step="0.1" style={{ width: "85%", padding: "6px 2px", background: K.inp, border: `1px solid ${c}40`, borderRadius: 6, color: K.t1, fontSize: 12, textAlign: "center" }} />
         </div>
         <div style={{ flex: "0 0 28%", display: "flex", justifyContent: "center" }}>
-          <input value={pw} onChange={e => setPw(e.target.value)} placeholder="password" style={{ width: "95%", padding: "6px 6px", background: K.inp, border: `1px solid ${c}40`, borderRadius: 6, color: K.t1, fontSize: 12 }} />
+          <input value={pw} onChange={e => setPw(e.target.value)} onKeyDown={e => { if (e.key === "Enter") save(); }} placeholder="password" style={{ width: "95%", padding: "6px 6px", background: K.inp, border: `1px solid ${c}40`, borderRadius: 6, color: K.t1, fontSize: 12 }} />
         </div>
         <div style={{ flex: "0 0 13%", display: "flex", justifyContent: "flex-end" }}>
           <button onClick={save} style={{ padding: "5px 10px", background: c, color: K.bg, border: "none", borderRadius: 6, fontWeight: 700, cursor: "pointer", fontSize: 10 }}>Save</button>
@@ -3182,7 +3182,7 @@ export default function WBCApp() {
 
   const resetToDemo = startFresh;
 
-  const startFresh = async () => {
+    const startFresh = async () => {
     // Clear scores, rounds, pairings, tees — keep tournament_players (roster + HIs)
     try {
       await sb.delete("hole_scores", `tournament_id=eq.${TOURNAMENT_ID}`);
@@ -3593,12 +3593,11 @@ export default function WBCApp() {
               {activePlayers.map(p => {
                 const isDirector = p.id === "aaron_j" || p.id === "scott_r";
                 return (
-                  <button key={p.id} onClick={() => setLoginPrompt({ id: p.id, name: p.name, isDirector })}
-                    style={{ background: K.card, border: `1px solid ${isDirector ? K.acc + "60" : K.bdr}`, borderRadius: 10, padding: "12px 6px", cursor: "pointer", color: K.t1, fontSize: 13, fontWeight: 600, textAlign: "center", transition: "all 0.15s" }}
+                  <button key={p.id} onClick={() => setLoginAnim({ id: p.id, name: p.name, isDirector })}
+                    style={{ background: K.card, border: `1px solid ${K.bdr}`, borderRadius: 10, padding: "12px 6px", cursor: "pointer", color: K.t1, fontSize: 13, fontWeight: 600, textAlign: "center", transition: "all 0.15s" }}
                     onMouseEnter={e => { e.currentTarget.style.borderColor = K.acc; e.currentTarget.style.background = K.hover; }}
-                    onMouseLeave={e => { e.currentTarget.style.borderColor = isDirector ? K.acc + "60" : K.bdr; e.currentTarget.style.background = K.card; }}>
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = K.bdr; e.currentTarget.style.background = K.card; }}>
                     {p.name}
-                    {isDirector && <div style={{ fontSize: 8, color: K.acc, fontWeight: 700, marginTop: 2 }}>DIRECTOR</div>}
                   </button>
                 );
               })}
