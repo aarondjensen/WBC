@@ -2314,7 +2314,6 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
   const [confirmCourse, setConfirmCourse] = useState(null);
   const [searching, setSearching] = useState(false);
   const [courseSearch, setCourseSearch] = useState("");
-  const [courseStateFilter, setCourseStateFilter] = useState("MI");
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [expandedCourse, setExpandedCourse] = useState(null);
@@ -2410,95 +2409,40 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
             tee_boxes: (tbRows || []).filter(t => t.course_id === c.id).map((t, ti) => ({ ...t, color: resolveTeeColor(t, ti) })),
           }));
         }
-        // Then search golf course API via proxy — supports two response schemas:
-        // Schema A (golfcourseapi.com): { courses: [{ club_name, course_name, location:{city,state}, tees:{male:[],female:[]} }] }
-        //   Each tee: { tee_name, slope_rating, course_rating, par_total, total_yards, holes:[{par,yardage,handicap}] }
-        // Schema B (RapidAPI): [ { name, city, state, teeBoxes:[{tee,slope,handicap}], scorecard:[{Hole,Par,Handicap,tees:{teeBox1:{color,yards}}}] } ]
+        // Then search GolfCourseAPI via proxy for any new courses not in history
         try {
-          const stateParam = courseStateFilter?.trim() ? `&state=${encodeURIComponent(courseStateFilter.trim())}` : "";
-          const apiRes = await fetch(`/api/courses?search=${encodeURIComponent(q)}${stateParam}`);
+          const apiRes = await fetch(`/api/courses?search=${encodeURIComponent(q)}`);
           if (apiRes.ok) {
             const apiData = await apiRes.json();
-            // Normalize to array of raw courses
-            const rawCourses = Array.isArray(apiData) ? apiData : (apiData.courses || apiData.data || []);
-
-            const parsedCourses = rawCourses.map((c, ci) => {
-              // Detect schema by presence of teeBoxes (Schema B / RapidAPI)
-              const isSchemaB = Array.isArray(c.teeBoxes);
-
-              let tees, hole_pars, hole_handicaps, par, slope, rating, name, city, state;
-
-              if (isSchemaB) {
-                // Schema B: RapidAPI
-                name = c.name || "Unknown";
-                city = c.city || "";
-                state = c.state || "";
-                // scorecard has hole-by-hole data
-                const sc = Array.isArray(c.scorecard) ? c.scorecard : [];
-                hole_pars = sc.map(h => parseInt(h.Par) || 4);
-                hole_handicaps = sc.map(h => parseInt(h.Handicap) || 0);
-                par = hole_pars.reduce((a, b) => a + b, 0) || 72;
-                // teeBoxes: [{ tee, slope, handicap (=course rating) }]
-                tees = (c.teeBoxes || []).map((t, ti) => ({
-                  name: t.tee || "Default",
-                  color: resolveTeeColor({ name: t.tee || "", color: t.tee || "" }, ti),
-                  slope: parseInt(t.slope) || 113,
-                  rating: parseFloat(t.handicap) || 72.0, // mislabeled as 'handicap' in this API
-                  par,
-                  yardage: sc.reduce((a, h) => {
-                    const tb = h.tees ? Object.values(h.tees)[ti] || Object.values(h.tees)[0] : null;
-                    return a + (parseInt(tb?.yards) || 0);
-                  }, 0),
-                  holes: sc.map(h => {
-                    const tb = h.tees ? Object.values(h.tees)[ti] || Object.values(h.tees)[0] : null;
-                    return { par: parseInt(h.Par) || 4, yardage: parseInt(tb?.yards) || 0, handicap: parseInt(h.Handicap) || 0 };
-                  }),
-                }));
-                slope = tees[0]?.slope || 113;
-                rating = tees[0]?.rating || 72.0;
-              } else {
-                // Schema A: golfcourseapi.com — tees: { male: [...], female: [...] }
-                name = [c.club_name, c.course_name].filter(Boolean).join(" – ") || "Unknown";
-                city = c.location?.city || c.city || "";
-                state = c.location?.state || c.state || "";
-                const teesObj = c.tees || {};
-                const maleTees = Array.isArray(teesObj.male) ? teesObj.male : [];
-                const femaleTees = Array.isArray(teesObj.female) ? teesObj.female : [];
-                const allTees = maleTees.length ? maleTees : femaleTees;
-                tees = allTees.map((t, ti) => ({
-                  name: t.tee_name || "Default",
-                  color: resolveTeeColor({ name: t.tee_name || "", color: "" }, ti),
+            const apiCourses = (apiData.courses || [])
+              .filter(c => !results.find(r => r.name.toLowerCase() === (c.club_name || c.course_name || "").toLowerCase()))
+              .map((c, ci) => {
+                const tees = (c.tees || []).map((t, ti) => ({
+                  name: t.tee_name || t.name || "Default",
+                  color: resolveTeeColor({ name: t.tee_name || t.name || "", color: "" }, ti),
                   rating: parseFloat(t.course_rating) || 72.0,
                   slope: parseInt(t.slope_rating) || 113,
-                  par: parseInt(t.par_total) || 72,
+                  par: parseInt(t.par) || 72,
                   yardage: parseInt(t.total_yards) || 0,
-                  holes: t.holes || [],
                 }));
-                const firstTee = allTees[0];
-                const holes = firstTee?.holes || [];
-                hole_pars = holes.map(h => parseInt(h.par) || 4);
-                hole_handicaps = holes.map(h => parseInt(h.handicap) || 0);
-                par = parseInt(firstTee?.par_total) || 72;
-                slope = parseInt(firstTee?.slope_rating) || 113;
-                rating = parseFloat(firstTee?.course_rating) || 72.0;
-              }
-
-              return { id: `gc_${c.id || c._id || ci}`, name, city, state, par, slope, rating, hole_pars, hole_handicaps, tee_boxes: tees };
-            });
-
-            const newCourses = parsedCourses.filter(c => {
-              const cName = c.name.toLowerCase();
-              if (results.find(r => r.name.toLowerCase() === cName)) return false;
-              if (courseStateFilter?.trim()) {
-                const sf = courseStateFilter.trim().toLowerCase();
-                if (c.state && !c.state.toLowerCase().includes(sf)) return false;
-              }
-              return true;
-            });
-            results = [...results, ...newCourses];
+                const firstTee = c.tees?.[0];
+                return {
+                  id: `gc_${c.id || ci}`,
+                  name: c.club_name || c.course_name || "Unknown",
+                  city: c.location?.city || "",
+                  state: c.location?.state || "",
+                  par: parseInt(firstTee?.par) || 72,
+                  slope: parseInt(firstTee?.slope_rating) || 113,
+                  rating: parseFloat(firstTee?.course_rating) || 72.0,
+                  hole_pars: firstTee?.holes?.map(h => h.par) || [],
+                  hole_handicaps: firstTee?.holes?.map(h => h.handicap) || [],
+                  tee_boxes: tees,
+                };
+              });
+            results = [...results, ...apiCourses];
           }
         } catch(apiErr) {
-          console.log("Golf course API proxy failed:", apiErr);
+          console.log("GolfCourseAPI proxy failed:", apiErr);
         }
         setSearchResults(results);
       } catch (err) {
@@ -2698,9 +2642,9 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
           const teesSet = teesSaved[editRound] && !teesModified[editRound] && activePlayers.every(p => ((teeData[editRound] || {})[p.id]));
           const groupsDone = _rg.length > 0 && _rg.flat().length === activePlayers.length;
           const teeTimesDone = _rg.length > 0 && _rg.every((_, gi) => _rt[gi] && _rt[gi].trim() !== "");
-          if (!teesSet) items.push({ text: "Tee assignments incomplete" });
-          if (!groupsDone) items.push({ text: "Pairings not set" });
-          if (!teeTimesDone) items.push({ text: "Tee times missing" });
+          if (!teesSet) items.push({ text: "Tee assignments incomplete", action: "Go to Tees →", onClick: () => setTab("tees") });
+          if (!groupsDone) items.push({ text: "Pairings not set", action: "Go to Pairings →", onClick: () => setTab("pairings") });
+          if (!teeTimesDone) items.push({ text: "Tee times missing", action: "Add tee times →", onClick: () => setTab("pairings") });
         }
         if (items.length === 0) return null;
         return (
@@ -2848,16 +2792,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                     })}
                     {searching && (
                       <div style={{ padding: 14, borderTop: `1px solid ${K.bdr}` }}>
-                        <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-                          <div style={{ position: "relative", flexShrink: 0 }}>
-                            <select value={courseStateFilter} onChange={e => { setCourseStateFilter(e.target.value); if (courseSearch.trim().length >= 2) doCourseSearch(courseSearch); }} style={{ appearance: "none", WebkitAppearance: "none", padding: "8px 24px 8px 10px", background: K.inp, border: `1px solid ${ac}40`, borderRadius: 8, color: courseStateFilter ? K.acc : K.t3, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
-                              <option value="">All</option>
-                              {["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"].map(s => <option key={s} value={s}>{s}</option>)}
-                            </select>
-                            <span style={{ position: "absolute", right: 7, top: "50%", transform: "translateY(-50%)", pointerEvents: "none", color: K.t3, fontSize: 8 }}>▼</span>
-                          </div>
-                          <input value={courseSearch} onChange={e => doCourseSearch(e.target.value)} placeholder="Search by course name..." autoFocus style={{ flex: 1, padding: "8px 12px", background: K.inp, border: `1px solid ${ac}40`, borderRadius: 8, color: K.t1, fontSize: 13, boxSizing: "border-box" }} />
-                        </div>
+                        <input value={courseSearch} onChange={e => doCourseSearch(e.target.value)} placeholder="Search courses by name, city, or state..." autoFocus style={{ width: "100%", padding: "8px 12px", background: K.inp, border: `1px solid ${ac}40`, borderRadius: 8, color: K.t1, fontSize: 13, marginBottom: 8, boxSizing: "border-box" }} />
                         {searchLoading && <div style={{ textAlign: "center", padding: 12, color: K.t3, fontSize: 11 }}>Searching GolfCourseAPI...</div>}
                         {!searchLoading && courseSearch.trim().length >= 2 && searchResults.length === 0 && <div style={{ color: K.t3, fontSize: 11, textAlign: "center", padding: 8 }}>No courses found</div>}
                         {!searchLoading && searchResults.filter(c => !courses.find(ex => ex.id === c.id)).map(c => (
@@ -3701,11 +3636,12 @@ export default function WBCApp() {
               {activePlayers.map(p => {
                 const isDirector = p.id === "aaron_j" || p.id === "scott_r";
                 return (
-                  <button key={p.id} onClick={() => setLoginAnim({ id: p.id, name: p.name, isDirector })}
-                    style={{ background: K.card, border: `1px solid ${K.bdr}`, borderRadius: 10, padding: "12px 6px", cursor: "pointer", color: K.t1, fontSize: 13, fontWeight: 600, textAlign: "center", transition: "all 0.15s" }}
+                  <button key={p.id} onClick={() => setLoginPrompt({ id: p.id, name: p.name, isDirector })}
+                    style={{ background: K.card, border: `1px solid ${isDirector ? K.acc + "60" : K.bdr}`, borderRadius: 10, padding: "12px 6px", cursor: "pointer", color: K.t1, fontSize: 13, fontWeight: 600, textAlign: "center", transition: "all 0.15s" }}
                     onMouseEnter={e => { e.currentTarget.style.borderColor = K.acc; e.currentTarget.style.background = K.hover; }}
-                    onMouseLeave={e => { e.currentTarget.style.borderColor = K.bdr; e.currentTarget.style.background = K.card; }}>
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = isDirector ? K.acc + "60" : K.bdr; e.currentTarget.style.background = K.card; }}>
                     {p.name}
+                    {isDirector && <div style={{ fontSize: 8, color: K.acc, fontWeight: 700, marginTop: 2 }}>DIRECTOR</div>}
                   </button>
                 );
               })}
