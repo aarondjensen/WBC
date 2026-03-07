@@ -24,14 +24,7 @@ const TROPHY_SVG_URL = `data:image/svg+xml;utf8,${encodeURIComponent(TROPHY_SVG)
 
 // Demo data simulating what's in Supabase
 // Player registry — loaded from Supabase players table on mount
-let DEMO_PLAYERS = [
-  { id: "aaron_j", name: "Aaron J" }, { id: "bob_b", name: "Bob B" },
-  { id: "brian_k", name: "Brian K" }, { id: "eric_o", name: "Eric O" },
-  { id: "joe_s", name: "Joe S" }, { id: "john_c", name: "John C" },
-  { id: "matt_v", name: "Matt V" }, { id: "scott_r", name: "Scott R" },
-  { id: "jeff_b", name: "Jeff B" }, { id: "ray_h", name: "Ray H" },
-  { id: "russ_w", name: "Russ W" }, { id: "steve_v", name: "Steve V" },
-];
+// Player registry is stored in React state (players) — no hardcoded list
 
 const DEMO_TP = [
   { id: "tp1", tournament_id: "wbc_2026", player_id: "aaron_j", handicap_index: 15.2, status: "active" },
@@ -3035,16 +3028,15 @@ export default function WBCApp() {
     return () => { document.head.removeChild(style); };
   }, []);
 
-  const [tPlayers, setTPlayers] = useState(DEMO_TP);
-  const [tRounds, setTRounds] = useState([
-    { id: "tr1", tournament_id: "wbc_2026", round_number: 1, course_id: "demo_course_1" },
-  ]);
-  const [courseList, setCourseList] = useState(ALL_DEMO_COURSES);
-  const [holeData, setHoleData] = useState(DEMO_HOLE_DATA);
+  const [players, setPlayers] = useState([]);
+  const [tPlayers, setTPlayers] = useState([]);
+  const [tRounds, setTRounds] = useState([]);
+  const [courseList, setCourseList] = useState([]);
+  const [holeData, setHoleData] = useState({});
   const [ctpData, setCtpData] = useState({});
-  const [pairingsData, setPairingsData] = useState(DEMO_PAIRINGS);
-  const [teeData, setTeeData] = useState(DEMO_TEE_ASSIGNMENTS);
-  const [teeTimesData, setTeeTimesData] = useState(DEMO_TEE_TIMES);
+  const [pairingsData, setPairingsData] = useState({});
+  const [teeData, setTeeData] = useState({});
+  const [teeTimesData, setTeeTimesData] = useState({});
   const [finalizedRounds, setFinalizedRounds] = useState({});
   // Auto-advance round when finalization changes
   useEffect(() => {
@@ -3056,11 +3048,7 @@ export default function WBCApp() {
   }, [JSON.stringify(finalizedRounds)]);
   const [adminSettingsOpen, setAdminSettingsOpen] = useState(false);
   const [adminSettingsTab, setAdminSettingsTab] = useState("players");
-  const [passwords, setPasswords] = useState(() => {
-    const pw = {};
-    DEMO_TP.forEach(tp => { pw[tp.player_id] = "wbc2026"; });
-    return pw;
-  });
+  const [passwords, setPasswords] = useState({});
   const [storageLoaded, setStorageLoaded] = useState(false);
   const [syncing, setSyncing] = useState(false);
 
@@ -3073,7 +3061,7 @@ export default function WBCApp() {
         // Load player registry (names) from players table
         const playerRows = await sb.get("players", "order=name");
         if (playerRows?.length) {
-          DEMO_PLAYERS = playerRows.map(r => ({ id: r.id, name: r.name }));
+          setPlayers(playerRows.map(r => ({ id: r.id, name: r.name })));
         }
 
         // Load tournament players
@@ -3192,36 +3180,7 @@ export default function WBCApp() {
     }, "tournament_id");
   };
 
-  const resetToDemo = async () => {
-    // Clear wbc_2026 data from Supabase
-    try {
-      await sb.delete("hole_scores", `tournament_id=eq.${TOURNAMENT_ID}`);
-      await sb.delete("pairings", `tournament_id=eq.${TOURNAMENT_ID}`);
-      await sb.delete("tee_assignments", `tournament_id=eq.${TOURNAMENT_ID}`);
-      await sb.delete("tournament_players", `tournament_id=eq.${TOURNAMENT_ID}`);
-      await sb.delete("tournament_rounds", `tournament_id=eq.${TOURNAMENT_ID}`);
-      await sb.delete("tournament_state", `tournament_id=eq.${TOURNAMENT_ID}`);
-    } catch(e) { console.error("Reset clear failed:", e); }
-    // Reset local state to demo defaults
-    setTPlayers(DEMO_TP);
-    setTRounds([{ id: "tr_2026_r1", tournament_id: TOURNAMENT_ID, round_number: 1, course_id: "demo_course_1" }]);
-    setCourseList(ALL_DEMO_COURSES);
-    setHoleData(DEMO_HOLE_DATA);
-    setCtpData({});
-    setPairingsData(DEMO_PAIRINGS);
-    setTeeData(DEMO_TEE_ASSIGNMENTS);
-    setTeeTimesData(DEMO_TEE_TIMES);
-    setFinalizedRounds({});
-    setRound(1);
-    const pw = {};
-    DEMO_TP.forEach(tp => { pw[tp.player_id] = "wbc2026"; });
-    setPasswords(pw);
-    // Re-seed demo data to Supabase
-    for (const tp of DEMO_TP) await sb.upsert("tournament_players", tp, "id");
-    await sb.upsert("tournament_rounds", { id: "tr_2026_r1", tournament_id: TOURNAMENT_ID, round_number: 1, course_id: "demo_course_1" }, "id");
-    await saveTournamentState({}, pw);
-    notify("Reset to demo data");
-  };
+  const resetToDemo = startFresh;
 
   const startFresh = async () => {
     // Clear scores, rounds, pairings, tees — keep tournament_players (roster + HIs)
@@ -3251,18 +3210,18 @@ export default function WBCApp() {
 
   const activePlayers = useMemo(() => {
     return tPlayers.filter(tp => tp.status !== "WD").map(tp => {
-      const p = DEMO_PLAYERS.find(pl => pl.id === tp.player_id);
+      const p = players.find(pl => pl.id === tp.player_id);
       return p ? { ...p, handicap_index: parseFloat(tp.handicap_index) || 0, tp_id: tp.id } : null;
     }).filter(Boolean).sort((a,b) => a.name.localeCompare(b.name));
-  }, [tPlayers]);
+  }, [tPlayers, players]);
 
   // All players including WD — used for leaderboard display
   const allPlayers = useMemo(() => {
     return tPlayers.map(tp => {
-      const p = DEMO_PLAYERS.find(pl => pl.id === tp.player_id);
+      const p = players.find(pl => pl.id === tp.player_id);
       return p ? { ...p, handicap_index: parseFloat(tp.handicap_index) || 0, tp_id: tp.id, isWD: tp.status === "WD" } : null;
     }).filter(Boolean).sort((a,b) => a.name.localeCompare(b.name));
-  }, [tPlayers]);
+  }, [tPlayers, players]);
 
   const currentTR = tRounds.find(r => r.round_number === round);
   const currentCourse = currentTR ? courseList.find(c => c.id === currentTR.course_id) : null;
@@ -3418,7 +3377,7 @@ export default function WBCApp() {
 
   const addPlayerToTournament = async (name, hi) => {
     const id = name.toLowerCase().replace(/\s+/g, "_");
-    if (!DEMO_PLAYERS.find(p => p.id === id)) DEMO_PLAYERS.push({ id, name });
+    setPlayers(prev => prev.find(p => p.id === id) ? prev : [...prev, { id, name }]);
     await sb.upsert("players", { id, name }, "id").catch(() => {});
     const newTp = { id: `tp_2026_${id}`, tournament_id: TOURNAMENT_ID, player_id: id, handicap_index: hi, status: "active" };
     setTPlayers(prev => [...prev, newTp]);
@@ -3454,9 +3413,7 @@ export default function WBCApp() {
   };
 
   const updateName = async (pid, newName) => {
-    const p = DEMO_PLAYERS.find(pl => pl.id === pid);
-    if (p) p.name = newName;
-    else DEMO_PLAYERS.push({ id: pid, name: newName });
+    setPlayers(prev => prev.map(p => p.id === pid ? { ...p, name: newName } : p));
     setTPlayers(prev => [...prev]); // trigger re-render
     await sb.upsert("players", { id: pid, name: newName }, "id").catch(() => {});
     notify("Name updated");
@@ -3636,11 +3593,12 @@ export default function WBCApp() {
               {activePlayers.map(p => {
                 const isDirector = p.id === "aaron_j" || p.id === "scott_r";
                 return (
-                  <button key={p.id} onClick={() => setLoginAnim({ id: p.id, name: p.name, isDirector })}
-                    style={{ background: K.card, border: `1px solid ${K.bdr}`, borderRadius: 10, padding: "12px 6px", cursor: "pointer", color: K.t1, fontSize: 13, fontWeight: 600, textAlign: "center", transition: "all 0.15s" }}
+                  <button key={p.id} onClick={() => setLoginPrompt({ id: p.id, name: p.name, isDirector })}
+                    style={{ background: K.card, border: `1px solid ${isDirector ? K.acc + "60" : K.bdr}`, borderRadius: 10, padding: "12px 6px", cursor: "pointer", color: K.t1, fontSize: 13, fontWeight: 600, textAlign: "center", transition: "all 0.15s" }}
                     onMouseEnter={e => { e.currentTarget.style.borderColor = K.acc; e.currentTarget.style.background = K.hover; }}
-                    onMouseLeave={e => { e.currentTarget.style.borderColor = K.bdr; e.currentTarget.style.background = K.card; }}>
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = isDirector ? K.acc + "60" : K.bdr; e.currentTarget.style.background = K.card; }}>
                     {p.name}
+                    {isDirector && <div style={{ fontSize: 8, color: K.acc, fontWeight: 700, marginTop: 2 }}>DIRECTOR</div>}
                   </button>
                 );
               })}
@@ -3719,7 +3677,7 @@ export default function WBCApp() {
         </div>
         {view === "skins" && <SkinsCtpView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} teeData={teeData} getPlayerTee={getPlayerTee} />}
         {view === "groups" && <GroupsView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} pairingsData={pairingsData} teeTimesData={teeTimesData} teeData={teeData} getPlayerTee={getPlayerTee} user={user} />}
-        {view === "admin" && (user.isDirector ? <AdminView players={DEMO_PLAYERS} activePlayers={activePlayers} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
+        {view === "admin" && (user.isDirector ? <AdminView players={players} activePlayers={activePlayers} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
               setTeeTimesData(prev => {
                 const next = typeof updater === "function" ? updater(prev) : updater;
                 // Fire-and-forget: update tee times on pairings rows in Supabase
