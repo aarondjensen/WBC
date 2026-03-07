@@ -24,8 +24,14 @@ const TROPHY_SVG_URL = `data:image/svg+xml;utf8,${encodeURIComponent(TROPHY_SVG)
 
 // Demo data simulating what's in Supabase
 // Player registry — loaded from Supabase players table on mount
-// Player registry — loaded from Supabase at runtime
-let DEMO_PLAYERS = [];
+let DEMO_PLAYERS = [
+  { id: "aaron_j", name: "Aaron J" }, { id: "bob_b", name: "Bob B" },
+  { id: "brian_k", name: "Brian K" }, { id: "eric_o", name: "Eric O" },
+  { id: "joe_s", name: "Joe S" }, { id: "john_c", name: "John C" },
+  { id: "matt_v", name: "Matt V" }, { id: "scott_r", name: "Scott R" },
+  { id: "jeff_b", name: "Jeff B" }, { id: "ray_h", name: "Ray H" },
+  { id: "russ_w", name: "Russ W" }, { id: "steve_v", name: "Steve V" },
+];
 
 const DEMO_TP = [
   { id: "tp1", tournament_id: "wbc_2026", player_id: "aaron_j", handicap_index: 15.2, status: "active" },
@@ -2308,6 +2314,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
   const [confirmCourse, setConfirmCourse] = useState(null);
   const [searching, setSearching] = useState(false);
   const [courseSearch, setCourseSearch] = useState("");
+  const [courseStateFilter, setCourseStateFilter] = useState("MI");
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [expandedCourse, setExpandedCourse] = useState(null);
@@ -2405,31 +2412,53 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
         }
         // Then search GolfCourseAPI via proxy for any new courses not in history
         try {
-          const apiRes = await fetch(`/api/courses?search=${encodeURIComponent(q)}`);
+          const stateParam = courseStateFilter.trim() ? `&state=${encodeURIComponent(courseStateFilter.trim())}` : "";
+          const apiRes = await fetch(`/api/courses?search=${encodeURIComponent(q)}${stateParam}`);
           if (apiRes.ok) {
             const apiData = await apiRes.json();
-            const apiCourses = (apiData.courses || [])
-              .filter(c => !results.find(r => r.name.toLowerCase() === (c.club_name || c.course_name || "").toLowerCase()))
+            // API returns { courses: [ { id, club_name, course_name, location: {city,state},
+            //   tees: { male: [...], female: [...] }  -- each tee has:
+            //   tee_name, course_rating, slope_rating, par_total, total_yards, holes: [{par, yardage, handicap}]
+            // } ] }
+            const rawCourses = Array.isArray(apiData) ? apiData : (apiData.courses || []);
+            const apiCourses = rawCourses
+              .filter(c => {
+                const name = (c.club_name || c.course_name || "").toLowerCase();
+                if (results.find(r => r.name.toLowerCase() === name)) return false;
+                if (courseStateFilter.trim()) {
+                  const sf = courseStateFilter.trim().toLowerCase();
+                  const cState = (c.location?.state || "").toLowerCase();
+                  if (cState && !cState.includes(sf)) return false;
+                }
+                return true;
+              })
               .map((c, ci) => {
-                const tees = (c.tees || []).map((t, ti) => ({
-                  name: t.tee_name || t.name || "Default",
-                  color: resolveTeeColor({ name: t.tee_name || t.name || "", color: "" }, ti),
+                // tees is { male: [...], female: [...] } — flatten all, prefer male
+                const teesObj = c.tees || {};
+                const maleTees = Array.isArray(teesObj.male) ? teesObj.male : [];
+                const femaleTees = Array.isArray(teesObj.female) ? teesObj.female : [];
+                const allTees = maleTees.length ? maleTees : femaleTees;
+                const tees = allTees.map((t, ti) => ({
+                  name: t.tee_name || "Default",
+                  color: resolveTeeColor({ name: t.tee_name || "", color: "" }, ti),
                   rating: parseFloat(t.course_rating) || 72.0,
                   slope: parseInt(t.slope_rating) || 113,
-                  par: parseInt(t.par) || 72,
+                  par: parseInt(t.par_total) || 72,
                   yardage: parseInt(t.total_yards) || 0,
+                  holes: t.holes || [],
                 }));
-                const firstTee = c.tees?.[0];
+                const firstTee = allTees[0];
+                const holes = firstTee?.holes || [];
                 return {
                   id: `gc_${c.id || ci}`,
-                  name: c.club_name || c.course_name || "Unknown",
+                  name: [c.club_name, c.course_name].filter(Boolean).join(" – ") || "Unknown",
                   city: c.location?.city || "",
                   state: c.location?.state || "",
-                  par: parseInt(firstTee?.par) || 72,
+                  par: parseInt(firstTee?.par_total) || 72,
                   slope: parseInt(firstTee?.slope_rating) || 113,
                   rating: parseFloat(firstTee?.course_rating) || 72.0,
-                  hole_pars: firstTee?.holes?.map(h => h.par) || [],
-                  hole_handicaps: firstTee?.holes?.map(h => h.handicap) || [],
+                  hole_pars: holes.map(h => parseInt(h.par) || 4),
+                  hole_handicaps: holes.map(h => parseInt(h.handicap) || 0),
                   tee_boxes: tees,
                 };
               });
@@ -2786,7 +2815,16 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                     })}
                     {searching && (
                       <div style={{ padding: 14, borderTop: `1px solid ${K.bdr}` }}>
-                        <input value={courseSearch} onChange={e => doCourseSearch(e.target.value)} placeholder="Search courses by name, city, or state..." autoFocus style={{ width: "100%", padding: "8px 12px", background: K.inp, border: `1px solid ${ac}40`, borderRadius: 8, color: K.t1, fontSize: 13, marginBottom: 8, boxSizing: "border-box" }} />
+                        <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                          <div style={{ position: "relative", flexShrink: 0 }}>
+                            <select value={courseStateFilter} onChange={e => { setCourseStateFilter(e.target.value); if (courseSearch.trim().length >= 2) doCourseSearch(courseSearch); }} style={{ appearance: "none", WebkitAppearance: "none", padding: "8px 26px 8px 10px", background: K.inp, border: `1px solid ${ac}40`, borderRadius: 8, color: courseStateFilter ? K.acc : K.t3, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                              <option value="">All</option>
+                              {["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"].map(s => <option key={s} value={s}>{s}</option>)}
+                            </select>
+                            <span style={{ position: "absolute", right: 7, top: "50%", transform: "translateY(-50%)", pointerEvents: "none", color: K.t3, fontSize: 8 }}>▼</span>
+                          </div>
+                          <input value={courseSearch} onChange={e => doCourseSearch(e.target.value)} placeholder="Search by course name..." autoFocus style={{ flex: 1, padding: "8px 12px", background: K.inp, border: `1px solid ${ac}40`, borderRadius: 8, color: K.t1, fontSize: 13, boxSizing: "border-box" }} />
+                        </div>
                         {searchLoading && <div style={{ textAlign: "center", padding: 12, color: K.t3, fontSize: 11 }}>Searching GolfCourseAPI...</div>}
                         {!searchLoading && courseSearch.trim().length >= 2 && searchResults.length === 0 && <div style={{ color: K.t3, fontSize: 11, textAlign: "center", padding: 8 }}>No courses found</div>}
                         {!searchLoading && searchResults.filter(c => !courses.find(ex => ex.id === c.id)).map(c => (
