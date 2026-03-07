@@ -2642,9 +2642,9 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
           const teesSet = teesSaved[editRound] && !teesModified[editRound] && activePlayers.every(p => ((teeData[editRound] || {})[p.id]));
           const groupsDone = _rg.length > 0 && _rg.flat().length === activePlayers.length;
           const teeTimesDone = _rg.length > 0 && _rg.every((_, gi) => _rt[gi] && _rt[gi].trim() !== "");
-          if (!teesSet) items.push({ text: "Tee assignments incomplete", action: "Go to Tees →", onClick: () => setTab("tees") });
-          if (!groupsDone) items.push({ text: "Pairings not set", action: "Go to Pairings →", onClick: () => setTab("pairings") });
-          if (!teeTimesDone) items.push({ text: "Tee times missing", action: "Add tee times →", onClick: () => setTab("pairings") });
+          if (!teesSet) items.push({ text: "Tee assignments incomplete" });
+          if (!groupsDone) items.push({ text: "Pairings not set" });
+          if (!teeTimesDone) items.push({ text: "Tee times missing" });
         }
         if (items.length === 0) return null;
         return (
@@ -3636,12 +3636,11 @@ export default function WBCApp() {
               {activePlayers.map(p => {
                 const isDirector = p.id === "aaron_j" || p.id === "scott_r";
                 return (
-                  <button key={p.id} onClick={() => setLoginPrompt({ id: p.id, name: p.name, isDirector })}
-                    style={{ background: K.card, border: `1px solid ${isDirector ? K.acc + "60" : K.bdr}`, borderRadius: 10, padding: "12px 6px", cursor: "pointer", color: K.t1, fontSize: 13, fontWeight: 600, textAlign: "center", transition: "all 0.15s" }}
+                  <button key={p.id} onClick={() => setLoginAnim({ id: p.id, name: p.name, isDirector })}
+                    style={{ background: K.card, border: `1px solid ${K.bdr}`, borderRadius: 10, padding: "12px 6px", cursor: "pointer", color: K.t1, fontSize: 13, fontWeight: 600, textAlign: "center", transition: "all 0.15s" }}
                     onMouseEnter={e => { e.currentTarget.style.borderColor = K.acc; e.currentTarget.style.background = K.hover; }}
-                    onMouseLeave={e => { e.currentTarget.style.borderColor = isDirector ? K.acc + "60" : K.bdr; e.currentTarget.style.background = K.card; }}>
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = K.bdr; e.currentTarget.style.background = K.card; }}>
                     {p.name}
-                    {isDirector && <div style={{ fontSize: 8, color: K.acc, fontWeight: 700, marginTop: 2 }}>DIRECTOR</div>}
                   </button>
                 );
               })}
