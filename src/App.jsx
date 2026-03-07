@@ -2410,31 +2410,62 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
             tee_boxes: (tbRows || []).filter(t => t.course_id === c.id).map((t, ti) => ({ ...t, color: resolveTeeColor(t, ti) })),
           }));
         }
-        // Then search GolfCourseAPI via proxy
-        // API spec: tees: { male: TeeBox[], female: TeeBox[] }
+        // Then search golf course API via proxy — supports two response schemas:
+        // Schema A (golfcourseapi.com): { courses: [{ club_name, course_name, location:{city,state}, tees:{male:[],female:[]} }] }
+        //   Each tee: { tee_name, slope_rating, course_rating, par_total, total_yards, holes:[{par,yardage,handicap}] }
+        // Schema B (RapidAPI): [ { name, city, state, teeBoxes:[{tee,slope,handicap}], scorecard:[{Hole,Par,Handicap,tees:{teeBox1:{color,yards}}}] } ]
         try {
           const stateParam = courseStateFilter?.trim() ? `&state=${encodeURIComponent(courseStateFilter.trim())}` : "";
           const apiRes = await fetch(`/api/courses?search=${encodeURIComponent(q)}${stateParam}`);
           if (apiRes.ok) {
             const apiData = await apiRes.json();
-            const rawCourses = Array.isArray(apiData) ? apiData : (apiData.courses || []);
-            const apiCourses = rawCourses
-              .filter(c => {
-                const name = [c.club_name, c.course_name].filter(Boolean).join(" ").toLowerCase();
-                if (results.find(r => r.name.toLowerCase() === name)) return false;
-                if (courseStateFilter?.trim()) {
-                  const sf = courseStateFilter.trim().toLowerCase();
-                  const cState = (c.location?.state || "").toLowerCase();
-                  if (cState && !cState.includes(sf)) return false;
-                }
-                return true;
-              })
-              .map((c, ci) => {
+            // Normalize to array of raw courses
+            const rawCourses = Array.isArray(apiData) ? apiData : (apiData.courses || apiData.data || []);
+
+            const parsedCourses = rawCourses.map((c, ci) => {
+              // Detect schema by presence of teeBoxes (Schema B / RapidAPI)
+              const isSchemaB = Array.isArray(c.teeBoxes);
+
+              let tees, hole_pars, hole_handicaps, par, slope, rating, name, city, state;
+
+              if (isSchemaB) {
+                // Schema B: RapidAPI
+                name = c.name || "Unknown";
+                city = c.city || "";
+                state = c.state || "";
+                // scorecard has hole-by-hole data
+                const sc = Array.isArray(c.scorecard) ? c.scorecard : [];
+                hole_pars = sc.map(h => parseInt(h.Par) || 4);
+                hole_handicaps = sc.map(h => parseInt(h.Handicap) || 0);
+                par = hole_pars.reduce((a, b) => a + b, 0) || 72;
+                // teeBoxes: [{ tee, slope, handicap (=course rating) }]
+                tees = (c.teeBoxes || []).map((t, ti) => ({
+                  name: t.tee || "Default",
+                  color: resolveTeeColor({ name: t.tee || "", color: t.tee || "" }, ti),
+                  slope: parseInt(t.slope) || 113,
+                  rating: parseFloat(t.handicap) || 72.0, // mislabeled as 'handicap' in this API
+                  par,
+                  yardage: sc.reduce((a, h) => {
+                    const tb = h.tees ? Object.values(h.tees)[ti] || Object.values(h.tees)[0] : null;
+                    return a + (parseInt(tb?.yards) || 0);
+                  }, 0),
+                  holes: sc.map(h => {
+                    const tb = h.tees ? Object.values(h.tees)[ti] || Object.values(h.tees)[0] : null;
+                    return { par: parseInt(h.Par) || 4, yardage: parseInt(tb?.yards) || 0, handicap: parseInt(h.Handicap) || 0 };
+                  }),
+                }));
+                slope = tees[0]?.slope || 113;
+                rating = tees[0]?.rating || 72.0;
+              } else {
+                // Schema A: golfcourseapi.com — tees: { male: [...], female: [...] }
+                name = [c.club_name, c.course_name].filter(Boolean).join(" – ") || "Unknown";
+                city = c.location?.city || c.city || "";
+                state = c.location?.state || c.state || "";
                 const teesObj = c.tees || {};
                 const maleTees = Array.isArray(teesObj.male) ? teesObj.male : [];
                 const femaleTees = Array.isArray(teesObj.female) ? teesObj.female : [];
                 const allTees = maleTees.length ? maleTees : femaleTees;
-                const tees = allTees.map((t, ti) => ({
+                tees = allTees.map((t, ti) => ({
                   name: t.tee_name || "Default",
                   color: resolveTeeColor({ name: t.tee_name || "", color: "" }, ti),
                   rating: parseFloat(t.course_rating) || 72.0,
@@ -2445,23 +2476,29 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                 }));
                 const firstTee = allTees[0];
                 const holes = firstTee?.holes || [];
-                return {
-                  id: `gc_${c.id || ci}`,
-                  name: [c.club_name, c.course_name].filter(Boolean).join(" – ") || "Unknown",
-                  city: c.location?.city || "",
-                  state: c.location?.state || "",
-                  par: parseInt(firstTee?.par_total) || 72,
-                  slope: parseInt(firstTee?.slope_rating) || 113,
-                  rating: parseFloat(firstTee?.course_rating) || 72.0,
-                  hole_pars: holes.map(h => parseInt(h.par) || 4),
-                  hole_handicaps: holes.map(h => parseInt(h.handicap) || 0),
-                  tee_boxes: tees,
-                };
-              });
-            results = [...results, ...apiCourses];
+                hole_pars = holes.map(h => parseInt(h.par) || 4);
+                hole_handicaps = holes.map(h => parseInt(h.handicap) || 0);
+                par = parseInt(firstTee?.par_total) || 72;
+                slope = parseInt(firstTee?.slope_rating) || 113;
+                rating = parseFloat(firstTee?.course_rating) || 72.0;
+              }
+
+              return { id: `gc_${c.id || c._id || ci}`, name, city, state, par, slope, rating, hole_pars, hole_handicaps, tee_boxes: tees };
+            });
+
+            const newCourses = parsedCourses.filter(c => {
+              const cName = c.name.toLowerCase();
+              if (results.find(r => r.name.toLowerCase() === cName)) return false;
+              if (courseStateFilter?.trim()) {
+                const sf = courseStateFilter.trim().toLowerCase();
+                if (c.state && !c.state.toLowerCase().includes(sf)) return false;
+              }
+              return true;
+            });
+            results = [...results, ...newCourses];
           }
         } catch(apiErr) {
-          console.log("GolfCourseAPI proxy failed:", apiErr);
+          console.log("Golf course API proxy failed:", apiErr);
         }
         setSearchResults(results);
       } catch (err) {
@@ -2872,11 +2909,15 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
 
               {/* Reset options */}
               <div style={{ marginTop: 16, paddingTop: 12, borderTop: `1px solid ${K.bdr}30`, display: "flex", flexDirection: "column", gap: 8 }}>
-                <button onClick={() => { if (confirm("Wipe all scores from Supabase? Roster, courses, pairings and tee assignments will be preserved. This cannot be undone.")) { startFresh(); setSettingsOpen(false); } }} style={{
+                <button onClick={() => { if (confirm("Clear all scores, rounds, pairings and tee assignments? Player roster and handicaps will be preserved. This cannot be undone.")) { startFresh(); setSettingsOpen(false); } }} style={{
                   width: "100%", padding: "10px 0", borderRadius: 8,
                   background: K.danger + "15", border: `1px solid ${K.danger}60`,
                   color: K.danger, fontSize: 12, fontWeight: 700, cursor: "pointer",
-                }}>🗑 Wipe All Scores from Database</button>
+                }}>🗑 Start Fresh — Clear All Data</button>
+                <button onClick={() => { if (confirm("Reset all data to demo defaults? This cannot be undone.")) { resetToDemo(); setSettingsOpen(false); } }} style={{
+                  width: "100%", padding: "10px 0", borderRadius: 8, background: "transparent",
+                  border: `1px solid ${K.bdr}`, color: K.t3, fontSize: 11, fontWeight: 600, cursor: "pointer",
+                }}>🔄 Load Demo Data</button>
               </div>
             </div>
           </div>
@@ -3248,16 +3289,27 @@ export default function WBCApp() {
   };
 
   const startFresh = async () => {
-    // Only wipe hole scores — keep roster, courses, rounds, pairings, tee assignments
+    // Clear scores, rounds, pairings, tees — keep tournament_players (roster + HIs)
     try {
       await sb.delete("hole_scores", `tournament_id=eq.${TOURNAMENT_ID}`);
+      await sb.delete("pairings", `tournament_id=eq.${TOURNAMENT_ID}`);
+      await sb.delete("tee_assignments", `tournament_id=eq.${TOURNAMENT_ID}`);
+      await sb.delete("tournament_rounds", `tournament_id=eq.${TOURNAMENT_ID}`);
+      await sb.delete("tournament_state", `tournament_id=eq.${TOURNAMENT_ID}`);
       await sb.delete("skins", `tournament_round_id=like.tr_2026%`);
-    } catch(e) { console.error("Wipe scores failed:", e); }
+    } catch(e) { console.error("Start fresh clear failed:", e); }
+    // Keep tPlayers (roster + HIs) and passwords intact — clear everything else
+    setTRounds([]);
+    setCourseList([]);
     setHoleData({});
     setCtpData({});
+    setPairingsData({});
+    setTeeData({});
+    setTeeTimesData({});
     setFinalizedRounds({});
+    setRound(1);
     await saveTournamentState({}, passwords);
-    notify("All scores wiped from database");
+    notify("Scorecards cleared — player roster preserved");
   };
 
   const notify = m => { setNotif(m); setTimeout(() => setNotif(null), 2500); };
@@ -3725,7 +3777,7 @@ export default function WBCApp() {
       </div>
       )}
 
-      <div style={{ padding: view === "leaderboard" ? "10px 12px" : "14px 20px", flex: 1, overflowY: view === "leaderboard" ? "hidden" : "auto", overflowX: "hidden" }}>
+      <div style={{ padding: "14px 20px", flex: 1, overflowY: "auto", overflowX: "hidden" }}>
         {view === "leaderboard" && <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} teeData={teeData} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} />}
         <div style={{ display: view === "scoring" ? "block" : "none" }}>
           <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeData={teeData} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onNavigate={setView} onGoToAdminCourses={() => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); }} markPlayerWD={markPlayerWD} />
