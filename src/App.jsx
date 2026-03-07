@@ -2414,37 +2414,28 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
           const apiRes = await fetch(`/api/courses?search=${encodeURIComponent(q)}`);
           if (apiRes.ok) {
             const apiData = await apiRes.json();
-            // GolfCourseAPI may return { courses: [...] } or just an array
-            const rawCourses = Array.isArray(apiData) ? apiData : (apiData.courses || apiData.data || []);
-            const apiCourses = rawCourses
-              .filter(c => !results.find(r => r.name.toLowerCase() === (c.club_name || c.course_name || c.name || "").toLowerCase()))
+            const apiCourses = (apiData.courses || [])
+              .filter(c => !results.find(r => r.name.toLowerCase() === (c.club_name || c.course_name || "").toLowerCase()))
               .map((c, ci) => {
-                // Tees can be an array or an object keyed by tee name
-                const rawTees = Array.isArray(c.tees) ? c.tees
-                  : c.tees && typeof c.tees === "object" ? Object.values(c.tees)
-                  : [];
-                const tees = rawTees.map((t, ti) => ({
-                  name: t.tee_name || t.name || t.color || "Default",
-                  color: resolveTeeColor({ name: t.tee_name || t.name || t.color || "", color: t.color || "" }, ti),
-                  rating: parseFloat(t.course_rating || t.rating) || 72.0,
-                  slope: parseInt(t.slope_rating || t.slope) || 113,
+                const tees = (c.tees || []).map((t, ti) => ({
+                  name: t.tee_name || t.name || "Default",
+                  color: resolveTeeColor({ name: t.tee_name || t.name || "", color: "" }, ti),
+                  rating: parseFloat(t.course_rating) || 72.0,
+                  slope: parseInt(t.slope_rating) || 113,
                   par: parseInt(t.par) || 72,
-                  yardage: parseInt(t.total_yards || t.yardage) || 0,
+                  yardage: parseInt(t.total_yards) || 0,
                 }));
-                const firstTee = rawTees[0];
-                // Hole data may live on course directly or on first tee
-                const holePars = (c.holes || firstTee?.holes || []).map(h => parseInt(h.par) || 4);
-                const holeHcps = (c.holes || firstTee?.holes || []).map(h => parseInt(h.handicap || h.hdcp) || 0);
+                const firstTee = c.tees?.[0];
                 return {
                   id: `gc_${c.id || ci}`,
-                  name: c.club_name || c.course_name || c.name || "Unknown",
-                  city: c.city || c.location?.city || "",
-                  state: c.state || c.location?.state || "",
-                  par: parseInt(c.par || firstTee?.par) || 72,
-                  slope: parseInt(c.slope || firstTee?.slope_rating || firstTee?.slope) || 113,
-                  rating: parseFloat(c.rating || firstTee?.course_rating || firstTee?.rating) || 72.0,
-                  hole_pars: holePars,
-                  hole_handicaps: holeHcps,
+                  name: c.club_name || c.course_name || "Unknown",
+                  city: c.location?.city || "",
+                  state: c.location?.state || "",
+                  par: parseInt(firstTee?.par) || 72,
+                  slope: parseInt(firstTee?.slope_rating) || 113,
+                  rating: parseFloat(firstTee?.course_rating) || 72.0,
+                  hole_pars: firstTee?.holes?.map(h => h.par) || [],
+                  hole_handicaps: firstTee?.holes?.map(h => h.handicap) || [],
                   tee_boxes: tees,
                 };
               });
@@ -3645,12 +3636,11 @@ export default function WBCApp() {
               {activePlayers.map(p => {
                 const isDirector = p.id === "aaron_j" || p.id === "scott_r";
                 return (
-                  <button key={p.id} onClick={() => setLoginAnim({ id: p.id, name: p.name, isDirector })}
-                    style={{ background: K.card, border: `1px solid ${isDirector ? K.acc + "60" : K.bdr}`, borderRadius: 10, padding: "12px 6px", cursor: "pointer", color: K.t1, fontSize: 13, fontWeight: 600, textAlign: "center", transition: "all 0.15s" }}
+                  <button key={p.id} onClick={() => setLoginPrompt({ id: p.id, name: p.name, isDirector })}
+                    style={{ background: K.card, border: `1px solid ${K.bdr}`, borderRadius: 10, padding: "12px 6px", cursor: "pointer", color: K.t1, fontSize: 13, fontWeight: 600, textAlign: "center", transition: "all 0.15s" }}
                     onMouseEnter={e => { e.currentTarget.style.borderColor = K.acc; e.currentTarget.style.background = K.hover; }}
-                    onMouseLeave={e => { e.currentTarget.style.borderColor = isDirector ? K.acc + "60" : K.bdr; e.currentTarget.style.background = K.card; }}>
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = K.bdr; e.currentTarget.style.background = K.card; }}>
                     {p.name}
-                    {isDirector && <div style={{ fontSize: 8, color: K.acc, fontWeight: 700, marginTop: 2 }}>DIRECTOR</div>}
                   </button>
                 );
               })}
