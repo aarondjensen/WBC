@@ -413,19 +413,22 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
     const calc = () => {
       if (!containerRef.current || !headerRef.current || lb.length === 0) return;
       const viewH = window.innerHeight;
-      const containerTop = containerRef.current.getBoundingClientRect().top;
+      const containerRect = containerRef.current.getBoundingClientRect();
       const headerH = headerRef.current.offsetHeight;
-      const navH = 60;
-      const bottomPad = 80;
-      const available = viewH - containerTop - headerH - navH - bottomPad - 8;
+      // Measure actual bottom nav height from DOM, fall back to 60
+      const navEl = containerRef.current.closest("[data-app-shell]")?.querySelector("[data-bottom-nav]");
+      const navH = navEl ? navEl.offsetHeight : 60;
+      // Content area bottom padding (14px top + 14px bottom from the scroll wrapper)
+      const contentPad = 28;
+      const available = viewH - containerRect.top - headerH - navH - contentPad;
       const perRow = Math.floor(available / lb.length);
-      const clampedPerRow = Math.min(perRow, 36); // never taller than 36px per row
+      const clampedPerRow = Math.min(Math.max(perRow, 10), 56);
       const vPad = Math.max(0, Math.floor((clampedPerRow - 14) / 2));
       const fSize = clampedPerRow >= 32 ? 13 : clampedPerRow >= 26 ? 12 : clampedPerRow >= 18 ? 11 : 10;
       setRowStyle({ padding: `${vPad}px 12px`, fontSize: fSize, lineHeight: 1 });
     };
     calc();
-    const t = setTimeout(calc, 100);
+    const t = setTimeout(calc, 150);
     window.addEventListener("resize", calc);
     return () => { clearTimeout(t); window.removeEventListener("resize", calc); };
   }, [lb.length]);
@@ -3669,7 +3672,7 @@ export default function WBCApp() {
 
   return (
     <div style={{ minHeight: "100vh", background: "#030810", display: "flex", justifyContent: "center" }}>
-    <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: K.bg, fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", color: K.t1, width: "100%", maxWidth: 480, position: "relative", boxShadow: "0 0 80px rgba(0,0,0,0.8)", flexShrink: 0 }}>
+    <div data-app-shell style={{ height: "100vh", display: "flex", flexDirection: "column", background: K.bg, fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", color: K.t1, width: "100%", maxWidth: 480, position: "relative", boxShadow: "0 0 80px rgba(0,0,0,0.8)", flexShrink: 0 }}>
       <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
 
       {notif && <div style={{ position: "fixed", top: 16, left: "50%", transform: "translateX(-50%)", background: K.accDim, color: "white", padding: "10px 24px", borderRadius: 12, fontSize: 13, fontWeight: 600, zIndex: 1000, boxShadow: "0 8px 32px rgba(0,0,0,0.4)" }}>{notif}</div>}
@@ -3750,7 +3753,7 @@ export default function WBCApp() {
         ))}
       </div>
 
-      <div style={{ position: "sticky", bottom: 0, width: "100%", display: "flex", background: "rgba(14,24,41,0.97)", borderTop: `1px solid ${K.bdr}`, zIndex: 100, marginTop: "auto" }}>
+      <div data-bottom-nav style={{ position: "sticky", bottom: 0, width: "100%", display: "flex", background: "rgba(14,24,41,0.97)", borderTop: `1px solid ${K.bdr}`, zIndex: 100, marginTop: "auto" }}>
         {navItems.map(item => {
           const active = view === item.key;
           const clr = active ? K.acc : K.t3;
