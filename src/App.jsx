@@ -2411,21 +2411,20 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
           }));
         }
         // Then search GolfCourseAPI via proxy for any new courses not in history
+        // API response: { courses: [{ id, club_name, course_name, location: {city,state},
+        //   tees: { male: [...], female: [...] } }] }
+        // Each tee: { tee_name, slope_rating, course_rating, par_total, total_yards, holes:[{par,yardage,handicap}] }
         try {
-          const stateParam = courseStateFilter.trim() ? `&state=${encodeURIComponent(courseStateFilter.trim())}` : "";
+          const stateParam = courseStateFilter?.trim() ? `&state=${encodeURIComponent(courseStateFilter.trim())}` : "";
           const apiRes = await fetch(`/api/courses?search=${encodeURIComponent(q)}${stateParam}`);
           if (apiRes.ok) {
             const apiData = await apiRes.json();
-            // API returns { courses: [ { id, club_name, course_name, location: {city,state},
-            //   tees: { male: [...], female: [...] }  -- each tee has:
-            //   tee_name, course_rating, slope_rating, par_total, total_yards, holes: [{par, yardage, handicap}]
-            // } ] }
             const rawCourses = Array.isArray(apiData) ? apiData : (apiData.courses || []);
             const apiCourses = rawCourses
               .filter(c => {
                 const name = (c.club_name || c.course_name || "").toLowerCase();
                 if (results.find(r => r.name.toLowerCase() === name)) return false;
-                if (courseStateFilter.trim()) {
+                if (courseStateFilter?.trim()) {
                   const sf = courseStateFilter.trim().toLowerCase();
                   const cState = (c.location?.state || "").toLowerCase();
                   if (cState && !cState.includes(sf)) return false;
@@ -2433,7 +2432,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                 return true;
               })
               .map((c, ci) => {
-                // tees is { male: [...], female: [...] } — flatten all, prefer male
+                // tees is { male: [...], female: [...] } — prefer male tees
                 const teesObj = c.tees || {};
                 const maleTees = Array.isArray(teesObj.male) ? teesObj.male : [];
                 const femaleTees = Array.isArray(teesObj.female) ? teesObj.female : [];
@@ -2817,7 +2816,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                       <div style={{ padding: 14, borderTop: `1px solid ${K.bdr}` }}>
                         <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
                           <div style={{ position: "relative", flexShrink: 0 }}>
-                            <select value={courseStateFilter} onChange={e => { setCourseStateFilter(e.target.value); if (courseSearch.trim().length >= 2) doCourseSearch(courseSearch); }} style={{ appearance: "none", WebkitAppearance: "none", padding: "8px 26px 8px 10px", background: K.inp, border: `1px solid ${ac}40`, borderRadius: 8, color: courseStateFilter ? K.acc : K.t3, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                            <select value={courseStateFilter} onChange={e => { setCourseStateFilter(e.target.value); if (courseSearch.trim().length >= 2) doCourseSearch(courseSearch); }} style={{ appearance: "none", WebkitAppearance: "none", padding: "8px 24px 8px 10px", background: K.inp, border: `1px solid ${ac}40`, borderRadius: 8, color: courseStateFilter ? K.acc : K.t3, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
                               <option value="">All</option>
                               {["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"].map(s => <option key={s} value={s}>{s}</option>)}
                             </select>
