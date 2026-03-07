@@ -415,12 +415,11 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
       const viewH = window.innerHeight;
       const containerTop = containerRef.current.getBoundingClientRect().top;
       const headerH = headerRef.current.offsetHeight;
-      const navEl = document.querySelector("[data-bottom-nav]");
-      const navH = navEl ? navEl.offsetHeight : 60;
-      // 2px for container border, 4px breathing room
-      const available = viewH - containerTop - headerH - navH - 6;
+      const navH = 60;
+      const bottomPad = 80;
+      const available = viewH - containerTop - headerH - navH - bottomPad - 8;
       const perRow = Math.floor(available / lb.length);
-      const clampedPerRow = Math.min(perRow, 56);
+      const clampedPerRow = Math.min(perRow, 36); // never taller than 36px per row
       const vPad = Math.max(0, Math.floor((clampedPerRow - 14) / 2));
       const fSize = clampedPerRow >= 32 ? 13 : clampedPerRow >= 26 ? 12 : clampedPerRow >= 18 ? 11 : 10;
       setRowStyle({ padding: `${vPad}px 12px`, fontSize: fSize, lineHeight: 1 });
@@ -561,6 +560,17 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
 
   return (
     <div style={{ position: "relative" }}>
+      {/* Giant trophy silhouette behind entire leaderboard */}
+      <img src={WBC_TROPHY_SILHOUETTE} alt="" style={{
+        position: "absolute", top: "50%", left: trophyLeft,
+        transform: "translate(-50%, -50%)",
+        width: "100%", height: "100%",
+        opacity: 0.08,
+        pointerEvents: "none",
+        userSelect: "none",
+        zIndex: 0,
+        objectFit: "contain",
+      }} />
       <div style={{ position: "relative", zIndex: 1 }}>
       {/* Title inline with stacked pills */}
       <div style={{ display: "flex", alignItems: "center", marginBottom: 10, gap: 8 }}>
@@ -619,19 +629,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
           </div>
         </div>
       </div>
-      <div ref={containerRef} style={{ position: "relative", background: "transparent", borderRadius: 12, border: `1px solid ${K.bdr}`, overflow: "hidden" }}>
-        {/* Giant trophy silhouette centered within the rows area */}
-        <img src={WBC_TROPHY_SILHOUETTE} alt="" style={{
-          position: "absolute", top: "50%", left: trophyLeft,
-          transform: "translate(-50%, -50%)",
-          width: "100%", height: "100%",
-          opacity: 0.08,
-          pointerEvents: "none",
-          userSelect: "none",
-          zIndex: 0,
-          objectFit: "contain",
-        }} />
-          <div style={{ position: "relative", zIndex: 1 }}>
+      <div ref={containerRef} style={{ background: "transparent", borderRadius: 12, border: `1px solid ${K.bdr}`, overflow: "hidden" }}>
         {/* Build dynamic grid: #, Player, Total, Thru, Rd, [8px gap], prior rounds */}
         {(() => {
           const allPriorRounds = [1, 2, 3, 4];
@@ -756,7 +754,6 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
             </>
           );
         })()}
-          </div>
       </div>
       </div>
     </div>
@@ -2875,15 +2872,11 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
 
               {/* Reset options */}
               <div style={{ marginTop: 16, paddingTop: 12, borderTop: `1px solid ${K.bdr}30`, display: "flex", flexDirection: "column", gap: 8 }}>
-                <button onClick={() => { if (confirm("Clear all scores, rounds, pairings and tee assignments? Player roster and handicaps will be preserved. This cannot be undone.")) { startFresh(); setSettingsOpen(false); } }} style={{
+                <button onClick={() => { if (confirm("Wipe all scores from Supabase? Roster, courses, pairings and tee assignments will be preserved. This cannot be undone.")) { startFresh(); setSettingsOpen(false); } }} style={{
                   width: "100%", padding: "10px 0", borderRadius: 8,
                   background: K.danger + "15", border: `1px solid ${K.danger}60`,
                   color: K.danger, fontSize: 12, fontWeight: 700, cursor: "pointer",
-                }}>🗑 Start Fresh — Clear All Data</button>
-                <button onClick={() => { if (confirm("Reset all data to demo defaults? This cannot be undone.")) { resetToDemo(); setSettingsOpen(false); } }} style={{
-                  width: "100%", padding: "10px 0", borderRadius: 8, background: "transparent",
-                  border: `1px solid ${K.bdr}`, color: K.t3, fontSize: 11, fontWeight: 600, cursor: "pointer",
-                }}>🔄 Load Demo Data</button>
+                }}>🗑 Wipe All Scores from Database</button>
               </div>
             </div>
           </div>
@@ -3255,27 +3248,16 @@ export default function WBCApp() {
   };
 
   const startFresh = async () => {
-    // Clear scores, rounds, pairings, tees — keep tournament_players (roster + HIs)
+    // Only wipe hole scores — keep roster, courses, rounds, pairings, tee assignments
     try {
       await sb.delete("hole_scores", `tournament_id=eq.${TOURNAMENT_ID}`);
-      await sb.delete("pairings", `tournament_id=eq.${TOURNAMENT_ID}`);
-      await sb.delete("tee_assignments", `tournament_id=eq.${TOURNAMENT_ID}`);
-      await sb.delete("tournament_rounds", `tournament_id=eq.${TOURNAMENT_ID}`);
-      await sb.delete("tournament_state", `tournament_id=eq.${TOURNAMENT_ID}`);
       await sb.delete("skins", `tournament_round_id=like.tr_2026%`);
-    } catch(e) { console.error("Start fresh clear failed:", e); }
-    // Keep tPlayers (roster + HIs) and passwords intact — clear everything else
-    setTRounds([]);
-    setCourseList([]);
+    } catch(e) { console.error("Wipe scores failed:", e); }
     setHoleData({});
     setCtpData({});
-    setPairingsData({});
-    setTeeData({});
-    setTeeTimesData({});
     setFinalizedRounds({});
-    setRound(1);
     await saveTournamentState({}, passwords);
-    notify("Scorecards cleared — player roster preserved");
+    notify("All scores wiped from database");
   };
 
   const notify = m => { setNotif(m); setTimeout(() => setNotif(null), 2500); };
@@ -3743,7 +3725,7 @@ export default function WBCApp() {
       </div>
       )}
 
-      <div style={{ padding: "14px 20px", flex: 1, overflowY: "auto", overflowX: "hidden" }}>
+      <div style={{ padding: view === "leaderboard" ? "10px 12px" : "14px 20px", flex: 1, overflowY: view === "leaderboard" ? "hidden" : "auto", overflowX: "hidden" }}>
         {view === "leaderboard" && <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} teeData={teeData} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} />}
         <div style={{ display: view === "scoring" ? "block" : "none" }}>
           <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeData={teeData} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onNavigate={setView} onGoToAdminCourses={() => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); }} markPlayerWD={markPlayerWD} />
@@ -3775,7 +3757,7 @@ export default function WBCApp() {
         ))}
       </div>
 
-      <div data-bottom-nav style={{ position: "sticky", bottom: 0, width: "100%", display: "flex", background: "rgba(14,24,41,0.97)", borderTop: `1px solid ${K.bdr}`, zIndex: 100, marginTop: "auto" }}>
+      <div style={{ position: "sticky", bottom: 0, width: "100%", display: "flex", background: "rgba(14,24,41,0.97)", borderTop: `1px solid ${K.bdr}`, zIndex: 100, marginTop: "auto" }}>
         {navItems.map(item => {
           const active = view === item.key;
           const clr = active ? K.acc : K.t3;
