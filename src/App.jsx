@@ -412,15 +412,15 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
   useEffect(() => {
     const calc = () => {
       if (!containerRef.current || !headerRef.current || lb.length === 0) return;
-      const viewH = window.innerHeight;
-      const containerRect = containerRef.current.getBoundingClientRect();
-      const headerH = headerRef.current.offsetHeight;
-      // Measure actual bottom nav height from DOM, fall back to 60
-      const navEl = containerRef.current.closest("[data-app-shell]")?.querySelector("[data-bottom-nav]");
+      // Walk up to find the scrollable content wrapper and bottom nav
+      const scrollEl = containerRef.current.closest("[data-scroll-content]");
+      const navEl = document.querySelector("[data-bottom-nav]");
       const navH = navEl ? navEl.offsetHeight : 60;
-      // Content area bottom padding (14px top + 14px bottom from the scroll wrapper)
-      const contentPad = 28;
-      const available = viewH - containerRect.top - headerH - navH - contentPad;
+      const contentPadding = 28; // 14px top + 14px bottom
+      const viewH = window.innerHeight;
+      const containerTop = containerRef.current.getBoundingClientRect().top;
+      const headerH = headerRef.current.offsetHeight;
+      const available = viewH - containerTop - headerH - navH - contentPadding;
       const perRow = Math.floor(available / lb.length);
       const clampedPerRow = Math.min(Math.max(perRow, 10), 56);
       const vPad = Math.max(0, Math.floor((clampedPerRow - 14) / 2));
@@ -3672,7 +3672,7 @@ export default function WBCApp() {
 
   return (
     <div style={{ minHeight: "100vh", background: "#030810", display: "flex", justifyContent: "center" }}>
-    <div data-app-shell style={{ height: "100vh", display: "flex", flexDirection: "column", background: K.bg, fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", color: K.t1, width: "100%", maxWidth: 480, position: "relative", boxShadow: "0 0 80px rgba(0,0,0,0.8)", flexShrink: 0 }}>
+    <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: K.bg, fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", color: K.t1, width: "100%", maxWidth: 480, position: "relative", boxShadow: "0 0 80px rgba(0,0,0,0.8)", flexShrink: 0 }}>
       <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
 
       {notif && <div style={{ position: "fixed", top: 16, left: "50%", transform: "translateX(-50%)", background: K.accDim, color: "white", padding: "10px 24px", borderRadius: 12, fontSize: 13, fontWeight: 600, zIndex: 1000, boxShadow: "0 8px 32px rgba(0,0,0,0.4)" }}>{notif}</div>}
@@ -3721,7 +3721,7 @@ export default function WBCApp() {
       </div>
       )}
 
-      <div style={{ padding: "14px 20px", flex: 1, overflowY: "auto", overflowX: "hidden" }}>
+      <div data-scroll-content style={{ padding: "14px 20px", flex: 1, overflowY: "hidden", overflowX: "hidden" }}>
         {view === "leaderboard" && <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} teeData={teeData} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} />}
         <div style={{ display: view === "scoring" ? "block" : "none" }}>
           <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeData={teeData} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onNavigate={setView} onGoToAdminCourses={() => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); }} markPlayerWD={markPlayerWD} />
