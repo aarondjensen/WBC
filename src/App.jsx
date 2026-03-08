@@ -560,11 +560,12 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
 
   return (
     <div style={{ position: "relative" }}>
-      {/* Giant trophy silhouette behind entire leaderboard */}
+      {/* Giant trophy silhouette behind entire leaderboard — fixed so it never shifts */}
       <img src={WBC_TROPHY_SILHOUETTE} alt="" style={{
-        position: "absolute", top: "50%", left: "50%",
+        position: "fixed", top: "50%", left: "50%",
         transform: "translate(-50%, -50%)",
-        width: "100%", height: "100%",
+        width: 480, height: "100vh",
+        maxWidth: "100vw",
         opacity: 0.08,
         pointerEvents: "none",
         userSelect: "none",
