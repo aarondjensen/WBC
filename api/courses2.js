@@ -1,7 +1,3 @@
-// api/courses2.js — Vercel serverless function
-// Backup golf course API using RapidAPI Golf Course Finder
-// Called when primary /api/courses returns default slope 113
-
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
@@ -11,20 +7,21 @@ export default async function handler(req, res) {
   if (!search) return res.status(400).json({ error: "search param required" });
 
   try {
-    const url = new URL("https://golf-course-finder.p.rapidapi.com/courses");
-    url.searchParams.set("name", search);
-    if (state) url.searchParams.set("state", state);
+    const apiKey = process.env.RAPIDAPI_KEY;
+    if (!apiKey) return res.status(500).json({ error: "RAPIDAPI_KEY not configured" });
 
-    const response = await fetch(url.toString(), {
+    const host = "golf-course-api.p.rapidapi.com";
+    const url = `https://${host}/search?name=${encodeURIComponent(search)}${state ? `&state=${encodeURIComponent(state)}` : ""}`;
+
+    const response = await fetch(url, {
       headers: {
-        "x-rapidapi-host": "golf-course-finder.p.rapidapi.com",
-        "x-rapidapi-key": process.env.RAPIDAPI_KEY,
+        "x-rapidapi-host": host,
+        "x-rapidapi-key": apiKey,
       },
     });
 
-    if (!response.ok) {
-      return res.status(response.status).json({ error: "Upstream API error", status: response.status });
-    }
+    if (response.status === 429) return res.status(429).json({ error: "Rate limit reached" });
+    if (!response.ok) return res.status(response.status).json({ error: `API error: ${response.status}` });
 
     const data = await response.json();
     return res.status(200).json(data);
