@@ -2654,14 +2654,20 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                 const hasRealSlope = (c) => (c.tee_boxes || []).some(tb => parseInt(tb.slope) !== 113) || (parseInt(c.slope) !== 113 && !!c.slope);
                 const sbReal = hasRealSlope(existingMatch);
                 const apiReal = hasRealSlope(parsed);
+                console.log(`[merge] ${existingMatch.name}: sbReal=${sbReal} (slope=${existingMatch.slope}, tees=${existingMatch.tee_boxes?.length}), apiReal=${apiReal} (slope=${parsed.slope}, tees=${parsed.tee_boxes?.length})`);
 
                 if (sbReal && apiReal) {
                   // Both have real slope data — let director compare and choose
                   const merged = { ...existingMatch, _apiVersion: parsed, _sbHasReal: true, _apiHasReal: true };
                   results = results.map(r => r.id === existingMatch.id ? merged : r);
                 } else if (apiReal && !sbReal) {
-                  // API has real data, Supabase only has placeholder — use API silently
-                  const refreshed = { ...existingMatch, par: parsed.par, slope: parsed.slope, rating: parsed.rating, hole_pars: parsed.hole_pars, hole_handicaps: parsed.hole_handicaps, tee_boxes: parsed.tee_boxes };
+                  // API has real data, Supabase only has placeholder
+                  // Only replace tee_boxes if API has more tees, otherwise just update slope/rating on existing tees
+                  const sbTeeCount = existingMatch.tee_boxes?.length || 0;
+                  const apiTeeCount = parsed.tee_boxes?.length || 0;
+                  const newTeeBoxes = apiTeeCount >= sbTeeCount ? parsed.tee_boxes
+                    : (existingMatch.tee_boxes || []).map(t => ({ ...t, slope: parsed.tee_boxes?.[0]?.slope || parsed.slope || t.slope, rating: parsed.tee_boxes?.[0]?.rating || parsed.rating || t.rating }));
+                  const refreshed = { ...existingMatch, par: parsed.par, slope: parsed.slope, rating: parsed.rating, hole_pars: parsed.hole_pars, hole_handicaps: parsed.hole_handicaps, tee_boxes: newTeeBoxes };
                   results = results.map(r => r.id === existingMatch.id ? refreshed : r);
                   const { tee_boxes: rTees, ...courseData } = refreshed;
                   sb.upsert("courses", courseData, "id").catch(() => {});
