@@ -2527,6 +2527,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
           return false;
         };
 
+        const decodeHtml = (str) => str ? str.replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"').replace(/&#39;/g,"'") : str;
         const hasRealSlope = (c) => (c.tee_boxes || []).some(tb => parseInt(tb.slope) !== 113) || (parseInt(c.slope) !== 113 && !!c.slope);
 
         const parseRapidAPI = (rawCourses, stateFilter) => rawCourses
@@ -2560,7 +2561,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
             }];
             return {
               id: `rapid_${c._id || ci}`,
-              name: c.name || "Unknown",
+              name: decodeHtml(c.name) || "Unknown",
               city: c.city || "", state: c.state || "",
               par, slope: parseInt(c.slopeRating) || 113,
               rating: parseFloat(c.courseRating) || 72.0,
@@ -2586,7 +2587,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
             const firstTee = allTees[0]; const holes = firstTee?.holes || [];
             return {
               id: `gc_${c.id || ci}`,
-              name: [c.club_name, c.course_name].filter(Boolean).join(" – ") || c.name || "Unknown",
+              name: decodeHtml([c.club_name, c.course_name].filter(Boolean).join(" – ") || c.name || "Unknown"),
               city: c.location?.city || c.city || "", state: c.location?.state || c.state || "",
               par: parseInt(firstTee?.par_total) || 72,
               slope: parseInt(firstTee?.slope_rating) || 113,
@@ -3019,13 +3020,14 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                                         : <span style={{ fontSize: 9, color: K.t2, fontWeight: 700 }}>{d[field]}</span>}
                                     </div>
                                   ))}
-                                  <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
+                                  <div style={{ marginLeft: "auto", display: "flex", gap: 4, alignItems: "center" }}>
                                     {!isEditing
                                       ? <button onClick={startEdit} style={{ padding: "3px 8px", borderRadius: 4, background: "transparent", border: `1px solid ${ac}60`, color: ac, fontSize: 9, fontWeight: 700, cursor: "pointer" }}>✏️ Edit</button>
                                       : <>
                                           <button onClick={saveEdit} style={{ padding: "3px 8px", borderRadius: 4, background: ac, border: "none", color: K.bg, fontSize: 9, fontWeight: 700, cursor: "pointer" }}>Save</button>
                                           <button onClick={() => setEditingCourse(null)} style={{ padding: "3px 8px", borderRadius: 4, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t3, fontSize: 9, cursor: "pointer" }}>Cancel</button>
                                         </>}
+                                    <button onClick={() => { setExpandedCourse(null); setEditingCourse(null); }} style={{ padding: "2px 6px", borderRadius: 4, background: "transparent", border: "none", color: K.t3, fontSize: 14, cursor: "pointer", lineHeight: 1 }} title="Collapse">✕</button>
                                   </div>
                                 </div>
                                 {/* Tee boxes */}
