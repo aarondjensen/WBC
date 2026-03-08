@@ -416,8 +416,8 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
       const containerTop = containerRef.current.getBoundingClientRect().top;
       const headerH = headerRef.current.offsetHeight;
       const navH = 60;
-      const bottomPad = 80;
-      const available = viewH - containerTop - headerH - navH - bottomPad - 8;
+      const bottomPad = 20;
+      const available = viewH - containerTop - headerH - navH - bottomPad;
       const perRow = Math.floor(available / lb.length);
       const clampedPerRow = Math.min(perRow, 36); // never taller than 36px per row
       const vPad = Math.max(0, Math.floor((clampedPerRow - 14) / 2));
@@ -3676,7 +3676,7 @@ export default function WBCApp() {
       </div>
       )}
 
-      <div style={{ padding: "14px 20px", flex: 1, overflowY: "auto", overflowX: "hidden" }}>
+      <div style={{ padding: view === "leaderboard" ? "14px 20px 0 20px" : "14px 20px", flex: 1, overflowY: "auto", overflowX: "hidden" }}>
         {view === "leaderboard" && <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} teeData={teeData} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} />}
         <div style={{ display: view === "scoring" ? "block" : "none" }}>
           <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeData={teeData} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onNavigate={setView} onGoToAdminCourses={() => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); }} markPlayerWD={markPlayerWD} />
