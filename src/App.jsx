@@ -3220,6 +3220,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                                   <div style={{ fontWeight: 600, fontSize: 13 }}>{c.name}</div>
                                   {c._incompleteData && <span style={{ fontSize: 8, background: "#d4584520", border: "1px solid #d4584540", color: "#d45845", borderRadius: 4, padding: "1px 5px", fontWeight: 700 }}>⚠ incomplete data</span>}
+                                  {!c._incompleteData && (c.tee_boxes?.length || 0) < 2 && <span style={{ fontSize: 8, background: "#d4a84320", border: "1px solid #d4a84340", color: "#d4a843", borderRadius: 4, padding: "1px 5px", fontWeight: 700 }}>⚠ 1 tee</span>}
                                 </div>
                                 <div style={{ fontSize: 10, color: K.t3 }}>{c.city}{c.state ? `, ${c.state}` : ""}{c.par ? ` · Par ${c.par}` : ""}{(() => { const realTbSlope = (c.tee_boxes || []).find(t => parseInt(t.slope) !== 113)?.slope; const displaySlope = realTbSlope || (c.slope && parseInt(c.slope) !== 113 ? c.slope : null); return displaySlope ? ` · Slope ${displaySlope}` : ""; })()}</div>
                               </div>
@@ -3297,7 +3298,12 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                                       ⚠ Neither API has complete data for this course. Slope, rating, and tee boxes may be missing or inaccurate — please enter them manually before adding.
                                     </div>
                                   )}
-                                  {!hasConflict && !draft._incompleteData && <div style={{ fontSize: 9, color: K.t3, marginTop: 6, fontStyle: "italic" }}>Review and edit before adding — tap any field to change it</div>}
+                                  {!hasConflict && !draft._incompleteData && (draft.tee_boxes?.length || 0) < 2 && (
+                                    <div style={{ marginTop: 8, padding: "8px 10px", background: "#d4a84310", border: "1px solid #d4a84340", borderRadius: 8, fontSize: 9, color: "#d4a843" }}>
+                                      ⚠ Only {draft.tee_boxes?.length || 0} tee box found — most courses have multiple tees. Tap <strong>+ Tee</strong> above to add Black, Blue, White, Red etc. with their ratings and slopes.
+                                    </div>
+                                  )}
+                                  {!hasConflict && !draft._incompleteData && (draft.tee_boxes?.length || 0) >= 2 && <div style={{ fontSize: 9, color: K.t3, marginTop: 6, fontStyle: "italic" }}>Review and edit before adding — tap any field to change it</div>}
                                 </div>
 
                                 <div style={{ padding: "12px 16px" }}>
