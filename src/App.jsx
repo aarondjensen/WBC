@@ -322,9 +322,15 @@ const isLightTee = (clr) => {
 };
 const isDarkTee = (clr) => {
   if (!clr) return false;
-  const dark = ["#1a1a2e","#000000","#111111","#0a0a0a","#1a1a1a","#222222","#2d2d2d","#0d0d0d","black"];
+  const dark = ["#1a1a2e","#000000","#111111","#0a0a0a","#1a1a1a","#222222","#2c2c2c","#2d2d2d","#0d0d0d","black"];
   return dark.includes(clr.toLowerCase());
 };
+const isBlackTee = (clr) => isDarkTee(clr);
+// Black tee marker: light gray background (#a8b2bd) with black dot inside
+const blackTeeMarker = (size = 10) => ({
+  outer: { width: size, height: size, borderRadius: "50%", background: "#a8b2bd", border: "1px solid #88888880", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  inner: { width: Math.round(size * 0.45), height: Math.round(size * 0.45), borderRadius: "50%", background: "#111", display: "block" },
+});
 
 // Pick default tee: closest to slope 128 and 6400 yards (weighted combo)
 const getDefaultTee = (tees) => {
@@ -1305,7 +1311,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
                         color: K.t1,
                       }}>
                         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 3, marginBottom: 1 }}>
-                          <span style={{ width: 7, height: 7, borderRadius: "50%", background: tee.color, display: "inline-block", border: isLightTee(tee.color) ? "1px solid #99999980" : isDarkTee(tee.color) ? "1px solid #ffffff50" : "none" }} />
+                          <span style={{ width: 7, height: 7, borderRadius: "50%", background: isBlackTee(tee.color) ? "#a8b2bd" : tee.color, display: "inline-block", border: isLightTee(tee.color) ? "1px solid #99999980" : isBlackTee(tee.color) ? "1px solid #88888880" : "none", position: "relative" }}>{isBlackTee(tee.color) && <span style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: 3, height: 3, borderRadius: "50%", background: "#111", display: "block" }} />}</span>
                           <span style={{ fontSize: 10, fontWeight: 700 }}>{tee.name}</span>
                         </div>
                         <div style={{ fontSize: 9, color: K.acc, fontWeight: 700 }}>CH {previewCH}</div>
@@ -1842,7 +1848,7 @@ function GroupsView({ players, round, tRounds, courses, pairingsData, teeTimesDa
                     <span style={{ fontWeight: 600, fontSize: 13, color: isMe ? "#d4a843" : K.t1 }}>{p.name}</span>
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 2, fontSize: 9, fontWeight: 600, color: isLightTee(teeClr) ? K.t3 : teeClr, justifyContent: "center" }}>
                       {teeName && <>
-                        <span style={{ width: 5, height: 5, borderRadius: "50%", background: teeClr, display: "inline-block", border: isLightTee(teeClr) ? "1px solid #999" : "none" }} />
+                        <span style={{ width: 5, height: 5, borderRadius: "50%", background: isBlackTee(teeClr) ? "#a8b2bd" : teeClr, display: "inline-block", border: isLightTee(teeClr) || isBlackTee(teeClr) ? "1px solid #99999980" : "none", position: "relative" }}>{isBlackTee(teeClr) && <span style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: 2, height: 2, borderRadius: "50%", background: "#111", display: "block" }} />}</span>
                         {teeName}
                       </>}
                     </span>
@@ -2216,7 +2222,7 @@ function TeeAssigner({ activePlayers, numRounds, tRounds, courses, teeData, setT
                     flex: 1, minWidth: 50, padding: "5px 3px", borderRadius: 6, cursor: "pointer", textAlign: "center",
                     background: K.card, border: `1px solid ${K.bdr}`, color: K.t1,
                   }}>
-                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: tee.color, display: "inline-block", border: isLightTee(tee.color) ? "1px solid #99999980" : isDarkTee(tee.color) ? "1px solid #ffffff50" : "none", marginRight: 3, verticalAlign: "middle" }} />
+                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: isBlackTee(tee.color) ? "#a8b2bd" : tee.color, display: "inline-block", border: isLightTee(tee.color) || isBlackTee(tee.color) ? "1px solid #99999980" : "none", marginRight: 3, verticalAlign: "middle", position: "relative" }}>{isBlackTee(tee.color) && <span style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: 3, height: 3, borderRadius: "50%", background: "#111", display: "block" }} />}</span>
                     <span style={{ fontSize: 10, fontWeight: 600 }}>{tee.name}</span>
                     <div style={{ fontSize: 8, color: K.t3 }}>{tee.slope}/{tee.rating}{tee.yardage ? ` · ${tee.yardage.toLocaleString()}` : ""}</div>
                   </button>
@@ -2277,8 +2283,8 @@ function TeeAssigner({ activePlayers, numRounds, tRounds, courses, teeData, setT
                           border: isActive ? `1px solid ${K.acc}` : `1px solid transparent`,
                         }}>
                           <span style={{
-                            width: 10, height: 10, borderRadius: "50%", background: tee.color,
-                            border: isLightTee(tee.color) ? "1px solid #99999980" : isDarkTee(tee.color) ? "1px solid #ffffff50" : "none",
+                            width: 10, height: 10, borderRadius: "50%", background: isBlackTee(tee.color) ? "#a8b2bd" : tee.color,
+                            border: isLightTee(tee.color) ? "1px solid #99999980" : isBlackTee(tee.color) ? "1px solid #88888880" : "none",
                           }} />
                         </button>
                       );
