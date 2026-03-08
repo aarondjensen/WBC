@@ -416,7 +416,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
       const containerTop = containerRef.current.getBoundingClientRect().top;
       const headerH = headerRef.current.offsetHeight;
       const navH = 60;
-      const bottomPad = 20;
+      const bottomPad = 14;
       const available = viewH - containerTop - headerH - navH - bottomPad;
       const perRow = Math.floor(available / lb.length);
       const clampedPerRow = Math.min(perRow, 36); // never taller than 36px per row
@@ -3626,8 +3626,8 @@ export default function WBCApp() {
   ];
 
   return (
-    <div style={{ minHeight: "100vh", background: "#030810", display: "flex", justifyContent: "center" }}>
-    <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: K.bg, fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", color: K.t1, width: "100%", maxWidth: 480, position: "relative", boxShadow: "0 0 80px rgba(0,0,0,0.8)", flexShrink: 0 }}>
+    <div style={{ minHeight: "100vh", background: "#030810", display: "flex", justifyContent: "center", overflow: "hidden" }}>
+    <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: K.bg, fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", color: K.t1, width: "100%", maxWidth: 480, position: "relative", boxShadow: "0 0 80px rgba(0,0,0,0.8)", flexShrink: 0, overflow: "hidden" }}>
       <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
 
       {notif && <div style={{ position: "fixed", top: 16, left: "50%", transform: "translateX(-50%)", background: K.accDim, color: "white", padding: "10px 24px", borderRadius: 12, fontSize: 13, fontWeight: 600, zIndex: 1000, boxShadow: "0 8px 32px rgba(0,0,0,0.4)" }}>{notif}</div>}
@@ -3676,7 +3676,7 @@ export default function WBCApp() {
       </div>
       )}
 
-      <div style={{ padding: view === "leaderboard" ? "14px 20px 0 20px" : "14px 20px", flex: 1, overflowY: "auto", overflowX: "hidden" }}>
+      <div style={{ padding: view === "leaderboard" ? "14px 20px 0 20px" : "14px 20px", flex: 1, overflowY: view === "leaderboard" ? "hidden" : "auto", overflowX: "hidden" }}>
         {view === "leaderboard" && <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} teeData={teeData} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} />}
         <div style={{ display: view === "scoring" ? "block" : "none" }}>
           <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeData={teeData} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onNavigate={setView} onGoToAdminCourses={() => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); }} markPlayerWD={markPlayerWD} />
