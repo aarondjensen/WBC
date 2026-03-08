@@ -2952,9 +2952,6 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                   background: K.danger + "15", border: `1px solid ${K.danger}60`,
                   color: K.danger, fontSize: 12, fontWeight: 700, cursor: "pointer",
                 }}>🗑 Start Fresh — Clear All Data</button>
-                  width: "100%", padding: "10px 0", borderRadius: 8, background: "transparent",
-                  border: `1px solid ${K.bdr}`, color: K.t3, fontSize: 11, fontWeight: 600, cursor: "pointer",
-                }}>🔄 Load Demo Data</button>
               </div>
             </div>
           </div>
