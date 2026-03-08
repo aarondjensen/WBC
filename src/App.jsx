@@ -2424,6 +2424,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
   const [expandedCourse, setExpandedCourse] = useState(null);
   const [editingCourse, setEditingCourse] = useState(null); // { courseId, draft: {...} }
   const [manualCourse, setManualCourse] = useState(null); // null | draft object when manually adding
+  const [coursePreview, setCoursePreview] = useState(null); // course to preview before confirming add
   const [confirmRound, setConfirmRound] = useState(null);
   const [editRound, setEditRound] = useState(() => { for (let r = 1; r <= 4; r++) { if (!finalizedRounds[r]) return r; } return 4; });
   // Keep editRound pointing at the active round when finalization state changes
@@ -3148,16 +3149,106 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                           );
                         })()}
                         {!searchLoading && searchResults.filter(c => !courses.find(ex => ex.id === c.id)).map(c => (
-                          <button key={c.id} onClick={() => { addCourseToLibrary(c); setSearchResults(prev => prev.filter(r => r.id !== c.id)); }} style={{ display: "block", width: "100%", background: K.inp, border: `1px solid ${K.bdr}`, borderRadius: 10, padding: "10px 14px", cursor: "pointer", textAlign: "left", color: K.t1, marginBottom: 6 }}>
+                          <button key={c.id} onClick={() => setCoursePreview(c)} style={{ display: "block", width: "100%", background: K.inp, border: `1px solid ${K.bdr}`, borderRadius: 10, padding: "10px 14px", cursor: "pointer", textAlign: "left", color: K.t1, marginBottom: 6 }}>
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                               <div>
                                 <div style={{ fontWeight: 600, fontSize: 13 }}>{c.name}</div>
                                 <div style={{ fontSize: 10, color: K.t3 }}>{c.city}{c.state ? `, ${c.state}` : ""}{c.par ? ` · Par ${c.par}` : ""}{c.slope ? ` · Slope ${c.slope}` : ""}</div>
                               </div>
-                              <span style={{ color: ac, fontSize: 11, fontWeight: 700 }}>+ Add</span>
+                              <span style={{ color: ac, fontSize: 11, fontWeight: 700 }}>Preview →</span>
                             </div>
                           </button>
                         ))}
+                        {/* Course preview/confirm modal */}
+                        {coursePreview && (() => {
+                          const cp = coursePreview;
+                          const tbs = cp.tee_boxes || [];
+                          return (
+                            <div style={{ position: "fixed", top: 0, bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 480, background: "rgba(0,0,0,0.82)", zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+                              <div style={{ background: K.card, borderRadius: 16, border: `1px solid ${ac}40`, width: "100%", maxWidth: 420, maxHeight: "90vh", overflowY: "auto", padding: 0 }}>
+                                {/* Header */}
+                                <div style={{ padding: "14px 16px 10px", borderBottom: `1px solid ${K.bdr}`, position: "sticky", top: 0, background: K.card, zIndex: 1 }}>
+                                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                                    <div>
+                                      <div style={{ fontSize: 14, fontWeight: 800, color: K.t1 }}>{cp.name}</div>
+                                      <div style={{ fontSize: 10, color: K.t3, marginTop: 2 }}>{cp.city}{cp.state ? `, ${cp.state}` : ""}</div>
+                                    </div>
+                                    <button onClick={() => setCoursePreview(null)} style={{ background: "transparent", border: "none", color: K.t3, fontSize: 18, cursor: "pointer", lineHeight: 1, padding: "0 0 0 8px" }}>✕</button>
+                                  </div>
+                                </div>
+
+                                <div style={{ padding: "12px 16px" }}>
+                                  {/* Tee boxes table */}
+                                  {tbs.length > 0 ? (
+                                    <div style={{ marginBottom: 14 }}>
+                                      <div style={{ fontSize: 9, color: K.t3, fontWeight: 700, textTransform: "uppercase", marginBottom: 6 }}>Tee Boxes</div>
+                                      <div style={{ display: "grid", gridTemplateColumns: "16px 1fr 52px 40px 36px 52px", gap: "4px 6px", fontSize: 9 }}>
+                                        {/* Header row */}
+                                        <div /><div style={{ color: K.t3, fontWeight: 600 }}>Tee</div>
+                                        <div style={{ color: K.t3, fontWeight: 600, textAlign: "center" }}>Rating</div>
+                                        <div style={{ color: K.t3, fontWeight: 600, textAlign: "center" }}>Slope</div>
+                                        <div style={{ color: K.t3, fontWeight: 600, textAlign: "center" }}>Par</div>
+                                        <div style={{ color: K.t3, fontWeight: 600, textAlign: "right" }}>Yards</div>
+                                        {/* Data rows */}
+                                        {tbs.map((tb, i) => (
+                                          <>
+                                            <div key={`dot-${i}`} style={{ display: "flex", alignItems: "center" }}><div style={{ width: 10, height: 10, borderRadius: "50%", background: tb.color || "#888" }} /></div>
+                                            <div key={`name-${i}`} style={{ color: K.t1, fontWeight: 600, display: "flex", alignItems: "center" }}>{tb.name}</div>
+                                            <div key={`rat-${i}`} style={{ color: K.t2, textAlign: "center", display: "flex", alignItems: "center", justifyContent: "center" }}>{tb.rating || "—"}</div>
+                                            <div key={`slp-${i}`} style={{ color: K.t2, textAlign: "center", display: "flex", alignItems: "center", justifyContent: "center" }}>{tb.slope || "—"}</div>
+                                            <div key={`par-${i}`} style={{ color: K.t2, textAlign: "center", display: "flex", alignItems: "center", justifyContent: "center" }}>{tb.par || "—"}</div>
+                                            <div key={`yds-${i}`} style={{ color: K.t2, textAlign: "right", display: "flex", alignItems: "center", justifyContent: "flex-end" }}>{tb.yardage ? tb.yardage.toLocaleString() : "—"}</div>
+                                          </>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div style={{ fontSize: 10, color: K.t3, marginBottom: 14, fontStyle: "italic" }}>No tee box data available</div>
+                                  )}
+
+                                  {/* Hole par/HCP grid */}
+                                  {cp.hole_pars?.length > 0 && (
+                                    <div style={{ marginBottom: 14 }}>
+                                      <div style={{ fontSize: 9, color: K.t3, fontWeight: 700, textTransform: "uppercase", marginBottom: 6 }}>Scorecard</div>
+                                      {[["Front", 0, 9], ["Back", 9, 9]].map(([label, start, count]) => {
+                                        const pars = cp.hole_pars.slice(start, start + count);
+                                        const hcps = (cp.hole_handicaps || []).slice(start, start + count);
+                                        if (!pars.length) return null;
+                                        return (
+                                          <div key={label} style={{ marginBottom: 6 }}>
+                                            <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8 }}>
+                                              <div style={{ color: K.t3, fontWeight: 600, padding: "2px 0" }}>Hole</div>
+                                              {Array.from({length:count},(_,i) => <div key={i} style={{ textAlign:"center", color:K.t2, fontWeight:700, padding:"2px 0" }}>{start+i+1}</div>)}
+                                              <div style={{ textAlign:"center", color:K.t3, fontSize:7, padding:"2px 0" }}>Tot</div>
+                                            </div>
+                                            <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8, background: K.inp, borderRadius: 3, marginBottom: 1 }}>
+                                              <div style={{ color: K.t3, fontWeight: 600, padding: "3px 2px" }}>Par</div>
+                                              {pars.map((p, i) => <div key={i} style={{ textAlign:"center", color:K.t1, fontWeight:700, padding:"3px 0" }}>{p}</div>)}
+                                              <div style={{ textAlign:"center", color:ac, fontWeight:800, padding:"3px 0" }}>{pars.reduce((a,b)=>a+(+b||0),0)}</div>
+                                            </div>
+                                            {hcps.length > 0 && (
+                                              <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8 }}>
+                                                <div style={{ color: K.t3, fontWeight: 600, padding: "2px 2px" }}>HCP</div>
+                                                {hcps.map((h, i) => <div key={i} style={{ textAlign:"center", color:K.t3, padding:"2px 0" }}>{h}</div>)}
+                                                <div />
+                                              </div>
+                                            )}
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+
+                                  {/* Action buttons */}
+                                  <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+                                    <button onClick={() => setCoursePreview(null)} style={{ flex: 1, padding: "10px 0", borderRadius: 8, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t3, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
+                                    <button onClick={() => { addCourseToLibrary(cp); setSearchResults(prev => prev.filter(r => r.id !== cp.id)); setCoursePreview(null); }} style={{ flex: 2, padding: "10px 0", borderRadius: 8, background: ac, border: "none", color: K.bg, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>✓ Add Course</button>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })()}
                         {!courseSearch.trim() && <div style={{ color: K.t3, fontSize: 10, textAlign: "center", padding: 4 }}>Type at least 2 characters to search</div>}
                         <div style={{ fontSize: 9, color: K.t3, textAlign: "center", marginTop: 6 }}>Powered by GolfCourseAPI.com · 35,000+ courses</div>
                       </div>
