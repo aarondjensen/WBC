@@ -2423,6 +2423,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
   const [searchLoading, setSearchLoading] = useState(false);
   const [expandedCourse, setExpandedCourse] = useState(null);
   const [editingCourse, setEditingCourse] = useState(null); // { courseId, draft: {...} }
+  const [manualCourse, setManualCourse] = useState(null); // null | draft object when manually adding
   const [confirmRound, setConfirmRound] = useState(null);
   const [editRound, setEditRound] = useState(() => { for (let r = 1; r <= 4; r++) { if (!finalizedRounds[r]) return r; } return 4; });
   // Keep editRound pointing at the active round when finalization state changes
@@ -2518,54 +2519,90 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
             tee_boxes: (tbRows || []).filter(t => t.course_id === c.id).map((t, ti) => ({ ...t, color: resolveTeeColor(t, ti) })),
           }));
         }
-        // Then search GolfCourseAPI via proxy for any new courses not in history
+        // Then search golf course API via proxy — supports two response schemas:
+        // Schema A (golfcourseapi.com): { courses: [{ club_name, course_name, location:{city,state}, tees:{male:[],female:[]} }] }
+        //   Each tee: { tee_name, slope_rating, course_rating, par_total, total_yards, holes:[{par,yardage,handicap}] }
+        // Schema B (RapidAPI): [ { name, city, state, teeBoxes:[{tee,slope,handicap}], scorecard:[{Hole,Par,Handicap,tees:{teeBox1:{color,yards}}}] } ]
         try {
           const stateParam = stateFilter ? `&state=${encodeURIComponent(stateFilter)}` : "";
           const apiRes = await fetch(`/api/courses?search=${encodeURIComponent(q)}${stateParam}`);
           if (apiRes.ok) {
             const apiData = await apiRes.json();
+            const rawCourses = Array.isArray(apiData) ? apiData : (apiData.courses || apiData.data || []);
+
+            const parsedCourses = rawCourses.map((c, ci) => {
+              const isSchemaB = Array.isArray(c.teeBoxes);
+              let tees, hole_pars, hole_handicaps, par, slope, rating, name, city, state;
+
+              if (isSchemaB) {
+                // Schema B: RapidAPI
+                name = c.name || "Unknown";
+                city = c.city || "";
+                state = c.state || "";
+                const sc = Array.isArray(c.scorecard) ? c.scorecard : [];
+                hole_pars = sc.map(h => parseInt(h.Par) || 4);
+                hole_handicaps = sc.map(h => parseInt(h.Handicap) || 0);
+                par = hole_pars.reduce((a, b) => a + b, 0) || 72;
+                tees = (c.teeBoxes || []).map((t, ti) => ({
+                  name: t.tee || "Default",
+                  color: resolveTeeColor({ name: t.tee || "", color: t.tee || "" }, ti),
+                  slope: parseInt(t.slope) || 113,
+                  rating: parseFloat(t.handicap) || 72.0, // mislabeled as 'handicap' in RapidAPI
+                  par,
+                  yardage: sc.reduce((a, h) => {
+                    const tb = h.tees ? Object.values(h.tees)[ti] || Object.values(h.tees)[0] : null;
+                    return a + (parseInt(tb?.yards) || 0);
+                  }, 0),
+                }));
+                slope = tees[0]?.slope || 113;
+                rating = tees[0]?.rating || 72.0;
+              } else {
+                // Schema A: golfcourseapi.com — tees: { male: [...], female: [...] }
+                name = [c.club_name, c.course_name].filter(Boolean).join(" – ") || c.name || "Unknown";
+                city = c.location?.city || c.city || "";
+                state = c.location?.state || c.state || "";
+                const teesObj = c.tees || {};
+                const allTees = Array.isArray(teesObj) ? teesObj
+                  : (Array.isArray(teesObj.male) && teesObj.male.length ? teesObj.male : (teesObj.female || []));
+                tees = allTees.map((t, ti) => ({
+                  name: t.tee_name || "Default",
+                  color: resolveTeeColor({ name: t.tee_name || "", color: "" }, ti),
+                  rating: parseFloat(t.course_rating) || 72.0,
+                  slope: parseInt(t.slope_rating) || 113,
+                  par: parseInt(t.par_total) || 72,
+                  yardage: parseInt(t.total_yards) || 0,
+                }));
+                const firstTee = allTees[0];
+                const holes = firstTee?.holes || [];
+                hole_pars = holes.map(h => parseInt(h.par) || 4);
+                hole_handicaps = holes.map(h => parseInt(h.handicap) || 0);
+                par = parseInt(firstTee?.par_total) || 72;
+                slope = parseInt(firstTee?.slope_rating) || 113;
+                rating = parseFloat(firstTee?.course_rating) || 72.0;
+              }
+
+              return { id: `gc_${c.id || c._id || ci}`, name, city, state, par, slope, rating, hole_pars, hole_handicaps, tee_boxes: tees };
+            });
+
             const apiCourses = [];
-            for (const [ci, c] of (apiData.courses || []).entries()) {
-              const apiName = (c.club_name || c.course_name || "").toLowerCase();
-              const existingMatch = results.find(r => r.name.toLowerCase() === apiName);
-              const tees = (c.tees || []).map((t, ti) => ({
-                name: t.tee_name || t.name || "Default",
-                color: resolveTeeColor({ name: t.tee_name || t.name || "", color: "" }, ti),
-                rating: parseFloat(t.course_rating) || 72.0,
-                slope: parseInt(t.slope_rating) || 113,
-                par: parseInt(t.par) || 72,
-                yardage: parseInt(t.total_yards) || 0,
-              }));
-              const firstTee = c.tees?.[0];
-              const freshData = {
-                par: parseInt(firstTee?.par) || 72,
-                slope: parseInt(firstTee?.slope_rating) || 113,
-                rating: parseFloat(firstTee?.course_rating) || 72.0,
-                hole_pars: firstTee?.holes?.map(h => h.par) || [],
-                hole_handicaps: firstTee?.holes?.map(h => h.handicap) || [],
-                tee_boxes: tees,
-              };
+            for (const parsed of parsedCourses) {
+              if (stateFilter && parsed.state && parsed.state.toUpperCase() !== stateFilter.toUpperCase()) continue;
+              const existingMatch = results.find(r => r.name.toLowerCase() === parsed.name.toLowerCase());
               if (existingMatch) {
-                // Cross-check: silently refresh Supabase record with latest API data
-                const refreshed = { ...existingMatch, ...freshData };
+                // Cross-check: silently refresh Supabase with latest API data
+                const refreshed = { ...existingMatch, par: parsed.par, slope: parsed.slope, rating: parsed.rating, hole_pars: parsed.hole_pars, hole_handicaps: parsed.hole_handicaps, tee_boxes: parsed.tee_boxes };
                 results = results.map(r => r.id === existingMatch.id ? refreshed : r);
                 const { tee_boxes: rTees, ...courseData } = refreshed;
                 sb.upsert("courses", courseData, "id").catch(() => {});
                 if (rTees?.length) rTees.forEach(tb => sb.upsert("tee_boxes", { id: `tb_${existingMatch.id}_${tb.name.toLowerCase().replace(/\s+/g,"_")}`, course_id: existingMatch.id, ...tb }, "id").catch(() => {}));
               } else {
-                apiCourses.push({
-                  id: `gc_${c.id || ci}`,
-                  name: c.club_name || c.course_name || "Unknown",
-                  city: c.location?.city || "",
-                  state: c.location?.state || "",
-                  ...freshData,
-                });
+                apiCourses.push(parsed);
               }
             }
             results = [...results, ...apiCourses];
           }
         } catch(apiErr) {
-          console.log("GolfCourseAPI proxy failed:", apiErr);
+          console.log("Golf course API proxy failed:", apiErr);
         }
         setSearchResults(results);
       } catch (err) {
@@ -2980,7 +3017,135 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                           <input value={courseSearch} onChange={e => doCourseSearch(e.target.value)} placeholder="Search by name or city..." autoFocus style={{ flex: 1, padding: "8px 12px", background: K.inp, border: `1px solid ${ac}40`, borderRadius: 8, color: K.t1, fontSize: 13, boxSizing: "border-box" }} />
                         </div>
                         {searchLoading && <div style={{ textAlign: "center", padding: 12, color: K.t3, fontSize: 11 }}>Searching GolfCourseAPI...</div>}
-                        {!searchLoading && courseSearch.trim().length >= 2 && searchResults.length === 0 && <div style={{ color: K.t3, fontSize: 11, textAlign: "center", padding: 8 }}>No courses found</div>}
+                        {!searchLoading && courseSearch.trim().length >= 2 && searchResults.length === 0 && !manualCourse && (
+                          <div style={{ textAlign: "center", padding: "10px 0" }}>
+                            <div style={{ color: K.t3, fontSize: 11, marginBottom: 8 }}>No courses found</div>
+                            <button onClick={() => setManualCourse({
+                              id: `manual_${Date.now()}`,
+                              name: courseSearch.trim(),
+                              city: "", state: courseStateFilter || "",
+                              par: 72, slope: 113, rating: 72.0,
+                              hole_pars: Array(18).fill(4),
+                              hole_handicaps: Array(18).fill(0).map((_,i)=>i+1),
+                              tee_boxes: [
+                                { name: "Black", color: "#222222", rating: 74.0, slope: 130, par: 72, yardage: 6800 },
+                                { name: "Blue",  color: "#1a56db", rating: 72.0, slope: 120, par: 72, yardage: 6400 },
+                                { name: "White", color: "#e5e7eb", rating: 70.0, slope: 113, par: 72, yardage: 6000 },
+                                { name: "Red",   color: "#e02424", rating: 68.0, slope: 108, par: 72, yardage: 5400 },
+                              ],
+                            })} style={{ padding: "7px 16px", borderRadius: 8, background: "transparent", border: `1px solid ${ac}`, color: ac, fontSize: 11, fontWeight: 700, cursor: "pointer" }}>
+                              + Add Course Manually
+                            </button>
+                          </div>
+                        )}
+                        {!searchLoading && manualCourse && (() => {
+                          const mc = manualCourse;
+                          const setMc = fn => setManualCourse(prev => fn(prev));
+                          const inpBase = { background: K.inp, border: `1px solid ${ac}40`, borderRadius: 6, color: K.t1, padding: "6px 8px", fontSize: 12, boxSizing: "border-box" };
+                          const tinyInp = { background: K.inp, border: `1px solid ${ac}30`, borderRadius: 4, color: K.t1, fontSize: 9, textAlign: "center", width: "100%", padding: "2px 1px", boxSizing: "border-box" };
+                          const label = (txt) => <div style={{ fontSize: 9, color: K.t3, fontWeight: 600, marginBottom: 2, textTransform: "uppercase" }}>{txt}</div>;
+                          const canSave = mc.name.trim().length > 1;
+                          return (
+                            <div style={{ background: K.card, border: `1px solid ${ac}30`, borderRadius: 10, padding: 14, marginBottom: 8 }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                                <span style={{ fontSize: 12, fontWeight: 800, color: K.t1 }}>Manual Course Entry</span>
+                                <button onClick={() => setManualCourse(null)} style={{ background: "transparent", border: "none", color: K.t3, fontSize: 16, cursor: "pointer", lineHeight: 1 }}>✕</button>
+                              </div>
+
+                              {/* Name / City / State */}
+                              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 60px", gap: 6, marginBottom: 8 }}>
+                                <div>
+                                  {label("Course Name")}
+                                  <input value={mc.name} onChange={e => setMc(p=>({...p,name:e.target.value}))} style={{...inpBase, width:"100%"}} placeholder="e.g. Treetops Resort" />
+                                </div>
+                                <div>
+                                  {label("City")}
+                                  <input value={mc.city} onChange={e => setMc(p=>({...p,city:e.target.value}))} style={{...inpBase, width:"100%"}} placeholder="e.g. Gaylord" />
+                                </div>
+                                <div>
+                                  {label("State")}
+                                  <select value={mc.state} onChange={e => setMc(p=>({...p,state:e.target.value}))} style={{...inpBase, width:"100%"}}>
+                                    <option value="">—</option>
+                                    {["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"].map(s=><option key={s} value={s}>{s}</option>)}
+                                  </select>
+                                </div>
+                              </div>
+
+                              {/* Tee Boxes */}
+                              <div style={{ marginBottom: 8 }}>
+                                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                                  {label("Tee Boxes")}
+                                  <button onClick={() => setMc(p=>({...p, tee_boxes:[...p.tee_boxes, {name:"", color:"#888888", rating:72.0, slope:113, par:72, yardage:0}]}))}
+                                    style={{ fontSize: 9, padding: "1px 6px", borderRadius: 4, background: "transparent", border: `1px solid ${ac}60`, color: ac, cursor: "pointer", fontWeight: 700 }}>+ Tee</button>
+                                </div>
+                                <div style={{ display: "grid", gridTemplateColumns: "12px 70px 50px 44px 32px 32px 40px 20px", gap: 3, fontSize: 8, color: K.t3, fontWeight: 600, marginBottom: 2, paddingLeft: 2 }}>
+                                  <div/>
+                                  <div>Name</div><div>Color</div><div>Rating</div><div>Slope</div><div>Par</div><div>Yards</div><div/>
+                                </div>
+                                {mc.tee_boxes.map((tb, tbi) => (
+                                  <div key={tbi} style={{ display: "grid", gridTemplateColumns: "12px 70px 50px 44px 32px 32px 40px 20px", gap: 3, marginBottom: 3, alignItems: "center" }}>
+                                    <div style={{ width: 10, height: 10, borderRadius: "50%", background: tb.color || "#888", flexShrink: 0 }} />
+                                    <input value={tb.name} onChange={e => setMc(p=>{const t=[...p.tee_boxes]; t[tbi]={...t[tbi],name:e.target.value}; return {...p,tee_boxes:t};})} style={{...tinyInp, textAlign:"left", padding:"2px 4px"}} placeholder="Name" />
+                                    <input type="color" value={tb.color||"#888888"} onChange={e => setMc(p=>{const t=[...p.tee_boxes]; t[tbi]={...t[tbi],color:e.target.value}; return {...p,tee_boxes:t};})} style={{ width:"100%", height:22, padding:0, border:"none", background:"transparent", cursor:"pointer" }} />
+                                    <input value={tb.rating} onChange={e => setMc(p=>{const t=[...p.tee_boxes]; t[tbi]={...t[tbi],rating:e.target.value}; return {...p,tee_boxes:t};})} style={tinyInp} />
+                                    <input value={tb.slope} onChange={e => setMc(p=>{const t=[...p.tee_boxes]; t[tbi]={...t[tbi],slope:e.target.value}; return {...p,tee_boxes:t};})} style={tinyInp} />
+                                    <input value={tb.par} onChange={e => setMc(p=>{const t=[...p.tee_boxes]; t[tbi]={...t[tbi],par:e.target.value}; return {...p,tee_boxes:t};})} style={tinyInp} />
+                                    <input value={tb.yardage} onChange={e => setMc(p=>{const t=[...p.tee_boxes]; t[tbi]={...t[tbi],yardage:e.target.value}; return {...p,tee_boxes:t};})} style={tinyInp} />
+                                    <button onClick={() => setMc(p=>({...p,tee_boxes:p.tee_boxes.filter((_,i)=>i!==tbi)}))} style={{ background:"transparent", border:"none", color:K.t3, fontSize:11, cursor:"pointer", padding:0, lineHeight:1 }}>✕</button>
+                                  </div>
+                                ))}
+                              </div>
+
+                              {/* Hole Pars & Handicaps */}
+                              {[["Front 9", 0, 9], ["Back 9", 9, 9]].map(([label9, start, count]) => (
+                                <div key={label9} style={{ marginBottom: 6 }}>
+                                  <div style={{ fontSize: 9, color: K.t3, fontWeight: 600, marginBottom: 3, textTransform: "uppercase" }}>{label9}</div>
+                                  <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8 }}>
+                                    <div style={{ color: K.t3, fontWeight: 600, padding: "2px 0" }}>Hole</div>
+                                    {Array.from({length:count},(_,i) => <div key={i} style={{ textAlign:"center", color:K.t2, fontWeight:700, padding:"2px 0" }}>{start+i+1}</div>)}
+                                    <div />
+                                  </div>
+                                  <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8, background: K.inp, borderRadius: 3, marginBottom: 2 }}>
+                                    <div style={{ color: K.t3, fontWeight: 600, padding: "3px 2px" }}>Par</div>
+                                    {Array.from({length:count},(_,i) => (
+                                      <input key={i} value={mc.hole_pars[start+i]??""} onChange={e => setMc(p=>{const hp=[...p.hole_pars]; hp[start+i]=e.target.value; return {...p,hole_pars:hp};})}
+                                        style={{ background:"transparent", border:"none", color:K.t1, fontSize:9, fontWeight:700, textAlign:"center", width:"100%", padding:"3px 0" }} />
+                                    ))}
+                                    <div style={{ textAlign:"center", color:ac, fontWeight:800, padding:"3px 0", fontSize:9 }}>
+                                      {mc.hole_pars.slice(start,start+count).reduce((a,b)=>a+(parseInt(b)||0),0)}
+                                    </div>
+                                  </div>
+                                  <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8 }}>
+                                    <div style={{ color: K.t3, fontWeight: 600, padding: "2px 2px" }}>HCP</div>
+                                    {Array.from({length:count},(_,i) => (
+                                      <input key={i} value={mc.hole_handicaps[start+i]??""} onChange={e => setMc(p=>{const hh=[...p.hole_handicaps]; hh[start+i]=e.target.value; return {...p,hole_handicaps:hh};})}
+                                        style={{ background:"transparent", border:"none", color:K.t3, fontSize:9, textAlign:"center", width:"100%", padding:"2px 0" }} />
+                                    ))}
+                                    <div />
+                                  </div>
+                                </div>
+                              ))}
+
+                              {/* Save button */}
+                              <button onClick={() => {
+                                const firstTee = mc.tee_boxes[0];
+                                const course = {
+                                  ...mc,
+                                  par: parseInt(firstTee?.par) || 72,
+                                  slope: parseInt(firstTee?.slope) || 113,
+                                  rating: parseFloat(firstTee?.rating) || 72.0,
+                                  hole_pars: mc.hole_pars.map(v=>parseInt(v)||4),
+                                  hole_handicaps: mc.hole_handicaps.map(v=>parseInt(v)||0),
+                                  tee_boxes: mc.tee_boxes.map(tb=>({...tb, rating:parseFloat(tb.rating)||72.0, slope:parseInt(tb.slope)||113, par:parseInt(tb.par)||72, yardage:parseInt(tb.yardage)||0})),
+                                };
+                                addCourseToLibrary(course);
+                                setManualCourse(null);
+                              }} disabled={!canSave} style={{ width:"100%", padding:"10px 0", borderRadius:8, background: canSave ? ac : K.bdr, border:"none", color: canSave ? K.bg : K.t3, fontSize:13, fontWeight:700, cursor: canSave ? "pointer" : "default", marginTop:4 }}>
+                                ✓ Add Course
+                              </button>
+                            </div>
+                          );
+                        })()}
                         {!searchLoading && searchResults.filter(c => !courses.find(ex => ex.id === c.id)).map(c => (
                           <button key={c.id} onClick={() => { addCourseToLibrary(c); setSearchResults(prev => prev.filter(r => r.id !== c.id)); }} style={{ display: "block", width: "100%", background: K.inp, border: `1px solid ${K.bdr}`, borderRadius: 10, padding: "10px 14px", cursor: "pointer", textAlign: "left", color: K.t1, marginBottom: 6 }}>
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
