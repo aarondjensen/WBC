@@ -2417,6 +2417,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
   const [confirmCourse, setConfirmCourse] = useState(null);
   const [searching, setSearching] = useState(false);
   const [courseSearch, setCourseSearch] = useState("");
+  const [courseStateFilter, setCourseStateFilter] = useState("MI");
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [expandedCourse, setExpandedCourse] = useState(null);
@@ -2491,21 +2492,24 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
 
   // Search GolfCourseAPI - debounced
   const searchTimerRef = useRef(null);
-  const doCourseSearch = (query) => {
+  const doCourseSearch = (query, stateOverride) => {
     setCourseSearch(query);
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     if (!query.trim() || query.trim().length < 2) { setSearchResults([]); return; }
     searchTimerRef.current = setTimeout(async () => {
       setSearchLoading(true);
+      const stateFilter = stateOverride !== undefined ? stateOverride : courseStateFilter;
       try {
         // First search Supabase (14 years of WBC history)
         const q = query.trim();
-        const rows = await sb.get("courses", `or=(name.ilike.*${q}*,city.ilike.*${q}*,state.ilike.*${q}*)&order=name&limit=20`);
+        const stateClause = stateFilter ? `,state.ilike.${stateFilter}*` : "";
+        const rows = await sb.get("courses", `or=(name.ilike.*${q}*,city.ilike.*${q}*${stateClause})&order=name&limit=20`);
         let results = [];
         if (rows?.length) {
-          const ids = rows.map(r => r.id).join(",");
-          const tbRows = await sb.get("tee_boxes", `course_id=in.(${ids})`);
-          results = rows.map((c) => ({
+          const filtered = stateFilter ? rows.filter(r => r.state?.toUpperCase() === stateFilter.toUpperCase()) : rows;
+          const ids = filtered.map(r => r.id).join(",");
+          const tbRows = ids ? await sb.get("tee_boxes", `course_id=in.(${ids})`) : [];
+          results = filtered.map((c) => ({
             ...c,
             hole_pars: c.hole_pars || [],
             hole_handicaps: c.hole_handicaps || [],
@@ -2514,7 +2518,8 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
         }
         // Then search GolfCourseAPI via proxy for any new courses not in history
         try {
-          const apiRes = await fetch(`/api/courses?search=${encodeURIComponent(q)}`);
+          const stateParam = stateFilter ? `&state=${encodeURIComponent(stateFilter)}` : "";
+          const apiRes = await fetch(`/api/courses?search=${encodeURIComponent(q)}${stateParam}`);
           if (apiRes.ok) {
             const apiData = await apiRes.json();
             const apiCourses = (apiData.courses || [])
@@ -2895,7 +2900,13 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                     })}
                     {searching && (
                       <div style={{ padding: 14, borderTop: `1px solid ${K.bdr}` }}>
-                        <input value={courseSearch} onChange={e => doCourseSearch(e.target.value)} placeholder="Search courses by name, city, or state..." autoFocus style={{ width: "100%", padding: "8px 12px", background: K.inp, border: `1px solid ${ac}40`, borderRadius: 8, color: K.t1, fontSize: 13, marginBottom: 8, boxSizing: "border-box" }} />
+                        <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                          <select value={courseStateFilter} onChange={e => { setCourseStateFilter(e.target.value); if (courseSearch.trim().length >= 2) doCourseSearch(courseSearch, e.target.value); }} style={{ width: 70, padding: "8px 6px", background: K.inp, border: `1px solid ${ac}40`, borderRadius: 8, color: K.t1, fontSize: 12, flexShrink: 0 }}>
+                            <option value="">All</option>
+                            {["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"].map(s => <option key={s} value={s}>{s}</option>)}
+                          </select>
+                          <input value={courseSearch} onChange={e => doCourseSearch(e.target.value)} placeholder="Search by name or city..." autoFocus style={{ flex: 1, padding: "8px 12px", background: K.inp, border: `1px solid ${ac}40`, borderRadius: 8, color: K.t1, fontSize: 13, boxSizing: "border-box" }} />
+                        </div>
                         {searchLoading && <div style={{ textAlign: "center", padding: 12, color: K.t3, fontSize: 11 }}>Searching GolfCourseAPI...</div>}
                         {!searchLoading && courseSearch.trim().length >= 2 && searchResults.length === 0 && <div style={{ color: K.t3, fontSize: 11, textAlign: "center", padding: 8 }}>No courses found</div>}
                         {!searchLoading && searchResults.filter(c => !courses.find(ex => ex.id === c.id)).map(c => (
