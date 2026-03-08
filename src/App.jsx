@@ -60,7 +60,7 @@ const DEMO_COURSE = {
   hole_pars:      [5,3,4,3,5,3,4,4,4, 5,4,4,3,4,4,3,4,5],
   hole_handicaps: [13,17,1,11,3,15,5,7,9, 4,6,2,12,14,16,18,8,10],
   tee_boxes: [
-    { name: "Black",  color: "#1a1a2e", slope: 147, rating: 74.8, par: 71, yardage: 7068 },
+    { name: "Black",  color: "#2c2c2c", slope: 147, rating: 74.8, par: 71, yardage: 7068 },
     { name: "Blue",   color: "#2d8fd4", slope: 137, rating: 71.7, par: 71, yardage: 6435 },
     { name: "White",  color: "#e8e8e8", slope: 132, rating: 69.4, par: 71, yardage: 5921 },
     { name: "Gold",   color: "#d4a843", slope: 127, rating: 67.1, par: 71, yardage: 5421 },
@@ -78,7 +78,7 @@ const DEMO_COURSE2 = {
   hole_pars:      [4,3,4,3,4,5,4,3,4, 5,3,4,4,4,5,4,3,4],
   hole_handicaps: [7,17,3,15,1,5,9,13,11, 4,14,10,2,8,6,18,16,12],
   tee_boxes: [
-    { name: "Black",  color: "#1a1a2e", slope: 140, rating: 72.9, par: 70, yardage: 6653 },
+    { name: "Black",  color: "#2c2c2c", slope: 140, rating: 72.9, par: 70, yardage: 6653 },
     { name: "Blue",   color: "#2d8fd4", slope: 139, rating: 71.0, par: 70, yardage: 6271 },
     { name: "White",  color: "#e8e8e8", slope: 135, rating: 69.2, par: 70, yardage: 5843 },
     { name: "Gold",   color: "#d4a843", slope: 131, rating: 66.8, par: 70, yardage: 5387 },
@@ -96,7 +96,7 @@ const DEMO_COURSE3 = {
   hole_pars:      [4,4,5,4,4,3,4,4,3, 5,4,3,4,4,3,4,3,5],
   hole_handicaps: [9,3,7,5,1,13,11,17,15, 8,2,14,18,6,10,4,16,12],
   tee_boxes: [
-    { name: "Black",  color: "#1a1a2e", slope: 130, rating: 70.0, par: 70, yardage: 6354 },
+    { name: "Black",  color: "#2c2c2c", slope: 130, rating: 70.0, par: 70, yardage: 6354 },
     { name: "Blue",   color: "#2d8fd4", slope: 126, rating: 69.4, par: 70, yardage: 6173 },
     { name: "White",  color: "#e8e8e8", slope: 118, rating: 67.8, par: 70, yardage: 5508 },
     { name: "Gold",   color: "#d4a843", slope: 115, rating: 66.4, par: 70, yardage: 5248 },
@@ -115,7 +115,7 @@ const DEMO_COURSE4 = {
   hole_pars:      [4,4,5,4,3,5,4,3,4, 5,3,4,4,5,4,3,4,4],
   hole_handicaps: [3,11,7,15,17,1,9,13,5, 2,16,8,4,12,6,18,14,10],
   tee_boxes: [
-    { name: "Black",  color: "#1a1a2e", slope: 142, rating: 73.3, par: 72, yardage: 6701 },
+    { name: "Black",  color: "#2c2c2c", slope: 142, rating: 73.3, par: 72, yardage: 6701 },
     { name: "Blue",   color: "#2d8fd4", slope: 132, rating: 71.0, par: 72, yardage: 6282 },
     { name: "White",  color: "#e8e8e8", slope: 126, rating: 68.8, par: 72, yardage: 5854 },
     { name: "Gold",   color: "#d4a843", slope: 117, rating: 65.6, par: 72, yardage: 5290 },
@@ -131,7 +131,7 @@ const DEMO_COURSE5 = {
   hole_pars:      [4,5,4,3,4,5,3,4,4, 4,4,3,5,4,3,4,4,5],
   hole_handicaps: [5,17,3,11,15,1,7,13,9, 12,10,8,18,16,2,14,6,4],
   tee_boxes: [
-    { name: "Jet",     color: "#1a1a2e", slope: 148, rating: 75.4, par: 72, yardage: 7213 },
+    { name: "Jet",     color: "#2c2c2c", slope: 148, rating: 75.4, par: 72, yardage: 7213 },
     { name: "Valor",   color: "#2d8fd4", slope: 142, rating: 73.0, par: 72, yardage: 6701 },
     { name: "Freedom", color: "#e8e8e8", slope: 133, rating: 70.3, par: 72, yardage: 6131 },
     { name: "Honor",   color: "#d4a843", slope: 126, rating: 67.8, par: 72, yardage: 5573 },
@@ -295,7 +295,7 @@ const fmtPar = n => n == null ? "—" : n === 0 ? "E" : n > 0 ? `+${n}` : `${n}`
 
 // Resolve tee color from name — handles standard colors, non-standard colors, and word names
 const TEE_COLOR_MAP = {
-  black: "#1a1a2e", blue: "#2d8fd4", white: "#e8e8e8", gold: "#d4a843", red: "#9b2335",
+  black: "#2c2c2c", blue: "#2d8fd4", white: "#e8e8e8", gold: "#d4a843", red: "#9b2335",
   green: "#2d8a4e", silver: "#a8b2bd", yellow: "#e6c619", orange: "#e67e22", purple: "#7b2d8b",
   maroon: "#6b1c2a", navy: "#1b2a4a", teal: "#1a8a7a", tan: "#c4a86b", copper: "#b87333",
   bronze: "#cd7f32", champagne: "#f7e7ce", crimson: "#b22234", burgundy: "#800020",
@@ -3160,7 +3160,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                                       <select value={Object.entries(TEE_COLOR_MAP).find(([,v])=>v===(tb.color||""))?.[0] || "black"}
                                         onChange={e => { const clr = TEE_COLOR_MAP[e.target.value] || tb.color || "#888888"; setMc(p=>{const t=[...p.tee_boxes]; t[tbi]={...t[tbi],color:clr}; return {...p,tee_boxes:t};}); }}
                                         style={{ position:"absolute", inset:0, width:"100%", height:"100%", opacity:0, cursor:"pointer", fontSize:12 }}>
-                                        {[["Black","#1a1a2e"],["Blue","#2d8fd4"],["White","#e8e8e8"],["Gold","#d4a843"],["Red","#9b2335"],["Green","#2d8a4e"],["Silver","#a8b2bd"],["Yellow","#e6c619"],["Orange","#e67e22"],["Purple","#7b2d8b"],["Maroon","#6b1c2a"],["Teal","#1a8a7a"],["Platinum","#c0c0c0"]].map(([n,c])=><option key={n} value={n.toLowerCase()}>{n}</option>)}
+                                        {[["Black","#2c2c2c"],["Blue","#2d8fd4"],["White","#e8e8e8"],["Gold","#d4a843"],["Red","#9b2335"],["Green","#2d8a4e"],["Silver","#a8b2bd"],["Yellow","#e6c619"],["Orange","#e67e22"],["Purple","#7b2d8b"],["Maroon","#6b1c2a"],["Teal","#1a8a7a"],["Platinum","#c0c0c0"]].map(([n,c])=><option key={n} value={n.toLowerCase()}>{n}</option>)}
                                       </select>
                                     </div>
                                     <input value={tb.rating} onChange={e => setMc(p=>{const t=[...p.tee_boxes]; t[tbi]={...t[tbi],rating:e.target.value}; return {...p,tee_boxes:t};})} style={tinyInp} />
@@ -3506,7 +3506,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                                           <select value={Object.entries(TEE_COLOR_MAP).find(([,v])=>v===(tb.color||""))?.[0] || "black"}
                                             onChange={e => { const clr = TEE_COLOR_MAP[e.target.value] || "#888888"; setDraft(p => { const t=[...p.tee_boxes]; t[i]={...t[i],color:clr,name:t[i].name||e.target.value.charAt(0).toUpperCase()+e.target.value.slice(1)}; return {...p,tee_boxes:t}; }); }}
                                             style={{ position:"absolute", inset:0, width:"100%", height:"100%", opacity:0, cursor:"pointer", fontSize:12 }}>
-                                            {[["Black","#1a1a2e"],["Blue","#2d8fd4"],["White","#e8e8e8"],["Gold","#d4a843"],["Red","#9b2335"],["Green","#2d8a4e"],["Silver","#a8b2bd"],["Yellow","#e6c619"],["Orange","#e67e22"],["Purple","#7b2d8b"],["Maroon","#6b1c2a"],["Teal","#1a8a7a"],["Platinum","#c0c0c0"]].map(([n,c])=><option key={n} value={n.toLowerCase()}>{n}</option>)}
+                                            {[["Black","#2c2c2c"],["Blue","#2d8fd4"],["White","#e8e8e8"],["Gold","#d4a843"],["Red","#9b2335"],["Green","#2d8a4e"],["Silver","#a8b2bd"],["Yellow","#e6c619"],["Orange","#e67e22"],["Purple","#7b2d8b"],["Maroon","#6b1c2a"],["Teal","#1a8a7a"],["Platinum","#c0c0c0"]].map(([n,c])=><option key={n} value={n.toLowerCase()}>{n}</option>)}
                                           </select>
                                         </div>
                                         <input value={tb.name} onChange={e => setDraft(p => { const t=[...p.tee_boxes]; t[i]={...t[i],name:e.target.value}; return {...p,tee_boxes:t}; })}
