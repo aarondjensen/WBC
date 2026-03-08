@@ -2851,7 +2851,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                               {Array.from({ length: numRounds }, (_, ri) => ri + 1).map(r => {
                                 const isAssigned = assignedRounds.includes(r);
                                 const tr = tRounds.find(t => t.round_number === r);
-                                const otherCourse = tr && tr.course_id && tr.course_id !== c.id;
+                                const otherCourse = tr && tr.course_id && String(tr.course_id).trim() !== "" && tr.course_id !== c.id;
                                 return (
                                   <button key={r} onClick={() => {
                                     if (isAssigned) { setCourseForRound(r, { id: null, name: "" }); }
