@@ -3859,14 +3859,31 @@ export default function WBCApp() {
       notify("Course removed");
       return;
     }
-    setCourseList(prev => prev.find(c => c.id === course.id) ? prev : [...prev, course]);
-    const { tee_boxes, ...courseData } = course;
+    // Strip all internal UI flags and tee_boxes before saving course row
+    const { tee_boxes, _incompleteData, _apiVersion, _sbVersion, _gcVersion,
+            _sbHasReal, _apiHasReal, _rapidHasReal, _gcHasReal, ...rawCourseData } = course;
+    // Ensure course has a stable id (not a temporary rapid_/gc_ prefixed one if Supabase has it)
+    const courseId = rawCourseData.id || `course_${Date.now()}`;
+    const courseData = { ...rawCourseData, id: courseId };
+    // Save course FIRST and wait for it before saving tee boxes (foreign key requirement)
     await sb.upsert("courses", courseData, "id");
     if (tee_boxes?.length) {
       for (const tb of tee_boxes) {
-        await sb.upsert("tee_boxes", { id: `tb_${course.id}_${tb.name.toLowerCase().replace(/\s+/g,"_")}`, course_id: course.id, ...tb }, "id");
+        // Strip any UI-only fields from tee box too
+        const { color: _c, ...tbData } = tb;
+        await sb.upsert("tee_boxes", {
+          id: `tb_${courseId}_${(tb.name || "default").toLowerCase().replace(/\s+/g,"_")}`,
+          course_id: courseId,
+          color: tb.color,
+          ...tbData,
+        }, "id");
       }
     }
+    // Update local state with clean version
+    const cleanCourse = { ...courseData, tee_boxes: tee_boxes || [] };
+    setCourseList(prev => prev.find(c => c.id === courseId)
+      ? prev.map(c => c.id === courseId ? cleanCourse : c)
+      : [...prev, cleanCourse]);
     notify(`Added ${course.name}`);
   };
 
