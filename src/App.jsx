@@ -2508,10 +2508,22 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
         const stateParam = stateFilter ? `&state=${encodeURIComponent(stateFilter)}` : "";
         let results = [];
 
+        const STATE_NAMES = { AL:"Alabama",AK:"Alaska",AZ:"Arizona",AR:"Arkansas",CA:"California",CO:"Colorado",CT:"Connecticut",DE:"Delaware",FL:"Florida",GA:"Georgia",HI:"Hawaii",ID:"Idaho",IL:"Illinois",IN:"Indiana",IA:"Iowa",KS:"Kansas",KY:"Kentucky",LA:"Louisiana",ME:"Maine",MD:"Maryland",MA:"Massachusetts",MI:"Michigan",MN:"Minnesota",MS:"Mississippi",MO:"Missouri",MT:"Montana",NE:"Nebraska",NV:"Nevada",NH:"New Hampshire",NJ:"New Jersey",NM:"New Mexico",NY:"New York",NC:"North Carolina",ND:"North Dakota",OH:"Ohio",OK:"Oklahoma",OR:"Oregon",PA:"Pennsylvania",RI:"Rhode Island",SC:"South Carolina",SD:"South Dakota",TN:"Tennessee",TX:"Texas",UT:"Utah",VT:"Vermont",VA:"Virginia",WA:"Washington",WV:"West Virginia",WI:"Wisconsin",WY:"Wyoming" };
+        const STATE_ABBREVS = Object.fromEntries(Object.entries(STATE_NAMES).map(([k,v]) => [v.toUpperCase(), k]));
+        const stateMatches = (courseState, filter) => {
+          if (!filter || !courseState) return true;
+          const cs = courseState.trim().toUpperCase();
+          const f = filter.trim().toUpperCase();
+          if (cs === f) return true; // exact match (MI === MI)
+          if (STATE_NAMES[f] && cs === STATE_NAMES[f].toUpperCase()) return true; // MI → Michigan
+          if (STATE_ABBREVS[cs] && STATE_ABBREVS[cs] === f) return true; // Michigan → MI
+          return false;
+        };
+
         const hasRealSlope = (c) => (c.tee_boxes || []).some(tb => parseInt(tb.slope) !== 113) || (parseInt(c.slope) !== 113 && !!c.slope);
 
         const parseRapidAPI = (rawCourses, stateFilter) => rawCourses
-          .filter(c => !stateFilter || !(c.state) || c.state.toUpperCase() === stateFilter.toUpperCase())
+          .filter(c => stateMatches(c.state, stateFilter))
           .map((c, ci) => {
             // This API: top-level courseRating/slopeRating, scorecard[].tees.teeBox1/teeBox2...
             const sc = Array.isArray(c.scorecard) ? c.scorecard : [];
@@ -2599,7 +2611,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
             const gcParsed = parseGolfCourseAPI(data2);
             console.log("[GolfCourseAPI] parsed:", gcParsed.map(c => ({ name: c.name, tees: c.tee_boxes?.length, slope: c.slope })));
             for (const gc of gcParsed) {
-              if (stateFilter && gc.state && gc.state.toUpperCase() !== stateFilter.toUpperCase()) continue;
+              if (!stateMatches(gc.state, stateFilter)) continue;
               const rapidMatch = results.find(r => r.name.toLowerCase() === gc.name.toLowerCase());
               if (rapidMatch) {
                 // Both found — pick whichever has real slope data
