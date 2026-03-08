@@ -2634,10 +2634,10 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
         // 3. Supabase — merge WBC history
         try {
           const qEnc = encodeURIComponent(`*${q}*`);
-          const stateClause = stateFilter ? `&state=eq.${stateFilter}` : "";
-          const rows = await sb.get("courses", `or=(name.ilike.${qEnc},city.ilike.${qEnc})${stateClause}&order=name&limit=20`);
+          // Don't filter by state in URL — state may be stored as full name or abbrev, use stateMatches() in JS
+          const rows = await sb.get("courses", `or=(name.ilike.${qEnc},city.ilike.${qEnc})&order=name&limit=40`);
           if (rows?.length) {
-            const filtered = stateFilter ? rows.filter(r => r.state?.toUpperCase() === stateFilter.toUpperCase()) : rows;
+            const filtered = stateFilter ? rows.filter(r => stateMatches(r.state, stateFilter)) : rows;
             const ids = filtered.map(r => r.id).join(",");
             const tbRows = ids ? await sb.get("tee_boxes", `course_id=in.(${ids})`) : [];
             const sbCourses = filtered.map((c) => ({
@@ -4019,7 +4019,16 @@ export default function WBCApp() {
       // Upsert tee boxes
       if (tee_boxes?.length) {
         for (const tb of tee_boxes) {
-          await sb.upsert("tee_boxes", { id: `tb_${course.id}_${tb.name.toLowerCase().replace(/\s+/g,"_")}`, course_id: course.id, ...tb }, "id");
+          const { hole_yards: hy2, _source: _s2, color: _c2, ...tbData2 } = tb;
+          const tbPayload2 = {
+            id: `tb_${course.id}_${(tb.name || "default").toLowerCase().replace(/\s+/g,"_")}`,
+            course_id: course.id,
+            color: tb.color || _c2,
+            name: tbData2.name, rating: tbData2.rating, slope: tbData2.slope,
+            par: tbData2.par, yardage: tbData2.yardage || 0,
+          };
+          if (Array.isArray(hy2) && hy2.some(y => y > 0)) tbPayload2.hole_yards = hy2;
+          await sb.upsert("tee_boxes", tbPayload2, "id");
         }
       }
     }
@@ -4063,14 +4072,23 @@ export default function WBCApp() {
     await sb.upsert("courses", { ...courseData, updated_at: now, updated_by: savedBy }, "id");
     if (tee_boxes?.length) {
       for (const tb of tee_boxes) {
-        // Strip any UI-only fields from tee box too
-        const { color: _c, ...tbData } = tb;
-        await sb.upsert("tee_boxes", {
+        // Strip UI-only fields; keep hole_yards only if it's a real array
+        const { color: _c, _source: _s, ...tbData } = tb;
+        const tbPayload = {
           id: `tb_${courseId}_${(tb.name || "default").toLowerCase().replace(/\s+/g,"_")}`,
           course_id: courseId,
           color: tb.color,
-          ...tbData,
-        }, "id");
+          name: tbData.name,
+          rating: tbData.rating,
+          slope: tbData.slope,
+          par: tbData.par,
+          yardage: tbData.yardage || 0,
+        };
+        // Only include hole_yards if it has actual data (column may not exist in older schemas)
+        if (Array.isArray(tb.hole_yards) && tb.hole_yards.some(y => y > 0)) {
+          tbPayload.hole_yards = tb.hole_yards;
+        }
+        await sb.upsert("tee_boxes", tbPayload, "id");
       }
     }
     // Update local state with clean version
