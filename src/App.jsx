@@ -3153,7 +3153,11 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                                   <div key={tbi} style={{ display: "grid", gridTemplateColumns: "12px 70px 50px 44px 32px 32px 40px 20px", gap: 3, marginBottom: 3, alignItems: "center" }}>
                                     <div style={{ width: 10, height: 10, borderRadius: "50%", background: tb.color || "#888", flexShrink: 0 }} />
                                     <input value={tb.name} onChange={e => setMc(p=>{const t=[...p.tee_boxes]; t[tbi]={...t[tbi],name:e.target.value}; return {...p,tee_boxes:t};})} style={{...tinyInp, textAlign:"left", padding:"2px 4px"}} placeholder="Name" />
-                                    <input type="color" value={tb.color||"#888888"} onChange={e => setMc(p=>{const t=[...p.tee_boxes]; t[tbi]={...t[tbi],color:e.target.value}; return {...p,tee_boxes:t};})} style={{ width:"100%", height:22, padding:0, border:"none", background:"transparent", cursor:"pointer" }} />
+                                    <select value={Object.entries(TEE_COLOR_MAP).find(([,v])=>v===(tb.color||""))?.[0] || "custom"}
+                                      onChange={e => { const clr = TEE_COLOR_MAP[e.target.value] || tb.color || "#888888"; setMc(p=>{const t=[...p.tee_boxes]; t[tbi]={...t[tbi],color:clr}; return {...p,tee_boxes:t};}); }}
+                                      style={{ width:"100%", height:22, padding:"0 2px", border:"none", borderRadius:3, background:tb.color||"#888", color:"#fff", fontSize:8, fontWeight:700, cursor:"pointer" }}>
+                                      {[["Black","#1a1a2e"],["Blue","#2d8fd4"],["White","#e8e8e8"],["Gold","#d4a843"],["Red","#9b2335"],["Green","#2d8a4e"],["Silver","#a8b2bd"],["Yellow","#e6c619"],["Orange","#e67e22"],["Purple","#7b2d8b"],["Maroon","#6b1c2a"],["Teal","#1a8a7a"],["Platinum","#c0c0c0"]].map(([n,c])=><option key={n} value={n.toLowerCase()} style={{background:c,color:n==="White"||n==="Silver"||n==="Platinum"||n==="Yellow"||n==="Gold"?"#333":"#fff"}}>{n}</option>)}
+                                    </select>
                                     <input value={tb.rating} onChange={e => setMc(p=>{const t=[...p.tee_boxes]; t[tbi]={...t[tbi],rating:e.target.value}; return {...p,tee_boxes:t};})} style={tinyInp} />
                                     <input value={tb.slope} onChange={e => setMc(p=>{const t=[...p.tee_boxes]; t[tbi]={...t[tbi],slope:e.target.value}; return {...p,tee_boxes:t};})} style={tinyInp} />
                                     <input value={tb.par} onChange={e => setMc(p=>{const t=[...p.tee_boxes]; t[tbi]={...t[tbi],par:e.target.value}; return {...p,tee_boxes:t};})} style={tinyInp} />
@@ -3346,8 +3350,11 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                                     </div>
                                     {tbs.map((tb, i) => (
                                       <div key={i} style={{ display: "grid", gridTemplateColumns: "18px 1fr 44px 38px 30px 46px 18px", gap: "3px 4px", marginBottom: 4, alignItems: "center" }}>
-                                        <input type="color" value={tb.color || "#888888"} onChange={e => setDraft(p => { const t=[...p.tee_boxes]; t[i]={...t[i],color:e.target.value}; return {...p,tee_boxes:t}; })}
-                                          style={{ width: 16, height: 16, padding: 0, border: "none", borderRadius: "50%", cursor: "pointer", background: "transparent" }} />
+                                        <select value={Object.entries(TEE_COLOR_MAP).find(([,v])=>v===(tb.color||""))?.[0] || "black"}
+                                          onChange={e => { const clr = TEE_COLOR_MAP[e.target.value] || "#888888"; setDraft(p => { const t=[...p.tee_boxes]; t[i]={...t[i],color:clr,name:t[i].name||e.target.value.charAt(0).toUpperCase()+e.target.value.slice(1)}; return {...p,tee_boxes:t}; }); }}
+                                          style={{ width:18, height:18, padding:0, border:"none", borderRadius:3, cursor:"pointer", background:tb.color||"#888", appearance:"none", WebkitAppearance:"none", fontSize:0 }}>
+                                          {[["Black","#1a1a2e"],["Blue","#2d8fd4"],["White","#e8e8e8"],["Gold","#d4a843"],["Red","#9b2335"],["Green","#2d8a4e"],["Silver","#a8b2bd"],["Yellow","#e6c619"],["Orange","#e67e22"],["Purple","#7b2d8b"],["Maroon","#6b1c2a"],["Teal","#1a8a7a"],["Platinum","#c0c0c0"]].map(([n,c])=><option key={n} value={n.toLowerCase()} style={{background:c}}>{n}</option>)}
+                                        </select>
                                         <input value={tb.name} onChange={e => setDraft(p => { const t=[...p.tee_boxes]; t[i]={...t[i],name:e.target.value}; return {...p,tee_boxes:t}; })}
                                           style={tiL} placeholder="Name" />
                                         <input value={tb.rating} onChange={e => setDraft(p => { const t=[...p.tee_boxes]; t[i]={...t[i],rating:e.target.value}; return {...p,tee_boxes:t}; })}
