@@ -2505,8 +2505,9 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
       try {
         // First search Supabase (14 years of WBC history)
         const q = query.trim();
+        const qEnc = encodeURIComponent(`*${q}*`);
         const stateClause = stateFilter ? `&state=eq.${stateFilter}` : "";
-        const rows = await sb.get("courses", `or=(name.ilike.*${q}*,city.ilike.*${q}*)${stateClause}&order=name&limit=20`);
+        const rows = await sb.get("courses", `or=(name.ilike.${qEnc},city.ilike.${qEnc})${stateClause}&order=name&limit=20`);
         let results = [];
         if (rows?.length) {
           const filtered = stateFilter ? rows.filter(r => r.state?.toUpperCase() === stateFilter.toUpperCase()) : rows;
