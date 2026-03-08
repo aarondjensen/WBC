@@ -4077,13 +4077,10 @@ export default function WBCApp() {
 
   const addCourse = async (course) => {
     if (course._delete) {
+      // Remove from tournament's active course list (local state only)
+      // Do NOT delete from Supabase — courses table is a permanent library
       setCourseList(prev => prev.filter(c => c.id !== course.id));
-      // Delete tee boxes first (foreign key), then course
-      try {
-        await sb.delete("tee_boxes", `course_id=eq.${course.id}`);
-        await sb.delete("courses", `id=eq.${course.id}`);
-      } catch(e) { console.error("Course delete failed:", e); }
-      notify("Course removed");
+      notify("Course removed from tournament");
       return;
     }
     // Strip all internal UI flags and tee_boxes before saving course row
