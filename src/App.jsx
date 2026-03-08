@@ -2644,40 +2644,25 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
               if (stateFilter && parsed.state && parsed.state.toUpperCase() !== stateFilter.toUpperCase()) continue;
               const existingMatch = results.find(r => r.name.toLowerCase() === parsed.name.toLowerCase());
               if (existingMatch) {
-                // Compare completeness: score each source by how much data it has
-                const score = (c) => {
-                  let s = 0;
-                  s += (c.tee_boxes?.length || 0) * 10;           // more tees = better
-                  s += (c.hole_pars?.length || 0);                 // hole pars
-                  s += (c.hole_handicaps?.filter(h=>h>0).length || 0); // non-zero hcps
-                  s += c.slope ? 1 : 0;
-                  s += c.rating ? 1 : 0;
-                  return s;
-                };
-                const sbScore = score(existingMatch);
-                const apiScore = score(parsed);
-                const hasDiff = existingMatch.tee_boxes?.length !== parsed.tee_boxes?.length
-                  || existingMatch.slope !== parsed.slope
-                  || existingMatch.rating !== parsed.rating;
+                // 113 is the USGA default placeholder — any other value means real data was found
+                const hasRealSlope = (c) => (c.tee_boxes || []).some(tb => parseInt(tb.slope) !== 113) || (parseInt(c.slope) !== 113 && !!c.slope);
+                const sbReal = hasRealSlope(existingMatch);
+                const apiReal = hasRealSlope(parsed);
 
-                if (hasDiff && apiScore !== sbScore) {
-                  // Surface both versions in the preview for the user to choose/merge
-                  const merged = {
-                    ...existingMatch,
-                    _apiVersion: parsed,         // stash API version for comparison
-                    _sbScore: sbScore,
-                    _apiScore: apiScore,
-                  };
+                if (sbReal && apiReal) {
+                  // Both have real slope data — let director compare and choose
+                  const merged = { ...existingMatch, _apiVersion: parsed, _sbHasReal: true, _apiHasReal: true };
                   results = results.map(r => r.id === existingMatch.id ? merged : r);
-                } else if (apiScore > sbScore) {
-                  // API clearly has more data — use it but keep Supabase id
+                } else if (apiReal && !sbReal) {
+                  // API has real data, Supabase only has placeholder — use API silently
                   const refreshed = { ...existingMatch, par: parsed.par, slope: parsed.slope, rating: parsed.rating, hole_pars: parsed.hole_pars, hole_handicaps: parsed.hole_handicaps, tee_boxes: parsed.tee_boxes };
                   results = results.map(r => r.id === existingMatch.id ? refreshed : r);
                   const { tee_boxes: rTees, ...courseData } = refreshed;
                   sb.upsert("courses", courseData, "id").catch(() => {});
                   if (rTees?.length) rTees.forEach(tb => sb.upsert("tee_boxes", { id: `tb_${existingMatch.id}_${tb.name.toLowerCase().replace(/\s+/g,"_")}`, course_id: existingMatch.id, ...tb }, "id").catch(() => {}));
                 }
-                // else: Supabase data is equal or better — keep it as-is
+                // sbReal && !apiReal: Supabase has real data, API has placeholder — keep Supabase as-is
+                // !sbReal && !apiReal: both placeholder — keep Supabase, nothing better available
               } else {
                 apiCourses.push(parsed);
               }
@@ -3230,7 +3215,23 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                           );
                         })()}
                         {!searchLoading && searchResults.filter(c => !courses.find(ex => ex.id === c.id)).map(c => (
-                          <button key={c.id} onClick={() => setCoursePreview(c)} style={{ display: "block", width: "100%", background: K.inp, border: `1px solid ${K.bdr}`, borderRadius: 10, padding: "10px 14px", cursor: "pointer", textAlign: "left", color: K.t1, marginBottom: 6 }}>
+                          <button key={c.id} onClick={() => {
+                            if (c._apiVersion) {
+                              if (c._sbHasReal && c._apiHasReal) {
+                                // Both real — open with Supabase data showing, conflict banner lets director compare
+                                setCoursePreview(c);
+                              } else if (c._apiHasReal && !c._sbHasReal) {
+                                // Only API has real data — open with API data pre-loaded
+                                const { _apiVersion, _sbHasReal, _apiHasReal, ...sbBase } = c;
+                                setCoursePreview({ ...sbBase, ...c._apiVersion, _apiVersion: c._apiVersion, _apiHasReal: true, _sbHasReal: false });
+                              } else {
+                                // Only Supabase real (or neither) — open with Supabase
+                                setCoursePreview(c);
+                              }
+                            } else {
+                              setCoursePreview(c);
+                            }
+                          }} style={{ display: "block", width: "100%", background: K.inp, border: `1px solid ${K.bdr}`, borderRadius: 10, padding: "10px 14px", cursor: "pointer", textAlign: "left", color: K.t1, marginBottom: 6 }}>
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                               <div>
                                 <div style={{ fontWeight: 600, fontSize: 13 }}>{c.name}</div>
@@ -3246,8 +3247,6 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                           const setDraft = fn => setCoursePreview(prev => fn(prev));
                           const tbs = draft.tee_boxes || [];
                           const hasConflict = !!draft._apiVersion;
-                          const sbScore = draft._sbScore || 0;
-                          const apiScore = draft._apiScore || 0;
                           const ti = { background: K.bg, border: `1px solid ${ac}30`, borderRadius: 4, color: K.t1, fontSize: 9, textAlign: "center", width: "100%", padding: "3px 2px", boxSizing: "border-box" };
                           const tiL = { ...ti, textAlign: "left", padding: "3px 5px" };
                           return (
@@ -3274,24 +3273,39 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                                   </div>
 
                                   {/* Source conflict banner */}
-                                  {hasConflict && (
-                                    <div style={{ marginTop: 8, padding: "8px 10px", background: "#d4a84310", border: `1px solid #d4a84340`, borderRadius: 8 }}>
-                                      <div style={{ fontSize: 9, color: "#d4a843", fontWeight: 700, marginBottom: 6 }}>⚡ Two sources found different data — pick one to start from:</div>
-                                      <div style={{ display: "flex", gap: 6 }}>
-                                        <button onClick={() => setDraft(p => { const {_apiVersion, _sbScore, _apiScore, ...sb} = p; return sb; })}
-                                          style={{ flex: 1, padding: "5px 0", borderRadius: 6, background: sbScore >= apiScore ? ac+"30" : "transparent", border: `1px solid ${sbScore >= apiScore ? ac : K.bdr}`, color: sbScore >= apiScore ? ac : K.t3, fontSize: 9, fontWeight: 700, cursor: "pointer" }}>
-                                          📦 WBC History
-                                          <div style={{ fontSize: 8, fontWeight: 400, color: K.t3, marginTop: 1 }}>{draft.tee_boxes?.length || 0} tees · {draft.hole_pars?.length || 0} holes</div>
-                                        </button>
-                                        <button onClick={() => setDraft(p => { const api = p._apiVersion; return { ...p, par: api.par, slope: api.slope, rating: api.rating, hole_pars: api.hole_pars, hole_handicaps: api.hole_handicaps, tee_boxes: api.tee_boxes, _apiVersion: undefined, _sbScore: undefined, _apiScore: undefined }; })}
-                                          style={{ flex: 1, padding: "5px 0", borderRadius: 6, background: apiScore > sbScore ? ac+"30" : "transparent", border: `1px solid ${apiScore > sbScore ? ac : K.bdr}`, color: apiScore > sbScore ? ac : K.t3, fontSize: 9, fontWeight: 700, cursor: "pointer" }}>
-                                          🌐 API (Fresh)
-                                          <div style={{ fontSize: 8, fontWeight: 400, color: K.t3, marginTop: 1 }}>{draft._apiVersion?.tee_boxes?.length || 0} tees · {draft._apiVersion?.hole_pars?.length || 0} holes</div>
-                                        </button>
+                                  {hasConflict && (() => {
+                                    const sbHasReal = draft._sbHasReal;
+                                    const apiHasReal = draft._apiHasReal;
+                                    const sbSlope = draft.tee_boxes?.find(t => parseInt(t.slope) !== 113)?.slope || draft.slope;
+                                    const apiSlope = draft._apiVersion?.tee_boxes?.find(t => parseInt(t.slope) !== 113)?.slope || draft._apiVersion?.slope;
+                                    const bothReal = sbHasReal && apiHasReal;
+                                    const bannerColor = bothReal ? "#d4a843" : "#5b9bd5";
+                                    const bannerMsg = bothReal
+                                      ? "⚡ Both sources have real slope data — review each and pick the most accurate:"
+                                      : "ℹ️ One source has real slope data — selecting the better one:";
+                                    return (
+                                      <div style={{ marginTop: 8, padding: "8px 10px", background: `${bannerColor}10`, border: `1px solid ${bannerColor}40`, borderRadius: 8 }}>
+                                        <div style={{ fontSize: 9, color: bannerColor, fontWeight: 700, marginBottom: 6 }}>{bannerMsg}</div>
+                                        <div style={{ display: "flex", gap: 6 }}>
+                                          <button onClick={() => setDraft(p => { const {_apiVersion, _sbHasReal, _apiHasReal, ...sb} = p; return sb; })}
+                                            style={{ flex: 1, padding: "6px 4px", borderRadius: 6, background: sbHasReal ? ac+"22" : "transparent", border: `1px solid ${sbHasReal ? ac : K.bdr}`, color: sbHasReal ? ac : K.t3, fontSize: 9, fontWeight: 700, cursor: "pointer", textAlign: "center" }}>
+                                            📦 WBC History
+                                            <div style={{ fontSize: 8, fontWeight: 400, color: K.t3, marginTop: 2 }}>{draft.tee_boxes?.length || 0} tees · Slope {sbSlope || "?"}</div>
+                                            {sbHasReal && <div style={{ fontSize: 7, color: ac, marginTop: 1 }}>✓ real data</div>}
+                                            {!sbHasReal && <div style={{ fontSize: 7, color: "#d4584580", marginTop: 1 }}>placeholder</div>}
+                                          </button>
+                                          <button onClick={() => setDraft(p => { const api = p._apiVersion; return { ...p, par: api.par, slope: api.slope, rating: api.rating, hole_pars: api.hole_pars, hole_handicaps: api.hole_handicaps, tee_boxes: api.tee_boxes, _apiVersion: undefined, _sbHasReal: undefined, _apiHasReal: undefined }; })}
+                                            style={{ flex: 1, padding: "6px 4px", borderRadius: 6, background: apiHasReal && !sbHasReal ? ac+"22" : "transparent", border: `1px solid ${apiHasReal ? ac : K.bdr}`, color: apiHasReal ? ac : K.t3, fontSize: 9, fontWeight: 700, cursor: "pointer", textAlign: "center" }}>
+                                            🌐 API (Fresh)
+                                            <div style={{ fontSize: 8, fontWeight: 400, color: K.t3, marginTop: 2 }}>{draft._apiVersion?.tee_boxes?.length || 0} tees · Slope {apiSlope || "?"}</div>
+                                            {apiHasReal && <div style={{ fontSize: 7, color: ac, marginTop: 1 }}>✓ real data</div>}
+                                            {!apiHasReal && <div style={{ fontSize: 7, color: "#d4584580", marginTop: 1 }}>placeholder</div>}
+                                          </button>
+                                        </div>
+                                        <div style={{ fontSize: 8, color: K.t3, marginTop: 5, fontStyle: "italic" }}>You can edit any field after selecting a source</div>
                                       </div>
-                                      <div style={{ fontSize: 8, color: K.t3, marginTop: 5, fontStyle: "italic" }}>You can edit any field after selecting a source</div>
-                                    </div>
-                                  )}
+                                    );
+                                  })()}
                                   {!hasConflict && <div style={{ fontSize: 9, color: K.t3, marginTop: 6, fontStyle: "italic" }}>Review and edit before adding — tap any field to change it</div>}
                                 </div>
 
