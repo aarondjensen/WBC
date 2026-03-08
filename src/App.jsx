@@ -4071,8 +4071,8 @@ export default function WBCApp() {
     const savedBy = typeof currentUser !== "undefined" ? currentUser?.name || "Unknown" : "Unknown";
     await sb.upsert("courses", { ...courseData, updated_at: now, updated_by: savedBy }, "id");
     if (tee_boxes?.length) {
+      let tbErrors = 0;
       for (const tb of tee_boxes) {
-        // Strip UI-only fields; keep hole_yards only if it's a real array
         const { color: _c, _source: _s, ...tbData } = tb;
         const tbPayload = {
           id: `tb_${courseId}_${(tb.name || "default").toLowerCase().replace(/\s+/g,"_")}`,
@@ -4084,14 +4084,21 @@ export default function WBCApp() {
           par: tbData.par,
           yardage: tbData.yardage || 0,
         };
-        // Only include hole_yards if it has actual data (column may not exist in older schemas)
         if (Array.isArray(tb.hole_yards) && tb.hole_yards.some(y => y > 0)) {
           tbPayload.hole_yards = tb.hole_yards;
         }
-        await sb.upsert("tee_boxes", tbPayload, "id");
+        try {
+          await sb.upsert("tee_boxes", tbPayload, "id");
+        } catch(tbErr) {
+          console.error("Tee box save failed:", tbErr, tbPayload);
+          tbErrors++;
+        }
+      }
+      if (tbErrors > 0) {
+        notify(`⚠ Course saved but ${tbErrors} tee box${tbErrors > 1 ? "es" : ""} failed to save — open and re-save to retry`);
       }
     }
-    // Update local state with clean version
+    // Update local state with clean version (always, even if tee saves had errors)
     const cleanCourse = { ...courseData, tee_boxes: tee_boxes || [] };
     setCourseList(prev => prev.find(c => c.id === courseId)
       ? prev.map(c => c.id === courseId ? cleanCourse : c)
