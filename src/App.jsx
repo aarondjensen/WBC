@@ -2586,8 +2586,61 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
               return { id: `gc_${c.id || c._id || ci}`, name, city, state, par, slope, rating, hole_pars, hole_handicaps, tee_boxes: tees };
             });
 
+            // Check if primary API returned useless slope data (all tees defaulted to 113)
+            const hasRealSlopes = (courses) => courses.some(c => (c.tee_boxes || []).some(tb => parseInt(tb.slope) !== 113));
+            const needsBackup = parsedCourses.length > 0 && !hasRealSlopes(parsedCourses);
+
+            let finalParsed = parsedCourses;
+            if (needsBackup) {
+              try {
+                console.log("Primary API returned default slopes — trying backup API (/api/courses2)");
+                const backupRes = await fetch(`/api/courses2?search=${encodeURIComponent(q)}${stateParam}`);
+                if (backupRes.ok) {
+                  const backupData = await backupRes.json();
+                  const rawBackup = Array.isArray(backupData) ? backupData : (backupData.courses || backupData.data || []);
+                  const backupParsed = rawBackup.map((c, ci) => {
+                    const isSchemaB = Array.isArray(c.teeBoxes);
+                    let tees, hole_pars, hole_handicaps, par, slope, rating, name, city, state;
+                    if (isSchemaB) {
+                      name = c.name || "Unknown";
+                      city = c.city || ""; state = c.state || "";
+                      const sc = Array.isArray(c.scorecard) ? c.scorecard : [];
+                      hole_pars = sc.map(h => parseInt(h.Par) || 4);
+                      hole_handicaps = sc.map(h => parseInt(h.Handicap) || 0);
+                      par = hole_pars.reduce((a,b) => a+b, 0) || 72;
+                      tees = (c.teeBoxes || []).map((t, ti) => ({
+                        name: t.tee || "Default",
+                        color: resolveTeeColor({ name: t.tee || "", color: t.tee || "" }, ti),
+                        slope: parseInt(t.slope) || 113,
+                        rating: parseFloat(t.handicap) || 72.0,
+                        par, yardage: sc.reduce((a, h) => { const tb = h.tees ? Object.values(h.tees)[ti] || Object.values(h.tees)[0] : null; return a + (parseInt(tb?.yards) || 0); }, 0),
+                      }));
+                      slope = tees[0]?.slope || 113; rating = tees[0]?.rating || 72.0;
+                    } else {
+                      name = [c.club_name, c.course_name].filter(Boolean).join(" – ") || c.name || "Unknown";
+                      city = c.location?.city || c.city || ""; state = c.location?.state || c.state || "";
+                      const teesObj = c.tees || {};
+                      const allTees = Array.isArray(teesObj) ? teesObj : (Array.isArray(teesObj.male) && teesObj.male.length ? teesObj.male : (teesObj.female || []));
+                      tees = allTees.map((t, ti) => ({ name: t.tee_name || "Default", color: resolveTeeColor({ name: t.tee_name || "", color: "" }, ti), rating: parseFloat(t.course_rating) || 72.0, slope: parseInt(t.slope_rating) || 113, par: parseInt(t.par_total) || 72, yardage: parseInt(t.total_yards) || 0 }));
+                      const firstTee = allTees[0]; const holes = firstTee?.holes || [];
+                      hole_pars = holes.map(h => parseInt(h.par) || 4); hole_handicaps = holes.map(h => parseInt(h.handicap) || 0);
+                      par = parseInt(firstTee?.par_total) || 72; slope = parseInt(firstTee?.slope_rating) || 113; rating = parseFloat(firstTee?.course_rating) || 72.0;
+                    }
+                    return { id: `gc_${c.id || c._id || ci}`, name, city, state, par, slope, rating, hole_pars, hole_handicaps, tee_boxes: tees };
+                  });
+                  // Use backup results if they have better slope data
+                  if (hasRealSlopes(backupParsed)) {
+                    console.log("Backup API returned real slopes — using backup data");
+                    finalParsed = backupParsed;
+                  }
+                }
+              } catch(backupErr) {
+                console.log("Backup API also failed:", backupErr);
+              }
+            }
+
             const apiCourses = [];
-            for (const parsed of parsedCourses) {
+            for (const parsed of finalParsed) {
               if (stateFilter && parsed.state && parsed.state.toUpperCase() !== stateFilter.toUpperCase()) continue;
               const existingMatch = results.find(r => r.name.toLowerCase() === parsed.name.toLowerCase());
               if (existingMatch) {
