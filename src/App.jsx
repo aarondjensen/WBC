@@ -2524,19 +2524,20 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
               const sample = sc.find(h => h.tees?.[key]);
               const color = sample?.tees?.[key]?.color || key;
               const yardage = sc.reduce((a, h) => a + (parseInt(h.tees?.[key]?.yards) || 0), 0);
+              const hole_yards = sc.map(h => parseInt(h.tees?.[key]?.yards) || 0);
               return {
                 name: color || key,
                 color: resolveTeeColor({ name: color || key, color: color || "" }, ti),
                 slope: parseInt(c.slopeRating) || 113,
                 rating: parseFloat(c.courseRating) || 72.0,
-                par, yardage,
+                par, yardage, hole_yards,
               };
             }) : [{
               name: "Default",
               color: resolveTeeColor({ name: "Default", color: "" }, 0),
               slope: parseInt(c.slopeRating) || 113,
               rating: parseFloat(c.courseRating) || 72.0,
-              par, yardage: 0,
+              par, yardage: 0, hole_yards: [],
             }];
             return {
               id: `rapid_${c._id || ci}`,
@@ -2545,6 +2546,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
               par, slope: parseInt(c.slopeRating) || 113,
               rating: parseFloat(c.courseRating) || 72.0,
               hole_pars, hole_handicaps, tee_boxes: tees,
+              _source: "RapidAPI",
             };
           });
 
@@ -2560,6 +2562,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
               slope: parseInt(t.slope_rating) || 113,
               par: parseInt(t.par_total) || 72,
               yardage: parseInt(t.total_yards) || 0,
+              hole_yards: (t.holes || []).map(h => parseInt(h.yardage) || 0),
             }));
             const firstTee = allTees[0]; const holes = firstTee?.holes || [];
             return {
@@ -2572,6 +2575,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
               hole_pars: holes.map(h => parseInt(h.par) || 4),
               hole_handicaps: holes.map(h => parseInt(h.handicap) || 0),
               tee_boxes: tees,
+              _source: "GolfCourseAPI",
             };
           });
         };
@@ -3221,6 +3225,8 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                                   <div style={{ fontWeight: 600, fontSize: 13 }}>{c.name}</div>
                                   {c._incompleteData && <span style={{ fontSize: 8, background: "#d4584520", border: "1px solid #d4584540", color: "#d45845", borderRadius: 4, padding: "1px 5px", fontWeight: 700 }}>⚠ incomplete data</span>}
                                   {!c._incompleteData && (c.tee_boxes?.length || 0) < 2 && <span style={{ fontSize: 8, background: "#d4a84320", border: "1px solid #d4a84340", color: "#d4a843", borderRadius: 4, padding: "1px 5px", fontWeight: 700 }}>⚠ 1 tee</span>}
+                                  {c._source && <span style={{ fontSize: 8, background: `${ac}15`, border: `1px solid ${ac}30`, color: ac, borderRadius: 4, padding: "1px 5px", fontWeight: 600 }}>{c._source}</span>}
+                                  {!c._source && !c._incompleteData && <span style={{ fontSize: 8, background: "#88888815", border: "1px solid #88888830", color: K.t3, borderRadius: 4, padding: "1px 5px", fontWeight: 600 }}>WBC History</span>}
                                 </div>
                                 <div style={{ fontSize: 10, color: K.t3 }}>{c.city}{c.state ? `, ${c.state}` : ""}{c.par ? ` · Par ${c.par}` : ""}{(() => { const realTbSlope = (c.tee_boxes || []).find(t => parseInt(t.slope) !== 113)?.slope; const displaySlope = realTbSlope || (c.slope && parseInt(c.slope) !== 113 ? c.slope : null); return displaySlope ? ` · Slope ${displaySlope}` : ""; })()}</div>
                               </div>
@@ -3303,7 +3309,13 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                                       ⚠ Only {draft.tee_boxes?.length || 0} tee box found — most courses have multiple tees. Tap <strong>+ Tee</strong> above to add Black, Blue, White, Red etc. with their ratings and slopes.
                                     </div>
                                   )}
-                                  {!hasConflict && !draft._incompleteData && (draft.tee_boxes?.length || 0) >= 2 && <div style={{ fontSize: 9, color: K.t3, marginTop: 6, fontStyle: "italic" }}>Review and edit before adding — tap any field to change it</div>}
+                                  {!hasConflict && !draft._incompleteData && (draft.tee_boxes?.length || 0) >= 2 && (
+                                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 6 }}>
+                                      <div style={{ fontSize: 9, color: K.t3, fontStyle: "italic" }}>Review and edit before adding — tap any field to change it</div>
+                                      {draft._source && <span style={{ fontSize: 8, background: `${ac}15`, border: `1px solid ${ac}30`, color: ac, borderRadius: 4, padding: "1px 6px", fontWeight: 600, flexShrink: 0 }}>{draft._source}</span>}
+                                      {!draft._source && <span style={{ fontSize: 8, background: "#88888815", border: "1px solid #88888830", color: K.t3, borderRadius: 4, padding: "1px 6px", fontWeight: 600, flexShrink: 0 }}>WBC History</span>}
+                                    </div>
+                                  )}
                                 </div>
 
                                 <div style={{ padding: "12px 16px" }}>
@@ -3370,6 +3382,20 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                                             ))}
                                             <div />
                                           </div>
+                                          {(() => {
+                                            const activeTee = (draft.tee_boxes || [])[0];
+                                            const hy = activeTee?.hole_yards || [];
+                                            if (!hy.some(y => y > 0)) return null;
+                                            const yds = hy.slice(start, start+count);
+                                            const tot = yds.reduce((a,b) => a+(parseInt(b)||0), 0);
+                                            return (
+                                              <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8 }}>
+                                                <div style={{ color: K.t3, fontWeight: 600, padding: "2px 2px" }}>Yds</div>
+                                                {yds.map((y, i) => <div key={i} style={{ textAlign: "center", color: K.t3, padding: "2px 0", fontSize: 8 }}>{y || "–"}</div>)}
+                                                <div style={{ textAlign: "center", color: K.t3, padding: "2px 0", fontSize: 8 }}>{tot || ""}</div>
+                                              </div>
+                                            );
+                                          })()}
                                         </div>
                                       );
                                     })}
@@ -3861,7 +3887,7 @@ export default function WBCApp() {
     }
     // Strip all internal UI flags and tee_boxes before saving course row
     const { tee_boxes, _incompleteData, _apiVersion, _sbVersion, _gcVersion,
-            _sbHasReal, _apiHasReal, _rapidHasReal, _gcHasReal, ...rawCourseData } = course;
+            _sbHasReal, _apiHasReal, _rapidHasReal, _gcHasReal, _source, ...rawCourseData } = course;
     // Ensure course has a stable id (not a temporary rapid_/gc_ prefixed one if Supabase has it)
     const courseId = rawCourseData.id || `course_${Date.now()}`;
     const courseData = { ...rawCourseData, id: courseId };
