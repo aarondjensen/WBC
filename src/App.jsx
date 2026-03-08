@@ -2397,7 +2397,7 @@ function PlayerRow({ player, onUpdateHI, onUpdateName, onRemove, onSavePassword,
   );
 }
 
-function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, passwords, setPasswords, holeData, finalizedRounds, onFinalizeRound, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, onExternalSettingsHandled }) {
+function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, passwords, setPasswords, holeData, finalizedRounds, onFinalizeRound, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, onExternalSettingsHandled, currentUser }) {
   const [tab, setTab] = useState("tees");
   const [teesSaved, setTeesSaved] = useState({});
   const [teesModified, setTeesModified] = useState({});
@@ -2425,6 +2425,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
   const [editingCourse, setEditingCourse] = useState(null); // { courseId, draft: {...} }
   const [manualCourse, setManualCourse] = useState(null); // null | draft object when manually adding
   const [coursePreview, setCoursePreview] = useState(null); // course to preview before confirming add
+  const [localDbPrompt, setLocalDbPrompt] = useState(null); // { sbCourse, query } — prompt user to use local or fetch fresh
   const [confirmRound, setConfirmRound] = useState(null);
   const [editRound, setEditRound] = useState(() => { for (let r = 1; r <= 4; r++) { if (!finalizedRounds[r]) return r; } return 4; });
   // Keep editRound pointing at the active round when finalization state changes
@@ -3219,16 +3220,17 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                         })()}
                         {!searchLoading && searchResults.filter(c => !courses.find(ex => ex.id === c.id)).map(c => (
                           <button key={c.id} onClick={() => {
-                            if (c._apiVersion) {
-                              if (c._sbHasReal && c._apiHasReal) {
-                                // Both real — open with Supabase data showing, conflict banner lets director compare
-                                setCoursePreview(c);
-                              } else if (c._apiHasReal && !c._sbHasReal) {
-                                // Only API has real data — open with API data pre-loaded
+                            const sbVer = c._sbVersion || (c.updated_at ? c : null);
+                            const hasLocalData = !!(sbVer && (sbVer.updated_at || c.updated_at));
+                            if (hasLocalData) {
+                              // Course exists in local DB — prompt user to use local or fetch fresh
+                              const localCourse = sbVer || c;
+                              setLocalDbPrompt({ sbCourse: localCourse, apiCourse: c._apiVersion || null, fullCourse: c });
+                            } else if (c._apiVersion) {
+                              if (c._apiHasReal && !c._sbHasReal) {
                                 const { _apiVersion, _sbHasReal, _apiHasReal, ...sbBase } = c;
                                 setCoursePreview({ ...sbBase, ...c._apiVersion, _apiVersion: c._apiVersion, _apiHasReal: true, _sbHasReal: false });
                               } else {
-                                // Only Supabase real (or neither) — open with Supabase
                                 setCoursePreview(c);
                               }
                             } else {
@@ -3243,6 +3245,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                                   {!c._incompleteData && (c.tee_boxes?.length || 0) < 2 && <span style={{ fontSize: 8, background: "#d4a84320", border: "1px solid #d4a84340", color: "#d4a843", borderRadius: 4, padding: "1px 5px", fontWeight: 700 }}>⚠ 1 tee</span>}
                                   {c._source && <span style={{ fontSize: 8, background: `${ac}15`, border: `1px solid ${ac}30`, color: ac, borderRadius: 4, padding: "1px 5px", fontWeight: 600 }}>{c._source}</span>}
                                   {!c._source && !c._incompleteData && <span style={{ fontSize: 8, background: "#88888815", border: "1px solid #88888830", color: K.t3, borderRadius: 4, padding: "1px 5px", fontWeight: 600 }}>WBC History</span>}
+                                  {(c.updated_at || c._sbVersion?.updated_at) && <span style={{ fontSize: 8, background: "#2d8a4e20", border: "1px solid #2d8a4e40", color: "#2d8a4e", borderRadius: 4, padding: "1px 5px", fontWeight: 600 }}>📁 saved</span>}
                                 </div>
                                 <div style={{ fontSize: 10, color: K.t3 }}>{c.city}{c.state ? `, ${c.state}` : ""}{c.par ? ` · Par ${c.par}` : ""}{(() => { const realTbSlope = (c.tee_boxes || []).find(t => parseInt(t.slope) !== 113)?.slope; const displaySlope = realTbSlope || (c.slope && parseInt(c.slope) !== 113 ? c.slope : null); return displaySlope ? ` · Slope ${displaySlope}` : ""; })()}</div>
                               </div>
@@ -3250,6 +3253,150 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                             </div>
                           </button>
                         ))}
+                        {/* Local DB prompt modal */}
+                        {localDbPrompt && (() => {
+                          const { sbCourse, apiCourse, fullCourse } = localDbPrompt;
+                          const tbs = sbCourse.tee_boxes || [];
+                          const updatedAt = sbCourse.updated_at;
+                          const updatedBy = sbCourse.updated_by || "Unknown";
+                          const formattedDate = updatedAt ? new Date(updatedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : null;
+                          const ScorecardPreview = ({ course }) => {
+                            const hp = course.hole_pars || [];
+                            const hh = course.hole_handicaps || [];
+                            if (!hp.length) return <div style={{ fontSize: 10, color: K.t3, fontStyle: "italic", marginBottom: 8 }}>No hole data available</div>;
+                            return (
+                              <div style={{ marginBottom: 10 }}>
+                                {[["Front", 0, 9], ["Back", 9, 9]].map(([lbl, start, count]) => {
+                                  const pars = hp.slice(start, start + count);
+                                  const hcps = hh.slice(start, start + count);
+                                  const firstTee = (course.tee_boxes || [])[0];
+                                  const yds = (firstTee?.hole_yards || []).slice(start, start + count);
+                                  const hasYds = yds.some(y => y > 0);
+                                  return (
+                                    <div key={lbl} style={{ marginBottom: 4 }}>
+                                      <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8 }}>
+                                        <div style={{ color: K.t3, fontWeight: 600, padding: "2px 0" }}>Hole</div>
+                                        {Array.from({length: count}, (_, i) => <div key={i} style={{ textAlign: "center", color: K.t2, fontWeight: 700, padding: "2px 0" }}>{start + i + 1}</div>)}
+                                        <div style={{ textAlign: "center", color: K.t3, fontSize: 7, padding: "2px 0" }}>Tot</div>
+                                      </div>
+                                      <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8, background: K.inp, borderRadius: 3, marginBottom: 1 }}>
+                                        <div style={{ color: K.t3, fontWeight: 600, padding: "3px 2px" }}>Par</div>
+                                        {pars.map((p, i) => <div key={i} style={{ textAlign: "center", color: K.t1, fontWeight: 700, padding: "3px 0" }}>{p || "–"}</div>)}
+                                        <div style={{ textAlign: "center", color: ac, fontWeight: 800, padding: "3px 0", fontSize: 9 }}>{pars.reduce((a, b) => a + (parseInt(b) || 0), 0)}</div>
+                                      </div>
+                                      {hcps.some(h => h > 0) && (
+                                        <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8, marginBottom: 1 }}>
+                                          <div style={{ color: K.t3, fontWeight: 600, padding: "2px 2px" }}>HCP</div>
+                                          {hcps.map((h, i) => <div key={i} style={{ textAlign: "center", color: K.t3, padding: "2px 0" }}>{h || "–"}</div>)}
+                                          <div />
+                                        </div>
+                                      )}
+                                      {hasYds && (
+                                        <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8 }}>
+                                          <div style={{ color: K.t3, fontWeight: 600, padding: "2px 2px" }}>Yds</div>
+                                          {yds.map((y, i) => <div key={i} style={{ textAlign: "center", color: K.t3, padding: "2px 0" }}>{y || "–"}</div>)}
+                                          <div style={{ textAlign: "center", color: K.t3, padding: "2px 0" }}>{yds.reduce((a, b) => a + (parseInt(b) || 0), 0) || ""}</div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            );
+                          };
+                          return (
+                            <div style={{ position: "fixed", inset: 0, background: "#00000088", zIndex: 200, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
+                              <div style={{ background: K.card, borderRadius: "18px 18px 0 0", width: "100%", maxWidth: 480, maxHeight: "88vh", overflowY: "auto", padding: "20px 18px 28px" }}>
+                                {/* Header */}
+                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
+                                  <div>
+                                    <div style={{ fontWeight: 700, fontSize: 16, color: K.t1, marginBottom: 2 }}>{sbCourse.name}</div>
+                                    <div style={{ fontSize: 11, color: K.t3 }}>{[sbCourse.city, sbCourse.state].filter(Boolean).join(", ")} · Par {sbCourse.par} · Slope {sbCourse.slope}</div>
+                                  </div>
+                                  <span onClick={() => setLocalDbPrompt(null)} style={{ fontSize: 20, color: K.t3, cursor: "pointer", lineHeight: 1, padding: "0 4px" }}>✕</span>
+                                </div>
+
+                                {/* Local DB notice */}
+                                <div style={{ background: `${ac}12`, border: `1px solid ${ac}35`, borderRadius: 10, padding: "10px 14px", marginBottom: 16 }}>
+                                  <div style={{ fontWeight: 700, fontSize: 12, color: ac, marginBottom: 4 }}>📁 Course exists in local database</div>
+                                  <div style={{ fontSize: 11, color: K.t2 }}>
+                                    Last saved {formattedDate ? `on ${formattedDate}` : ""} by <strong>{updatedBy}</strong>
+                                  </div>
+                                  <div style={{ fontSize: 10, color: K.t3, marginTop: 2 }}>
+                                    {tbs.length} tee {tbs.length === 1 ? "box" : "boxes"}{tbs.length > 0 ? ` — ${tbs.map(t => t.name).join(", ")}` : ""}
+                                  </div>
+                                </div>
+
+                                {/* Tee boxes preview */}
+                                {tbs.length > 0 && (
+                                  <div style={{ marginBottom: 14 }}>
+                                    <div style={{ fontSize: 9, color: K.t3, fontWeight: 700, textTransform: "uppercase", marginBottom: 6 }}>Tee Boxes</div>
+                                    <div style={{ display: "grid", gridTemplateColumns: "14px 1fr 44px 38px 30px 46px", gap: "3px 4px", fontSize: 8, color: K.t3, fontWeight: 600, marginBottom: 3, paddingLeft: 2 }}>
+                                      <div/><div>Name</div><div style={{textAlign:"center"}}>Rating</div><div style={{textAlign:"center"}}>Slope</div><div style={{textAlign:"center"}}>Par</div><div style={{textAlign:"center"}}>Yards</div>
+                                    </div>
+                                    {tbs.map((tb, i) => (
+                                      <div key={i} style={{ display: "grid", gridTemplateColumns: "14px 1fr 44px 38px 30px 46px", gap: "3px 4px", marginBottom: 3, alignItems: "center", fontSize: 11 }}>
+                                        <div style={{ width: 12, height: 12, borderRadius: 3, background: tb.color || "#888", border: "1px solid #ffffff20", flexShrink: 0 }} />
+                                        <div style={{ color: K.t1, fontWeight: 600 }}>{tb.name}</div>
+                                        <div style={{ textAlign: "center", color: K.t2 }}>{tb.rating}</div>
+                                        <div style={{ textAlign: "center", color: K.t2 }}>{tb.slope}</div>
+                                        <div style={{ textAlign: "center", color: K.t2 }}>{tb.par}</div>
+                                        <div style={{ textAlign: "center", color: K.t2 }}>{tb.yardage ? tb.yardage.toLocaleString() : "–"}</div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+
+                                {/* Scorecard preview */}
+                                <div style={{ marginBottom: 16 }}>
+                                  <div style={{ fontSize: 9, color: K.t3, fontWeight: 700, textTransform: "uppercase", marginBottom: 6 }}>Scorecard</div>
+                                  <ScorecardPreview course={sbCourse} />
+                                </div>
+
+                                {/* Action buttons */}
+                                <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+                                  <button onClick={() => {
+                                    // Use local data — open preview with Supabase course
+                                    setLocalDbPrompt(null);
+                                    setCoursePreview({ ...sbCourse, _source: "WBC History" });
+                                  }} style={{ flex: 1, padding: "12px 0", borderRadius: 10, background: ac, border: "none", color: "#0a1628", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+                                    ✓ Use Local Data
+                                  </button>
+                                  <button onClick={async () => {
+                                    // Fetch fresh from API — run search and open preview with API data
+                                    setLocalDbPrompt(null);
+                                    setSearchLoading(true);
+                                    try {
+                                      const q = sbCourse.name;
+                                      const stateParam = sbCourse.state ? `&state=${encodeURIComponent(sbCourse.state)}` : "";
+                                      const [r1, r2] = await Promise.allSettled([
+                                        fetch(`/api/courses2?search=${encodeURIComponent(q)}${stateParam}`).then(r => r.json()),
+                                        fetch(`/api/courses?search=${encodeURIComponent(q)}`).then(r => r.json()),
+                                      ]);
+                                      const rapidRaw = r1.status === "fulfilled" ? r1.value : [];
+                                      const gcRaw = r2.status === "fulfilled" ? r2.value : [];
+                                      // Simple: find best match by name
+                                      const allApi = [...(Array.isArray(rapidRaw) ? rapidRaw : rapidRaw.courses || []), ...(Array.isArray(gcRaw) ? gcRaw : gcRaw.courses || [])];
+                                      const match = allApi.find(c => (c.name || c.club_name || "").toLowerCase().includes(q.toLowerCase().split(" ")[0]));
+                                      if (match) {
+                                        setCoursePreview({ ...sbCourse, ...match, id: sbCourse.id, _source: match.source || "API", _freshFetch: true });
+                                      } else {
+                                        // No API match — fall back to local
+                                        setCoursePreview({ ...sbCourse, _source: "WBC History" });
+                                      }
+                                    } catch(e) {
+                                      setCoursePreview({ ...sbCourse, _source: "WBC History" });
+                                    }
+                                    setSearchLoading(false);
+                                  }} style={{ flex: 1, padding: "12px 0", borderRadius: 10, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t2, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+                                    🔄 Fetch Fresh
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })()}
+
                         {/* Course preview/confirm modal */}
                         {coursePreview && (() => {
                           const draft = coursePreview;
@@ -3906,12 +4053,14 @@ export default function WBCApp() {
     }
     // Strip all internal UI flags and tee_boxes before saving course row
     const { tee_boxes, _incompleteData, _apiVersion, _sbVersion, _gcVersion,
-            _sbHasReal, _apiHasReal, _rapidHasReal, _gcHasReal, _source, ...rawCourseData } = course;
+            _sbHasReal, _apiHasReal, _rapidHasReal, _gcHasReal, _source, _freshFetch, ...rawCourseData } = course;
     // Ensure course has a stable id (not a temporary rapid_/gc_ prefixed one if Supabase has it)
     const courseId = rawCourseData.id || `course_${Date.now()}`;
     const courseData = { ...rawCourseData, id: courseId };
     // Save course FIRST and wait for it before saving tee boxes (foreign key requirement)
-    await sb.upsert("courses", courseData, "id");
+    const now = new Date().toISOString();
+    const savedBy = typeof currentUser !== "undefined" ? currentUser?.name || "Unknown" : "Unknown";
+    await sb.upsert("courses", { ...courseData, updated_at: now, updated_by: savedBy }, "id");
     if (tee_boxes?.length) {
       for (const tb of tee_boxes) {
         // Strip any UI-only fields from tee box too
@@ -4251,7 +4400,7 @@ export default function WBCApp() {
                 });
                 return next;
               });
-            }} passwords={passwords} setPasswords={async pw => { setPasswords(pw); await saveTournamentState(finalizedRounds, pw); }} holeData={holeData} finalizedRounds={finalizedRounds} onFinalizeRound={async rnd => { const nf = { ...finalizedRounds, [rnd]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); if (rnd < 4) setRound(rnd + 1); }} getPlayerTee={getPlayerTee} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); }} /> : (
+            }} passwords={passwords} setPasswords={async pw => { setPasswords(pw); await saveTournamentState(finalizedRounds, pw); }} holeData={holeData} finalizedRounds={finalizedRounds} onFinalizeRound={async rnd => { const nf = { ...finalizedRounds, [rnd]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); if (rnd < 4) setRound(rnd + 1); }} getPlayerTee={getPlayerTee} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); }} currentUser={user} /> : (
           <div style={{ textAlign: "center", padding: "40px 20px" }}>
             <div style={{ fontSize: 40, marginBottom: 12 }}>🔒</div>
             <div style={{ fontSize: 16, fontWeight: 700, color: K.t1, marginBottom: 6 }}>Directors Only</div>
