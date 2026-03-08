@@ -3787,7 +3787,7 @@ export default function WBCApp() {
               hole_handicaps: c.hole_handicaps || [],
               tee_boxes: (tbRows || []).filter(t => t.course_id === c.id).map(t => ({ name: t.name, color: t.color, rating: parseFloat(t.rating), slope: t.slope, par: t.par, yardage: t.yardage })),
             }));
-            setCourseList(coursesWithTees);
+            setCourseList(prev => sortCoursesByRound(coursesWithTees, tRounds));
           }
         }
 
@@ -4017,6 +4017,15 @@ export default function WBCApp() {
     notify(`Player withdrawn from tournament`);
   };
 
+  const sortCoursesByRound = (list, rounds) => {
+    return [...list].sort((a, b) => {
+      const ra = rounds.find(r => r.course_id === a.id)?.round_number ?? 99;
+      const rb = rounds.find(r => r.course_id === b.id)?.round_number ?? 99;
+      if (ra !== rb) return ra - rb;
+      return a.name.localeCompare(b.name); // fallback alpha for unassigned
+    });
+  };
+
   const setCourseForRound = async (rnd, course) => {
     if (course.id) {
       setCourseList(prev => prev.find(c => c.id === course.id) ? prev : [...prev, course]);
@@ -4042,9 +4051,12 @@ export default function WBCApp() {
     const trRow = { id: `tr_2026_r${rnd}`, tournament_id: TOURNAMENT_ID, round_number: rnd, course_id: course.id || null };
     setTRounds(prev => {
       const existing = prev.find(t => t.round_number === rnd);
-      if (existing) return prev.map(t => t.round_number === rnd ? { ...t, course_id: course.id } : t);
-      if (!course.id) return prev;
-      return [...prev, trRow];
+      const updated = existing
+        ? prev.map(t => t.round_number === rnd ? { ...t, course_id: course.id } : t)
+        : (course.id ? [...prev, trRow] : prev);
+      // Re-sort courseList by round assignment now that rounds have changed
+      setCourseList(cl => sortCoursesByRound(cl, updated));
+      return updated;
     });
     await sb.upsert("tournament_rounds", trRow, "id");
     // Auto-assign default tee
@@ -4107,9 +4119,10 @@ export default function WBCApp() {
     }
     // Update local state with clean version (always, even if tee saves had errors)
     const cleanCourse = { ...courseData, tee_boxes: tee_boxes || [] };
-    setCourseList(prev => prev.find(c => c.id === courseId)
-      ? prev.map(c => c.id === courseId ? cleanCourse : c)
-      : [...prev, cleanCourse]);
+    setCourseList(prev => sortCoursesByRound(
+      prev.find(c => c.id === courseId) ? prev.map(c => c.id === courseId ? cleanCourse : c) : [...prev, cleanCourse],
+      tRounds
+    ));
     notify(`Added ${course.name}`);
   };
 
