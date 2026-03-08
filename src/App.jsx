@@ -3031,6 +3031,10 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                                               : <span style={{ color: K.t2 }}>{tb[f]}</span>}
                                           </div>
                                         ))}
+                                        {isEditing && (
+                                          <button onClick={() => setEditingCourse(prev => ({ ...prev, draft: { ...prev.draft, tee_boxes: prev.draft.tee_boxes.filter((_,i) => i !== tbi) } }))}
+                                            style={{ marginLeft: "auto", background: "transparent", border: "none", color: K.t3, cursor: "pointer", fontSize: 13, lineHeight: 1, padding: "0 2px" }} title="Remove tee">✕</button>
+                                        )}
                                       </div>
                                     ))}
                                   </div>
