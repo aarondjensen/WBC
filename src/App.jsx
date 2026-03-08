@@ -2504,186 +2504,119 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
       setSearchLoading(true);
       const stateFilter = stateOverride !== undefined ? stateOverride : courseStateFilter;
       try {
-        // First search Supabase (14 years of WBC history)
         const q = query.trim();
-        const qEnc = encodeURIComponent(`*${q}*`);
-        const stateClause = stateFilter ? `&state=eq.${stateFilter}` : "";
-        const rows = await sb.get("courses", `or=(name.ilike.${qEnc},city.ilike.${qEnc})${stateClause}&order=name&limit=20`);
+        const stateParam = stateFilter ? `&state=${encodeURIComponent(stateFilter)}` : "";
         let results = [];
-        if (rows?.length) {
-          const filtered = stateFilter ? rows.filter(r => r.state?.toUpperCase() === stateFilter.toUpperCase()) : rows;
-          const ids = filtered.map(r => r.id).join(",");
-          const tbRows = ids ? await sb.get("tee_boxes", `course_id=in.(${ids})`) : [];
-          results = filtered.map((c) => ({
-            ...c,
-            hole_pars: c.hole_pars || [],
-            hole_handicaps: c.hole_handicaps || [],
-            tee_boxes: (tbRows || []).filter(t => t.course_id === c.id).map((t, ti) => {
-              // If tee box has placeholder slope but course row has real slope, sync it
-              const tbSlope = parseInt(t.slope);
-              const courseSlope = parseInt(c.slope);
-              const slope = (tbSlope === 113 && courseSlope && courseSlope !== 113) ? courseSlope : t.slope;
-              return { ...t, slope, color: resolveTeeColor(t, ti) };
-            }),
-          }));
-        }
-        // Then search golf course API via proxy — supports two response schemas:
-        // Schema A (golfcourseapi.com): { courses: [{ club_name, course_name, location:{city,state}, tees:{male:[],female:[]} }] }
-        //   Each tee: { tee_name, slope_rating, course_rating, par_total, total_yards, holes:[{par,yardage,handicap}] }
-        // Schema B (RapidAPI): [ { name, city, state, teeBoxes:[{tee,slope,handicap}], scorecard:[{Hole,Par,Handicap,tees:{teeBox1:{color,yards}}}] } ]
+
+        // 1. RapidAPI — primary source (has full tee data)
         try {
-          const stateParam = stateFilter ? `&state=${encodeURIComponent(stateFilter)}` : "";
-          const apiRes = await fetch(`/api/courses?search=${encodeURIComponent(q)}${stateParam}`);
+          const apiUrl = `/api/courses2?search=${encodeURIComponent(q)}${stateParam}`;
+          console.log("[RapidAPI] fetching:", apiUrl);
+          const apiRes = await fetch(apiUrl);
+          console.log("[RapidAPI] status:", apiRes.status);
           if (apiRes.ok) {
             const apiData = await apiRes.json();
+            console.log("[RapidAPI] raw:", JSON.stringify(apiData).slice(0, 600));
             const rawCourses = Array.isArray(apiData) ? apiData : (apiData.courses || apiData.data || []);
-
-            const parsedCourses = rawCourses.map((c, ci) => {
-              const isSchemaB = Array.isArray(c.teeBoxes);
-              let tees, hole_pars, hole_handicaps, par, slope, rating, name, city, state;
-
-              if (isSchemaB) {
-                // Schema B: RapidAPI
-                name = c.name || "Unknown";
-                city = c.city || "";
-                state = c.state || "";
-                const sc = Array.isArray(c.scorecard) ? c.scorecard : [];
-                hole_pars = sc.map(h => parseInt(h.Par) || 4);
-                hole_handicaps = sc.map(h => parseInt(h.Handicap) || 0);
-                par = hole_pars.reduce((a, b) => a + b, 0) || 72;
-                tees = (c.teeBoxes || []).map((t, ti) => ({
-                  name: t.tee || "Default",
-                  color: resolveTeeColor({ name: t.tee || "", color: t.tee || "" }, ti),
-                  slope: parseInt(t.slope) || 113,
-                  rating: parseFloat(t.handicap) || 72.0, // mislabeled as 'handicap' in RapidAPI
-                  par,
-                  yardage: sc.reduce((a, h) => {
-                    const tb = h.tees ? Object.values(h.tees)[ti] || Object.values(h.tees)[0] : null;
-                    return a + (parseInt(tb?.yards) || 0);
-                  }, 0),
-                }));
-                slope = tees[0]?.slope || 113;
-                rating = tees[0]?.rating || 72.0;
-              } else {
-                // Schema A: golfcourseapi.com — tees: { male: [...], female: [...] }
-                name = [c.club_name, c.course_name].filter(Boolean).join(" – ") || c.name || "Unknown";
-                city = c.location?.city || c.city || "";
-                state = c.location?.state || c.state || "";
-                const teesObj = c.tees || {};
-                const allTees = Array.isArray(teesObj) ? teesObj
-                  : (Array.isArray(teesObj.male) && teesObj.male.length ? teesObj.male : (teesObj.female || []));
-                tees = allTees.map((t, ti) => ({
-                  name: t.tee_name || "Default",
-                  color: resolveTeeColor({ name: t.tee_name || "", color: "" }, ti),
-                  rating: parseFloat(t.course_rating) || 72.0,
-                  slope: parseInt(t.slope_rating) || 113,
-                  par: parseInt(t.par_total) || 72,
-                  yardage: parseInt(t.total_yards) || 0,
-                }));
-                const firstTee = allTees[0];
-                const holes = firstTee?.holes || [];
-                hole_pars = holes.map(h => parseInt(h.par) || 4);
-                hole_handicaps = holes.map(h => parseInt(h.handicap) || 0);
-                par = parseInt(firstTee?.par_total) || 72;
-                slope = parseInt(firstTee?.slope_rating) || 113;
-                rating = parseFloat(firstTee?.course_rating) || 72.0;
-              }
-
-              return { id: `gc_${c.id || c._id || ci}`, name, city, state, par, slope, rating, hole_pars, hole_handicaps, tee_boxes: tees };
-            });
-
-            // Check if primary API returned useless slope data (all tees defaulted to 113)
-            const hasRealSlopes = (courses) => courses.some(c => (c.tee_boxes || []).some(tb => parseInt(tb.slope) !== 113));
-            const needsBackup = parsedCourses.length > 0 && !hasRealSlopes(parsedCourses);
-
-            let finalParsed = parsedCourses;
-            if (needsBackup) {
-              try {
-                console.log("Primary API returned default slopes — trying backup API (/api/courses2)");
-                const backupRes = await fetch(`/api/courses2?search=${encodeURIComponent(q)}${stateParam}`);
-                if (backupRes.ok) {
-                  const backupData = await backupRes.json();
-                  const rawBackup = Array.isArray(backupData) ? backupData : (backupData.courses || backupData.data || []);
-                  const backupParsed = rawBackup.map((c, ci) => {
-                    const isSchemaB = Array.isArray(c.teeBoxes);
-                    let tees, hole_pars, hole_handicaps, par, slope, rating, name, city, state;
-                    if (isSchemaB) {
-                      name = c.name || "Unknown";
-                      city = c.city || ""; state = c.state || "";
-                      const sc = Array.isArray(c.scorecard) ? c.scorecard : [];
-                      hole_pars = sc.map(h => parseInt(h.Par) || 4);
-                      hole_handicaps = sc.map(h => parseInt(h.Handicap) || 0);
-                      par = hole_pars.reduce((a,b) => a+b, 0) || 72;
-                      tees = (c.teeBoxes || []).map((t, ti) => ({
-                        name: t.tee || "Default",
-                        color: resolveTeeColor({ name: t.tee || "", color: t.tee || "" }, ti),
-                        slope: parseInt(t.slope) || 113,
-                        rating: parseFloat(t.handicap) || 72.0,
-                        par, yardage: sc.reduce((a, h) => { const tb = h.tees ? Object.values(h.tees)[ti] || Object.values(h.tees)[0] : null; return a + (parseInt(tb?.yards) || 0); }, 0),
-                      }));
-                      slope = tees[0]?.slope || 113; rating = tees[0]?.rating || 72.0;
-                    } else {
-                      name = [c.club_name, c.course_name].filter(Boolean).join(" – ") || c.name || "Unknown";
-                      city = c.location?.city || c.city || ""; state = c.location?.state || c.state || "";
-                      const teesObj = c.tees || {};
-                      const allTees = Array.isArray(teesObj) ? teesObj : (Array.isArray(teesObj.male) && teesObj.male.length ? teesObj.male : (teesObj.female || []));
-                      tees = allTees.map((t, ti) => ({ name: t.tee_name || "Default", color: resolveTeeColor({ name: t.tee_name || "", color: "" }, ti), rating: parseFloat(t.course_rating) || 72.0, slope: parseInt(t.slope_rating) || 113, par: parseInt(t.par_total) || 72, yardage: parseInt(t.total_yards) || 0 }));
-                      const firstTee = allTees[0]; const holes = firstTee?.holes || [];
-                      hole_pars = holes.map(h => parseInt(h.par) || 4); hole_handicaps = holes.map(h => parseInt(h.handicap) || 0);
-                      par = parseInt(firstTee?.par_total) || 72; slope = parseInt(firstTee?.slope_rating) || 113; rating = parseFloat(firstTee?.course_rating) || 72.0;
-                    }
-                    return { id: `gc_${c.id || c._id || ci}`, name, city, state, par, slope, rating, hole_pars, hole_handicaps, tee_boxes: tees };
-                  });
-                  // Use backup results if they have better slope data
-                  if (hasRealSlopes(backupParsed)) {
-                    console.log("Backup API returned real slopes — using backup data");
-                    finalParsed = backupParsed;
-                  }
+            results = rawCourses
+              .filter(c => {
+                if (!stateFilter) return true;
+                const cs = (c.state || "").toUpperCase();
+                return !cs || cs === stateFilter.toUpperCase();
+              })
+              .map((c, ci) => {
+                const isSchemaB = Array.isArray(c.teeBoxes);
+                let tees, hole_pars, hole_handicaps, par, slope, rating, name, city, state;
+                if (isSchemaB) {
+                  name = c.name || "Unknown";
+                  city = c.city || ""; state = c.state || "";
+                  const sc = Array.isArray(c.scorecard) ? c.scorecard : [];
+                  hole_pars = sc.map(h => parseInt(h.Par) || 4);
+                  hole_handicaps = sc.map(h => parseInt(h.Handicap) || 0);
+                  par = hole_pars.reduce((a, b) => a + b, 0) || 72;
+                  tees = (c.teeBoxes || []).map((t, ti) => ({
+                    name: t.tee || "Default",
+                    color: resolveTeeColor({ name: t.tee || "", color: t.tee || "" }, ti),
+                    slope: parseInt(t.slope) || 113,
+                    rating: parseFloat(t.handicap) || 72.0,
+                    par,
+                    yardage: sc.reduce((a, h) => { const tb = h.tees ? Object.values(h.tees)[ti] || Object.values(h.tees)[0] : null; return a + (parseInt(tb?.yards) || 0); }, 0),
+                  }));
+                  slope = tees[0]?.slope || 113; rating = tees[0]?.rating || 72.0;
+                } else {
+                  name = [c.club_name, c.course_name].filter(Boolean).join(" – ") || c.name || "Unknown";
+                  city = c.location?.city || c.city || ""; state = c.location?.state || c.state || "";
+                  const teesObj = c.tees || {};
+                  const allTees = Array.isArray(teesObj) ? teesObj : (Array.isArray(teesObj.male) && teesObj.male.length ? teesObj.male : (teesObj.female || []));
+                  tees = allTees.map((t, ti) => ({ name: t.tee_name || "Default", color: resolveTeeColor({ name: t.tee_name || "", color: "" }, ti), rating: parseFloat(t.course_rating) || 72.0, slope: parseInt(t.slope_rating) || 113, par: parseInt(t.par_total) || 72, yardage: parseInt(t.total_yards) || 0 }));
+                  const firstTee = allTees[0]; const holes = firstTee?.holes || [];
+                  hole_pars = holes.map(h => parseInt(h.par) || 4); hole_handicaps = holes.map(h => parseInt(h.handicap) || 0);
+                  par = parseInt(firstTee?.par_total) || 72; slope = parseInt(firstTee?.slope_rating) || 113; rating = parseFloat(firstTee?.course_rating) || 72.0;
                 }
-              } catch(backupErr) {
-                console.log("Backup API also failed:", backupErr);
-              }
-            }
-
-            const apiCourses = [];
-            for (const parsed of finalParsed) {
-              if (stateFilter && parsed.state && parsed.state.toUpperCase() !== stateFilter.toUpperCase()) continue;
-              const existingMatch = results.find(r => r.name.toLowerCase() === parsed.name.toLowerCase());
-              if (existingMatch) {
-                // 113 is the USGA default placeholder — any other value means real data was found
-                const hasRealSlope = (c) => (c.tee_boxes || []).some(tb => parseInt(tb.slope) !== 113) || (parseInt(c.slope) !== 113 && !!c.slope);
-                const sbReal = hasRealSlope(existingMatch);
-                const apiReal = hasRealSlope(parsed);
-                console.log(`[merge] ${existingMatch.name}: sbReal=${sbReal} (slope=${existingMatch.slope}, tees=${existingMatch.tee_boxes?.length}), apiReal=${apiReal} (slope=${parsed.slope}, tees=${parsed.tee_boxes?.length})`);
-
-                if (sbReal && apiReal) {
-                  // Both have real slope data — let director compare and choose
-                  const merged = { ...existingMatch, _apiVersion: parsed, _sbHasReal: true, _apiHasReal: true };
-                  results = results.map(r => r.id === existingMatch.id ? merged : r);
-                } else if (apiReal && !sbReal) {
-                  // API has real data, Supabase only has placeholder
-                  // Only replace tee_boxes if API has more tees, otherwise just update slope/rating on existing tees
-                  const sbTeeCount = existingMatch.tee_boxes?.length || 0;
-                  const apiTeeCount = parsed.tee_boxes?.length || 0;
-                  const newTeeBoxes = apiTeeCount >= sbTeeCount ? parsed.tee_boxes
-                    : (existingMatch.tee_boxes || []).map(t => ({ ...t, slope: parsed.tee_boxes?.[0]?.slope || parsed.slope || t.slope, rating: parsed.tee_boxes?.[0]?.rating || parsed.rating || t.rating }));
-                  const refreshed = { ...existingMatch, par: parsed.par, slope: parsed.slope, rating: parsed.rating, hole_pars: parsed.hole_pars, hole_handicaps: parsed.hole_handicaps, tee_boxes: newTeeBoxes };
-                  results = results.map(r => r.id === existingMatch.id ? refreshed : r);
-                  const { tee_boxes: rTees, ...courseData } = refreshed;
-                  sb.upsert("courses", courseData, "id").catch(() => {});
-                  if (rTees?.length) rTees.forEach(tb => sb.upsert("tee_boxes", { id: `tb_${existingMatch.id}_${tb.name.toLowerCase().replace(/\s+/g,"_")}`, course_id: existingMatch.id, ...tb }, "id").catch(() => {}));
-                }
-                // sbReal && !apiReal: Supabase has real data, API has placeholder — keep Supabase as-is
-                // !sbReal && !apiReal: both placeholder — keep Supabase, nothing better available
-              } else {
-                apiCourses.push(parsed);
-              }
-            }
-            results = [...results, ...apiCourses];
+                return { id: `gc_${c.id || c._id || ci}`, name, city, state, par, slope, rating, hole_pars, hole_handicaps, tee_boxes: tees };
+              });
+            console.log("[RapidAPI] parsed:", results.map(c => ({ name: c.name, tees: c.tee_boxes?.length, slope: c.slope })));
           }
         } catch(apiErr) {
-          console.log("Golf course API proxy failed:", apiErr);
+          console.log("[RapidAPI] failed:", apiErr);
         }
+
+        // 2. Supabase — merge in WBC history (preserves known course ids, enriches with stored data)
+        try {
+          const qEnc = encodeURIComponent(`*${q}*`);
+          const stateClause = stateFilter ? `&state=eq.${stateFilter}` : "";
+          const rows = await sb.get("courses", `or=(name.ilike.${qEnc},city.ilike.${qEnc})${stateClause}&order=name&limit=20`);
+          if (rows?.length) {
+            const filtered = stateFilter ? rows.filter(r => r.state?.toUpperCase() === stateFilter.toUpperCase()) : rows;
+            const ids = filtered.map(r => r.id).join(",");
+            const tbRows = ids ? await sb.get("tee_boxes", `course_id=in.(${ids})`) : [];
+            const sbCourses = filtered.map((c) => ({
+              ...c,
+              hole_pars: c.hole_pars || [],
+              hole_handicaps: c.hole_handicaps || [],
+              tee_boxes: (tbRows || []).filter(t => t.course_id === c.id).map((t, ti) => {
+                const tbSlope = parseInt(t.slope);
+                const courseSlope = parseInt(c.slope);
+                const slope = (tbSlope === 113 && courseSlope && courseSlope !== 113) ? courseSlope : t.slope;
+                return { ...t, slope, color: resolveTeeColor(t, ti) };
+              }),
+            }));
+            console.log("[Supabase] courses:", sbCourses.map(c => ({ name: c.name, tees: c.tee_boxes?.length, slope: c.slope })));
+
+            // Merge: for each Supabase course, check if RapidAPI already found it
+            const hasRealSlope = (c) => (c.tee_boxes || []).some(tb => parseInt(tb.slope) !== 113) || (parseInt(c.slope) !== 113 && !!c.slope);
+            for (const sbC of sbCourses) {
+              const apiMatch = results.find(r => r.name.toLowerCase() === sbC.name.toLowerCase());
+              if (apiMatch) {
+                const apiReal = hasRealSlope(apiMatch);
+                const sbReal = hasRealSlope(sbC);
+                console.log(`[merge] "${sbC.name}": api tees=${apiMatch.tee_boxes?.length} real=${apiReal}, sb tees=${sbC.tee_boxes?.length} real=${sbReal}`);
+                if (apiReal && sbReal) {
+                  // Both have real data — show conflict banner, default to API (fresher)
+                  results = results.map(r => r.name.toLowerCase() === sbC.name.toLowerCase()
+                    ? { ...apiMatch, id: sbC.id, _apiVersion: apiMatch, _sbVersion: sbC, _sbHasReal: true, _apiHasReal: true }
+                    : r);
+                } else if (sbReal && !apiReal) {
+                  // Supabase has real slope, API doesn't — use Supabase tees but keep API hole data if better
+                  results = results.map(r => r.name.toLowerCase() === sbC.name.toLowerCase()
+                    ? { ...apiMatch, id: sbC.id, tee_boxes: sbC.tee_boxes, slope: sbC.slope, rating: sbC.rating }
+                    : r);
+                } else {
+                  // API real or both placeholder — keep API result but use Supabase id
+                  results = results.map(r => r.name.toLowerCase() === sbC.name.toLowerCase()
+                    ? { ...apiMatch, id: sbC.id }
+                    : r);
+                }
+              } else {
+                // Only in Supabase, not found by API — add it
+                results.push(sbC);
+              }
+            }
+          }
+        } catch(sbErr) {
+          console.log("[Supabase] search failed:", sbErr);
+        }
+
         setSearchResults(results);
       } catch (err) {
         console.log("Course search failed:", err);
