@@ -2422,6 +2422,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [expandedCourse, setExpandedCourse] = useState(null);
+  const [editingCourse, setEditingCourse] = useState(null); // { courseId, draft: {...} }
   const [confirmRound, setConfirmRound] = useState(null);
   const [editRound, setEditRound] = useState(() => { for (let r = 1; r <= 4; r++) { if (!finalizedRounds[r]) return r; } return 4; });
   // Keep editRound pointing at the active round when finalization state changes
@@ -2523,31 +2524,44 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
           const apiRes = await fetch(`/api/courses?search=${encodeURIComponent(q)}${stateParam}`);
           if (apiRes.ok) {
             const apiData = await apiRes.json();
-            const apiCourses = (apiData.courses || [])
-              .filter(c => !results.find(r => r.name.toLowerCase() === (c.club_name || c.course_name || "").toLowerCase()))
-              .map((c, ci) => {
-                const tees = (c.tees || []).map((t, ti) => ({
-                  name: t.tee_name || t.name || "Default",
-                  color: resolveTeeColor({ name: t.tee_name || t.name || "", color: "" }, ti),
-                  rating: parseFloat(t.course_rating) || 72.0,
-                  slope: parseInt(t.slope_rating) || 113,
-                  par: parseInt(t.par) || 72,
-                  yardage: parseInt(t.total_yards) || 0,
-                }));
-                const firstTee = c.tees?.[0];
-                return {
+            const apiCourses = [];
+            for (const [ci, c] of (apiData.courses || []).entries()) {
+              const apiName = (c.club_name || c.course_name || "").toLowerCase();
+              const existingMatch = results.find(r => r.name.toLowerCase() === apiName);
+              const tees = (c.tees || []).map((t, ti) => ({
+                name: t.tee_name || t.name || "Default",
+                color: resolveTeeColor({ name: t.tee_name || t.name || "", color: "" }, ti),
+                rating: parseFloat(t.course_rating) || 72.0,
+                slope: parseInt(t.slope_rating) || 113,
+                par: parseInt(t.par) || 72,
+                yardage: parseInt(t.total_yards) || 0,
+              }));
+              const firstTee = c.tees?.[0];
+              const freshData = {
+                par: parseInt(firstTee?.par) || 72,
+                slope: parseInt(firstTee?.slope_rating) || 113,
+                rating: parseFloat(firstTee?.course_rating) || 72.0,
+                hole_pars: firstTee?.holes?.map(h => h.par) || [],
+                hole_handicaps: firstTee?.holes?.map(h => h.handicap) || [],
+                tee_boxes: tees,
+              };
+              if (existingMatch) {
+                // Cross-check: silently refresh Supabase record with latest API data
+                const refreshed = { ...existingMatch, ...freshData };
+                results = results.map(r => r.id === existingMatch.id ? refreshed : r);
+                const { tee_boxes: rTees, ...courseData } = refreshed;
+                sb.upsert("courses", courseData, "id").catch(() => {});
+                if (rTees?.length) rTees.forEach(tb => sb.upsert("tee_boxes", { id: `tb_${existingMatch.id}_${tb.name.toLowerCase().replace(/\s+/g,"_")}`, course_id: existingMatch.id, ...tb }, "id").catch(() => {}));
+              } else {
+                apiCourses.push({
                   id: `gc_${c.id || ci}`,
                   name: c.club_name || c.course_name || "Unknown",
                   city: c.location?.city || "",
                   state: c.location?.state || "",
-                  par: parseInt(firstTee?.par) || 72,
-                  slope: parseInt(firstTee?.slope_rating) || 113,
-                  rating: parseFloat(firstTee?.course_rating) || 72.0,
-                  hole_pars: firstTee?.holes?.map(h => h.par) || [],
-                  hole_handicaps: firstTee?.holes?.map(h => h.handicap) || [],
-                  tee_boxes: tees,
-                };
-              });
+                  ...freshData,
+                });
+              }
+            }
             results = [...results, ...apiCourses];
           }
         } catch(apiErr) {
@@ -2868,34 +2882,91 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                             </div>
                             <button onClick={() => setConfirmCourse({ course: c, delete: true, assignedRounds })} style={{ background: "transparent", border: "none", color: K.t3, cursor: "pointer", fontSize: 14, padding: "2px 4px", lineHeight: 1 }} title="Remove course">✕</button>
                           </div>
-                          {expandedCourse === c.id && (
-                            <div style={{ padding: "0 14px 12px", background: ac + "04" }}>
-                              <div style={{ fontSize: 10, color: K.t3, marginBottom: 4 }}>Rating {c.rating} · Slope {c.slope}</div>
-                              {[["Front", 0, 9], ["Back", 9, 9]].map(([label, start, count]) => {
-                                const pars = (c.hole_pars || []).slice(start, start + count);
-                                const hcps = (c.hole_handicaps || []).slice(start, start + count);
-                                return (
-                                  <div key={label} style={{ marginBottom: 4 }}>
-                                    <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8 }}>
-                                      <div style={{ color: K.t3, fontWeight: 600, padding: "2px 0" }}>Hole</div>
-                                      {pars.map((_, i) => <div key={i} style={{ textAlign: "center", color: K.t2, fontWeight: 700, padding: "2px 0" }}>{start + i + 1}</div>)}
-                                      <div />
+                          {expandedCourse === c.id && (() => {
+                            const isEditing = editingCourse?.courseId === c.id;
+                            const d = isEditing ? editingCourse.draft : c;
+                            const inpStyle = { background: K.inp, border: `1px solid ${ac}40`, borderRadius: 4, color: K.t1, fontSize: 9, textAlign: "center", width: "100%", padding: "2px 0", boxSizing: "border-box" };
+                            const readStyle = { textAlign: "center", color: K.t1, fontWeight: 700, padding: "3px 0", fontSize: 9 };
+                            const startEdit = () => setEditingCourse({ courseId: c.id, draft: { ...c, hole_pars: [...(c.hole_pars||Array(18).fill(4))], hole_handicaps: [...(c.hole_handicaps||Array(18).fill(0))], tee_boxes: (c.tee_boxes||[]).map(t=>({...t})) } });
+                            const saveEdit = () => {
+                              const updated = { ...editingCourse.draft };
+                              setCourseList(prev => prev.map(x => x.id === c.id ? updated : x));
+                              const { tee_boxes: tbs, ...courseData } = updated;
+                              addCourse(updated);
+                              setEditingCourse(null);
+                            };
+                            return (
+                              <div style={{ padding: "0 14px 12px", background: ac + "04" }}>
+                                {/* Rating / Slope row */}
+                                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, marginTop: 4 }}>
+                                  {["rating","slope"].map(field => (
+                                    <div key={field} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                                      <span style={{ fontSize: 9, color: K.t3, textTransform: "capitalize" }}>{field}:</span>
+                                      {isEditing
+                                        ? <input value={d[field]||""} onChange={e => setEditingCourse(prev => ({ ...prev, draft: { ...prev.draft, [field]: e.target.value } }))} style={{ ...inpStyle, width: 44 }} />
+                                        : <span style={{ fontSize: 9, color: K.t2, fontWeight: 700 }}>{d[field]}</span>}
                                     </div>
-                                    <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8, background: K.inp, borderRadius: 3 }}>
-                                      <div style={{ color: K.t3, fontWeight: 600, padding: "3px 2px" }}>Par</div>
-                                      {pars.map((p, i) => <div key={i} style={{ textAlign: "center", color: K.t1, fontWeight: 700, padding: "3px 0" }}>{p}</div>)}
-                                      <div style={{ textAlign: "center", color: ac, fontWeight: 800, padding: "3px 0" }}>{pars.reduce((a,b)=>a+b,0)}</div>
-                                    </div>
-                                    <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8 }}>
-                                      <div style={{ color: K.t3, fontWeight: 600, padding: "2px 2px" }}>HCP</div>
-                                      {hcps.map((h, i) => <div key={i} style={{ textAlign: "center", color: K.t3, padding: "2px 0" }}>{h}</div>)}
-                                      <div />
-                                    </div>
+                                  ))}
+                                  <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
+                                    {!isEditing
+                                      ? <button onClick={startEdit} style={{ padding: "3px 8px", borderRadius: 4, background: "transparent", border: `1px solid ${ac}60`, color: ac, fontSize: 9, fontWeight: 700, cursor: "pointer" }}>✏️ Edit</button>
+                                      : <>
+                                          <button onClick={saveEdit} style={{ padding: "3px 8px", borderRadius: 4, background: ac, border: "none", color: K.bg, fontSize: 9, fontWeight: 700, cursor: "pointer" }}>Save</button>
+                                          <button onClick={() => setEditingCourse(null)} style={{ padding: "3px 8px", borderRadius: 4, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t3, fontSize: 9, cursor: "pointer" }}>Cancel</button>
+                                        </>}
                                   </div>
-                                );
-                              })}
-                            </div>
-                          )}
+                                </div>
+                                {/* Tee boxes */}
+                                {(d.tee_boxes||[]).length > 0 && (
+                                  <div style={{ marginBottom: 8 }}>
+                                    <div style={{ fontSize: 8, color: K.t3, fontWeight: 600, marginBottom: 3, textTransform: "uppercase" }}>Tee Boxes</div>
+                                    {(d.tee_boxes||[]).map((tb, tbi) => (
+                                      <div key={tbi} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 3, fontSize: 9 }}>
+                                        <div style={{ width: 10, height: 10, borderRadius: "50%", background: tb.color || "#aaa", flexShrink: 0 }} />
+                                        <span style={{ color: K.t2, fontWeight: 600, width: 52 }}>{tb.name}</span>
+                                        {["rating","slope","par"].map(f => (
+                                          <div key={f} style={{ display: "flex", alignItems: "center", gap: 2 }}>
+                                            <span style={{ color: K.t3, fontSize: 8 }}>{f[0].toUpperCase()+f.slice(1)}:</span>
+                                            {isEditing
+                                              ? <input value={tb[f]||""} onChange={e => setEditingCourse(prev => { const tbs = prev.draft.tee_boxes.map((t,i) => i===tbi ? {...t,[f]:e.target.value} : t); return {...prev, draft:{...prev.draft,tee_boxes:tbs}}; })} style={{...inpStyle, width: f==="rating"?34:28}} />
+                                              : <span style={{ color: K.t2 }}>{tb[f]}</span>}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                                {/* Hole par / HCP grid */}
+                                {[["Front", 0, 9], ["Back", 9, 9]].map(([label, start, count]) => {
+                                  const pars = (d.hole_pars||[]).slice(start, start+count);
+                                  const hcps = (d.hole_handicaps||[]).slice(start, start+count);
+                                  return (
+                                    <div key={label} style={{ marginBottom: 4 }}>
+                                      <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8 }}>
+                                        <div style={{ color: K.t3, fontWeight: 600, padding: "2px 0" }}>Hole</div>
+                                        {Array.from({length:count},(_,i)=><div key={i} style={{ textAlign:"center", color:K.t2, fontWeight:700, padding:"2px 0" }}>{start+i+1}</div>)}
+                                        <div />
+                                      </div>
+                                      <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8, background: K.inp, borderRadius: 3 }}>
+                                        <div style={{ color: K.t3, fontWeight: 600, padding: "3px 2px" }}>Par</div>
+                                        {Array.from({length:count},(_,i) => isEditing
+                                          ? <input key={i} value={pars[i]??""} onChange={e => setEditingCourse(prev => { const hp=[...(prev.draft.hole_pars||[])]; hp[start+i]=parseInt(e.target.value)||0; return {...prev,draft:{...prev.draft,hole_pars:hp}}; })} style={inpStyle} />
+                                          : <div key={i} style={readStyle}>{pars[i]}</div>)}
+                                        <div style={{ textAlign:"center", color:ac, fontWeight:800, padding:"3px 0", fontSize:9 }}>{pars.reduce((a,b)=>a+(+b||0),0)}</div>
+                                      </div>
+                                      <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8 }}>
+                                        <div style={{ color: K.t3, fontWeight: 600, padding: "2px 2px" }}>HCP</div>
+                                        {Array.from({length:count},(_,i) => isEditing
+                                          ? <input key={i} value={hcps[i]??""} onChange={e => setEditingCourse(prev => { const hh=[...(prev.draft.hole_handicaps||[])]; hh[start+i]=parseInt(e.target.value)||0; return {...prev,draft:{...prev.draft,hole_handicaps:hh}}; })} style={{...inpStyle, color:K.t3}} />
+                                          : <div key={i} style={{ textAlign:"center", color:K.t3, padding:"2px 0", fontSize:9 }}>{hcps[i]}</div>)}
+                                        <div />
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            );
+                          })()}
                         </div>
                       );
                     })}
