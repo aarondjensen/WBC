@@ -2952,7 +2952,6 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                   background: K.danger + "15", border: `1px solid ${K.danger}60`,
                   color: K.danger, fontSize: 12, fontWeight: 700, cursor: "pointer",
                 }}>🗑 Start Fresh — Clear All Data</button>
-                <button onClick={() => { if (confirm("Reset all data to demo defaults? This cannot be undone.")) { resetToDemo(); setSettingsOpen(false); } }} style={{
                   width: "100%", padding: "10px 0", borderRadius: 8, background: "transparent",
                   border: `1px solid ${K.bdr}`, color: K.t3, fontSize: 11, fontWeight: 600, cursor: "pointer",
                 }}>🔄 Load Demo Data</button>
@@ -3038,7 +3037,9 @@ export default function WBCApp() {
   }, []);
 
   const [tPlayers, setTPlayers] = useState([]);
-  const [tRounds, setTRounds] = useState([]);
+  const [tRounds, setTRounds] = useState([
+    { id: "tr1", tournament_id: "wbc_2026", round_number: 1, course_id: "demo_course_1" },
+  ]);
   const [courseList, setCourseList] = useState([]);
   const [holeData, setHoleData] = useState({});
   const [ctpData, setCtpData] = useState({});
@@ -3057,8 +3058,6 @@ export default function WBCApp() {
   const [adminSettingsOpen, setAdminSettingsOpen] = useState(false);
   const [adminSettingsTab, setAdminSettingsTab] = useState("players");
   const [passwords, setPasswords] = useState({});
-    return pw;
-  });
   const [storageLoaded, setStorageLoaded] = useState(false);
   const [syncing, setSyncing] = useState(false);
 
@@ -3765,3 +3764,4 @@ export default function WBCApp() {
     </div>
     </div>
   );
+}
