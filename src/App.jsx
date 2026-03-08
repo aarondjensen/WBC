@@ -2970,7 +2970,8 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                               {Array.from({ length: numRounds }, (_, ri) => ri + 1).map(r => {
                                 const isAssigned = assignedRounds.includes(r);
                                 const tr = tRounds.find(t => t.round_number === r);
-                                const otherCourse = tr && tr.course_id && String(tr.course_id).trim() !== "" && tr.course_id !== c.id;
+                                const trCourseId = tr?.course_id;
+                                const otherCourse = trCourseId && trCourseId !== "null" && trCourseId !== "undefined" && String(trCourseId).trim() !== "" && trCourseId !== c.id && courses.find(x => x.id === trCourseId);
                                 return (
                                   <button key={r} onClick={() => {
                                     if (isAssigned) { setCourseForRound(r, { id: null, name: "" }); }
