@@ -2518,7 +2518,13 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
             ...c,
             hole_pars: c.hole_pars || [],
             hole_handicaps: c.hole_handicaps || [],
-            tee_boxes: (tbRows || []).filter(t => t.course_id === c.id).map((t, ti) => ({ ...t, color: resolveTeeColor(t, ti) })),
+            tee_boxes: (tbRows || []).filter(t => t.course_id === c.id).map((t, ti) => {
+              // If tee box has placeholder slope but course row has real slope, sync it
+              const tbSlope = parseInt(t.slope);
+              const courseSlope = parseInt(c.slope);
+              const slope = (tbSlope === 113 && courseSlope && courseSlope !== 113) ? courseSlope : t.slope;
+              return { ...t, slope, color: resolveTeeColor(t, ti) };
+            }),
           }));
         }
         // Then search golf course API via proxy — supports two response schemas:
@@ -3235,7 +3241,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                               <div>
                                 <div style={{ fontWeight: 600, fontSize: 13 }}>{c.name}</div>
-                                <div style={{ fontSize: 10, color: K.t3 }}>{c.city}{c.state ? `, ${c.state}` : ""}{c.par ? ` · Par ${c.par}` : ""}{c.slope ? ` · Slope ${c.slope}` : ""}</div>
+                                <div style={{ fontSize: 10, color: K.t3 }}>{c.city}{c.state ? `, ${c.state}` : ""}{c.par ? ` · Par ${c.par}` : ""}{(() => { const realTbSlope = (c.tee_boxes || []).find(t => parseInt(t.slope) !== 113)?.slope; const displaySlope = realTbSlope || (c.slope && parseInt(c.slope) !== 113 ? c.slope : null); return displaySlope ? ` · Slope ${displaySlope}` : ""; })()}</div>
                               </div>
                               <span style={{ color: ac, fontSize: 11, fontWeight: 700 }}>Preview →</span>
                             </div>
