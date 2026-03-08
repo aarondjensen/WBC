@@ -2600,48 +2600,10 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
           });
         };
 
-        // 1. RapidAPI
-        try {
-          const r = await fetch(`/api/courses2?search=${encodeURIComponent(q)}${stateParam}`);
-          if (r.ok) {
-            const data = await r.json();
-            const raw = Array.isArray(data) ? data : (data.courses || data.data || []);
-            results = parseRapidAPI(raw, stateFilter);
-            console.log("[RapidAPI] parsed:", results.map(c => ({ name: c.name, tees: c.tee_boxes?.length, slope: c.slope })));
-          }
-        } catch(e) { console.log("[RapidAPI] failed:", e); }
-
-        // 2. GolfCourseAPI — fill in any courses RapidAPI missed or has incomplete data for
-        try {
-          const r2 = await fetch(`/api/courses?search=${encodeURIComponent(q)}${stateParam}`);
-          if (r2.ok) {
-            const data2 = await r2.json();
-            const gcParsed = parseGolfCourseAPI(data2);
-            console.log("[GolfCourseAPI] parsed:", gcParsed.map(c => ({ name: c.name, tees: c.tee_boxes?.length, slope: c.slope })));
-            for (const gc of gcParsed) {
-              if (!stateMatches(gc.state, stateFilter)) continue;
-              const rapidMatch = results.find(r => r.name.toLowerCase() === gc.name.toLowerCase());
-              if (rapidMatch) {
-                // Both found — pick whichever has real slope data
-                const rapidReal = hasRealSlope(rapidMatch);
-                const gcReal = hasRealSlope(gc);
-                if (gcReal && !rapidReal) {
-                  results = results.map(r => r.name.toLowerCase() === gc.name.toLowerCase() ? { ...rapidMatch, tee_boxes: gc.tee_boxes, slope: gc.slope, rating: gc.rating } : r);
-                } else if (gcReal && rapidReal) {
-                  results = results.map(r => r.name.toLowerCase() === gc.name.toLowerCase()
-                    ? { ...rapidMatch, _gcVersion: gc, _rapidHasReal: true, _gcHasReal: true } : r);
-                }
-              } else {
-                results.push(gc);
-              }
-            }
-          }
-        } catch(e) { console.log("[GolfCourseAPI] failed:", e); }
-
-        // 3. Supabase — merge WBC history
+        // 1. Supabase FIRST — local WBC history takes priority
+        let sbCourseNames = new Set();
         try {
           const qEnc = encodeURIComponent(`*${q}*`);
-          // Don't filter by state in URL — state may be stored as full name or abbrev, use stateMatches() in JS
           const rows = await sb.get("courses", `or=(name.ilike.${qEnc},city.ilike.${qEnc})&order=name&limit=40`);
           if (rows?.length) {
             const filtered = stateFilter ? rows.filter(r => stateMatches(r.state, stateFilter)) : rows;
@@ -2649,6 +2611,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
             const tbRows = ids ? await sb.get("tee_boxes", `course_id=in.(${ids})`) : [];
             const sbCourses = filtered.map((c) => ({
               ...c, hole_pars: c.hole_pars || [], hole_handicaps: c.hole_handicaps || [],
+              _source: "WBC History",
               tee_boxes: (tbRows || []).filter(t => t.course_id === c.id).map((t, ti) => {
                 const tbSlope = parseInt(t.slope), courseSlope = parseInt(c.slope);
                 const slope = (tbSlope === 113 && courseSlope && courseSlope !== 113) ? courseSlope : t.slope;
@@ -2656,25 +2619,47 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
               }),
             }));
             for (const sbC of sbCourses) {
-              const apiMatch = results.find(r => r.name.toLowerCase() === sbC.name.toLowerCase());
-              if (apiMatch) {
-                const apiReal = hasRealSlope(apiMatch); const sbReal = hasRealSlope(sbC);
-                if (apiReal && sbReal) {
-                  results = results.map(r => r.name.toLowerCase() === sbC.name.toLowerCase()
-                    ? { ...apiMatch, id: sbC.id, _apiVersion: apiMatch, _sbVersion: sbC, _sbHasReal: true, _apiHasReal: true } : r);
-                } else if (sbReal && !apiReal) {
-                  results = results.map(r => r.name.toLowerCase() === sbC.name.toLowerCase()
-                    ? { ...apiMatch, id: sbC.id, tee_boxes: sbC.tee_boxes, slope: sbC.slope, rating: sbC.rating } : r);
-                } else {
-                  results = results.map(r => r.name.toLowerCase() === sbC.name.toLowerCase()
-                    ? { ...apiMatch, id: sbC.id } : r);
-                }
-              } else {
-                results.push(sbC);
-              }
+              results.push(sbC);
+              sbCourseNames.add(sbC.name.toLowerCase());
             }
           }
         } catch(e) { console.log("[Supabase] failed:", e); }
+
+        // 2. RapidAPI — only for courses NOT already in local DB
+        let apiResults = [];
+        try {
+          const r = await fetch(`/api/courses2?search=${encodeURIComponent(q)}${stateParam}`);
+          if (r.ok) {
+            const data = await r.json();
+            const raw = Array.isArray(data) ? data : (data.courses || data.data || []);
+            apiResults = parseRapidAPI(raw, stateFilter).filter(c => !sbCourseNames.has(c.name.toLowerCase()));
+            results = [...results, ...apiResults];
+          }
+        } catch(e) { console.log("[RapidAPI] failed:", e); }
+
+        // 3. GolfCourseAPI — fill gaps not covered by Supabase or RapidAPI
+        try {
+          const r2 = await fetch(`/api/courses?search=${encodeURIComponent(q)}${stateParam}`);
+          if (r2.ok) {
+            const data2 = await r2.json();
+            const gcParsed = parseGolfCourseAPI(data2);
+            for (const gc of gcParsed) {
+              if (!stateMatches(gc.state, stateFilter)) continue;
+              const nameLower = gc.name.toLowerCase();
+              if (sbCourseNames.has(nameLower)) continue; // already have local version
+              const rapidMatch = results.find(r => r.name.toLowerCase() === nameLower);
+              if (rapidMatch) {
+                const rapidReal = hasRealSlope(rapidMatch), gcReal = hasRealSlope(gc);
+                if (gcReal && !rapidReal) {
+                  results = results.map(r => r.name.toLowerCase() === nameLower
+                    ? { ...rapidMatch, tee_boxes: gc.tee_boxes, slope: gc.slope, rating: gc.rating } : r);
+                }
+              } else {
+                results.push(gc);
+              }
+            }
+          }
+        } catch(e) { console.log("[GolfCourseAPI] failed:", e); }
 
         // 4. Flag courses where neither API had real data
         results = results.map(c => ({ ...c, _incompleteData: !hasRealSlope(c) }));
@@ -3255,9 +3240,11 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                                   <div style={{ fontWeight: 600, fontSize: 13 }}>{c.name}</div>
                                   {c._incompleteData && <span style={{ fontSize: 8, background: "#d4584520", border: "1px solid #d4584540", color: "#d45845", borderRadius: 4, padding: "1px 5px", fontWeight: 700 }}>⚠ incomplete data</span>}
                                   {!c._incompleteData && (c.tee_boxes?.length || 0) < 2 && <span style={{ fontSize: 8, background: "#d4a84320", border: "1px solid #d4a84340", color: "#d4a843", borderRadius: 4, padding: "1px 5px", fontWeight: 700 }}>⚠ 1 tee</span>}
-                                  {c._source && <span style={{ fontSize: 8, background: `${ac}15`, border: `1px solid ${ac}30`, color: ac, borderRadius: 4, padding: "1px 5px", fontWeight: 600 }}>{c._source}</span>}
-                                  {!c._source && !c._incompleteData && <span style={{ fontSize: 8, background: "#88888815", border: "1px solid #88888830", color: K.t3, borderRadius: 4, padding: "1px 5px", fontWeight: 600 }}>WBC History</span>}
-                                  {(c.updated_at || c._sbVersion?.updated_at) && <span style={{ fontSize: 8, background: "#2d8a4e20", border: "1px solid #2d8a4e40", color: "#2d8a4e", borderRadius: 4, padding: "1px 5px", fontWeight: 600 }}>📁 saved</span>}
+                                  {c._source && c._source !== "WBC History" && <span style={{ fontSize: 8, background: `${ac}15`, border: `1px solid ${ac}30`, color: ac, borderRadius: 4, padding: "1px 5px", fontWeight: 600 }}>{c._source}</span>}
+                                  {c.updated_at && (() => {
+                                    const d = new Date(c.updated_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+                                    return <span style={{ fontSize: 8, background: "#2d8a4e20", border: "1px solid #2d8a4e40", color: "#2d8a4e", borderRadius: 4, padding: "1px 5px", fontWeight: 600 }}>📁 {d}{c.updated_by ? ` · ${c.updated_by}` : ""}</span>;
+                                  })()}
                                 </div>
                                 <div style={{ fontSize: 10, color: K.t3 }}>{c.city}{c.state ? `, ${c.state}` : ""}{c.par ? ` · Par ${c.par}` : ""}{(() => { const realTbSlope = (c.tee_boxes || []).find(t => parseInt(t.slope) !== 113)?.slope; const displaySlope = realTbSlope || (c.slope && parseInt(c.slope) !== 113 ? c.slope : null); return displaySlope ? ` · Slope ${displaySlope}` : ""; })()}</div>
                               </div>
