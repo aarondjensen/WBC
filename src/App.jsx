@@ -3245,9 +3245,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                                     const d = new Date(c.updated_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
                                     return (
                                       <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 8, background: "#2d8a4e20", border: "1px solid #2d8a4e40", color: "#2d8a4e", borderRadius: 4, padding: "1px 5px", fontWeight: 600 }}>
-                                        <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                          <polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-1a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v1a2 2 0 0 1-2 2h-2"/><rect x="6" y="18" width="12" height="4" rx="1"/>
-                                        </svg>
+                                        <img src={TROPHY_SVG_URL} alt="" style={{ width: 9, height: 9, filter: "brightness(0) saturate(100%) invert(42%) sepia(73%) saturate(400%) hue-rotate(100deg) brightness(95%)" }} />
                                         {d}{c.updated_by && c.updated_by !== "Unknown" ? ` · ${c.updated_by}` : ""}
                                       </span>
                                     );
@@ -4080,6 +4078,11 @@ export default function WBCApp() {
   const addCourse = async (course) => {
     if (course._delete) {
       setCourseList(prev => prev.filter(c => c.id !== course.id));
+      // Delete tee boxes first (foreign key), then course
+      try {
+        await sb.delete("tee_boxes", `course_id=eq.${course.id}`);
+        await sb.delete("courses", `id=eq.${course.id}`);
+      } catch(e) { console.error("Course delete failed:", e); }
       notify("Course removed");
       return;
     }
