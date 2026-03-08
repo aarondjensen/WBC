@@ -2396,7 +2396,7 @@ function PlayerRow({ player, onUpdateHI, onUpdateName, onRemove, onSavePassword,
   );
 }
 
-function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, passwords, setPasswords, holeData, finalizedRounds, onFinalizeRound, getPlayerTee, resetToDemo, startFresh, externalSettingsOpen, externalSettingsTab, onExternalSettingsHandled }) {
+function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, passwords, setPasswords, holeData, finalizedRounds, onFinalizeRound, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, onExternalSettingsHandled }) {
   const [tab, setTab] = useState("tees");
   const [teesSaved, setTeesSaved] = useState({});
   const [teesModified, setTeesModified] = useState({});
@@ -3037,16 +3037,14 @@ export default function WBCApp() {
     return () => { document.head.removeChild(style); };
   }, []);
 
-  const [tPlayers, setTPlayers] = useState(DEMO_TP);
-  const [tRounds, setTRounds] = useState([
-    { id: "tr1", tournament_id: "wbc_2026", round_number: 1, course_id: "demo_course_1" },
-  ]);
-  const [courseList, setCourseList] = useState(ALL_DEMO_COURSES);
-  const [holeData, setHoleData] = useState(DEMO_HOLE_DATA);
+  const [tPlayers, setTPlayers] = useState([]);
+  const [tRounds, setTRounds] = useState([]);
+  const [courseList, setCourseList] = useState([]);
+  const [holeData, setHoleData] = useState({});
   const [ctpData, setCtpData] = useState({});
-  const [pairingsData, setPairingsData] = useState(DEMO_PAIRINGS);
-  const [teeData, setTeeData] = useState(DEMO_TEE_ASSIGNMENTS);
-  const [teeTimesData, setTeeTimesData] = useState(DEMO_TEE_TIMES);
+  const [pairingsData, setPairingsData] = useState({});
+  const [teeData, setTeeData] = useState({});
+  const [teeTimesData, setTeeTimesData] = useState({});
   const [finalizedRounds, setFinalizedRounds] = useState({});
   // Auto-advance round when finalization changes
   useEffect(() => {
@@ -3058,9 +3056,7 @@ export default function WBCApp() {
   }, [JSON.stringify(finalizedRounds)]);
   const [adminSettingsOpen, setAdminSettingsOpen] = useState(false);
   const [adminSettingsTab, setAdminSettingsTab] = useState("players");
-  const [passwords, setPasswords] = useState(() => {
-    const pw = {};
-    DEMO_TP.forEach(tp => { pw[tp.player_id] = "wbc2026"; });
+  const [passwords, setPasswords] = useState({});
     return pw;
   });
   const [storageLoaded, setStorageLoaded] = useState(false);
@@ -3194,36 +3190,6 @@ export default function WBCApp() {
     }, "tournament_id");
   };
 
-  const resetToDemo = async () => {
-    // Clear wbc_2026 data from Supabase
-    try {
-      await sb.delete("hole_scores", `tournament_id=eq.${TOURNAMENT_ID}`);
-      await sb.delete("pairings", `tournament_id=eq.${TOURNAMENT_ID}`);
-      await sb.delete("tee_assignments", `tournament_id=eq.${TOURNAMENT_ID}`);
-      await sb.delete("tournament_players", `tournament_id=eq.${TOURNAMENT_ID}`);
-      await sb.delete("tournament_rounds", `tournament_id=eq.${TOURNAMENT_ID}`);
-      await sb.delete("tournament_state", `tournament_id=eq.${TOURNAMENT_ID}`);
-    } catch(e) { console.error("Reset clear failed:", e); }
-    // Reset local state to demo defaults
-    setTPlayers(DEMO_TP);
-    setTRounds([{ id: "tr_2026_r1", tournament_id: TOURNAMENT_ID, round_number: 1, course_id: "demo_course_1" }]);
-    setCourseList(ALL_DEMO_COURSES);
-    setHoleData(DEMO_HOLE_DATA);
-    setCtpData({});
-    setPairingsData(DEMO_PAIRINGS);
-    setTeeData(DEMO_TEE_ASSIGNMENTS);
-    setTeeTimesData(DEMO_TEE_TIMES);
-    setFinalizedRounds({});
-    setRound(1);
-    const pw = {};
-    DEMO_TP.forEach(tp => { pw[tp.player_id] = "wbc2026"; });
-    setPasswords(pw);
-    // Re-seed demo data to Supabase
-    for (const tp of DEMO_TP) await sb.upsert("tournament_players", tp, "id");
-    await sb.upsert("tournament_rounds", { id: "tr_2026_r1", tournament_id: TOURNAMENT_ID, round_number: 1, course_id: "demo_course_1" }, "id");
-    await saveTournamentState({}, pw);
-    notify("Reset to demo data");
-  };
 
   const startFresh = async () => {
     // Clear scores, rounds, pairings, tees — keep tournament_players (roster + HIs)
@@ -3639,11 +3605,10 @@ export default function WBCApp() {
                 const isDirector = p.id === "aaron_j" || p.id === "scott_r";
                 return (
                   <button key={p.id} onClick={() => setLoginAnim({ id: p.id, name: p.name, isDirector })}
-                    style={{ background: K.card, border: `1px solid ${isDirector ? K.acc + "60" : K.bdr}`, borderRadius: 10, padding: "12px 6px", cursor: "pointer", color: K.t1, fontSize: 13, fontWeight: 600, textAlign: "center", transition: "all 0.15s" }}
+                    style={{ background: K.card, border: `1px solid ${K.bdr}`, borderRadius: 10, padding: "12px 6px", cursor: "pointer", color: K.t1, fontSize: 13, fontWeight: 600, textAlign: "center", transition: "all 0.15s" }}
                     onMouseEnter={e => { e.currentTarget.style.borderColor = K.acc; e.currentTarget.style.background = K.hover; }}
-                    onMouseLeave={e => { e.currentTarget.style.borderColor = isDirector ? K.acc + "60" : K.bdr; e.currentTarget.style.background = K.card; }}>
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = K.bdr; e.currentTarget.style.background = K.card; }}>
                     {p.name}
-                    {isDirector && <div style={{ fontSize: 8, color: K.acc, fontWeight: 700, marginTop: 2 }}>DIRECTOR</div>}
                   </button>
                 );
               })}
@@ -3738,7 +3703,7 @@ export default function WBCApp() {
                 });
                 return next;
               });
-            }} passwords={passwords} setPasswords={async pw => { setPasswords(pw); await saveTournamentState(finalizedRounds, pw); }} holeData={holeData} finalizedRounds={finalizedRounds} onFinalizeRound={async rnd => { const nf = { ...finalizedRounds, [rnd]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); if (rnd < 4) setRound(rnd + 1); }} getPlayerTee={getPlayerTee} resetToDemo={resetToDemo} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); }} /> : (
+            }} passwords={passwords} setPasswords={async pw => { setPasswords(pw); await saveTournamentState(finalizedRounds, pw); }} holeData={holeData} finalizedRounds={finalizedRounds} onFinalizeRound={async rnd => { const nf = { ...finalizedRounds, [rnd]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); if (rnd < 4) setRound(rnd + 1); }} getPlayerTee={getPlayerTee} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); }} /> : (
           <div style={{ textAlign: "center", padding: "40px 20px" }}>
             <div style={{ fontSize: 40, marginBottom: 12 }}>🔒</div>
             <div style={{ fontSize: 16, fontWeight: 700, color: K.t1, marginBottom: 6 }}>Directors Only</div>
@@ -3800,4 +3765,3 @@ export default function WBCApp() {
     </div>
     </div>
   );
-}
