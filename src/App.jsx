@@ -2508,60 +2508,113 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
         const stateParam = stateFilter ? `&state=${encodeURIComponent(stateFilter)}` : "";
         let results = [];
 
-        // 1. RapidAPI — primary source (has full tee data)
+        const hasRealSlope = (c) => (c.tee_boxes || []).some(tb => parseInt(tb.slope) !== 113) || (parseInt(c.slope) !== 113 && !!c.slope);
+
+        const parseRapidAPI = (rawCourses, stateFilter) => rawCourses
+          .filter(c => !stateFilter || !(c.state) || c.state.toUpperCase() === stateFilter.toUpperCase())
+          .map((c, ci) => {
+            // This API: top-level courseRating/slopeRating, scorecard[].tees.teeBox1/teeBox2...
+            const sc = Array.isArray(c.scorecard) ? c.scorecard : [];
+            const hole_pars = sc.map(h => parseInt(h.Par) || 4);
+            const hole_handicaps = sc.map(h => parseInt(h.Handicap) || 0);
+            const par = hole_pars.reduce((a, b) => a + b, 0) || 72;
+            // Collect all tee box keys across all holes
+            const teeKeys = [...new Set(sc.flatMap(h => h.tees ? Object.keys(h.tees) : []))];
+            const tees = teeKeys.length ? teeKeys.map((key, ti) => {
+              const sample = sc.find(h => h.tees?.[key]);
+              const color = sample?.tees?.[key]?.color || key;
+              const yardage = sc.reduce((a, h) => a + (parseInt(h.tees?.[key]?.yards) || 0), 0);
+              return {
+                name: color || key,
+                color: resolveTeeColor({ name: color || key, color: color || "" }, ti),
+                slope: parseInt(c.slopeRating) || 113,
+                rating: parseFloat(c.courseRating) || 72.0,
+                par, yardage,
+              };
+            }) : [{
+              name: "Default",
+              color: resolveTeeColor({ name: "Default", color: "" }, 0),
+              slope: parseInt(c.slopeRating) || 113,
+              rating: parseFloat(c.courseRating) || 72.0,
+              par, yardage: 0,
+            }];
+            return {
+              id: `rapid_${c._id || ci}`,
+              name: c.name || "Unknown",
+              city: c.city || "", state: c.state || "",
+              par, slope: parseInt(c.slopeRating) || 113,
+              rating: parseFloat(c.courseRating) || 72.0,
+              hole_pars, hole_handicaps, tee_boxes: tees,
+            };
+          });
+
+        const parseGolfCourseAPI = (rawCourses) => {
+          const arr = Array.isArray(rawCourses) ? rawCourses : (rawCourses.courses || []);
+          return arr.map((c, ci) => {
+            const teesObj = c.tees || {};
+            const allTees = Array.isArray(teesObj.male) && teesObj.male.length ? teesObj.male : (teesObj.female || []);
+            const tees = allTees.map((t, ti) => ({
+              name: t.tee_name || "Default",
+              color: resolveTeeColor({ name: t.tee_name || "", color: "" }, ti),
+              rating: parseFloat(t.course_rating) || 72.0,
+              slope: parseInt(t.slope_rating) || 113,
+              par: parseInt(t.par_total) || 72,
+              yardage: parseInt(t.total_yards) || 0,
+            }));
+            const firstTee = allTees[0]; const holes = firstTee?.holes || [];
+            return {
+              id: `gc_${c.id || ci}`,
+              name: [c.club_name, c.course_name].filter(Boolean).join(" – ") || c.name || "Unknown",
+              city: c.location?.city || c.city || "", state: c.location?.state || c.state || "",
+              par: parseInt(firstTee?.par_total) || 72,
+              slope: parseInt(firstTee?.slope_rating) || 113,
+              rating: parseFloat(firstTee?.course_rating) || 72.0,
+              hole_pars: holes.map(h => parseInt(h.par) || 4),
+              hole_handicaps: holes.map(h => parseInt(h.handicap) || 0),
+              tee_boxes: tees,
+            };
+          });
+        };
+
+        // 1. RapidAPI
         try {
-          const apiUrl = `/api/courses2?search=${encodeURIComponent(q)}${stateParam}`;
-          console.log("[RapidAPI] fetching:", apiUrl);
-          const apiRes = await fetch(apiUrl);
-          console.log("[RapidAPI] status:", apiRes.status);
-          if (apiRes.ok) {
-            const apiData = await apiRes.json();
-            console.log("[RapidAPI] raw:", JSON.stringify(apiData).slice(0, 600));
-            const rawCourses = Array.isArray(apiData) ? apiData : (apiData.courses || apiData.data || []);
-            results = rawCourses
-              .filter(c => {
-                if (!stateFilter) return true;
-                const cs = (c.state || "").toUpperCase();
-                return !cs || cs === stateFilter.toUpperCase();
-              })
-              .map((c, ci) => {
-                const isSchemaB = Array.isArray(c.teeBoxes);
-                let tees, hole_pars, hole_handicaps, par, slope, rating, name, city, state;
-                if (isSchemaB) {
-                  name = c.name || "Unknown";
-                  city = c.city || ""; state = c.state || "";
-                  const sc = Array.isArray(c.scorecard) ? c.scorecard : [];
-                  hole_pars = sc.map(h => parseInt(h.Par) || 4);
-                  hole_handicaps = sc.map(h => parseInt(h.Handicap) || 0);
-                  par = hole_pars.reduce((a, b) => a + b, 0) || 72;
-                  tees = (c.teeBoxes || []).map((t, ti) => ({
-                    name: t.tee || "Default",
-                    color: resolveTeeColor({ name: t.tee || "", color: t.tee || "" }, ti),
-                    slope: parseInt(t.slope) || 113,
-                    rating: parseFloat(t.handicap) || 72.0,
-                    par,
-                    yardage: sc.reduce((a, h) => { const tb = h.tees ? Object.values(h.tees)[ti] || Object.values(h.tees)[0] : null; return a + (parseInt(tb?.yards) || 0); }, 0),
-                  }));
-                  slope = tees[0]?.slope || 113; rating = tees[0]?.rating || 72.0;
-                } else {
-                  name = [c.club_name, c.course_name].filter(Boolean).join(" – ") || c.name || "Unknown";
-                  city = c.location?.city || c.city || ""; state = c.location?.state || c.state || "";
-                  const teesObj = c.tees || {};
-                  const allTees = Array.isArray(teesObj) ? teesObj : (Array.isArray(teesObj.male) && teesObj.male.length ? teesObj.male : (teesObj.female || []));
-                  tees = allTees.map((t, ti) => ({ name: t.tee_name || "Default", color: resolveTeeColor({ name: t.tee_name || "", color: "" }, ti), rating: parseFloat(t.course_rating) || 72.0, slope: parseInt(t.slope_rating) || 113, par: parseInt(t.par_total) || 72, yardage: parseInt(t.total_yards) || 0 }));
-                  const firstTee = allTees[0]; const holes = firstTee?.holes || [];
-                  hole_pars = holes.map(h => parseInt(h.par) || 4); hole_handicaps = holes.map(h => parseInt(h.handicap) || 0);
-                  par = parseInt(firstTee?.par_total) || 72; slope = parseInt(firstTee?.slope_rating) || 113; rating = parseFloat(firstTee?.course_rating) || 72.0;
-                }
-                return { id: `gc_${c.id || c._id || ci}`, name, city, state, par, slope, rating, hole_pars, hole_handicaps, tee_boxes: tees };
-              });
+          const r = await fetch(`/api/courses2?search=${encodeURIComponent(q)}${stateParam}`);
+          if (r.ok) {
+            const data = await r.json();
+            const raw = Array.isArray(data) ? data : (data.courses || data.data || []);
+            results = parseRapidAPI(raw, stateFilter);
             console.log("[RapidAPI] parsed:", results.map(c => ({ name: c.name, tees: c.tee_boxes?.length, slope: c.slope })));
           }
-        } catch(apiErr) {
-          console.log("[RapidAPI] failed:", apiErr);
-        }
+        } catch(e) { console.log("[RapidAPI] failed:", e); }
 
-        // 2. Supabase — merge in WBC history (preserves known course ids, enriches with stored data)
+        // 2. GolfCourseAPI — fill in any courses RapidAPI missed or has incomplete data for
+        try {
+          const r2 = await fetch(`/api/courses?search=${encodeURIComponent(q)}${stateParam}`);
+          if (r2.ok) {
+            const data2 = await r2.json();
+            const gcParsed = parseGolfCourseAPI(data2);
+            console.log("[GolfCourseAPI] parsed:", gcParsed.map(c => ({ name: c.name, tees: c.tee_boxes?.length, slope: c.slope })));
+            for (const gc of gcParsed) {
+              if (stateFilter && gc.state && gc.state.toUpperCase() !== stateFilter.toUpperCase()) continue;
+              const rapidMatch = results.find(r => r.name.toLowerCase() === gc.name.toLowerCase());
+              if (rapidMatch) {
+                // Both found — pick whichever has real slope data
+                const rapidReal = hasRealSlope(rapidMatch);
+                const gcReal = hasRealSlope(gc);
+                if (gcReal && !rapidReal) {
+                  results = results.map(r => r.name.toLowerCase() === gc.name.toLowerCase() ? { ...rapidMatch, tee_boxes: gc.tee_boxes, slope: gc.slope, rating: gc.rating } : r);
+                } else if (gcReal && rapidReal) {
+                  results = results.map(r => r.name.toLowerCase() === gc.name.toLowerCase()
+                    ? { ...rapidMatch, _gcVersion: gc, _rapidHasReal: true, _gcHasReal: true } : r);
+                }
+              } else {
+                results.push(gc);
+              }
+            }
+          }
+        } catch(e) { console.log("[GolfCourseAPI] failed:", e); }
+
+        // 3. Supabase — merge WBC history
         try {
           const qEnc = encodeURIComponent(`*${q}*`);
           const stateClause = stateFilter ? `&state=eq.${stateFilter}` : "";
@@ -2571,51 +2624,36 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
             const ids = filtered.map(r => r.id).join(",");
             const tbRows = ids ? await sb.get("tee_boxes", `course_id=in.(${ids})`) : [];
             const sbCourses = filtered.map((c) => ({
-              ...c,
-              hole_pars: c.hole_pars || [],
-              hole_handicaps: c.hole_handicaps || [],
+              ...c, hole_pars: c.hole_pars || [], hole_handicaps: c.hole_handicaps || [],
               tee_boxes: (tbRows || []).filter(t => t.course_id === c.id).map((t, ti) => {
-                const tbSlope = parseInt(t.slope);
-                const courseSlope = parseInt(c.slope);
+                const tbSlope = parseInt(t.slope), courseSlope = parseInt(c.slope);
                 const slope = (tbSlope === 113 && courseSlope && courseSlope !== 113) ? courseSlope : t.slope;
                 return { ...t, slope, color: resolveTeeColor(t, ti) };
               }),
             }));
-            console.log("[Supabase] courses:", sbCourses.map(c => ({ name: c.name, tees: c.tee_boxes?.length, slope: c.slope })));
-
-            // Merge: for each Supabase course, check if RapidAPI already found it
-            const hasRealSlope = (c) => (c.tee_boxes || []).some(tb => parseInt(tb.slope) !== 113) || (parseInt(c.slope) !== 113 && !!c.slope);
             for (const sbC of sbCourses) {
               const apiMatch = results.find(r => r.name.toLowerCase() === sbC.name.toLowerCase());
               if (apiMatch) {
-                const apiReal = hasRealSlope(apiMatch);
-                const sbReal = hasRealSlope(sbC);
-                console.log(`[merge] "${sbC.name}": api tees=${apiMatch.tee_boxes?.length} real=${apiReal}, sb tees=${sbC.tee_boxes?.length} real=${sbReal}`);
+                const apiReal = hasRealSlope(apiMatch); const sbReal = hasRealSlope(sbC);
                 if (apiReal && sbReal) {
-                  // Both have real data — show conflict banner, default to API (fresher)
                   results = results.map(r => r.name.toLowerCase() === sbC.name.toLowerCase()
-                    ? { ...apiMatch, id: sbC.id, _apiVersion: apiMatch, _sbVersion: sbC, _sbHasReal: true, _apiHasReal: true }
-                    : r);
+                    ? { ...apiMatch, id: sbC.id, _apiVersion: apiMatch, _sbVersion: sbC, _sbHasReal: true, _apiHasReal: true } : r);
                 } else if (sbReal && !apiReal) {
-                  // Supabase has real slope, API doesn't — use Supabase tees but keep API hole data if better
                   results = results.map(r => r.name.toLowerCase() === sbC.name.toLowerCase()
-                    ? { ...apiMatch, id: sbC.id, tee_boxes: sbC.tee_boxes, slope: sbC.slope, rating: sbC.rating }
-                    : r);
+                    ? { ...apiMatch, id: sbC.id, tee_boxes: sbC.tee_boxes, slope: sbC.slope, rating: sbC.rating } : r);
                 } else {
-                  // API real or both placeholder — keep API result but use Supabase id
                   results = results.map(r => r.name.toLowerCase() === sbC.name.toLowerCase()
-                    ? { ...apiMatch, id: sbC.id }
-                    : r);
+                    ? { ...apiMatch, id: sbC.id } : r);
                 }
               } else {
-                // Only in Supabase, not found by API — add it
                 results.push(sbC);
               }
             }
           }
-        } catch(sbErr) {
-          console.log("[Supabase] search failed:", sbErr);
-        }
+        } catch(e) { console.log("[Supabase] failed:", e); }
+
+        // 4. Flag courses where neither API had real data
+        results = results.map(c => ({ ...c, _incompleteData: !hasRealSlope(c) }));
 
         setSearchResults(results);
       } catch (err) {
@@ -3179,7 +3217,10 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                           }} style={{ display: "block", width: "100%", background: K.inp, border: `1px solid ${K.bdr}`, borderRadius: 10, padding: "10px 14px", cursor: "pointer", textAlign: "left", color: K.t1, marginBottom: 6 }}>
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                               <div>
-                                <div style={{ fontWeight: 600, fontSize: 13 }}>{c.name}</div>
+                                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                  <div style={{ fontWeight: 600, fontSize: 13 }}>{c.name}</div>
+                                  {c._incompleteData && <span style={{ fontSize: 8, background: "#d4584520", border: "1px solid #d4584540", color: "#d45845", borderRadius: 4, padding: "1px 5px", fontWeight: 700 }}>⚠ incomplete data</span>}
+                                </div>
                                 <div style={{ fontSize: 10, color: K.t3 }}>{c.city}{c.state ? `, ${c.state}` : ""}{c.par ? ` · Par ${c.par}` : ""}{(() => { const realTbSlope = (c.tee_boxes || []).find(t => parseInt(t.slope) !== 113)?.slope; const displaySlope = realTbSlope || (c.slope && parseInt(c.slope) !== 113 ? c.slope : null); return displaySlope ? ` · Slope ${displaySlope}` : ""; })()}</div>
                               </div>
                               <span style={{ color: ac, fontSize: 11, fontWeight: 700 }}>Preview →</span>
@@ -3251,7 +3292,12 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                                       </div>
                                     );
                                   })()}
-                                  {!hasConflict && <div style={{ fontSize: 9, color: K.t3, marginTop: 6, fontStyle: "italic" }}>Review and edit before adding — tap any field to change it</div>}
+                                  {!hasConflict && draft._incompleteData && (
+                                    <div style={{ marginTop: 8, padding: "8px 10px", background: "#d4584510", border: "1px solid #d4584540", borderRadius: 8, fontSize: 9, color: "#d45845" }}>
+                                      ⚠ Neither API has complete data for this course. Slope, rating, and tee boxes may be missing or inaccurate — please enter them manually before adding.
+                                    </div>
+                                  )}
+                                  {!hasConflict && !draft._incompleteData && <div style={{ fontSize: 9, color: K.t3, marginTop: 6, fontStyle: "italic" }}>Review and edit before adding — tap any field to change it</div>}
                                 </div>
 
                                 <div style={{ padding: "12px 16px" }}>
