@@ -4062,11 +4062,13 @@ export default function WBCApp() {
       const updated = existing
         ? prev.map(t => t.round_number === rnd ? { ...t, course_id: course.id } : t)
         : (course.id ? [...prev, trRow] : prev);
-      // Re-sort courseList by round assignment now that rounds have changed
       setCourseList(cl => sortCoursesByRound(cl, updated));
       return updated;
     });
-    await sb.upsert("tournament_rounds", trRow, "id");
+    // Only upsert to Supabase if assigning a real course — skip if unassigning (course_id null violates NOT NULL)
+    if (course.id) {
+      await sb.upsert("tournament_rounds", trRow, "id");
+    }
     // Auto-assign default tee
     if (course.id && course.tee_boxes?.length) {
       const defaultTee = getDefaultTee(course.tee_boxes);
