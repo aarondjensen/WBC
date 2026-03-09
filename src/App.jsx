@@ -306,13 +306,14 @@ const TEE_COLOR_MAP = {
 // Palette for unknown tee names (cycled by index)
 const TEE_FALLBACK_COLORS = ["#5b8fb9", "#8b5e3c", "#6b7b3a", "#8e44ad", "#2e86ab", "#a84632"];
 const resolveTeeColor = (tee, index) => {
-  if (tee.color && tee.color !== "#000" && tee.color !== "#000000") return tee.color;
+  // Always check name first so known color names are normalized consistently
   const key = (tee.name || "").toLowerCase().trim();
   if (TEE_COLOR_MAP[key]) return TEE_COLOR_MAP[key];
-  // Check if name contains a known color word
   for (const [word, clr] of Object.entries(TEE_COLOR_MAP)) {
     if (key.includes(word)) return clr;
   }
+  // Fall back to stored color only for unknown tee names
+  if (tee.color && tee.color !== "#000" && tee.color !== "#000000") return tee.color;
   return TEE_FALLBACK_COLORS[index % TEE_FALLBACK_COLORS.length];
 };
 // Combo tee detection — splits "BLACK/BLUE" into ["#2c2c2c", "#2d8fd4"]
