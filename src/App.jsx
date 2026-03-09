@@ -2317,12 +2317,13 @@ function TeeAssigner({ activePlayers, numRounds, tRounds, courses, teeData, setT
                       const isActive = currentTee === tee.name;
                       return (
                         <button key={tee.name} onClick={() => assign(p.id, tee.name)} style={{
-                          width: 28, height: 28, borderRadius: 6, cursor: "pointer",
-                          display: "flex", alignItems: "center", justifyContent: "center",
-                          background: isActive ? (isDarkTee(tee.color) ? K.acc + "15" : tee.color + "25") : K.inp,
-                          border: isActive ? `1px solid ${K.acc}` : `1px solid transparent`,
+                          width: 34, padding: "4px 3px 3px", borderRadius: 6, cursor: "pointer",
+                          display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
+                          background: isActive ? K.acc + "18" : K.inp,
+                          border: isActive ? `1px solid ${K.acc}` : `1px solid ${K.bdr}`,
                         }}>
-                          <TeeColorSwatch color={tee.color} name={tee.name} size={10} />
+                          <TeeColorSwatch color={tee.color} name={tee.name} size={14} style={{ borderRadius: 3 }} />
+                          <span style={{ fontSize: 7, fontWeight: 700, color: isActive ? K.acc : K.t3, lineHeight: 1 }}>{tee.name.split("/")[0].substring(0,5)}</span>
                         </button>
                       );
                     })}
