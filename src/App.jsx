@@ -2150,9 +2150,9 @@ function PairingsEditor({ activePlayers, numRounds, pairingsData, setPairings, t
                   onKeyDown={e => { if (e.key === "Enter") { e.target.blur(); } }}
                   style={{
                     width: 74, padding: "2px 4px", borderRadius: 5,
-                    border: `1px solid ${teeTime ? K.acc + "40" : K.bdr}`,
-                    background: teeTime ? K.acc + "08" : K.inp,
-                    color: teeTime ? K.acc : K.t3,
+                    border: `1px solid ${teeTime ? K.acc + "40" : "#f59e0b60"}`,
+                    background: teeTime ? K.acc + "08" : "#f59e0b08",
+                    color: teeTime ? K.acc : "#f59e0b",
                     fontSize: 9, fontWeight: 600, textAlign: "center",
                   }}
                 />
