@@ -1471,7 +1471,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
 
       {/* WD confirmation modal */}
       {wdConfirm && (
-          <div style={{ position: "fixed", top: 0, bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 480, background: "rgba(0,0,0,0.8)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+          <div style={{ position: "fixed", top: 0, bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.8)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
             <div style={{ background: K.card, borderRadius: 16, border: `1px solid ${K.danger}60`, width: "100%", maxWidth: 340, overflow: "hidden" }}>
               <div style={{ background: K.danger + "15", borderBottom: `1px solid ${K.danger}30`, padding: "16px 20px", textAlign: "center" }}>
                 <div style={{ fontSize: 28, marginBottom: 6 }}>⛳</div>
@@ -1509,7 +1509,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
           if (missingHoles.length > 0) finalizeMissing.push({ name: p.name, holes: missingHoles });
         });
         return (
-          <div style={{ position: "fixed", top: 0, bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 480, background: "rgba(0,0,0,0.75)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 12 }}>
+          <div style={{ position: "fixed", top: 0, bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.75)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 12 }}>
             <div style={{ background: K.card, borderRadius: 16, padding: 16, maxWidth: 400, width: "100%", maxHeight: "90vh", overflow: "auto" }}>
               <div style={{ textAlign: "center", marginBottom: 10 }}>
                 <div style={{ fontSize: 15, fontWeight: 800, color: K.t1 }}>Finalize Group — Round {round}</div>
@@ -2720,7 +2720,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
 
       {/* Finalize round popup modal */}
       {finalizeModal && (
-        <div style={{ position: "fixed", top: 0, bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 480, background: "rgba(0,0,0,0.75)", zIndex: 200, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }}>
+        <div style={{ position: "fixed", top: 0, bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.75)", zIndex: 200, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }}>
           <div style={{ background: K.card, borderRadius: 16, border: `1px solid ${K.bdr}`, width: "100%", maxWidth: 420, overflow: "hidden", marginTop: "auto", marginBottom: "auto" }}>
             {/* Header */}
             <div style={{ background: "#fde04710", borderBottom: `1px solid #d4a84330`, padding: "14px 16px", display: "flex", alignItems: "center", gap: 8 }}>
@@ -2898,9 +2898,9 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
           const teesSet = teesSaved[editRound] && !teesModified[editRound] && activePlayers.every(p => ((teeData[editRound] || {})[p.id]));
           const groupsDone = _rg.length > 0 && _rg.flat().length === activePlayers.length;
           const teeTimesDone = _rg.length > 0 && _rg.every((_, gi) => _rt[gi] && _rt[gi].trim() !== "");
-          if (!teesSet) items.push({ text: "Tee assignments incomplete" });
-          if (!groupsDone) items.push({ text: "Pairings not set" });
-          if (!teeTimesDone) items.push({ text: "Tee times missing" });
+          if (!teesSet) items.push({ text: "Tee assignments incomplete", action: "Go to Tees", onClick: () => setTab("tees") });
+          if (!groupsDone) items.push({ text: "Pairings not set", action: "Go to Pairings", onClick: () => setTab("pairings") });
+          if (!teeTimesDone) items.push({ text: "Tee times missing", action: "Go to Pairings", onClick: () => setTab("pairings") });
         }
         if (items.length === 0) return null;
         return (
@@ -2923,8 +2923,8 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
 
       {/* Settings modal */}
       {settingsOpen && (
-        <div style={{ position: "fixed", top: 0, bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 480, background: "#00000080", zIndex: 100, display: "flex", alignItems: "flex-end" }} onClick={() => setSettingsOpen(false)}>
-          <div onClick={e => e.stopPropagation()} style={{ width: "100%", height: "85vh", background: K.bg, borderRadius: "16px 16px 0 0", border: `1px solid ${K.bdr}`, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        <div style={{ position: "fixed", top: 0, bottom: 0, left: 0, right: 0, background: "#00000080", zIndex: 100, display: "flex", alignItems: "flex-end", justifyContent: "center" }} onClick={() => setSettingsOpen(false)}>
+          <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 480, height: "85vh", background: K.bg, borderRadius: "16px 16px 0 0", border: `1px solid ${K.bdr}`, display: "flex", flexDirection: "column", overflow: "hidden" }}>
             {/* Modal header */}
             <div style={{ padding: "14px 16px 10px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${K.bdr}` }}>
               <span style={{ fontWeight: 700, fontSize: 15, color: K.t1 }}>Tournament Settings</span>
@@ -3024,8 +3024,6 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                             const startEdit = () => setEditingCourse({ courseId: c.id, draft: { ...c, hole_pars: [...(c.hole_pars||Array(18).fill(4))], hole_handicaps: [...(c.hole_handicaps||Array(18).fill(0))], tee_boxes: (c.tee_boxes||[]).map(t=>({...t})) } });
                             const saveEdit = () => {
                               const updated = { ...editingCourse.draft };
-                              setCourseList(prev => prev.map(x => x.id === c.id ? updated : x));
-                              const { tee_boxes: tbs, ...courseData } = updated;
                               addCourse(updated);
                               setEditingCourse(null);
                             };
@@ -3450,8 +3448,8 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                           const ti = { background: K.bg, border: `1px solid ${ac}30`, borderRadius: 4, color: K.t1, fontSize: 9, textAlign: "center", width: "100%", padding: "3px 2px", boxSizing: "border-box" };
                           const tiL = { ...ti, textAlign: "left", padding: "3px 5px" };
                           return (
-                            <div style={{ position: "fixed", top: 0, bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 480, background: "rgba(0,0,0,0.82)", zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-                              <div style={{ background: K.card, borderRadius: 16, border: `1px solid ${ac}40`, width: "100%", maxWidth: 420, maxHeight: "90vh", overflowY: "auto", padding: 0 }}>
+                            <div style={{ position: "fixed", top: 0, bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.82)", zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+                              <div style={{ background: K.card, borderRadius: 16, border: `1px solid ${ac}40`, width: "100%", maxWidth: 420, maxHeight: "calc(100vh - 48px)", overflowY: "auto", padding: 0 }}>
 
                                 {/* Header */}
                                 <div style={{ padding: "14px 16px 10px", borderBottom: `1px solid ${K.bdr}`, position: "sticky", top: 0, background: K.card, zIndex: 1 }}>
