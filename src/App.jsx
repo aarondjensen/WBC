@@ -60,7 +60,7 @@ const DEMO_COURSE = {
   hole_pars:      [5,3,4,3,5,3,4,4,4, 5,4,4,3,4,4,3,4,5],
   hole_handicaps: [13,17,1,11,3,15,5,7,9, 4,6,2,12,14,16,18,8,10],
   tee_boxes: [
-    { name: "Black",  color: "#2c2c2c", slope: 147, rating: 74.8, par: 71, yardage: 7068 },
+    { name: "Black",  color: "#1a1a2e", slope: 147, rating: 74.8, par: 71, yardage: 7068 },
     { name: "Blue",   color: "#2d8fd4", slope: 137, rating: 71.7, par: 71, yardage: 6435 },
     { name: "White",  color: "#e8e8e8", slope: 132, rating: 69.4, par: 71, yardage: 5921 },
     { name: "Gold",   color: "#d4a843", slope: 127, rating: 67.1, par: 71, yardage: 5421 },
@@ -78,7 +78,7 @@ const DEMO_COURSE2 = {
   hole_pars:      [4,3,4,3,4,5,4,3,4, 5,3,4,4,4,5,4,3,4],
   hole_handicaps: [7,17,3,15,1,5,9,13,11, 4,14,10,2,8,6,18,16,12],
   tee_boxes: [
-    { name: "Black",  color: "#2c2c2c", slope: 140, rating: 72.9, par: 70, yardage: 6653 },
+    { name: "Black",  color: "#1a1a2e", slope: 140, rating: 72.9, par: 70, yardage: 6653 },
     { name: "Blue",   color: "#2d8fd4", slope: 139, rating: 71.0, par: 70, yardage: 6271 },
     { name: "White",  color: "#e8e8e8", slope: 135, rating: 69.2, par: 70, yardage: 5843 },
     { name: "Gold",   color: "#d4a843", slope: 131, rating: 66.8, par: 70, yardage: 5387 },
@@ -96,7 +96,7 @@ const DEMO_COURSE3 = {
   hole_pars:      [4,4,5,4,4,3,4,4,3, 5,4,3,4,4,3,4,3,5],
   hole_handicaps: [9,3,7,5,1,13,11,17,15, 8,2,14,18,6,10,4,16,12],
   tee_boxes: [
-    { name: "Black",  color: "#2c2c2c", slope: 130, rating: 70.0, par: 70, yardage: 6354 },
+    { name: "Black",  color: "#1a1a2e", slope: 130, rating: 70.0, par: 70, yardage: 6354 },
     { name: "Blue",   color: "#2d8fd4", slope: 126, rating: 69.4, par: 70, yardage: 6173 },
     { name: "White",  color: "#e8e8e8", slope: 118, rating: 67.8, par: 70, yardage: 5508 },
     { name: "Gold",   color: "#d4a843", slope: 115, rating: 66.4, par: 70, yardage: 5248 },
@@ -115,7 +115,7 @@ const DEMO_COURSE4 = {
   hole_pars:      [4,4,5,4,3,5,4,3,4, 5,3,4,4,5,4,3,4,4],
   hole_handicaps: [3,11,7,15,17,1,9,13,5, 2,16,8,4,12,6,18,14,10],
   tee_boxes: [
-    { name: "Black",  color: "#2c2c2c", slope: 142, rating: 73.3, par: 72, yardage: 6701 },
+    { name: "Black",  color: "#1a1a2e", slope: 142, rating: 73.3, par: 72, yardage: 6701 },
     { name: "Blue",   color: "#2d8fd4", slope: 132, rating: 71.0, par: 72, yardage: 6282 },
     { name: "White",  color: "#e8e8e8", slope: 126, rating: 68.8, par: 72, yardage: 5854 },
     { name: "Gold",   color: "#d4a843", slope: 117, rating: 65.6, par: 72, yardage: 5290 },
@@ -131,7 +131,7 @@ const DEMO_COURSE5 = {
   hole_pars:      [4,5,4,3,4,5,3,4,4, 4,4,3,5,4,3,4,4,5],
   hole_handicaps: [5,17,3,11,15,1,7,13,9, 12,10,8,18,16,2,14,6,4],
   tee_boxes: [
-    { name: "Jet",     color: "#2c2c2c", slope: 148, rating: 75.4, par: 72, yardage: 7213 },
+    { name: "Jet",     color: "#1a1a2e", slope: 148, rating: 75.4, par: 72, yardage: 7213 },
     { name: "Valor",   color: "#2d8fd4", slope: 142, rating: 73.0, par: 72, yardage: 6701 },
     { name: "Freedom", color: "#e8e8e8", slope: 133, rating: 70.3, par: 72, yardage: 6131 },
     { name: "Honor",   color: "#d4a843", slope: 126, rating: 67.8, par: 72, yardage: 5573 },
@@ -295,7 +295,7 @@ const fmtPar = n => n == null ? "—" : n === 0 ? "E" : n > 0 ? `+${n}` : `${n}`
 
 // Resolve tee color from name — handles standard colors, non-standard colors, and word names
 const TEE_COLOR_MAP = {
-  black: "#2c2c2c", blue: "#2d8fd4", white: "#e8e8e8", gold: "#d4a843", red: "#9b2335",
+  black: "#1a1a2e", blue: "#2d8fd4", white: "#e8e8e8", gold: "#d4a843", red: "#9b2335",
   green: "#2d8a4e", silver: "#a8b2bd", yellow: "#e6c619", orange: "#e67e22", purple: "#7b2d8b",
   maroon: "#6b1c2a", navy: "#1b2a4a", teal: "#1a8a7a", tan: "#c4a86b", copper: "#b87333",
   bronze: "#cd7f32", champagne: "#f7e7ce", crimson: "#b22234", burgundy: "#800020",
@@ -315,46 +315,6 @@ const resolveTeeColor = (tee, index) => {
   }
   return TEE_FALLBACK_COLORS[index % TEE_FALLBACK_COLORS.length];
 };
-// Combo tee detection — splits "BLACK/BLUE" into ["#2c2c2c", "#2d8fd4"]
-const getComboColors = (name) => {
-  if (!name) return null;
-  const separators = ["/", "-", "+", "&", " and "];
-  for (const sep of separators) {
-    const parts = name.split(new RegExp(`\\s*${sep.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")}\\s*`, "i")).map(p => p.trim().toLowerCase());
-    if (parts.length === 2 && parts[0] !== parts[1]) {
-      const c1 = TEE_COLOR_MAP[parts[0]] || (parts[0].includes("black") ? "#2c2c2c" : null);
-      const c2 = TEE_COLOR_MAP[parts[1]] || (parts[1].includes("white") ? "#e8e8e8" : null);
-      if (c1 && c2) return [c1, c2];
-    }
-  }
-  return null;
-};
-// TeeColorSwatch — handles solid, combo (diagonal split), and black (gray+dot) tees
-const TeeColorSwatch = ({ color, name, size = 12, style = {} }) => {
-  const combo = getComboColors(name || "");
-  if (combo) {
-    const [c1, c2] = combo;
-    const s = size;
-    return (
-      <span style={{ display: "inline-block", width: s, height: s, borderRadius: 3, overflow: "hidden", flexShrink: 0, border: "1px solid #ffffff20", ...style }}>
-        <svg width={s} height={s} viewBox={`0 0 ${s} ${s}`}>
-          <polygon points={`0,0 ${s},0 0,${s}`} fill={c1} />
-          <polygon points={`${s},0 ${s},${s} 0,${s}`} fill={c2} />
-        </svg>
-      </span>
-    );
-  }
-  if (isBlackTee(color)) {
-    return (
-      <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: size, height: size, borderRadius: 3, background: "#a8b2bd", border: "1px solid #88888880", flexShrink: 0, ...style }}>
-        <span style={{ width: Math.round(size*0.4), height: Math.round(size*0.4), borderRadius: "50%", background: "#111", display: "block" }} />
-      </span>
-    );
-  }
-  const border = isLightTee(color) ? "1px solid #99999960" : "1px solid #ffffff15";
-  return <span style={{ display: "inline-block", width: size, height: size, borderRadius: 3, background: color || "#888", border, flexShrink: 0, ...style }} />;
-};
-
 const isLightTee = (clr) => {
   if (!clr) return false;
   const light = ["#e8e8e8","#a8b2bd","#c0c0c0","#f7e7ce","#c2b280","#c4a86b","#8e8e8e"];
@@ -362,15 +322,9 @@ const isLightTee = (clr) => {
 };
 const isDarkTee = (clr) => {
   if (!clr) return false;
-  const dark = ["#1a1a2e","#000000","#111111","#0a0a0a","#1a1a1a","#222222","#2c2c2c","#2d2d2d","#0d0d0d","black"];
+  const dark = ["#1a1a2e","#000000","#111111","#0a0a0a","#1a1a1a","#222222","#2d2d2d","#0d0d0d","black"];
   return dark.includes(clr.toLowerCase());
 };
-const isBlackTee = (clr) => isDarkTee(clr);
-// Black tee marker: light gray background (#a8b2bd) with black dot inside
-const blackTeeMarker = (size = 10) => ({
-  outer: { width: size, height: size, borderRadius: "50%", background: "#a8b2bd", border: "1px solid #88888880", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
-  inner: { width: Math.round(size * 0.45), height: Math.round(size * 0.45), borderRadius: "50%", background: "#111", display: "block" },
-});
 
 // Pick default tee: closest to slope 128 and 6400 yards (weighted combo)
 const getDefaultTee = (tees) => {
@@ -462,8 +416,8 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
       const containerTop = containerRef.current.getBoundingClientRect().top;
       const headerH = headerRef.current.offsetHeight;
       const navH = 60;
-      const bottomPad = 14;
-      const available = viewH - containerTop - headerH - navH - bottomPad;
+      const bottomPad = 80;
+      const available = viewH - containerTop - headerH - navH - bottomPad - 8;
       const perRow = Math.floor(available / lb.length);
       const clampedPerRow = Math.min(perRow, 36); // never taller than 36px per row
       const vPad = Math.max(0, Math.floor((clampedPerRow - 14) / 2));
@@ -606,12 +560,11 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
 
   return (
     <div style={{ position: "relative" }}>
-      {/* Giant trophy silhouette behind entire leaderboard — fixed so it never shifts */}
+      {/* Giant trophy silhouette behind entire leaderboard */}
       <img src={WBC_TROPHY_SILHOUETTE} alt="" style={{
-        position: "fixed", top: "50%", left: "50%",
+        position: "absolute", top: "50%", left: trophyLeft,
         transform: "translate(-50%, -50%)",
-        width: 480, height: "100vh",
-        maxWidth: "100vw",
+        width: "100%", height: "100%",
         opacity: 0.08,
         pointerEvents: "none",
         userSelect: "none",
@@ -1351,7 +1304,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
                         color: K.t1,
                       }}>
                         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 3, marginBottom: 1 }}>
-                          <TeeColorSwatch color={tee.color} name={tee.name} size={8} />
+                          <span style={{ width: 7, height: 7, borderRadius: "50%", background: tee.color, display: "inline-block", border: isLightTee(tee.color) ? "1px solid #99999980" : isDarkTee(tee.color) ? "1px solid #ffffff50" : "none" }} />
                           <span style={{ fontSize: 10, fontWeight: 700 }}>{tee.name}</span>
                         </div>
                         <div style={{ fontSize: 9, color: K.acc, fontWeight: 700 }}>CH {previewCH}</div>
@@ -1888,7 +1841,7 @@ function GroupsView({ players, round, tRounds, courses, pairingsData, teeTimesDa
                     <span style={{ fontWeight: 600, fontSize: 13, color: isMe ? "#d4a843" : K.t1 }}>{p.name}</span>
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 2, fontSize: 9, fontWeight: 600, color: isLightTee(teeClr) ? K.t3 : teeClr, justifyContent: "center" }}>
                       {teeName && <>
-                        <TeeColorSwatch color={teeClr} name={teeName} size={6} />
+                        <span style={{ width: 5, height: 5, borderRadius: "50%", background: teeClr, display: "inline-block", border: isLightTee(teeClr) ? "1px solid #999" : "none" }} />
                         {teeName}
                       </>}
                     </span>
@@ -2262,7 +2215,7 @@ function TeeAssigner({ activePlayers, numRounds, tRounds, courses, teeData, setT
                     flex: 1, minWidth: 50, padding: "5px 3px", borderRadius: 6, cursor: "pointer", textAlign: "center",
                     background: K.card, border: `1px solid ${K.bdr}`, color: K.t1,
                   }}>
-                    <TeeColorSwatch color={tee.color} name={tee.name} size={7} style={{ marginRight: 3, verticalAlign: "middle" }} />
+                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: tee.color, display: "inline-block", border: isLightTee(tee.color) ? "1px solid #99999980" : isDarkTee(tee.color) ? "1px solid #ffffff50" : "none", marginRight: 3, verticalAlign: "middle" }} />
                     <span style={{ fontSize: 10, fontWeight: 600 }}>{tee.name}</span>
                     <div style={{ fontSize: 8, color: K.t3 }}>{tee.slope}/{tee.rating}{tee.yardage ? ` · ${tee.yardage.toLocaleString()}` : ""}</div>
                   </button>
@@ -2322,7 +2275,10 @@ function TeeAssigner({ activePlayers, numRounds, tRounds, courses, teeData, setT
                           background: isActive ? (isDarkTee(tee.color) ? K.acc + "15" : tee.color + "25") : K.inp,
                           border: isActive ? `1px solid ${K.acc}` : `1px solid transparent`,
                         }}>
-                          <TeeColorSwatch color={tee.color} name={tee.name} size={10} />
+                          <span style={{
+                            width: 10, height: 10, borderRadius: "50%", background: tee.color,
+                            border: isLightTee(tee.color) ? "1px solid #99999980" : isDarkTee(tee.color) ? "1px solid #ffffff50" : "none",
+                          }} />
                         </button>
                       );
                     })}
@@ -2440,7 +2396,7 @@ function PlayerRow({ player, onUpdateHI, onUpdateName, onRemove, onSavePassword,
   );
 }
 
-function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, passwords, setPasswords, holeData, finalizedRounds, onFinalizeRound, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, onExternalSettingsHandled, currentUser }) {
+function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, passwords, setPasswords, holeData, finalizedRounds, onFinalizeRound, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, onExternalSettingsHandled }) {
   const [tab, setTab] = useState("tees");
   const [teesSaved, setTeesSaved] = useState({});
   const [teesModified, setTeesModified] = useState({});
@@ -2461,14 +2417,9 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
   const [confirmCourse, setConfirmCourse] = useState(null);
   const [searching, setSearching] = useState(false);
   const [courseSearch, setCourseSearch] = useState("");
-  const [courseStateFilter, setCourseStateFilter] = useState("MI");
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [expandedCourse, setExpandedCourse] = useState(null);
-  const [editingCourse, setEditingCourse] = useState(null); // { courseId, draft: {...} }
-  const [manualCourse, setManualCourse] = useState(null); // null | draft object when manually adding
-  const [coursePreview, setCoursePreview] = useState(null); // course to preview before confirming add
-  const [localDbPrompt, setLocalDbPrompt] = useState(null); // { sbCourse, query } — prompt user to use local or fetch fresh
   const [confirmRound, setConfirmRound] = useState(null);
   const [editRound, setEditRound] = useState(() => { for (let r = 1; r <= 4; r++) { if (!finalizedRounds[r]) return r; } return 4; });
   // Keep editRound pointing at the active round when finalization state changes
@@ -2540,167 +2491,62 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
 
   // Search GolfCourseAPI - debounced
   const searchTimerRef = useRef(null);
-  const doCourseSearch = (query, stateOverride) => {
+  const doCourseSearch = (query) => {
     setCourseSearch(query);
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     if (!query.trim() || query.trim().length < 2) { setSearchResults([]); return; }
     searchTimerRef.current = setTimeout(async () => {
       setSearchLoading(true);
-      const stateFilter = stateOverride !== undefined ? stateOverride : courseStateFilter;
       try {
+        // First search Supabase (14 years of WBC history)
         const q = query.trim();
-        const stateParam = stateFilter ? `&state=${encodeURIComponent(stateFilter)}` : "";
+        const rows = await sb.get("courses", `or=(name.ilike.*${q}*,city.ilike.*${q}*,state.ilike.*${q}*)&order=name&limit=20`);
         let results = [];
-
-        const STATE_NAMES = { AL:"Alabama",AK:"Alaska",AZ:"Arizona",AR:"Arkansas",CA:"California",CO:"Colorado",CT:"Connecticut",DE:"Delaware",FL:"Florida",GA:"Georgia",HI:"Hawaii",ID:"Idaho",IL:"Illinois",IN:"Indiana",IA:"Iowa",KS:"Kansas",KY:"Kentucky",LA:"Louisiana",ME:"Maine",MD:"Maryland",MA:"Massachusetts",MI:"Michigan",MN:"Minnesota",MS:"Mississippi",MO:"Missouri",MT:"Montana",NE:"Nebraska",NV:"Nevada",NH:"New Hampshire",NJ:"New Jersey",NM:"New Mexico",NY:"New York",NC:"North Carolina",ND:"North Dakota",OH:"Ohio",OK:"Oklahoma",OR:"Oregon",PA:"Pennsylvania",RI:"Rhode Island",SC:"South Carolina",SD:"South Dakota",TN:"Tennessee",TX:"Texas",UT:"Utah",VT:"Vermont",VA:"Virginia",WA:"Washington",WV:"West Virginia",WI:"Wisconsin",WY:"Wyoming" };
-        const STATE_ABBREVS = Object.fromEntries(Object.entries(STATE_NAMES).map(([k,v]) => [v.toUpperCase(), k]));
-        const stateMatches = (courseState, filter) => {
-          if (!filter || !courseState) return true;
-          const cs = courseState.trim().toUpperCase();
-          const f = filter.trim().toUpperCase();
-          if (cs === f) return true; // exact match (MI === MI)
-          if (STATE_NAMES[f] && cs === STATE_NAMES[f].toUpperCase()) return true; // MI → Michigan
-          if (STATE_ABBREVS[cs] && STATE_ABBREVS[cs] === f) return true; // Michigan → MI
-          return false;
-        };
-
-        const decodeHtml = (str) => str ? str.replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"').replace(/&#39;/g,"'") : str;
-        const hasRealSlope = (c) => (c.tee_boxes || []).some(tb => parseInt(tb.slope) !== 113) || (parseInt(c.slope) !== 113 && !!c.slope);
-
-        const parseRapidAPI = (rawCourses, stateFilter) => rawCourses
-          .filter(c => stateMatches(c.state, stateFilter))
-          .map((c, ci) => {
-            // This API: top-level courseRating/slopeRating, scorecard[].tees.teeBox1/teeBox2...
-            const sc = Array.isArray(c.scorecard) ? c.scorecard : [];
-            const hole_pars = sc.map(h => parseInt(h.Par) || 4);
-            const hole_handicaps = sc.map(h => parseInt(h.Handicap) || 0);
-            const par = hole_pars.reduce((a, b) => a + b, 0) || 72;
-            // Collect all tee box keys across all holes
-            const teeKeys = [...new Set(sc.flatMap(h => h.tees ? Object.keys(h.tees) : []))];
-            const tees = teeKeys.length ? teeKeys.map((key, ti) => {
-              const sample = sc.find(h => h.tees?.[key]);
-              const color = sample?.tees?.[key]?.color || key;
-              const yardage = sc.reduce((a, h) => a + (parseInt(h.tees?.[key]?.yards) || 0), 0);
-              const hole_yards = sc.map(h => parseInt(h.tees?.[key]?.yards) || 0);
-              return {
-                name: color || key,
-                color: resolveTeeColor({ name: color || key, color: color || "" }, ti),
-                slope: parseInt(c.slopeRating) || 113,
-                rating: parseFloat(c.courseRating) || 72.0,
-                par, yardage, hole_yards,
-              };
-            }) : [{
-              name: "Default",
-              color: resolveTeeColor({ name: "Default", color: "" }, 0),
-              slope: parseInt(c.slopeRating) || 113,
-              rating: parseFloat(c.courseRating) || 72.0,
-              par, yardage: 0, hole_yards: [],
-            }];
-            return {
-              id: `rapid_${c._id || ci}`,
-              name: decodeHtml(c.name) || "Unknown",
-              city: c.city || "", state: c.state || "",
-              par, slope: parseInt(c.slopeRating) || 113,
-              rating: parseFloat(c.courseRating) || 72.0,
-              hole_pars, hole_handicaps, tee_boxes: tees,
-              _source: "RapidAPI",
-            };
-          });
-
-        const parseGolfCourseAPI = (rawCourses) => {
-          const arr = Array.isArray(rawCourses) ? rawCourses : (rawCourses.courses || []);
-          return arr.map((c, ci) => {
-            const teesObj = c.tees || {};
-            const allTees = Array.isArray(teesObj.male) && teesObj.male.length ? teesObj.male : (teesObj.female || []);
-            const tees = allTees.map((t, ti) => ({
-              name: t.tee_name || "Default",
-              color: resolveTeeColor({ name: t.tee_name || "", color: "" }, ti),
-              rating: parseFloat(t.course_rating) || 72.0,
-              slope: parseInt(t.slope_rating) || 113,
-              par: parseInt(t.par_total) || 72,
-              yardage: parseInt(t.total_yards) || 0,
-              hole_yards: (t.holes || []).map(h => parseInt(h.yardage) || 0),
-            }));
-            const firstTee = allTees[0]; const holes = firstTee?.holes || [];
-            return {
-              id: `gc_${c.id || ci}`,
-              name: decodeHtml([c.club_name, c.course_name].filter(Boolean).join(" – ") || c.name || "Unknown"),
-              city: c.location?.city || c.city || "", state: c.location?.state || c.state || "",
-              par: parseInt(firstTee?.par_total) || 72,
-              slope: parseInt(firstTee?.slope_rating) || 113,
-              rating: parseFloat(firstTee?.course_rating) || 72.0,
-              hole_pars: holes.map(h => parseInt(h.par) || 4),
-              hole_handicaps: holes.map(h => parseInt(h.handicap) || 0),
-              tee_boxes: tees,
-              _source: "GolfCourseAPI",
-            };
-          });
-        };
-
-        // 1. Supabase FIRST — local WBC history takes priority
-        let sbCourseNames = new Set();
+        if (rows?.length) {
+          const ids = rows.map(r => r.id).join(",");
+          const tbRows = await sb.get("tee_boxes", `course_id=in.(${ids})`);
+          results = rows.map((c) => ({
+            ...c,
+            hole_pars: c.hole_pars || [],
+            hole_handicaps: c.hole_handicaps || [],
+            tee_boxes: (tbRows || []).filter(t => t.course_id === c.id).map((t, ti) => ({ ...t, color: resolveTeeColor(t, ti) })),
+          }));
+        }
+        // Then search GolfCourseAPI via proxy for any new courses not in history
         try {
-          const qEnc = encodeURIComponent(`*${q}*`);
-          const rows = await sb.get("courses", `or=(name.ilike.${qEnc},city.ilike.${qEnc})&order=name&limit=40`);
-          if (rows?.length) {
-            const filtered = stateFilter ? rows.filter(r => stateMatches(r.state, stateFilter)) : rows;
-            const ids = filtered.map(r => r.id).join(",");
-            const tbRows = ids ? await sb.get("tee_boxes", `course_id=in.(${ids})`) : [];
-            const sbCourses = filtered.map((c) => ({
-              ...c, hole_pars: c.hole_pars || [], hole_handicaps: c.hole_handicaps || [],
-              _source: "WBC History",
-              tee_boxes: (tbRows || []).filter(t => t.course_id === c.id).map((t, ti) => {
-                const tbSlope = parseInt(t.slope), courseSlope = parseInt(c.slope);
-                const slope = (tbSlope === 113 && courseSlope && courseSlope !== 113) ? courseSlope : t.slope;
-                return { ...t, slope, color: resolveTeeColor(t, ti) };
-              }),
-            }));
-            for (const sbC of sbCourses) {
-              results.push(sbC);
-              sbCourseNames.add(sbC.name.toLowerCase());
-            }
+          const apiRes = await fetch(`/api/courses?search=${encodeURIComponent(q)}`);
+          if (apiRes.ok) {
+            const apiData = await apiRes.json();
+            const apiCourses = (apiData.courses || [])
+              .filter(c => !results.find(r => r.name.toLowerCase() === (c.club_name || c.course_name || "").toLowerCase()))
+              .map((c, ci) => {
+                const tees = (c.tees || []).map((t, ti) => ({
+                  name: t.tee_name || t.name || "Default",
+                  color: resolveTeeColor({ name: t.tee_name || t.name || "", color: "" }, ti),
+                  rating: parseFloat(t.course_rating) || 72.0,
+                  slope: parseInt(t.slope_rating) || 113,
+                  par: parseInt(t.par) || 72,
+                  yardage: parseInt(t.total_yards) || 0,
+                }));
+                const firstTee = c.tees?.[0];
+                return {
+                  id: `gc_${c.id || ci}`,
+                  name: c.club_name || c.course_name || "Unknown",
+                  city: c.location?.city || "",
+                  state: c.location?.state || "",
+                  par: parseInt(firstTee?.par) || 72,
+                  slope: parseInt(firstTee?.slope_rating) || 113,
+                  rating: parseFloat(firstTee?.course_rating) || 72.0,
+                  hole_pars: firstTee?.holes?.map(h => h.par) || [],
+                  hole_handicaps: firstTee?.holes?.map(h => h.handicap) || [],
+                  tee_boxes: tees,
+                };
+              });
+            results = [...results, ...apiCourses];
           }
-        } catch(e) { console.log("[Supabase] failed:", e); }
-
-        // 2. RapidAPI — only for courses NOT already in local DB
-        let apiResults = [];
-        try {
-          const r = await fetch(`/api/courses2?search=${encodeURIComponent(q)}${stateParam}`);
-          if (r.ok) {
-            const data = await r.json();
-            const raw = Array.isArray(data) ? data : (data.courses || data.data || []);
-            apiResults = parseRapidAPI(raw, stateFilter).filter(c => !sbCourseNames.has(c.name.toLowerCase()));
-            results = [...results, ...apiResults];
-          }
-        } catch(e) { console.log("[RapidAPI] failed:", e); }
-
-        // 3. GolfCourseAPI — fill gaps not covered by Supabase or RapidAPI
-        try {
-          const r2 = await fetch(`/api/courses?search=${encodeURIComponent(q)}${stateParam}`);
-          if (r2.ok) {
-            const data2 = await r2.json();
-            const gcParsed = parseGolfCourseAPI(data2);
-            for (const gc of gcParsed) {
-              if (!stateMatches(gc.state, stateFilter)) continue;
-              const nameLower = gc.name.toLowerCase();
-              if (sbCourseNames.has(nameLower)) continue; // already have local version
-              const rapidMatch = results.find(r => r.name.toLowerCase() === nameLower);
-              if (rapidMatch) {
-                const rapidReal = hasRealSlope(rapidMatch), gcReal = hasRealSlope(gc);
-                if (gcReal && !rapidReal) {
-                  results = results.map(r => r.name.toLowerCase() === nameLower
-                    ? { ...rapidMatch, tee_boxes: gc.tee_boxes, slope: gc.slope, rating: gc.rating } : r);
-                }
-              } else {
-                results.push(gc);
-              }
-            }
-          }
-        } catch(e) { console.log("[GolfCourseAPI] failed:", e); }
-
-        // 4. Flag courses where neither API had real data
-        results = results.map(c => ({ ...c, _incompleteData: !hasRealSlope(c) }));
-
+        } catch(apiErr) {
+          console.log("GolfCourseAPI proxy failed:", apiErr);
+        }
         setSearchResults(results);
       } catch (err) {
         console.log("Course search failed:", err);
@@ -2999,8 +2845,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                               {Array.from({ length: numRounds }, (_, ri) => ri + 1).map(r => {
                                 const isAssigned = assignedRounds.includes(r);
                                 const tr = tRounds.find(t => t.round_number === r);
-                                const trCourseId = tr?.course_id;
-                                const otherCourse = trCourseId && trCourseId !== "null" && trCourseId !== "undefined" && String(trCourseId).trim() !== "" && trCourseId !== c.id && courses.find(x => x.id === trCourseId);
+                                const otherCourse = tr && tr.course_id && tr.course_id !== c.id;
                                 return (
                                   <button key={r} onClick={() => {
                                     if (isAssigned) { setCourseForRound(r, { id: null, name: "" }); }
@@ -3017,628 +2862,53 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                             </div>
                             <button onClick={() => setConfirmCourse({ course: c, delete: true, assignedRounds })} style={{ background: "transparent", border: "none", color: K.t3, cursor: "pointer", fontSize: 14, padding: "2px 4px", lineHeight: 1 }} title="Remove course">✕</button>
                           </div>
-                          {expandedCourse === c.id && (() => {
-                            const isEditing = editingCourse?.courseId === c.id;
-                            const d = isEditing ? editingCourse.draft : c;
-                            const inpStyle = { background: K.inp, border: `1px solid ${ac}40`, borderRadius: 4, color: K.t1, fontSize: 9, textAlign: "center", width: "100%", padding: "2px 0", boxSizing: "border-box" };
-                            const readStyle = { textAlign: "center", color: K.t1, fontWeight: 700, padding: "3px 0", fontSize: 9 };
-                            const startEdit = () => setEditingCourse({ courseId: c.id, draft: { ...c, hole_pars: [...(c.hole_pars||Array(18).fill(4))], hole_handicaps: [...(c.hole_handicaps||Array(18).fill(0))], tee_boxes: (c.tee_boxes||[]).map(t=>({...t})) } });
-                            const saveEdit = () => {
-                              const updated = { ...editingCourse.draft };
-                              setCourseList(prev => prev.map(x => x.id === c.id ? updated : x));
-                              const { tee_boxes: tbs, ...courseData } = updated;
-                              addCourse(updated);
-                              setEditingCourse(null);
-                            };
-                            return (
-                              <div style={{ padding: "0 14px 12px", background: ac + "04" }}>
-                                {/* Rating / Slope row */}
-                                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, marginTop: 4 }}>
-                                  {["rating","slope"].map(field => (
-                                    <div key={field} style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                                      <span style={{ fontSize: 9, color: K.t3, textTransform: "capitalize" }}>{field}:</span>
-                                      {isEditing
-                                        ? <input value={d[field]||""} onChange={e => setEditingCourse(prev => ({ ...prev, draft: { ...prev.draft, [field]: e.target.value } }))} style={{ ...inpStyle, width: 44 }} />
-                                        : <span style={{ fontSize: 9, color: K.t2, fontWeight: 700 }}>{d[field]}</span>}
+                          {expandedCourse === c.id && (
+                            <div style={{ padding: "0 14px 12px", background: ac + "04" }}>
+                              <div style={{ fontSize: 10, color: K.t3, marginBottom: 4 }}>Rating {c.rating} · Slope {c.slope}</div>
+                              {[["Front", 0, 9], ["Back", 9, 9]].map(([label, start, count]) => {
+                                const pars = (c.hole_pars || []).slice(start, start + count);
+                                const hcps = (c.hole_handicaps || []).slice(start, start + count);
+                                return (
+                                  <div key={label} style={{ marginBottom: 4 }}>
+                                    <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8 }}>
+                                      <div style={{ color: K.t3, fontWeight: 600, padding: "2px 0" }}>Hole</div>
+                                      {pars.map((_, i) => <div key={i} style={{ textAlign: "center", color: K.t2, fontWeight: 700, padding: "2px 0" }}>{start + i + 1}</div>)}
+                                      <div />
                                     </div>
-                                  ))}
-                                  <div style={{ marginLeft: "auto", display: "flex", gap: 4, alignItems: "center" }}>
-                                    {!isEditing
-                                      ? <button onClick={startEdit} style={{ padding: "3px 8px", borderRadius: 4, background: "transparent", border: `1px solid ${ac}60`, color: ac, fontSize: 9, fontWeight: 700, cursor: "pointer" }}>✏️ Edit</button>
-                                      : <>
-                                          <button onClick={saveEdit} style={{ padding: "3px 8px", borderRadius: 4, background: ac, border: "none", color: K.bg, fontSize: 9, fontWeight: 700, cursor: "pointer" }}>Save</button>
-                                          <button onClick={() => setEditingCourse(null)} style={{ padding: "3px 8px", borderRadius: 4, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t3, fontSize: 9, cursor: "pointer" }}>Cancel</button>
-                                        </>}
-                                    <button onClick={() => { setExpandedCourse(null); setEditingCourse(null); }} style={{ padding: "2px 6px", borderRadius: 4, background: "transparent", border: "none", color: K.t3, fontSize: 14, cursor: "pointer", lineHeight: 1 }} title="Collapse">✕</button>
-                                  </div>
-                                </div>
-                                {/* Tee boxes */}
-                                {(d.tee_boxes||[]).length > 0 && (
-                                  <div style={{ marginBottom: 8 }}>
-                                    <div style={{ fontSize: 8, color: K.t3, fontWeight: 600, marginBottom: 3, textTransform: "uppercase" }}>Tee Boxes</div>
-                                    {(d.tee_boxes||[]).map((tb, tbi) => (
-                                      <div key={tbi} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 3, fontSize: 9 }}>
-                                        <TeeColorSwatch color={tb.color} name={tb.name} size={10} />
-                                        <span style={{ color: K.t2, fontWeight: 600, width: 52 }}>{tb.name}</span>
-                                        {["rating","slope","par"].map(f => (
-                                          <div key={f} style={{ display: "flex", alignItems: "center", gap: 2 }}>
-                                            <span style={{ color: K.t3, fontSize: 8 }}>{f[0].toUpperCase()+f.slice(1)}:</span>
-                                            {isEditing
-                                              ? <input value={tb[f]||""} onChange={e => setEditingCourse(prev => { const tbs = prev.draft.tee_boxes.map((t,i) => i===tbi ? {...t,[f]:e.target.value} : t); return {...prev, draft:{...prev.draft,tee_boxes:tbs}}; })} style={{...inpStyle, width: f==="rating"?34:28}} />
-                                              : <span style={{ color: K.t2 }}>{tb[f]}</span>}
-                                          </div>
-                                        ))}
-                                        {isEditing && (
-                                          <button onClick={() => setEditingCourse(prev => ({ ...prev, draft: { ...prev.draft, tee_boxes: prev.draft.tee_boxes.filter((_,i) => i !== tbi) } }))}
-                                            style={{ marginLeft: "auto", background: "transparent", border: "none", color: K.t3, cursor: "pointer", fontSize: 13, lineHeight: 1, padding: "0 2px" }} title="Remove tee">✕</button>
-                                        )}
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
-                                {/* Hole par / HCP grid */}
-                                {[["Front", 0, 9], ["Back", 9, 9]].map(([label, start, count]) => {
-                                  const pars = (d.hole_pars||[]).slice(start, start+count);
-                                  const hcps = (d.hole_handicaps||[]).slice(start, start+count);
-                                  return (
-                                    <div key={label} style={{ marginBottom: 4 }}>
-                                      <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8 }}>
-                                        <div style={{ color: K.t3, fontWeight: 600, padding: "2px 0" }}>Hole</div>
-                                        {Array.from({length:count},(_,i)=><div key={i} style={{ textAlign:"center", color:K.t2, fontWeight:700, padding:"2px 0" }}>{start+i+1}</div>)}
-                                        <div />
-                                      </div>
-                                      <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8, background: K.inp, borderRadius: 3 }}>
-                                        <div style={{ color: K.t3, fontWeight: 600, padding: "3px 2px" }}>Par</div>
-                                        {Array.from({length:count},(_,i) => isEditing
-                                          ? <input key={i} value={pars[i]??""} onChange={e => setEditingCourse(prev => { const hp=[...(prev.draft.hole_pars||[])]; hp[start+i]=parseInt(e.target.value)||0; return {...prev,draft:{...prev.draft,hole_pars:hp}}; })} style={inpStyle} />
-                                          : <div key={i} style={readStyle}>{pars[i]}</div>)}
-                                        <div style={{ textAlign:"center", color:ac, fontWeight:800, padding:"3px 0", fontSize:9 }}>{pars.reduce((a,b)=>a+(+b||0),0)}</div>
-                                      </div>
-                                      <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8 }}>
-                                        <div style={{ color: K.t3, fontWeight: 600, padding: "2px 2px" }}>HCP</div>
-                                        {Array.from({length:count},(_,i) => isEditing
-                                          ? <input key={i} value={hcps[i]??""} onChange={e => setEditingCourse(prev => { const hh=[...(prev.draft.hole_handicaps||[])]; hh[start+i]=parseInt(e.target.value)||0; return {...prev,draft:{...prev.draft,hole_handicaps:hh}}; })} style={{...inpStyle, color:K.t3}} />
-                                          : <div key={i} style={{ textAlign:"center", color:K.t3, padding:"2px 0", fontSize:9 }}>{hcps[i]}</div>)}
-                                        <div />
-                                      </div>
+                                    <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8, background: K.inp, borderRadius: 3 }}>
+                                      <div style={{ color: K.t3, fontWeight: 600, padding: "3px 2px" }}>Par</div>
+                                      {pars.map((p, i) => <div key={i} style={{ textAlign: "center", color: K.t1, fontWeight: 700, padding: "3px 0" }}>{p}</div>)}
+                                      <div style={{ textAlign: "center", color: ac, fontWeight: 800, padding: "3px 0" }}>{pars.reduce((a,b)=>a+b,0)}</div>
                                     </div>
-                                  );
-                                })}
-                              </div>
-                            );
-                          })()}
+                                    <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8 }}>
+                                      <div style={{ color: K.t3, fontWeight: 600, padding: "2px 2px" }}>HCP</div>
+                                      {hcps.map((h, i) => <div key={i} style={{ textAlign: "center", color: K.t3, padding: "2px 0" }}>{h}</div>)}
+                                      <div />
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
                         </div>
                       );
                     })}
                     {searching && (
                       <div style={{ padding: 14, borderTop: `1px solid ${K.bdr}` }}>
-                        <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-                          <select value={courseStateFilter} onChange={e => { setCourseStateFilter(e.target.value); if (courseSearch.trim().length >= 2) doCourseSearch(courseSearch, e.target.value); }} style={{ width: 70, padding: "8px 6px", background: K.inp, border: `1px solid ${ac}40`, borderRadius: 8, color: K.t1, fontSize: 12, flexShrink: 0 }}>
-                            <option value="">All</option>
-                            {["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"].map(s => <option key={s} value={s}>{s}</option>)}
-                          </select>
-                          <input value={courseSearch} onChange={e => doCourseSearch(e.target.value)} placeholder="Search by name or city..." autoFocus style={{ flex: 1, padding: "8px 12px", background: K.inp, border: `1px solid ${ac}40`, borderRadius: 8, color: K.t1, fontSize: 13, boxSizing: "border-box" }} />
-                        </div>
+                        <input value={courseSearch} onChange={e => doCourseSearch(e.target.value)} placeholder="Search courses by name, city, or state..." autoFocus style={{ width: "100%", padding: "8px 12px", background: K.inp, border: `1px solid ${ac}40`, borderRadius: 8, color: K.t1, fontSize: 13, marginBottom: 8, boxSizing: "border-box" }} />
                         {searchLoading && <div style={{ textAlign: "center", padding: 12, color: K.t3, fontSize: 11 }}>Searching GolfCourseAPI...</div>}
-                        {!searchLoading && courseSearch.trim().length >= 2 && searchResults.length === 0 && !manualCourse && (
-                          <div style={{ textAlign: "center", padding: "10px 0" }}>
-                            <div style={{ color: K.t3, fontSize: 11, marginBottom: 8 }}>No courses found</div>
-                            <button onClick={() => setManualCourse({
-                              id: `manual_${Date.now()}`,
-                              name: courseSearch.trim(),
-                              city: "", state: courseStateFilter || "",
-                              par: 72, slope: 113, rating: 72.0,
-                              hole_pars: Array(18).fill(4),
-                              hole_handicaps: Array(18).fill(0).map((_,i)=>i+1),
-                              tee_boxes: [
-                                { name: "Black", color: "#222222", rating: 74.0, slope: 130, par: 72, yardage: 6800 },
-                                { name: "Blue",  color: "#1a56db", rating: 72.0, slope: 120, par: 72, yardage: 6400 },
-                                { name: "White", color: "#e5e7eb", rating: 70.0, slope: 113, par: 72, yardage: 6000 },
-                                { name: "Red",   color: "#e02424", rating: 68.0, slope: 108, par: 72, yardage: 5400 },
-                              ],
-                            })} style={{ padding: "7px 16px", borderRadius: 8, background: "transparent", border: `1px solid ${ac}`, color: ac, fontSize: 11, fontWeight: 700, cursor: "pointer" }}>
-                              + Add Course Manually
-                            </button>
-                          </div>
-                        )}
-                        {!searchLoading && manualCourse && (() => {
-                          const mc = manualCourse;
-                          const setMc = fn => setManualCourse(prev => fn(prev));
-                          const inpBase = { background: K.inp, border: `1px solid ${ac}40`, borderRadius: 6, color: K.t1, padding: "6px 8px", fontSize: 12, boxSizing: "border-box" };
-                          const tinyInp = { background: K.inp, border: `1px solid ${ac}30`, borderRadius: 4, color: K.t1, fontSize: 9, textAlign: "center", width: "100%", padding: "2px 1px", boxSizing: "border-box" };
-                          const label = (txt) => <div style={{ fontSize: 9, color: K.t3, fontWeight: 600, marginBottom: 2, textTransform: "uppercase" }}>{txt}</div>;
-                          const canSave = mc.name.trim().length > 1;
-                          return (
-                            <div style={{ background: K.card, border: `1px solid ${ac}30`, borderRadius: 10, padding: 14, marginBottom: 8 }}>
-                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                                <span style={{ fontSize: 12, fontWeight: 800, color: K.t1 }}>Manual Course Entry</span>
-                                <button onClick={() => setManualCourse(null)} style={{ background: "transparent", border: "none", color: K.t3, fontSize: 16, cursor: "pointer", lineHeight: 1 }}>✕</button>
-                              </div>
-
-                              {/* Name / City / State */}
-                              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 60px", gap: 6, marginBottom: 8 }}>
-                                <div>
-                                  {label("Course Name")}
-                                  <input value={mc.name} onChange={e => setMc(p=>({...p,name:e.target.value}))} style={{...inpBase, width:"100%"}} placeholder="e.g. Treetops Resort" />
-                                </div>
-                                <div>
-                                  {label("City")}
-                                  <input value={mc.city} onChange={e => setMc(p=>({...p,city:e.target.value}))} style={{...inpBase, width:"100%"}} placeholder="e.g. Gaylord" />
-                                </div>
-                                <div>
-                                  {label("State")}
-                                  <select value={mc.state} onChange={e => setMc(p=>({...p,state:e.target.value}))} style={{...inpBase, width:"100%"}}>
-                                    <option value="">—</option>
-                                    {["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"].map(s=><option key={s} value={s}>{s}</option>)}
-                                  </select>
-                                </div>
-                              </div>
-
-                              {/* Tee Boxes */}
-                              <div style={{ marginBottom: 8 }}>
-                                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-                                  {label("Tee Boxes")}
-                                  <button onClick={() => setMc(p=>({...p, tee_boxes:[...p.tee_boxes, {name:"", color:"#888888", rating:72.0, slope:113, par:72, yardage:0}]}))}
-                                    style={{ fontSize: 9, padding: "1px 6px", borderRadius: 4, background: "transparent", border: `1px solid ${ac}60`, color: ac, cursor: "pointer", fontWeight: 700 }}>+ Tee</button>
-                                </div>
-                                <div style={{ display: "grid", gridTemplateColumns: "12px 70px 50px 44px 32px 32px 40px 20px", gap: 3, fontSize: 8, color: K.t3, fontWeight: 600, marginBottom: 2, paddingLeft: 2 }}>
-                                  <div/>
-                                  <div>Name</div><div>Color</div><div>Rating</div><div>Slope</div><div>Par</div><div>Yards</div><div/>
-                                </div>
-                                {mc.tee_boxes.map((tb, tbi) => (
-                                  <div key={tbi} style={{ display: "grid", gridTemplateColumns: "12px 70px 50px 44px 32px 32px 40px 20px", gap: 3, marginBottom: 3, alignItems: "center" }}>
-                                    <TeeColorSwatch color={tb.color} name={tb.name} size={10} />
-                                    <input value={tb.name} onChange={e => setMc(p=>{const t=[...p.tee_boxes]; t[tbi]={...t[tbi],name:e.target.value}; return {...p,tee_boxes:t};})} style={{...tinyInp, textAlign:"left", padding:"2px 4px"}} placeholder="Name" />
-                                    <div style={{ position:"relative", width:"100%", height:22, flexShrink:0 }}>
-                                      <div style={{ position:"absolute", inset:0, borderRadius:3, background:tb.color||"#888", border:"1px solid #ffffff25", pointerEvents:"none" }} />
-                                      <select value={Object.entries(TEE_COLOR_MAP).find(([,v])=>v===(tb.color||""))?.[0] || "black"}
-                                        onChange={e => { const clr = TEE_COLOR_MAP[e.target.value] || tb.color || "#888888"; setMc(p=>{const t=[...p.tee_boxes]; t[tbi]={...t[tbi],color:clr}; return {...p,tee_boxes:t};}); }}
-                                        style={{ position:"absolute", inset:0, width:"100%", height:"100%", opacity:0, cursor:"pointer", fontSize:12 }}>
-                                        {[["Black","#2c2c2c"],["Blue","#2d8fd4"],["White","#e8e8e8"],["Gold","#d4a843"],["Red","#9b2335"],["Green","#2d8a4e"],["Silver","#a8b2bd"],["Yellow","#e6c619"],["Orange","#e67e22"],["Purple","#7b2d8b"],["Maroon","#6b1c2a"],["Teal","#1a8a7a"],["Platinum","#c0c0c0"]].map(([n,c])=><option key={n} value={n.toLowerCase()}>{n}</option>)}
-                                      </select>
-                                    </div>
-                                    <input value={tb.rating} onChange={e => setMc(p=>{const t=[...p.tee_boxes]; t[tbi]={...t[tbi],rating:e.target.value}; return {...p,tee_boxes:t};})} style={tinyInp} />
-                                    <input value={tb.slope} onChange={e => setMc(p=>{const t=[...p.tee_boxes]; t[tbi]={...t[tbi],slope:e.target.value}; return {...p,tee_boxes:t};})} style={tinyInp} />
-                                    <input value={tb.par} onChange={e => setMc(p=>{const t=[...p.tee_boxes]; t[tbi]={...t[tbi],par:e.target.value}; return {...p,tee_boxes:t};})} style={tinyInp} />
-                                    <input value={tb.yardage} onChange={e => setMc(p=>{const t=[...p.tee_boxes]; t[tbi]={...t[tbi],yardage:e.target.value}; return {...p,tee_boxes:t};})} style={tinyInp} />
-                                    <button onClick={() => setMc(p=>({...p,tee_boxes:p.tee_boxes.filter((_,i)=>i!==tbi)}))} style={{ background:"transparent", border:"none", color:K.t3, fontSize:11, cursor:"pointer", padding:0, lineHeight:1 }}>✕</button>
-                                  </div>
-                                ))}
-                              </div>
-
-                              {/* Hole Pars & Handicaps */}
-                              {[["Front 9", 0, 9], ["Back 9", 9, 9]].map(([label9, start, count]) => (
-                                <div key={label9} style={{ marginBottom: 6 }}>
-                                  <div style={{ fontSize: 9, color: K.t3, fontWeight: 600, marginBottom: 3, textTransform: "uppercase" }}>{label9}</div>
-                                  <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8 }}>
-                                    <div style={{ color: K.t3, fontWeight: 600, padding: "2px 0" }}>Hole</div>
-                                    {Array.from({length:count},(_,i) => <div key={i} style={{ textAlign:"center", color:K.t2, fontWeight:700, padding:"2px 0" }}>{start+i+1}</div>)}
-                                    <div />
-                                  </div>
-                                  <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8, background: K.inp, borderRadius: 3, marginBottom: 2 }}>
-                                    <div style={{ color: K.t3, fontWeight: 600, padding: "3px 2px" }}>Par</div>
-                                    {Array.from({length:count},(_,i) => (
-                                      <input key={i} value={mc.hole_pars[start+i]??""} onChange={e => setMc(p=>{const hp=[...p.hole_pars]; hp[start+i]=e.target.value; return {...p,hole_pars:hp};})}
-                                        style={{ background:"transparent", border:"none", color:K.t1, fontSize:9, fontWeight:700, textAlign:"center", width:"100%", padding:"3px 0" }} />
-                                    ))}
-                                    <div style={{ textAlign:"center", color:ac, fontWeight:800, padding:"3px 0", fontSize:9 }}>
-                                      {mc.hole_pars.slice(start,start+count).reduce((a,b)=>a+(parseInt(b)||0),0)}
-                                    </div>
-                                  </div>
-                                  <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8 }}>
-                                    <div style={{ color: K.t3, fontWeight: 600, padding: "2px 2px" }}>HCP</div>
-                                    {Array.from({length:count},(_,i) => (
-                                      <input key={i} value={mc.hole_handicaps[start+i]??""} onChange={e => setMc(p=>{const hh=[...p.hole_handicaps]; hh[start+i]=e.target.value; return {...p,hole_handicaps:hh};})}
-                                        style={{ background:"transparent", border:"none", color:K.t3, fontSize:9, textAlign:"center", width:"100%", padding:"2px 0" }} />
-                                    ))}
-                                    <div />
-                                  </div>
-                                </div>
-                              ))}
-
-                              {/* Save button */}
-                              <button onClick={() => {
-                                const firstTee = mc.tee_boxes[0];
-                                const course = {
-                                  ...mc,
-                                  par: parseInt(firstTee?.par) || 72,
-                                  slope: parseInt(firstTee?.slope) || 113,
-                                  rating: parseFloat(firstTee?.rating) || 72.0,
-                                  hole_pars: mc.hole_pars.map(v=>parseInt(v)||4),
-                                  hole_handicaps: mc.hole_handicaps.map(v=>parseInt(v)||0),
-                                  tee_boxes: mc.tee_boxes.map(tb=>({...tb, rating:parseFloat(tb.rating)||72.0, slope:parseInt(tb.slope)||113, par:parseInt(tb.par)||72, yardage:parseInt(tb.yardage)||0})),
-                                };
-                                addCourseToLibrary(course);
-                                setManualCourse(null);
-                              }} disabled={!canSave} style={{ width:"100%", padding:"10px 0", borderRadius:8, background: canSave ? ac : K.bdr, border:"none", color: canSave ? K.bg : K.t3, fontSize:13, fontWeight:700, cursor: canSave ? "pointer" : "default", marginTop:4 }}>
-                                ✓ Add Course
-                              </button>
-                            </div>
-                          );
-                        })()}
+                        {!searchLoading && courseSearch.trim().length >= 2 && searchResults.length === 0 && <div style={{ color: K.t3, fontSize: 11, textAlign: "center", padding: 8 }}>No courses found</div>}
                         {!searchLoading && searchResults.filter(c => !courses.find(ex => ex.id === c.id)).map(c => (
-                          <button key={c.id} onClick={() => {
-                            const sbVer = c._sbVersion || (c.updated_at ? c : null);
-                            const hasLocalData = !!(sbVer && (sbVer.updated_at || c.updated_at));
-                            if (hasLocalData) {
-                              // Course exists in local DB — prompt user to use local or fetch fresh
-                              const localCourse = sbVer || c;
-                              setLocalDbPrompt({ sbCourse: localCourse, apiCourse: c._apiVersion || null, fullCourse: c });
-                            } else if (c._apiVersion) {
-                              if (c._apiHasReal && !c._sbHasReal) {
-                                const { _apiVersion, _sbHasReal, _apiHasReal, ...sbBase } = c;
-                                setCoursePreview({ ...sbBase, ...c._apiVersion, _apiVersion: c._apiVersion, _apiHasReal: true, _sbHasReal: false });
-                              } else {
-                                setCoursePreview(c);
-                              }
-                            } else {
-                              setCoursePreview(c);
-                            }
-                          }} style={{ display: "block", width: "100%", background: K.inp, border: `1px solid ${K.bdr}`, borderRadius: 10, padding: "10px 14px", cursor: "pointer", textAlign: "left", color: K.t1, marginBottom: 6 }}>
+                          <button key={c.id} onClick={() => { addCourseToLibrary(c); setSearchResults(prev => prev.filter(r => r.id !== c.id)); }} style={{ display: "block", width: "100%", background: K.inp, border: `1px solid ${K.bdr}`, borderRadius: 10, padding: "10px 14px", cursor: "pointer", textAlign: "left", color: K.t1, marginBottom: 6 }}>
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                               <div>
-                                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                                  <div style={{ fontWeight: 600, fontSize: 13 }}>{c.name}</div>
-                                  {c._incompleteData && <span style={{ fontSize: 8, background: "#d4584520", border: "1px solid #d4584540", color: "#d45845", borderRadius: 4, padding: "1px 5px", fontWeight: 700 }}>⚠ incomplete data</span>}
-                                  {!c._incompleteData && (c.tee_boxes?.length || 0) < 2 && <span style={{ fontSize: 8, background: "#d4a84320", border: "1px solid #d4a84340", color: "#d4a843", borderRadius: 4, padding: "1px 5px", fontWeight: 700 }}>⚠ 1 tee</span>}
-                                  {c._source && c._source !== "WBC History" && <span style={{ fontSize: 8, background: `${ac}15`, border: `1px solid ${ac}30`, color: ac, borderRadius: 4, padding: "1px 5px", fontWeight: 600 }}>{c._source}</span>}
-                                  {c.updated_at && (() => {
-                                    const d = new Date(c.updated_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-                                    return (
-                                      <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 8, background: "#2d8a4e20", border: "1px solid #2d8a4e40", color: "#2d8a4e", borderRadius: 4, padding: "1px 5px", fontWeight: 600 }}>
-                                        <img src={TROPHY_SVG_URL} alt="" style={{ width: 9, height: 9, filter: "brightness(0) saturate(100%) invert(42%) sepia(73%) saturate(400%) hue-rotate(100deg) brightness(95%)" }} />
-                                        {d}{c.updated_by && c.updated_by !== "Unknown" ? ` · ${c.updated_by}` : ""}
-                                      </span>
-                                    );
-                                  })()}
-                                </div>
-                                <div style={{ fontSize: 10, color: K.t3 }}>{c.city}{c.state ? `, ${c.state}` : ""}{c.par ? ` · Par ${c.par}` : ""}{(() => { const realTbSlope = (c.tee_boxes || []).find(t => parseInt(t.slope) !== 113)?.slope; const displaySlope = realTbSlope || (c.slope && parseInt(c.slope) !== 113 ? c.slope : null); return displaySlope ? ` · Slope ${displaySlope}` : ""; })()}</div>
+                                <div style={{ fontWeight: 600, fontSize: 13 }}>{c.name}</div>
+                                <div style={{ fontSize: 10, color: K.t3 }}>{c.city}{c.state ? `, ${c.state}` : ""}{c.par ? ` · Par ${c.par}` : ""}{c.slope ? ` · Slope ${c.slope}` : ""}</div>
                               </div>
-                              <span style={{ color: ac, fontSize: 11, fontWeight: 700 }}>Preview →</span>
+                              <span style={{ color: ac, fontSize: 11, fontWeight: 700 }}>+ Add</span>
                             </div>
                           </button>
                         ))}
-                        {/* Local DB prompt modal */}
-                        {localDbPrompt && (() => {
-                          const { sbCourse, apiCourse, fullCourse } = localDbPrompt;
-                          const tbs = sbCourse.tee_boxes || [];
-                          const updatedAt = sbCourse.updated_at;
-                          const updatedBy = sbCourse.updated_by || "Unknown";
-                          const formattedDate = updatedAt ? new Date(updatedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : null;
-                          const ScorecardPreview = ({ course }) => {
-                            const hp = course.hole_pars || [];
-                            const hh = course.hole_handicaps || [];
-                            if (!hp.length) return <div style={{ fontSize: 10, color: K.t3, fontStyle: "italic", marginBottom: 8 }}>No hole data available</div>;
-                            return (
-                              <div style={{ marginBottom: 10 }}>
-                                {[["Front", 0, 9], ["Back", 9, 9]].map(([lbl, start, count]) => {
-                                  const pars = hp.slice(start, start + count);
-                                  const hcps = hh.slice(start, start + count);
-                                  const firstTee = (course.tee_boxes || [])[0];
-                                  const yds = (firstTee?.hole_yards || []).slice(start, start + count);
-                                  const hasYds = yds.some(y => y > 0);
-                                  return (
-                                    <div key={lbl} style={{ marginBottom: 4 }}>
-                                      <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8 }}>
-                                        <div style={{ color: K.t3, fontWeight: 600, padding: "2px 0" }}>Hole</div>
-                                        {Array.from({length: count}, (_, i) => <div key={i} style={{ textAlign: "center", color: K.t2, fontWeight: 700, padding: "2px 0" }}>{start + i + 1}</div>)}
-                                        <div style={{ textAlign: "center", color: K.t3, fontSize: 7, padding: "2px 0" }}>Tot</div>
-                                      </div>
-                                      <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8, background: K.inp, borderRadius: 3, marginBottom: 1 }}>
-                                        <div style={{ color: K.t3, fontWeight: 600, padding: "3px 2px" }}>Par</div>
-                                        {pars.map((p, i) => <div key={i} style={{ textAlign: "center", color: K.t1, fontWeight: 700, padding: "3px 0" }}>{p || "–"}</div>)}
-                                        <div style={{ textAlign: "center", color: ac, fontWeight: 800, padding: "3px 0", fontSize: 9 }}>{pars.reduce((a, b) => a + (parseInt(b) || 0), 0)}</div>
-                                      </div>
-                                      {hcps.some(h => h > 0) && (
-                                        <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8, marginBottom: 1 }}>
-                                          <div style={{ color: K.t3, fontWeight: 600, padding: "2px 2px" }}>HCP</div>
-                                          {hcps.map((h, i) => <div key={i} style={{ textAlign: "center", color: K.t3, padding: "2px 0" }}>{h || "–"}</div>)}
-                                          <div />
-                                        </div>
-                                      )}
-                                      {hasYds && (
-                                        <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8 }}>
-                                          <div style={{ color: K.t3, fontWeight: 600, padding: "2px 2px" }}>Yds</div>
-                                          {yds.map((y, i) => <div key={i} style={{ textAlign: "center", color: K.t3, padding: "2px 0" }}>{y || "–"}</div>)}
-                                          <div style={{ textAlign: "center", color: K.t3, padding: "2px 0" }}>{yds.reduce((a, b) => a + (parseInt(b) || 0), 0) || ""}</div>
-                                        </div>
-                                      )}
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            );
-                          };
-                          return (
-                            <div style={{ position: "fixed", inset: 0, background: "#00000088", zIndex: 200, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
-                              <div style={{ background: K.card, borderRadius: "18px 18px 0 0", width: "100%", maxWidth: 480, maxHeight: "88vh", overflowY: "auto", padding: "20px 18px 28px" }}>
-                                {/* Header */}
-                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
-                                  <div>
-                                    <div style={{ fontWeight: 700, fontSize: 16, color: K.t1, marginBottom: 2 }}>{sbCourse.name}</div>
-                                    <div style={{ fontSize: 11, color: K.t3 }}>{[sbCourse.city, sbCourse.state].filter(Boolean).join(", ")} · Par {sbCourse.par} · Slope {sbCourse.slope}</div>
-                                  </div>
-                                  <span onClick={() => setLocalDbPrompt(null)} style={{ fontSize: 20, color: K.t3, cursor: "pointer", lineHeight: 1, padding: "0 4px" }}>✕</span>
-                                </div>
-
-                                {/* Local DB notice */}
-                                <div style={{ background: `${ac}12`, border: `1px solid ${ac}35`, borderRadius: 10, padding: "10px 14px", marginBottom: 16 }}>
-                                  <div style={{ fontWeight: 700, fontSize: 12, color: ac, marginBottom: 4 }}>📁 Course exists in local database</div>
-                                  <div style={{ fontSize: 11, color: K.t2 }}>
-                                    Last saved {formattedDate ? `on ${formattedDate}` : ""} by <strong>{updatedBy}</strong>
-                                  </div>
-                                  <div style={{ fontSize: 10, color: K.t3, marginTop: 2 }}>
-                                    {tbs.length} tee {tbs.length === 1 ? "box" : "boxes"}{tbs.length > 0 ? ` — ${tbs.map(t => t.name).join(", ")}` : ""}
-                                  </div>
-                                </div>
-
-                                {/* Tee boxes preview */}
-                                {tbs.length > 0 && (
-                                  <div style={{ marginBottom: 14 }}>
-                                    <div style={{ fontSize: 9, color: K.t3, fontWeight: 700, textTransform: "uppercase", marginBottom: 6 }}>Tee Boxes</div>
-                                    <div style={{ display: "grid", gridTemplateColumns: "14px 1fr 44px 38px 30px 46px", gap: "3px 4px", fontSize: 8, color: K.t3, fontWeight: 600, marginBottom: 3, paddingLeft: 2 }}>
-                                      <div/><div>Name</div><div style={{textAlign:"center"}}>Rating</div><div style={{textAlign:"center"}}>Slope</div><div style={{textAlign:"center"}}>Par</div><div style={{textAlign:"center"}}>Yards</div>
-                                    </div>
-                                    {tbs.map((tb, i) => (
-                                      <div key={i} style={{ display: "grid", gridTemplateColumns: "14px 1fr 44px 38px 30px 46px", gap: "3px 4px", marginBottom: 3, alignItems: "center", fontSize: 11 }}>
-                                        <TeeColorSwatch color={tb.color} name={tb.name} size={12} />
-                                        <div style={{ color: K.t1, fontWeight: 600 }}>{tb.name}</div>
-                                        <div style={{ textAlign: "center", color: K.t2 }}>{tb.rating}</div>
-                                        <div style={{ textAlign: "center", color: K.t2 }}>{tb.slope}</div>
-                                        <div style={{ textAlign: "center", color: K.t2 }}>{tb.par}</div>
-                                        <div style={{ textAlign: "center", color: K.t2 }}>{tb.yardage ? tb.yardage.toLocaleString() : "–"}</div>
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
-
-                                {/* Scorecard preview */}
-                                <div style={{ marginBottom: 16 }}>
-                                  <div style={{ fontSize: 9, color: K.t3, fontWeight: 700, textTransform: "uppercase", marginBottom: 6 }}>Scorecard</div>
-                                  <ScorecardPreview course={sbCourse} />
-                                </div>
-
-                                {/* Action buttons */}
-                                <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
-                                  <button onClick={() => {
-                                    // Use local data — open preview with Supabase course
-                                    setLocalDbPrompt(null);
-                                    setCoursePreview({ ...sbCourse, _source: "WBC History" });
-                                  }} style={{ flex: 1, padding: "12px 0", borderRadius: 10, background: ac, border: "none", color: "#0a1628", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
-                                    ✓ Use Local Data
-                                  </button>
-                                  <button onClick={async () => {
-                                    // Fetch fresh from API — run search and open preview with API data
-                                    setLocalDbPrompt(null);
-                                    setSearchLoading(true);
-                                    try {
-                                      const q = sbCourse.name;
-                                      const stateParam = sbCourse.state ? `&state=${encodeURIComponent(sbCourse.state)}` : "";
-                                      const [r1, r2] = await Promise.allSettled([
-                                        fetch(`/api/courses2?search=${encodeURIComponent(q)}${stateParam}`).then(r => r.json()),
-                                        fetch(`/api/courses?search=${encodeURIComponent(q)}`).then(r => r.json()),
-                                      ]);
-                                      const rapidRaw = r1.status === "fulfilled" ? r1.value : [];
-                                      const gcRaw = r2.status === "fulfilled" ? r2.value : [];
-                                      // Simple: find best match by name
-                                      const allApi = [...(Array.isArray(rapidRaw) ? rapidRaw : rapidRaw.courses || []), ...(Array.isArray(gcRaw) ? gcRaw : gcRaw.courses || [])];
-                                      const match = allApi.find(c => (c.name || c.club_name || "").toLowerCase().includes(q.toLowerCase().split(" ")[0]));
-                                      if (match) {
-                                        setCoursePreview({ ...sbCourse, ...match, id: sbCourse.id, _source: match.source || "API", _freshFetch: true });
-                                      } else {
-                                        // No API match — fall back to local
-                                        setCoursePreview({ ...sbCourse, _source: "WBC History" });
-                                      }
-                                    } catch(e) {
-                                      setCoursePreview({ ...sbCourse, _source: "WBC History" });
-                                    }
-                                    setSearchLoading(false);
-                                  }} style={{ flex: 1, padding: "12px 0", borderRadius: 10, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t2, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
-                                    🔄 Fetch Fresh
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })()}
-
-                        {/* Course preview/confirm modal */}
-                        {coursePreview && (() => {
-                          const draft = coursePreview;
-                          const setDraft = fn => setCoursePreview(prev => fn(prev));
-                          const tbs = draft.tee_boxes || [];
-                          const hasConflict = !!draft._apiVersion;
-                          const ti = { background: K.bg, border: `1px solid ${ac}30`, borderRadius: 4, color: K.t1, fontSize: 9, textAlign: "center", width: "100%", padding: "3px 2px", boxSizing: "border-box" };
-                          const tiL = { ...ti, textAlign: "left", padding: "3px 5px" };
-                          return (
-                            <div style={{ position: "fixed", top: 0, bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 480, background: "rgba(0,0,0,0.82)", zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-                              <div style={{ background: K.card, borderRadius: 16, border: `1px solid ${ac}40`, width: "100%", maxWidth: 420, maxHeight: "90vh", overflowY: "auto", padding: 0 }}>
-
-                                {/* Header */}
-                                <div style={{ padding: "14px 16px 10px", borderBottom: `1px solid ${K.bdr}`, position: "sticky", top: 0, background: K.card, zIndex: 1 }}>
-                                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                                    <div style={{ flex: 1, marginRight: 8 }}>
-                                      <input value={draft.name} onChange={e => setDraft(p => ({...p, name: e.target.value}))}
-                                        style={{ background: "transparent", border: "none", borderBottom: `1px solid ${ac}40`, color: K.t1, fontSize: 14, fontWeight: 800, width: "100%", padding: "2px 0" }} />
-                                      <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
-                                        <input value={draft.city} onChange={e => setDraft(p => ({...p, city: e.target.value}))} placeholder="City"
-                                          style={{ ...tiL, fontSize: 10, flex: 1 }} />
-                                        <select value={draft.state} onChange={e => setDraft(p => ({...p, state: e.target.value}))}
-                                          style={{ ...ti, fontSize: 10, width: 52 }}>
-                                          <option value="">—</option>
-                                          {["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"].map(s => <option key={s} value={s}>{s}</option>)}
-                                        </select>
-                                      </div>
-                                    </div>
-                                    <button onClick={() => setCoursePreview(null)} style={{ background: "transparent", border: "none", color: K.t3, fontSize: 18, cursor: "pointer", lineHeight: 1 }}>✕</button>
-                                  </div>
-
-                                  {/* Source conflict banner */}
-                                  {hasConflict && (() => {
-                                    const sbHasReal = draft._sbHasReal;
-                                    const apiHasReal = draft._apiHasReal;
-                                    const sbSlope = draft.tee_boxes?.find(t => parseInt(t.slope) !== 113)?.slope || draft.slope;
-                                    const apiSlope = draft._apiVersion?.tee_boxes?.find(t => parseInt(t.slope) !== 113)?.slope || draft._apiVersion?.slope;
-                                    const bothReal = sbHasReal && apiHasReal;
-                                    const bannerColor = bothReal ? "#d4a843" : "#5b9bd5";
-                                    const bannerMsg = bothReal
-                                      ? "⚡ Both sources have real slope data — review each and pick the most accurate:"
-                                      : "ℹ️ One source has real slope data — selecting the better one:";
-                                    return (
-                                      <div style={{ marginTop: 8, padding: "8px 10px", background: `${bannerColor}10`, border: `1px solid ${bannerColor}40`, borderRadius: 8 }}>
-                                        <div style={{ fontSize: 9, color: bannerColor, fontWeight: 700, marginBottom: 6 }}>{bannerMsg}</div>
-                                        <div style={{ display: "flex", gap: 6 }}>
-                                          <button onClick={() => setDraft(p => { const {_apiVersion, _sbHasReal, _apiHasReal, ...sb} = p; return sb; })}
-                                            style={{ flex: 1, padding: "6px 4px", borderRadius: 6, background: sbHasReal ? ac+"22" : "transparent", border: `1px solid ${sbHasReal ? ac : K.bdr}`, color: sbHasReal ? ac : K.t3, fontSize: 9, fontWeight: 700, cursor: "pointer", textAlign: "center" }}>
-                                            📦 WBC History
-                                            <div style={{ fontSize: 8, fontWeight: 400, color: K.t3, marginTop: 2 }}>{draft.tee_boxes?.length || 0} tees · Slope {sbSlope || "?"}</div>
-                                            {sbHasReal && <div style={{ fontSize: 7, color: ac, marginTop: 1 }}>✓ real data</div>}
-                                            {!sbHasReal && <div style={{ fontSize: 7, color: "#d4584580", marginTop: 1 }}>placeholder</div>}
-                                          </button>
-                                          <button onClick={() => setDraft(p => { const api = p._apiVersion; return { ...p, par: api.par, slope: api.slope, rating: api.rating, hole_pars: api.hole_pars, hole_handicaps: api.hole_handicaps, tee_boxes: api.tee_boxes, _apiVersion: undefined, _sbHasReal: undefined, _apiHasReal: undefined }; })}
-                                            style={{ flex: 1, padding: "6px 4px", borderRadius: 6, background: apiHasReal && !sbHasReal ? ac+"22" : "transparent", border: `1px solid ${apiHasReal ? ac : K.bdr}`, color: apiHasReal ? ac : K.t3, fontSize: 9, fontWeight: 700, cursor: "pointer", textAlign: "center" }}>
-                                            🌐 API (Fresh)
-                                            <div style={{ fontSize: 8, fontWeight: 400, color: K.t3, marginTop: 2 }}>{draft._apiVersion?.tee_boxes?.length || 0} tees · Slope {apiSlope || "?"}</div>
-                                            {apiHasReal && <div style={{ fontSize: 7, color: ac, marginTop: 1 }}>✓ real data</div>}
-                                            {!apiHasReal && <div style={{ fontSize: 7, color: "#d4584580", marginTop: 1 }}>placeholder</div>}
-                                          </button>
-                                        </div>
-                                        <div style={{ fontSize: 8, color: K.t3, marginTop: 5, fontStyle: "italic" }}>You can edit any field after selecting a source</div>
-                                      </div>
-                                    );
-                                  })()}
-                                  {!hasConflict && draft._incompleteData && (
-                                    <div style={{ marginTop: 8, padding: "8px 10px", background: "#d4584510", border: "1px solid #d4584540", borderRadius: 8, fontSize: 9, color: "#d45845" }}>
-                                      ⚠ Neither API has complete data for this course. Slope, rating, and tee boxes may be missing or inaccurate — please enter them manually before adding.
-                                    </div>
-                                  )}
-                                  {!hasConflict && !draft._incompleteData && (draft.tee_boxes?.length || 0) < 2 && (
-                                    <div style={{ marginTop: 8, padding: "8px 10px", background: "#d4a84310", border: "1px solid #d4a84340", borderRadius: 8, fontSize: 9, color: "#d4a843" }}>
-                                      ⚠ Only {draft.tee_boxes?.length || 0} tee box found — most courses have multiple tees. Tap <strong>+ Tee</strong> above to add Black, Blue, White, Red etc. with their ratings and slopes.
-                                    </div>
-                                  )}
-                                  {!hasConflict && !draft._incompleteData && (draft.tee_boxes?.length || 0) >= 2 && (
-                                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 6 }}>
-                                      <div style={{ fontSize: 9, color: K.t3, fontStyle: "italic" }}>Review and edit before adding — tap any field to change it</div>
-                                      {draft._source && <span style={{ fontSize: 8, background: `${ac}15`, border: `1px solid ${ac}30`, color: ac, borderRadius: 4, padding: "1px 6px", fontWeight: 600, flexShrink: 0 }}>{draft._source}</span>}
-                                      {!draft._source && <span style={{ fontSize: 8, background: "#88888815", border: "1px solid #88888830", color: K.t3, borderRadius: 4, padding: "1px 6px", fontWeight: 600, flexShrink: 0 }}>WBC History</span>}
-                                    </div>
-                                  )}
-                                </div>
-
-                                <div style={{ padding: "12px 16px" }}>
-
-                                  {/* Tee Boxes — fully editable */}
-                                  <div style={{ marginBottom: 14 }}>
-                                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                                      <div style={{ fontSize: 9, color: K.t3, fontWeight: 700, textTransform: "uppercase" }}>Tee Boxes</div>
-                                      <button onClick={() => setDraft(p => ({ ...p, tee_boxes: [...(p.tee_boxes||[]), { name: "", color: "#888888", rating: 72.0, slope: 113, par: 72, yardage: 0 }] }))}
-                                        style={{ fontSize: 9, padding: "2px 7px", borderRadius: 4, background: "transparent", border: `1px solid ${ac}60`, color: ac, cursor: "pointer", fontWeight: 700 }}>+ Tee</button>
-                                    </div>
-                                    {tbs.length === 0 && <div style={{ fontSize: 10, color: K.warn, marginBottom: 8, fontStyle: "italic" }}>⚠ No tees from API — add them manually below</div>}
-                                    {/* Column headers */}
-                                    <div style={{ display: "grid", gridTemplateColumns: "18px 1fr 44px 38px 30px 46px 18px", gap: "3px 4px", fontSize: 8, color: K.t3, fontWeight: 600, marginBottom: 3, paddingLeft: 2 }}>
-                                      <div/><div>Name</div><div style={{textAlign:"center"}}>Rating</div><div style={{textAlign:"center"}}>Slope</div><div style={{textAlign:"center"}}>Par</div><div style={{textAlign:"center"}}>Yards</div><div/>
-                                    </div>
-                                    {tbs.map((tb, i) => (
-                                      <div key={i} style={{ display: "grid", gridTemplateColumns: "18px 1fr 44px 38px 30px 46px 18px", gap: "3px 4px", marginBottom: 4, alignItems: "center" }}>
-                                        <div style={{ position:"relative", width:18, height:18, flexShrink:0 }}>
-                                          <div style={{ position:"absolute", inset:0, pointerEvents:"none" }}><TeeColorSwatch color={tb.color} name={tb.name} size={18} style={{ borderRadius:3, width:"100%", height:"100%" }} /></div>
-                                          <select value={Object.entries(TEE_COLOR_MAP).find(([,v])=>v===(tb.color||""))?.[0] || "black"}
-                                            onChange={e => { const clr = TEE_COLOR_MAP[e.target.value] || "#888888"; setDraft(p => { const t=[...p.tee_boxes]; t[i]={...t[i],color:clr,name:t[i].name||e.target.value.charAt(0).toUpperCase()+e.target.value.slice(1)}; return {...p,tee_boxes:t}; }); }}
-                                            style={{ position:"absolute", inset:0, width:"100%", height:"100%", opacity:0, cursor:"pointer", fontSize:12 }}>
-                                            {[["Black","#2c2c2c"],["Blue","#2d8fd4"],["White","#e8e8e8"],["Gold","#d4a843"],["Red","#9b2335"],["Green","#2d8a4e"],["Silver","#a8b2bd"],["Yellow","#e6c619"],["Orange","#e67e22"],["Purple","#7b2d8b"],["Maroon","#6b1c2a"],["Teal","#1a8a7a"],["Platinum","#c0c0c0"]].map(([n,c])=><option key={n} value={n.toLowerCase()}>{n}</option>)}
-                                          </select>
-                                        </div>
-                                        <input value={tb.name} onChange={e => setDraft(p => { const t=[...p.tee_boxes]; t[i]={...t[i],name:e.target.value}; return {...p,tee_boxes:t}; })}
-                                          style={tiL} placeholder="Name" />
-                                        <input value={tb.rating} onChange={e => setDraft(p => { const t=[...p.tee_boxes]; t[i]={...t[i],rating:e.target.value}; return {...p,tee_boxes:t}; })}
-                                          style={ti} />
-                                        <input value={tb.slope} onChange={e => setDraft(p => { const t=[...p.tee_boxes]; t[i]={...t[i],slope:e.target.value}; return {...p,tee_boxes:t}; })}
-                                          style={ti} />
-                                        <input value={tb.par} onChange={e => setDraft(p => { const t=[...p.tee_boxes]; t[i]={...t[i],par:e.target.value}; return {...p,tee_boxes:t}; })}
-                                          style={ti} />
-                                        <input value={tb.yardage} onChange={e => setDraft(p => { const t=[...p.tee_boxes]; t[i]={...t[i],yardage:e.target.value}; return {...p,tee_boxes:t}; })}
-                                          style={ti} />
-                                        <button onClick={() => setDraft(p => ({...p, tee_boxes: p.tee_boxes.filter((_,j) => j!==i)}))}
-                                          style={{ background: "transparent", border: "none", color: K.t3, fontSize: 11, cursor: "pointer", padding: 0, lineHeight: 1 }}>✕</button>
-                                      </div>
-                                    ))}
-                                  </div>
-
-                                  {/* Scorecard — editable pars & handicaps */}
-                                  <div style={{ marginBottom: 14 }}>
-                                    <div style={{ fontSize: 9, color: K.t3, fontWeight: 700, textTransform: "uppercase", marginBottom: 6 }}>Scorecard</div>
-                                    {(draft.hole_pars?.length === 0) && <div style={{ fontSize: 10, color: K.warn, marginBottom: 6, fontStyle: "italic" }}>⚠ No hole data from API — enter pars below</div>}
-                                    {[["Front", 0, 9], ["Back", 9, 9]].map(([lbl, start, count]) => {
-                                      const pars = (draft.hole_pars || Array(18).fill(4)).slice(start, start+count);
-                                      const hcps = (draft.hole_handicaps || Array(18).fill(0)).slice(start, start+count);
-                                      return (
-                                        <div key={lbl} style={{ marginBottom: 6 }}>
-                                          <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8 }}>
-                                            <div style={{ color: K.t3, fontWeight: 600, padding: "2px 0" }}>Hole</div>
-                                            {Array.from({length:count},(_,i) => <div key={i} style={{ textAlign:"center", color:K.t2, fontWeight:700, padding:"2px 0" }}>{start+i+1}</div>)}
-                                            <div style={{ textAlign:"center", color:K.t3, fontSize:7, padding:"2px 0" }}>Tot</div>
-                                          </div>
-                                          <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8, background: K.inp, borderRadius: 3, marginBottom: 1 }}>
-                                            <div style={{ color: K.t3, fontWeight: 600, padding: "3px 2px" }}>Par</div>
-                                            {Array.from({length:count},(_,i) => (
-                                              <input key={i} value={pars[i] ?? ""} onChange={e => setDraft(p => { const hp=[...(p.hole_pars||Array(18).fill(4))]; hp[start+i]=e.target.value; return {...p,hole_pars:hp}; })}
-                                                style={{ background:"transparent", border:"none", color:K.t1, fontSize:9, fontWeight:700, textAlign:"center", width:"100%", padding:"3px 0" }} />
-                                            ))}
-                                            <div style={{ textAlign:"center", color:ac, fontWeight:800, padding:"3px 0", fontSize:9 }}>{pars.reduce((a,b)=>a+(parseInt(b)||0),0)}</div>
-                                          </div>
-                                          <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8 }}>
-                                            <div style={{ color: K.t3, fontWeight: 600, padding: "2px 2px" }}>HCP</div>
-                                            {Array.from({length:count},(_,i) => (
-                                              <input key={i} value={hcps[i] ?? ""} onChange={e => setDraft(p => { const hh=[...(p.hole_handicaps||Array(18).fill(0))]; hh[start+i]=e.target.value; return {...p,hole_handicaps:hh}; })}
-                                                style={{ background:"transparent", border:"none", color:K.t3, fontSize:9, textAlign:"center", width:"100%", padding:"2px 0" }} />
-                                            ))}
-                                            <div />
-                                          </div>
-                                          {(() => {
-                                            const activeTee = (draft.tee_boxes || [])[0];
-                                            const hy = activeTee?.hole_yards || [];
-                                            if (!hy.some(y => y > 0)) return null;
-                                            const yds = hy.slice(start, start+count);
-                                            const tot = yds.reduce((a,b) => a+(parseInt(b)||0), 0);
-                                            return (
-                                              <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8 }}>
-                                                <div style={{ color: K.t3, fontWeight: 600, padding: "2px 2px" }}>Yds</div>
-                                                {yds.map((y, i) => <div key={i} style={{ textAlign: "center", color: K.t3, padding: "2px 0", fontSize: 8 }}>{y || "–"}</div>)}
-                                                <div style={{ textAlign: "center", color: K.t3, padding: "2px 0", fontSize: 8 }}>{tot || ""}</div>
-                                              </div>
-                                            );
-                                          })()}
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-
-                                  {/* Action buttons */}
-                                  <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-                                    <button onClick={() => setCoursePreview(null)} style={{ flex: 1, padding: "10px 0", borderRadius: 8, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t3, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
-                                    <button onClick={() => {
-                                      const firstTee = draft.tee_boxes?.[0];
-                                      const finalCourse = {
-                                        ...draft,
-                                        par: parseInt(firstTee?.par) || draft.par || 72,
-                                        slope: parseInt(firstTee?.slope) || draft.slope || 113,
-                                        rating: parseFloat(firstTee?.rating) || draft.rating || 72.0,
-                                        hole_pars: (draft.hole_pars||[]).map(v => parseInt(v)||4),
-                                        hole_handicaps: (draft.hole_handicaps||[]).map(v => parseInt(v)||0),
-                                        tee_boxes: (draft.tee_boxes||[]).map(tb => ({...tb, rating:parseFloat(tb.rating)||72.0, slope:parseInt(tb.slope)||113, par:parseInt(tb.par)||72, yardage:parseInt(tb.yardage)||0})),
-                                      };
-                                      addCourseToLibrary(finalCourse);
-                                      setSearchResults(prev => prev.filter(r => r.id !== draft.id));
-                                      setCoursePreview(null);
-                                    }} style={{ flex: 2, padding: "10px 0", borderRadius: 8, background: ac, border: "none", color: K.bg, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>✓ Add Course</button>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })()}
                         {!courseSearch.trim() && <div style={{ color: K.t3, fontSize: 10, textAlign: "center", padding: 4 }}>Type at least 2 characters to search</div>}
                         <div style={{ fontSize: 9, color: K.t3, textAlign: "center", marginTop: 6 }}>Powered by GolfCourseAPI.com · 35,000+ courses</div>
                       </div>
@@ -3682,6 +2952,10 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                   background: K.danger + "15", border: `1px solid ${K.danger}60`,
                   color: K.danger, fontSize: 12, fontWeight: 700, cursor: "pointer",
                 }}>🗑 Start Fresh — Clear All Data</button>
+                <button onClick={() => { if (confirm("Reset all data to demo defaults? This cannot be undone.")) { resetToDemo(); setSettingsOpen(false); } }} style={{
+                  width: "100%", padding: "10px 0", borderRadius: 8, background: "transparent",
+                  border: `1px solid ${K.bdr}`, color: K.t3, fontSize: 11, fontWeight: 600, cursor: "pointer",
+                }}>🔄 Load Demo Data</button>
               </div>
             </div>
           </div>
@@ -3764,9 +3038,7 @@ export default function WBCApp() {
   }, []);
 
   const [tPlayers, setTPlayers] = useState([]);
-  const [tRounds, setTRounds] = useState([
-    { id: "tr1", tournament_id: "wbc_2026", round_number: 1, course_id: "demo_course_1" },
-  ]);
+  const [tRounds, setTRounds] = useState([]);
   const [courseList, setCourseList] = useState([]);
   const [holeData, setHoleData] = useState({});
   const [ctpData, setCtpData] = useState({});
@@ -3785,6 +3057,8 @@ export default function WBCApp() {
   const [adminSettingsOpen, setAdminSettingsOpen] = useState(false);
   const [adminSettingsTab, setAdminSettingsTab] = useState("players");
   const [passwords, setPasswords] = useState({});
+    return pw;
+  });
   const [storageLoaded, setStorageLoaded] = useState(false);
   const [syncing, setSyncing] = useState(false);
 
@@ -3828,7 +3102,7 @@ export default function WBCApp() {
               hole_handicaps: c.hole_handicaps || [],
               tee_boxes: (tbRows || []).filter(t => t.course_id === c.id).map(t => ({ name: t.name, color: t.color, rating: parseFloat(t.rating), slope: t.slope, par: t.par, yardage: t.yardage })),
             }));
-            setCourseList(prev => sortCoursesByRound(coursesWithTees, tRounds));
+            setCourseList(coursesWithTees);
           }
         }
 
@@ -4058,15 +3332,6 @@ export default function WBCApp() {
     notify(`Player withdrawn from tournament`);
   };
 
-  const sortCoursesByRound = (list, rounds) => {
-    return [...list].sort((a, b) => {
-      const ra = rounds.find(r => r.course_id === a.id)?.round_number ?? 99;
-      const rb = rounds.find(r => r.course_id === b.id)?.round_number ?? 99;
-      if (ra !== rb) return ra - rb;
-      return a.name.localeCompare(b.name); // fallback alpha for unassigned
-    });
-  };
-
   const setCourseForRound = async (rnd, course) => {
     if (course.id) {
       setCourseList(prev => prev.find(c => c.id === course.id) ? prev : [...prev, course]);
@@ -4076,32 +3341,18 @@ export default function WBCApp() {
       // Upsert tee boxes
       if (tee_boxes?.length) {
         for (const tb of tee_boxes) {
-          const { hole_yards: hy2, _source: _s2, color: _c2, ...tbData2 } = tb;
-          const tbPayload2 = {
-            id: `tb_${course.id}_${(tb.name || "default").toLowerCase().replace(/\s+/g,"_")}`,
-            course_id: course.id,
-            color: tb.color || _c2,
-            name: tbData2.name, rating: tbData2.rating, slope: tbData2.slope,
-            par: tbData2.par, yardage: tbData2.yardage || 0,
-          };
-          if (Array.isArray(hy2) && hy2.some(y => y > 0)) tbPayload2.hole_yards = hy2;
-          await sb.upsert("tee_boxes", tbPayload2, "id");
+          await sb.upsert("tee_boxes", { id: `tb_${course.id}_${tb.name.toLowerCase().replace(/\s+/g,"_")}`, course_id: course.id, ...tb }, "id");
         }
       }
     }
     const trRow = { id: `tr_2026_r${rnd}`, tournament_id: TOURNAMENT_ID, round_number: rnd, course_id: course.id || null };
     setTRounds(prev => {
       const existing = prev.find(t => t.round_number === rnd);
-      const updated = existing
-        ? prev.map(t => t.round_number === rnd ? { ...t, course_id: course.id } : t)
-        : (course.id ? [...prev, trRow] : prev);
-      setCourseList(cl => sortCoursesByRound(cl, updated));
-      return updated;
+      if (existing) return prev.map(t => t.round_number === rnd ? { ...t, course_id: course.id } : t);
+      if (!course.id) return prev;
+      return [...prev, trRow];
     });
-    // Only upsert to Supabase if assigning a real course — skip if unassigning (course_id null violates NOT NULL)
-    if (course.id) {
-      await sb.upsert("tournament_rounds", trRow, "id");
-    }
+    await sb.upsert("tournament_rounds", trRow, "id");
     // Auto-assign default tee
     if (course.id && course.tee_boxes?.length) {
       const defaultTee = getDefaultTee(course.tee_boxes);
@@ -4118,56 +3369,18 @@ export default function WBCApp() {
 
   const addCourse = async (course) => {
     if (course._delete) {
-      // Remove from tournament's active course list (local state only)
-      // Do NOT delete from Supabase — courses table is a permanent library
       setCourseList(prev => prev.filter(c => c.id !== course.id));
-      notify("Course removed from tournament");
+      notify("Course removed");
       return;
     }
-    // Strip all internal UI flags and tee_boxes before saving course row
-    const { tee_boxes, _incompleteData, _apiVersion, _sbVersion, _gcVersion,
-            _sbHasReal, _apiHasReal, _rapidHasReal, _gcHasReal, _source, _freshFetch, ...rawCourseData } = course;
-    // Ensure course has a stable id (not a temporary rapid_/gc_ prefixed one if Supabase has it)
-    const courseId = rawCourseData.id || `course_${Date.now()}`;
-    const courseData = { ...rawCourseData, id: courseId };
-    // Save course FIRST and wait for it before saving tee boxes (foreign key requirement)
-    const now = new Date().toISOString();
-    const savedBy = typeof currentUser !== "undefined" ? currentUser?.name || "Unknown" : "Unknown";
-    await sb.upsert("courses", { ...courseData, updated_at: now, updated_by: savedBy }, "id");
+    setCourseList(prev => prev.find(c => c.id === course.id) ? prev : [...prev, course]);
+    const { tee_boxes, ...courseData } = course;
+    await sb.upsert("courses", courseData, "id");
     if (tee_boxes?.length) {
-      let tbErrors = 0;
       for (const tb of tee_boxes) {
-        const { color: _c, _source: _s, ...tbData } = tb;
-        const tbPayload = {
-          id: `tb_${courseId}_${(tb.name || "default").toLowerCase().replace(/\s+/g,"_")}`,
-          course_id: courseId,
-          color: tb.color,
-          name: tbData.name,
-          rating: tbData.rating,
-          slope: tbData.slope,
-          par: tbData.par,
-          yardage: tbData.yardage || 0,
-        };
-        if (Array.isArray(tb.hole_yards) && tb.hole_yards.some(y => y > 0)) {
-          tbPayload.hole_yards = tb.hole_yards;
-        }
-        try {
-          await sb.upsert("tee_boxes", tbPayload, "id");
-        } catch(tbErr) {
-          console.error("Tee box save failed:", tbErr, tbPayload);
-          tbErrors++;
-        }
-      }
-      if (tbErrors > 0) {
-        notify(`⚠ Course saved but ${tbErrors} tee box${tbErrors > 1 ? "es" : ""} failed to save — open and re-save to retry`);
+        await sb.upsert("tee_boxes", { id: `tb_${course.id}_${tb.name.toLowerCase().replace(/\s+/g,"_")}`, course_id: course.id, ...tb }, "id");
       }
     }
-    // Update local state with clean version (always, even if tee saves had errors)
-    const cleanCourse = { ...courseData, tee_boxes: tee_boxes || [] };
-    setCourseList(prev => sortCoursesByRound(
-      prev.find(c => c.id === courseId) ? prev.map(c => c.id === courseId ? cleanCourse : c) : [...prev, cleanCourse],
-      tRounds
-    ));
     notify(`Added ${course.name}`);
   };
 
@@ -4417,8 +3630,8 @@ export default function WBCApp() {
   ];
 
   return (
-    <div style={{ minHeight: "100vh", background: "#030810", display: "flex", justifyContent: "center", overflow: "hidden" }}>
-    <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: K.bg, fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", color: K.t1, width: "100%", maxWidth: 480, position: "relative", boxShadow: "0 0 80px rgba(0,0,0,0.8)", flexShrink: 0, overflow: "hidden" }}>
+    <div style={{ minHeight: "100vh", background: "#030810", display: "flex", justifyContent: "center" }}>
+    <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: K.bg, fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", color: K.t1, width: "100%", maxWidth: 480, position: "relative", boxShadow: "0 0 80px rgba(0,0,0,0.8)", flexShrink: 0 }}>
       <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
 
       {notif && <div style={{ position: "fixed", top: 16, left: "50%", transform: "translateX(-50%)", background: K.accDim, color: "white", padding: "10px 24px", borderRadius: 12, fontSize: 13, fontWeight: 600, zIndex: 1000, boxShadow: "0 8px 32px rgba(0,0,0,0.4)" }}>{notif}</div>}
@@ -4467,7 +3680,7 @@ export default function WBCApp() {
       </div>
       )}
 
-      <div style={{ padding: view === "leaderboard" ? "14px 20px 0 20px" : "14px 20px", flex: 1, overflowY: view === "leaderboard" ? "hidden" : "auto", overflowX: "hidden" }}>
+      <div style={{ padding: "14px 20px", flex: 1, overflowY: "auto", overflowX: "hidden" }}>
         {view === "leaderboard" && <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} teeData={teeData} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} />}
         <div style={{ display: view === "scoring" ? "block" : "none" }}>
           <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeData={teeData} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onNavigate={setView} onGoToAdminCourses={() => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); }} markPlayerWD={markPlayerWD} />
@@ -4490,7 +3703,7 @@ export default function WBCApp() {
                 });
                 return next;
               });
-            }} passwords={passwords} setPasswords={async pw => { setPasswords(pw); await saveTournamentState(finalizedRounds, pw); }} holeData={holeData} finalizedRounds={finalizedRounds} onFinalizeRound={async rnd => { const nf = { ...finalizedRounds, [rnd]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); if (rnd < 4) setRound(rnd + 1); }} getPlayerTee={getPlayerTee} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); }} currentUser={user} /> : (
+            }} passwords={passwords} setPasswords={async pw => { setPasswords(pw); await saveTournamentState(finalizedRounds, pw); }} holeData={holeData} finalizedRounds={finalizedRounds} onFinalizeRound={async rnd => { const nf = { ...finalizedRounds, [rnd]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); if (rnd < 4) setRound(rnd + 1); }} getPlayerTee={getPlayerTee} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); }} /> : (
           <div style={{ textAlign: "center", padding: "40px 20px" }}>
             <div style={{ fontSize: 40, marginBottom: 12 }}>🔒</div>
             <div style={{ fontSize: 16, fontWeight: 700, color: K.t1, marginBottom: 6 }}>Directors Only</div>
