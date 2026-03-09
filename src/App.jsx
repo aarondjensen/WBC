@@ -357,11 +357,7 @@ const TeeColorSwatch = ({ color, name, size = 12, style = {} }) => {
     );
   }
   if (isBlackTee(color)) {
-    return (
-      <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: size, height: size, borderRadius: 3, background: "#a8b2bd", border: "1px solid #88888880", flexShrink: 0, ...style }}>
-        <span style={{ width: Math.round(size*0.4), height: Math.round(size*0.4), borderRadius: "50%", background: "#111", display: "block" }} />
-      </span>
-    );
+    return <span style={{ display: "inline-block", width: size, height: size, borderRadius: 3, background: "#1a1a1a", border: "1px solid #666666", flexShrink: 0, ...style }} />;
   }
   const border = isLightTee(color) ? "1px solid #99999960" : "1px solid #ffffff15";
   return <span style={{ display: "inline-block", width: size, height: size, borderRadius: 3, background: color || "#888", border, flexShrink: 0, ...style }} />;
@@ -455,7 +451,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
     prevPositions.current = newPos;
   }, [lb.map(p => p.id).join(",")]);
 
-  // Dynamically size rows to fill available viewport
+  // Row styles handled via CSS flex — rowStyle kept for font size only
   useEffect(() => {
     const calc = () => {
       if (!containerRef.current || !headerRef.current || lb.length === 0) return;
@@ -466,10 +462,9 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
       const bottomPad = 14;
       const available = viewH - containerTop - headerH - navH - bottomPad;
       const perRow = Math.floor(available / lb.length);
-      const clampedPerRow = Math.min(perRow, 36); // never taller than 36px per row
-      const vPad = Math.max(0, Math.floor((clampedPerRow - 14) / 2));
+      const clampedPerRow = Math.min(perRow, 36);
       const fSize = clampedPerRow >= 32 ? 13 : clampedPerRow >= 26 ? 12 : clampedPerRow >= 18 ? 11 : 10;
-      setRowStyle({ padding: `${vPad}px 12px`, fontSize: fSize, lineHeight: 1 });
+      setRowStyle({ fontSize: fSize, lineHeight: 1 });
     };
     calc();
     const t = setTimeout(calc, 100);
@@ -606,7 +601,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
   };
 
   return (
-    <div style={{ position: "relative" }}>
+    <div style={{ position: "relative", height: "100%", display: "flex", flexDirection: "column" }}>
       {/* Giant trophy silhouette behind entire leaderboard — fixed so it never shifts */}
       <img src={WBC_TROPHY_SILHOUETTE} alt="" style={{
         position: "fixed", top: "50%", left: "50%",
@@ -619,7 +614,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
         zIndex: 0,
         objectFit: "contain",
       }} />
-      <div style={{ position: "relative", zIndex: 1 }}>
+      <div style={{ position: "relative", zIndex: 1, flex: 1, display: "flex", flexDirection: "column" }}>
       {/* Title inline with stacked pills */}
       <div style={{ display: "flex", alignItems: "center", marginBottom: 10, gap: 8 }}>
         {/* Left pill — Net/Gross */}
@@ -677,7 +672,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
           </div>
         </div>
       </div>
-      <div ref={containerRef} style={{ background: "transparent", borderRadius: 12, border: `1px solid ${K.bdr}`, overflow: "hidden" }}>
+      <div ref={containerRef} style={{ background: "transparent", borderRadius: 12, border: `1px solid ${K.bdr}`, overflow: "hidden", display: "flex", flexDirection: "column", flex: 1 }}>
         {/* Build dynamic grid: #, Player, Total, Thru, Rd, [8px gap], prior rounds */}
         {(() => {
           const allPriorRounds = [1, 2, 3, 4];
@@ -696,6 +691,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
                 {allPriorRounds.map(r => <span key={r} style={{ textAlign: "center" }}>R{r}</span>)}
               </div>
               {lb.length === 0 && <div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: 12 }}>No scores yet — be the first!</div>}
+              <div style={{ display: "flex", flexDirection: "column", flex: 1 }}>
               {(() => {
                 // Pre-compute tied positions
                 const posMap = {};
@@ -708,7 +704,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
                   for (let k = i; k < j; k++) posMap[lb[k].id] = tied ? `T${i + 1}` : i + 1;
                   i = j;
                 }
-                return lb.map((p, idx) => {
+                const rows = lb.map((p, idx) => {
                 const pos = posMap[p.id] ?? (p.roundsPlayed === 0 ? "—" : idx + 1);
                 const rd = p.rds[round - 1];
                 const top3 = pos === 1 || pos === "T1";
@@ -748,8 +744,8 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
                     })()
                   : rd?.netToPar;
                 return (
-                  <div key={p.id}>
-                    <div onClick={() => { setExpanded(isExpanded ? null : p.id); setScorecardRound(null); }} style={{ ...gridStyle, padding: rowStyle.padding, borderBottom: `1px solid ${K.bdr}10`, background: "transparent", cursor: "pointer" }}>
+                  <div key={p.id} style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center" }}>
+                    <div onClick={() => { setExpanded(isExpanded ? null : p.id); setScorecardRound(null); }} style={{ ...gridStyle, padding: "0 12px", minHeight: 0, height: "100%", alignItems: "center", borderBottom: `1px solid ${K.bdr}10`, background: "transparent", cursor: "pointer", fontSize: rowStyle.fontSize, lineHeight: 1 }}>
                       {/* # */}
                       <span style={{ fontWeight: 800, fontSize: rowStyle.fontSize, color: top3 ? K.acc : K.t3, display: "flex", alignItems: "center", gap: 1 }}>
                         {pos}
@@ -798,7 +794,9 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
                   </div>
                 );
               });
+                return <>{rows}</>;
               })()}
+              </div>
             </>
           );
         })()}
@@ -4468,7 +4466,7 @@ export default function WBCApp() {
       </div>
       )}
 
-      <div style={{ padding: view === "leaderboard" ? "14px 20px 0 20px" : "14px 20px", flex: 1, overflowY: view === "leaderboard" ? "hidden" : "auto", overflowX: "hidden" }}>
+      <div style={{ padding: view === "leaderboard" ? "14px 20px 0 20px" : "14px 20px", flex: 1, overflowY: view === "leaderboard" ? "hidden" : "auto", overflowX: "hidden", display: view === "leaderboard" ? "flex" : "block", flexDirection: "column" }}>
         {view === "leaderboard" && <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} teeData={teeData} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} />}
         <div style={{ display: view === "scoring" ? "block" : "none" }}>
           <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeData={teeData} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onNavigate={setView} onGoToAdminCourses={() => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); }} markPlayerWD={markPlayerWD} />
