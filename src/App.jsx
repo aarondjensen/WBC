@@ -315,6 +315,46 @@ const resolveTeeColor = (tee, index) => {
   }
   return TEE_FALLBACK_COLORS[index % TEE_FALLBACK_COLORS.length];
 };
+// Combo tee detection — splits "BLACK/BLUE" into ["#2c2c2c", "#2d8fd4"]
+const getComboColors = (name) => {
+  if (!name) return null;
+  const separators = ["/", "-", "+", "&", " and "];
+  for (const sep of separators) {
+    const parts = name.split(new RegExp(`\\s*${sep.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")}\\s*`, "i")).map(p => p.trim().toLowerCase());
+    if (parts.length === 2 && parts[0] !== parts[1]) {
+      const c1 = TEE_COLOR_MAP[parts[0]] || (parts[0].includes("black") ? "#2c2c2c" : null);
+      const c2 = TEE_COLOR_MAP[parts[1]] || (parts[1].includes("white") ? "#e8e8e8" : null);
+      if (c1 && c2) return [c1, c2];
+    }
+  }
+  return null;
+};
+// TeeColorSwatch — handles solid, combo (diagonal split), and black (gray+dot) tees
+const TeeColorSwatch = ({ color, name, size = 12, style = {} }) => {
+  const combo = getComboColors(name || "");
+  if (combo) {
+    const [c1, c2] = combo;
+    const s = size;
+    return (
+      <span style={{ display: "inline-block", width: s, height: s, borderRadius: 3, overflow: "hidden", flexShrink: 0, border: "1px solid #ffffff20", ...style }}>
+        <svg width={s} height={s} viewBox={`0 0 ${s} ${s}`}>
+          <polygon points={`0,0 ${s},0 0,${s}`} fill={c1} />
+          <polygon points={`${s},0 ${s},${s} 0,${s}`} fill={c2} />
+        </svg>
+      </span>
+    );
+  }
+  if (isBlackTee(color)) {
+    return (
+      <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: size, height: size, borderRadius: 3, background: "#a8b2bd", border: "1px solid #88888880", flexShrink: 0, ...style }}>
+        <span style={{ width: Math.round(size*0.4), height: Math.round(size*0.4), borderRadius: "50%", background: "#111", display: "block" }} />
+      </span>
+    );
+  }
+  const border = isLightTee(color) ? "1px solid #99999960" : "1px solid #ffffff15";
+  return <span style={{ display: "inline-block", width: size, height: size, borderRadius: 3, background: color || "#888", border, flexShrink: 0, ...style }} />;
+};
+
 const isLightTee = (clr) => {
   if (!clr) return false;
   const light = ["#e8e8e8","#a8b2bd","#c0c0c0","#f7e7ce","#c2b280","#c4a86b","#8e8e8e"];
@@ -1311,7 +1351,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
                         color: K.t1,
                       }}>
                         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 3, marginBottom: 1 }}>
-                          <span style={{ width: 7, height: 7, borderRadius: "50%", background: isBlackTee(tee.color) ? "#a8b2bd" : tee.color, display: "inline-block", border: isLightTee(tee.color) ? "1px solid #99999980" : isBlackTee(tee.color) ? "1px solid #88888880" : "none", position: "relative" }}>{isBlackTee(tee.color) && <span style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: 3, height: 3, borderRadius: "50%", background: "#111", display: "block" }} />}</span>
+                          <TeeColorSwatch color={tee.color} name={tee.name} size={8} />
                           <span style={{ fontSize: 10, fontWeight: 700 }}>{tee.name}</span>
                         </div>
                         <div style={{ fontSize: 9, color: K.acc, fontWeight: 700 }}>CH {previewCH}</div>
@@ -1848,7 +1888,7 @@ function GroupsView({ players, round, tRounds, courses, pairingsData, teeTimesDa
                     <span style={{ fontWeight: 600, fontSize: 13, color: isMe ? "#d4a843" : K.t1 }}>{p.name}</span>
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 2, fontSize: 9, fontWeight: 600, color: isLightTee(teeClr) ? K.t3 : teeClr, justifyContent: "center" }}>
                       {teeName && <>
-                        <span style={{ width: 5, height: 5, borderRadius: "50%", background: isBlackTee(teeClr) ? "#a8b2bd" : teeClr, display: "inline-block", border: isLightTee(teeClr) || isBlackTee(teeClr) ? "1px solid #99999980" : "none", position: "relative" }}>{isBlackTee(teeClr) && <span style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: 2, height: 2, borderRadius: "50%", background: "#111", display: "block" }} />}</span>
+                        <TeeColorSwatch color={teeClr} name={teeName} size={6} />
                         {teeName}
                       </>}
                     </span>
@@ -2222,7 +2262,7 @@ function TeeAssigner({ activePlayers, numRounds, tRounds, courses, teeData, setT
                     flex: 1, minWidth: 50, padding: "5px 3px", borderRadius: 6, cursor: "pointer", textAlign: "center",
                     background: K.card, border: `1px solid ${K.bdr}`, color: K.t1,
                   }}>
-                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: isBlackTee(tee.color) ? "#a8b2bd" : tee.color, display: "inline-block", border: isLightTee(tee.color) || isBlackTee(tee.color) ? "1px solid #99999980" : "none", marginRight: 3, verticalAlign: "middle", position: "relative" }}>{isBlackTee(tee.color) && <span style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: 3, height: 3, borderRadius: "50%", background: "#111", display: "block" }} />}</span>
+                    <TeeColorSwatch color={tee.color} name={tee.name} size={7} style={{ marginRight: 3, verticalAlign: "middle" }} />
                     <span style={{ fontSize: 10, fontWeight: 600 }}>{tee.name}</span>
                     <div style={{ fontSize: 8, color: K.t3 }}>{tee.slope}/{tee.rating}{tee.yardage ? ` · ${tee.yardage.toLocaleString()}` : ""}</div>
                   </button>
@@ -2282,10 +2322,7 @@ function TeeAssigner({ activePlayers, numRounds, tRounds, courses, teeData, setT
                           background: isActive ? (isDarkTee(tee.color) ? K.acc + "15" : tee.color + "25") : K.inp,
                           border: isActive ? `1px solid ${K.acc}` : `1px solid transparent`,
                         }}>
-                          <span style={{
-                            width: 10, height: 10, borderRadius: "50%", background: isBlackTee(tee.color) ? "#a8b2bd" : tee.color,
-                            border: isLightTee(tee.color) ? "1px solid #99999980" : isBlackTee(tee.color) ? "1px solid #88888880" : "none",
-                          }} />
+                          <TeeColorSwatch color={tee.color} name={tee.name} size={10} />
                         </button>
                       );
                     })}
@@ -3021,7 +3058,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                                     <div style={{ fontSize: 8, color: K.t3, fontWeight: 600, marginBottom: 3, textTransform: "uppercase" }}>Tee Boxes</div>
                                     {(d.tee_boxes||[]).map((tb, tbi) => (
                                       <div key={tbi} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 3, fontSize: 9 }}>
-                                        <div style={{ width: 10, height: 10, borderRadius: "50%", background: tb.color || "#aaa", flexShrink: 0 }} />
+                                        <TeeColorSwatch color={tb.color} name={tb.name} size={10} />
                                         <span style={{ color: K.t2, fontWeight: 600, width: 52 }}>{tb.name}</span>
                                         {["rating","slope","par"].map(f => (
                                           <div key={f} style={{ display: "flex", alignItems: "center", gap: 2 }}>
@@ -3150,7 +3187,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                                 </div>
                                 {mc.tee_boxes.map((tb, tbi) => (
                                   <div key={tbi} style={{ display: "grid", gridTemplateColumns: "12px 70px 50px 44px 32px 32px 40px 20px", gap: 3, marginBottom: 3, alignItems: "center" }}>
-                                    <div style={{ width: 10, height: 10, borderRadius: "50%", background: tb.color || "#888", flexShrink: 0 }} />
+                                    <TeeColorSwatch color={tb.color} name={tb.name} size={10} />
                                     <input value={tb.name} onChange={e => setMc(p=>{const t=[...p.tee_boxes]; t[tbi]={...t[tbi],name:e.target.value}; return {...p,tee_boxes:t};})} style={{...tinyInp, textAlign:"left", padding:"2px 4px"}} placeholder="Name" />
                                     <div style={{ position:"relative", width:"100%", height:22, flexShrink:0 }}>
                                       <div style={{ position:"absolute", inset:0, borderRadius:3, background:tb.color||"#888", border:"1px solid #ffffff25", pointerEvents:"none" }} />
@@ -3344,7 +3381,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                                     </div>
                                     {tbs.map((tb, i) => (
                                       <div key={i} style={{ display: "grid", gridTemplateColumns: "14px 1fr 44px 38px 30px 46px", gap: "3px 4px", marginBottom: 3, alignItems: "center", fontSize: 11 }}>
-                                        <div style={{ width: 12, height: 12, borderRadius: 3, background: tb.color || "#888", border: "1px solid #ffffff20", flexShrink: 0 }} />
+                                        <TeeColorSwatch color={tb.color} name={tb.name} size={12} />
                                         <div style={{ color: K.t1, fontWeight: 600 }}>{tb.name}</div>
                                         <div style={{ textAlign: "center", color: K.t2 }}>{tb.rating}</div>
                                         <div style={{ textAlign: "center", color: K.t2 }}>{tb.slope}</div>
@@ -3506,7 +3543,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                                     {tbs.map((tb, i) => (
                                       <div key={i} style={{ display: "grid", gridTemplateColumns: "18px 1fr 44px 38px 30px 46px 18px", gap: "3px 4px", marginBottom: 4, alignItems: "center" }}>
                                         <div style={{ position:"relative", width:18, height:18, flexShrink:0 }}>
-                                          <div style={{ width:18, height:18, borderRadius:3, background:tb.color||"#888", border:"1px solid #ffffff25", pointerEvents:"none", position:"absolute", inset:0 }} />
+                                          <div style={{ position:"absolute", inset:0, pointerEvents:"none" }}><TeeColorSwatch color={tb.color} name={tb.name} size={18} style={{ borderRadius:3, width:"100%", height:"100%" }} /></div>
                                           <select value={Object.entries(TEE_COLOR_MAP).find(([,v])=>v===(tb.color||""))?.[0] || "black"}
                                             onChange={e => { const clr = TEE_COLOR_MAP[e.target.value] || "#888888"; setDraft(p => { const t=[...p.tee_boxes]; t[i]={...t[i],color:clr,name:t[i].name||e.target.value.charAt(0).toUpperCase()+e.target.value.slice(1)}; return {...p,tee_boxes:t}; }); }}
                                             style={{ position:"absolute", inset:0, width:"100%", height:"100%", opacity:0, cursor:"pointer", fontSize:12 }}>
