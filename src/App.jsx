@@ -2441,9 +2441,8 @@ function PlayerRow({ player, onUpdateHI, onUpdateName, onRemove, onSavePassword,
   );
 }
 
-function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, passwords, setPasswords, holeData, finalizedRounds, onFinalizeRound, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, onExternalSettingsHandled, currentUser, teesSaved, onTeesSave }) {
+function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, passwords, setPasswords, holeData, finalizedRounds, onFinalizeRound, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, onExternalSettingsHandled, currentUser, teesSaved, onTeesSave, teesModified, setTeesModified }) {
   const [tab, setTab] = useState("tees");
-  const [teesModified, setTeesModified] = useState({});
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState("players");
   // Apply external open requests (e.g. from scoring tab)
@@ -3773,6 +3772,7 @@ export default function WBCApp() {
   const [pairingsData, setPairingsData] = useState({});
   const [teeData, setTeeData] = useState({});
   const [teesSaved, setTeesSaved] = useState({});
+  const [teesModified, setTeesModified] = useState({});
   const [teeTimesData, setTeeTimesData] = useState({});
   const [finalizedRounds, setFinalizedRounds] = useState({});
   // Auto-advance round when finalization changes
@@ -4495,7 +4495,7 @@ export default function WBCApp() {
                 });
                 return next;
               });
-            }} passwords={passwords} setPasswords={async pw => { setPasswords(pw); await saveTournamentState(finalizedRounds, pw); }} holeData={holeData} finalizedRounds={finalizedRounds} onFinalizeRound={async rnd => { const nf = { ...finalizedRounds, [rnd]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); if (rnd < 4) setRound(rnd + 1); }} getPlayerTee={getPlayerTee} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); }} currentUser={user} teesSaved={teesSaved} onTeesSave={async r => { const next = { ...teesSaved, [r]: true }; setTeesSaved(next); setTeesModified(prev => ({ ...prev, [r]: false })); await saveTournamentState(finalizedRounds, passwords, next); }} /> : (
+            }} passwords={passwords} setPasswords={async pw => { setPasswords(pw); await saveTournamentState(finalizedRounds, pw); }} holeData={holeData} finalizedRounds={finalizedRounds} onFinalizeRound={async rnd => { const nf = { ...finalizedRounds, [rnd]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); if (rnd < 4) setRound(rnd + 1); }} getPlayerTee={getPlayerTee} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); }} currentUser={user} teesSaved={teesSaved} onTeesSave={async r => { const next = { ...teesSaved, [r]: true }; setTeesSaved(next); setTeesModified(prev => ({ ...prev, [r]: false })); await saveTournamentState(finalizedRounds, passwords, next); }} teesModified={teesModified} setTeesModified={setTeesModified} /> : (
           <div style={{ textAlign: "center", padding: "40px 20px" }}>
             <div style={{ fontSize: 40, marginBottom: 12 }}>🔒</div>
             <div style={{ fontSize: 16, fontWeight: 700, color: K.t1, marginBottom: 6 }}>Directors Only</div>
