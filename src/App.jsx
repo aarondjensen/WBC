@@ -2258,12 +2258,13 @@ function TeeAssigner({ activePlayers, numRounds, tRounds, courses, teeData, setT
               <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
                 {tees.map(tee => (
                   <button key={tee.name} onClick={() => setAll(tee.name)} style={{
-                    flex: 1, minWidth: 50, padding: "5px 3px", borderRadius: 6, cursor: "pointer", textAlign: "center",
-                    background: K.card, border: `1px solid ${K.bdr}`, color: K.t1,
+                    flex: 1, minWidth: 60, padding: "8px 6px", borderRadius: 8, cursor: "pointer", textAlign: "center",
+                    background: K.inp, border: `1px solid ${K.bdr}`, color: K.t1,
+                    display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
                   }}>
-                    <TeeColorSwatch color={tee.color} name={tee.name} size={7} style={{ marginRight: 3, verticalAlign: "middle" }} />
-                    <span style={{ fontSize: 10, fontWeight: 600 }}>{tee.name}</span>
-                    <div style={{ fontSize: 8, color: K.t3 }}>{tee.slope}/{tee.rating}{tee.yardage ? ` · ${tee.yardage.toLocaleString()}` : ""}</div>
+                    <TeeColorSwatch color={tee.color} name={tee.name} size={18} style={{ borderRadius: 4 }} />
+                    <span style={{ fontSize: 10, fontWeight: 700 }}>{tee.name}</span>
+                    <div style={{ fontSize: 8, color: K.t3, lineHeight: 1.2 }}>{tee.slope}/{tee.rating}{tee.yardage ? <><br/>{tee.yardage.toLocaleString()}</> : ""}</div>
                   </button>
                 ))}
               </div>
