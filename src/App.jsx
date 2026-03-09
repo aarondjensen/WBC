@@ -2440,9 +2440,8 @@ function PlayerRow({ player, onUpdateHI, onUpdateName, onRemove, onSavePassword,
   );
 }
 
-function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, passwords, setPasswords, holeData, finalizedRounds, onFinalizeRound, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, onExternalSettingsHandled, currentUser }) {
+function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, passwords, setPasswords, holeData, finalizedRounds, onFinalizeRound, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, onExternalSettingsHandled, currentUser, teesSaved, onTeesSave }) {
   const [tab, setTab] = useState("tees");
-  const [teesSaved, setTeesSaved] = useState({});
   const [teesModified, setTeesModified] = useState({});
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState("players");
@@ -3710,7 +3709,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
       )}
 
       {tab === "tees" && (
-        <TeeAssigner activePlayers={activePlayers} numRounds={numRounds} tRounds={tRounds} courses={courses} teeData={teeData} setTeeBulk={setTeeBulk} finalizedRounds={finalizedRounds} editRound={editRound} setEditRound={r => { setEditRound(r); setTab("tees"); }} onOpenCourseSettings={() => { setSettingsOpen(true); setSettingsTab("course"); }} teesSaved={teesSaved} onTeesSave={r => { setTeesSaved(prev => ({ ...prev, [r]: true })); setTeesModified(prev => ({ ...prev, [r]: false })); }} teesModified={teesModified} onTeesModify={r => setTeesModified(prev => ({ ...prev, [r]: true }))} />
+        <TeeAssigner activePlayers={activePlayers} numRounds={numRounds} tRounds={tRounds} courses={courses} teeData={teeData} setTeeBulk={setTeeBulk} finalizedRounds={finalizedRounds} editRound={editRound} setEditRound={r => { setEditRound(r); setTab("tees"); }} onOpenCourseSettings={() => { setSettingsOpen(true); setSettingsTab("course"); }} teesSaved={teesSaved} onTeesSave={onTeesSave} teesModified={teesModified} onTeesModify={r => setTeesModified(prev => ({ ...prev, [r]: true }))} />
       )}
 
 
@@ -3772,6 +3771,7 @@ export default function WBCApp() {
   const [ctpData, setCtpData] = useState({});
   const [pairingsData, setPairingsData] = useState({});
   const [teeData, setTeeData] = useState({});
+  const [teesSaved, setTeesSaved] = useState({});
   const [teeTimesData, setTeeTimesData] = useState({});
   const [finalizedRounds, setFinalizedRounds] = useState({});
   // Auto-advance round when finalization changes
@@ -3853,6 +3853,7 @@ export default function WBCApp() {
           const s = stateRows[0];
           if (s.finalized_rounds) setFinalizedRounds(s.finalized_rounds);
           if (s.passwords) setPasswords(s.passwords);
+          if (s.tees_saved) setTeesSaved(s.tees_saved);
         }
 
       } catch(e) { console.error("Load failed:", e); }
@@ -3893,6 +3894,7 @@ export default function WBCApp() {
       if (rows?.length) {
         if (rows[0].finalized_rounds) setFinalizedRounds(rows[0].finalized_rounds);
         if (rows[0].passwords) setPasswords(rows[0].passwords);
+        if (rows[0].tees_saved) setTeesSaved(rows[0].tees_saved);
       }
     }));
 
@@ -3906,12 +3908,14 @@ export default function WBCApp() {
   }, []);
 
   // Save tournament state (finalized rounds + passwords) to Supabase
-  const saveTournamentState = async (finalized, pwds) => {
+  const saveTournamentState = async (finalized, pwds, savedTees) => {
+    const tsSaved = savedTees !== undefined ? savedTees : teesSaved;
     await sb.upsert("tournament_state", {
       id: `ts_${TOURNAMENT_ID}`,
       tournament_id: TOURNAMENT_ID,
       finalized_rounds: finalized,
       passwords: pwds,
+      tees_saved: tsSaved,
       updated_at: new Date().toISOString(),
     }, "tournament_id");
   };
@@ -4490,7 +4494,7 @@ export default function WBCApp() {
                 });
                 return next;
               });
-            }} passwords={passwords} setPasswords={async pw => { setPasswords(pw); await saveTournamentState(finalizedRounds, pw); }} holeData={holeData} finalizedRounds={finalizedRounds} onFinalizeRound={async rnd => { const nf = { ...finalizedRounds, [rnd]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); if (rnd < 4) setRound(rnd + 1); }} getPlayerTee={getPlayerTee} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); }} currentUser={user} /> : (
+            }} passwords={passwords} setPasswords={async pw => { setPasswords(pw); await saveTournamentState(finalizedRounds, pw); }} holeData={holeData} finalizedRounds={finalizedRounds} onFinalizeRound={async rnd => { const nf = { ...finalizedRounds, [rnd]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); if (rnd < 4) setRound(rnd + 1); }} getPlayerTee={getPlayerTee} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); }} currentUser={user} teesSaved={teesSaved} onTeesSave={async r => { const next = { ...teesSaved, [r]: true }; setTeesSaved(next); setTeesModified(prev => ({ ...prev, [r]: false })); await saveTournamentState(finalizedRounds, passwords, next); }} /> : (
           <div style={{ textAlign: "center", padding: "40px 20px" }}>
             <div style={{ fontSize: 40, marginBottom: 12 }}>🔒</div>
             <div style={{ fontSize: 16, fontWeight: 700, color: K.t1, marginBottom: 6 }}>Directors Only</div>
