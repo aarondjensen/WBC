@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
 
 const WBC_LOGO = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAJ4AAADLAgMAAADiqMKsAAAAIGNIUk0AAHomAACAhAAA+gAAAIDoAAB1MAAA6mAAADqYAAAXcJy6UTwAAAAJUExURf///yLTp////ypiD0cAAAABdFJOUwBA5thmAAAAAWJLR0QAiAUdSAAAAAd0SU1FB+oCHA8GOoAOEAoAAAH7SURBVGje7dlBcsMgDAVQtNARdB823dMZdP+r1LFjMA5IogND09a7TF6Qv2TjTOJcPoi9Mx28HWZoWRMekIMVcrRCvfwOPenl4UgNank826O1KRdFufwlB0gSiorULo9liPaidE9LjfSv88Nq86E26Fp5rA6vkom4Wahc9Lwc6J7gNid4QnhdFwu6vfp4vKxNryi/nSKd8LV7GT4+tEOqXjoFjPtSrMCt4meGvg3JCnkPHVQInVAvjT3w6Esd0h36BsTrXXdcuNqe0gtjY9bXs32m0WBKU7/M8pHSiJvJBUanbaSca8ubI6UllQPTkgpMO32wQvXZxdYlzzRqHLTWBnNtnljb/9wGzUzzDtAtg9oIoRsGBWI31NpI3XBdGxd2R8vS3R11u+/exIeFxt7QahYztGZx1ixgzWKG/W3UYP8tqMHhu6350TEe4kQYZEjDIS+DsA7iG8B9gpGWwWCA/A3odegHQuiDbjSM62AwQJwDvR3iYOhGQloL4zTohsHwHhBM0M+C8vdMXgvdX4RxLaz+oD4fhn/4KyCNhL4Xqr8fz4Pqjpugt8Jggajd2Feo/aW4Q9Ae2Oltlk8SrDB3hcQ0l68SchrOUHwa4h16acHzXQFiAYUhUgGxDQ939gTapYsF8zQbMFfDZnv4NgwSuqP/q36clM05NLov1h1u0UFTWgoAAAAASUVORK5CYII=";
 const WBC_TROPHY = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIoAAADgAgMAAAChhhbLAAAACVBMVEX///8i06f///8qYg9HAAAAAXRSTlMAQObYZgAAAAFiS0dEAIgFHUgAAAAHdElNRQfqAhwPCRGrKvWFAAACeElEQVRYw+3YW3LdIAwAUPHBDsp+9NN/dQb2v5WaxzUgJFCapNOkZvK8PmM9kO2bAAwrpNdCUFYnKhpJSpJwiS1aTVrWEs6vJu2TkU16zH9pwj8W6zGKyQdRNfVo/kqqScWknfHdxK0huD6casL1mQ3uTD5yGdgZehkwGr81aDNJNXibIJrYDJbTec1E6AZl46ibq0GiycdyMsUk2ZRHxhvMtW9Sn/1tojKptbJuZBRhMkp/jobeZtL7jSuDU3/cGffpBuuBsleaqWX5bmBvcG+wzuLOlMOelBuZ3aS7OJvxW6MMRzQbZzGxn+1kcGN8M/ROE2j4przPbMbvTJuKGlIzMJQnG2cxbUcgikNGQ+mvmLJpF3S+9WqmDXIb64OpU8ZNmeP72VyT/1MTXmW14kVDt0kGEyQz7OjdoLAaN7wtKd0UjO+hamGCCaNJ68bHOZ32i2AGUrdl2S4XR1NvaNz4yTjZ0GhgLQxba/v6YTBBMnE2eRRnc704p1OSXgyejWMGuMlPG0ZyYZ6Z5f3qlbSbjYuLobO5XmGG7QTUOZi3Kywkz/RYGJbt4cGQGRIMzcYJBub3Uu1mwg1OJkgG4mjW7tQTDQ2KYqir9F9sNoTF+iwvNqpysGOoOZhm4JzOGIwMBlXjz6F60nqonvTO+FPlRuOOKd8J0daEQ3fuhPanqQnhY76dgQ86zxczYKi9XDwfYf5iny3XsuWeYDCGe1R/yBmIhhJbeip90T6QlnhIx2Dq3++7UEIwwXzW/2mdZPAxb+nhYx7zpQ3OxHJdeMnQbIJk4jc1rHaxP6yHlr0wPS8sz6b1RARnhIKZ0/4J8jqdZBo0Jn4DUtjOuhjt96MAAAAASUVORK5CYII=";
@@ -342,6 +343,12 @@ const isDarkTee = (clr) => {
   return dark.includes(clr.toLowerCase());
 };
 const isBlackTee = (clr) => isDarkTee(clr);
+
+// Portal component — renders modal directly into document.body to escape all stacking contexts
+const CoursePreviewPortal = ({ children }) => {
+  if (typeof document === "undefined") return null;
+  return createPortal(children, document.body);
+};
 // TeeColorSwatch — handles solid, combo (diagonal split), and black (gray+dot) tees
 const TeeColorSwatch = ({ color, name, size = 12, style = {} }) => {
   const combo = getComboColors(name || "");
@@ -459,7 +466,8 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
       const viewH = window.innerHeight;
       const containerTop = containerRef.current.getBoundingClientRect().top;
       const headerH = headerRef.current.offsetHeight;
-      const navH = 60;
+      const safeBottom = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--sab") || "0") || 0;
+      const navH = 60 + safeBottom;
       const bottomPad = 14;
       const available = viewH - containerTop - headerH - navH - bottomPad;
       const perRow = Math.floor(available / lb.length);
@@ -3348,6 +3356,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                             );
                           };
                           return (
+                            <CoursePreviewPortal>
                             <div style={{ position: "fixed", inset: 0, background: "#00000088", zIndex: 200, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
                               <div style={{ background: K.card, borderRadius: "18px 18px 0 0", width: "100%", maxWidth: 480, maxHeight: "88vh", overflowY: "auto", padding: "20px 18px 28px" }}>
                                 {/* Header */}
@@ -3437,6 +3446,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                                 </div>
                               </div>
                             </div>
+                            </CoursePreviewPortal>
                           );
                         })()}
 
@@ -3449,6 +3459,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                           const ti = { background: K.bg, border: `1px solid ${ac}30`, borderRadius: 4, color: K.t1, fontSize: 9, textAlign: "center", width: "100%", padding: "3px 2px", boxSizing: "border-box" };
                           const tiL = { ...ti, textAlign: "left", padding: "3px 5px" };
                           return (
+                            <CoursePreviewPortal>
                             <div style={{ position: "fixed", top: 0, bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.82)", zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
                               <div style={{ background: K.card, borderRadius: 16, border: `1px solid ${ac}40`, width: "100%", maxWidth: 420, maxHeight: "calc(100vh - 48px)", overflowY: "auto", padding: 0 }}>
 
@@ -3635,6 +3646,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                                 </div>
                               </div>
                             </div>
+                            </CoursePreviewPortal>
                           );
                         })()}
                         {!courseSearch.trim() && <div style={{ color: K.t3, fontSize: 10, textAlign: "center", padding: 4 }}>Type at least 2 characters to search</div>}
@@ -4338,7 +4350,9 @@ export default function WBCApp() {
   if (!user) {
     return (
       <div style={{ minHeight: "100vh", background: `radial-gradient(ellipse at 20% 50%, #0d1f3c 0%, ${K.bg} 70%)`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", padding: 20 }}>
-        <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+      <style>{`:root { --sab: env(safe-area-inset-bottom, 0px); }`}</style>
+      <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
         <style>{`
           @keyframes loginPulse { 0% { transform: scale(0.8); opacity: 0; } 50% { transform: scale(1.05); opacity: 1; } 100% { transform: scale(1); opacity: 1; } }
           @keyframes loginCheck { 0% { stroke-dashoffset: 24; } 100% { stroke-dashoffset: 0; } }
@@ -4423,11 +4437,13 @@ export default function WBCApp() {
   return (
     <div style={{ minHeight: "100vh", background: "#030810", display: "flex", justifyContent: "center", overflow: "hidden" }}>
     <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: K.bg, fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", color: K.t1, width: "100%", maxWidth: 480, position: "relative", boxShadow: "0 0 80px rgba(0,0,0,0.8)", flexShrink: 0, overflow: "hidden" }}>
+      <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+      <style>{`:root { --sab: env(safe-area-inset-bottom, 0px); }`}</style>
       <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
 
       {notif && <div style={{ position: "fixed", top: 16, left: "50%", transform: "translateX(-50%)", background: K.accDim, color: "white", padding: "10px 24px", borderRadius: 12, fontSize: 13, fontWeight: 600, zIndex: 1000, boxShadow: "0 8px 32px rgba(0,0,0,0.4)" }}>{notif}</div>}
 
-      <div style={{ padding: "10px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${K.bdr}`, background: "rgba(14,24,41,0.95)", position: "sticky", top: 0, zIndex: 50 }}>
+      <div style={{ padding: "10px 20px", paddingTop: "max(10px, calc(env(safe-area-inset-top, 0px) + 10px))", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${K.bdr}`, background: "rgba(14,24,41,0.95)", position: "sticky", top: 0, zIndex: 50 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <img src={WBC_LOGO} alt="WBC" style={{ height: 32 }} />
           <div>
@@ -4503,7 +4519,7 @@ export default function WBCApp() {
         ))}
       </div>
 
-      <div style={{ position: "sticky", bottom: 0, width: "100%", display: "flex", background: "rgba(14,24,41,0.97)", borderTop: `1px solid ${K.bdr}`, zIndex: 100, marginTop: "auto" }}>
+      <div style={{ position: "sticky", bottom: 0, width: "100%", display: "flex", background: "rgba(14,24,41,0.97)", borderTop: `1px solid ${K.bdr}`, zIndex: 100, marginTop: "auto", paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
         {navItems.map(item => {
           const active = view === item.key;
           const clr = active ? K.acc : K.t3;
