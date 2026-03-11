@@ -2270,7 +2270,7 @@ function TeeAssigner({ activePlayers, numRounds, tRounds, courses, teeData, setT
   const isModified = teesModified && teesModified[editRound];
 
   return (
-    <div>
+    <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
       {finalizedRounds[editRound] && (
         <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", background: K.bdr + "15", borderRadius: 8, marginBottom: 10, border: `1px solid ${K.bdr}30` }}>
           <span style={{ fontSize: 12 }}>🔒</span>
@@ -2278,7 +2278,7 @@ function TeeAssigner({ activePlayers, numRounds, tRounds, courses, teeData, setT
         </div>
       )}
       {!finalizedRounds[editRound] && !course ? null : (
-        <div style={{ opacity: finalizedRounds[editRound] ? 0.6 : 1, pointerEvents: finalizedRounds[editRound] ? "none" : "auto" }}>
+        <div style={{ opacity: finalizedRounds[editRound] ? 0.6 : 1, pointerEvents: finalizedRounds[editRound] ? "none" : "auto", display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
           {/* Quick-set all buttons */}
           {tees.length > 0 && !finalizedRounds[editRound] && (
             <div style={{ marginBottom: 8 }}>
@@ -2315,10 +2315,11 @@ function TeeAssigner({ activePlayers, numRounds, tRounds, courses, teeData, setT
           )}
 
           {/* Per-player tee assignment */}
-          <div style={{ background: K.card, borderRadius: 10, border: `1px solid ${K.bdr}`, overflow: "hidden" }}>
-            <div style={{ padding: "6px 12px", fontSize: 10, fontWeight: 600, color: K.t3, textTransform: "uppercase", borderBottom: `1px solid ${K.bdr}` }}>
+          <div style={{ background: K.card, borderRadius: 10, border: `1px solid ${K.bdr}`, overflow: "hidden", flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+            <div style={{ padding: "6px 12px", fontSize: 10, fontWeight: 600, color: K.t3, textTransform: "uppercase", borderBottom: `1px solid ${K.bdr}`, flexShrink: 0 }}>
               {course.name} — Tee Assignments
             </div>
+            <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column" }}>
             {activePlayers.map((p, i) => {
               const defaultTee = getDefaultTee(tees);
               const currentTee = assignments[p.id] || defaultTee?.name || tees[0]?.name || "";
@@ -2359,6 +2360,7 @@ function TeeAssigner({ activePlayers, numRounds, tRounds, courses, teeData, setT
                 </div>
               );
             })}
+            </div>
           </div>
         </div>
       )}
@@ -2745,7 +2747,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
   const numRounds = tournament?.num_rounds || 4;
 
   return (
-    <div>
+    <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
 
       {/* Finalize round popup modal */}
       {finalizeModal && (
@@ -3764,7 +3766,9 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
       )}
 
       {tab === "tees" && (
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
         <TeeAssigner activePlayers={activePlayers} numRounds={numRounds} tRounds={tRounds} courses={courses} teeData={teeData} setTeeBulk={setTeeBulk} finalizedRounds={finalizedRounds} editRound={editRound} setEditRound={r => { setEditRound(r); setTab("tees"); }} onOpenCourseSettings={() => { setSettingsOpen(true); setSettingsTab("course"); }} teesSaved={teesSaved} onTeesSave={onTeesSave} teesModified={teesModified} onTeesModify={r => setTeesModified(prev => ({ ...prev, [r]: true }))} />
+        </div>
       )}
 
       {showFinalizeModal && (
@@ -4632,7 +4636,7 @@ export default function WBCApp() {
       </div>
       )}
 
-      <div style={{ padding: view === "leaderboard" ? "14px 20px 0 20px" : "14px 20px", paddingBottom: "calc(60px + env(safe-area-inset-bottom, 0px))", flex: 1, overflowY: view === "leaderboard" ? "hidden" : "auto", overflowX: "hidden", display: view === "leaderboard" ? "flex" : "block", flexDirection: "column", minHeight: 0 }}>
+      <div style={{ padding: (view === "leaderboard" || view === "admin") ? "14px 20px 0 20px" : "14px 20px", paddingBottom: "calc(60px + env(safe-area-inset-bottom, 0px))", flex: 1, overflowY: (view === "leaderboard" || view === "admin") ? "hidden" : "auto", overflowX: "hidden", display: (view === "leaderboard" || view === "admin") ? "flex" : "block", flexDirection: "column", minHeight: 0 }}>
         {view === "leaderboard" && <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} teeData={teeData} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} />}
         <div style={{ display: view === "scoring" ? "block" : "none" }}>
           <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeData={teeData} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onNavigate={setView} onGoToAdminCourses={() => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); }} markPlayerWD={markPlayerWD} />
