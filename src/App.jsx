@@ -463,13 +463,11 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
   useEffect(() => {
     const calc = () => {
       if (!containerRef.current || !headerRef.current || lb.length === 0) return;
-      const viewH = window.innerHeight;
-      const containerTop = containerRef.current.getBoundingClientRect().top;
+      // Use the container's own bounding rect — it already lives inside the padded content area
+      const containerRect = containerRef.current.getBoundingClientRect();
       const headerH = headerRef.current.offsetHeight;
-      const safeBottom = window.innerHeight - document.documentElement.clientHeight || 0;
-      const navH = 60 + Math.max(0, safeBottom);
-      const bottomPad = 14;
-      const available = viewH - containerTop - headerH - navH - bottomPad;
+      // Available = space from bottom of grid header to bottom of container
+      const available = containerRect.height - headerH;
       const perRow = Math.floor(available / lb.length);
       const clampedPerRow = Math.min(perRow, 36);
       const fSize = clampedPerRow >= 32 ? 13 : clampedPerRow >= 26 ? 12 : clampedPerRow >= 18 ? 11 : 10;
@@ -4487,7 +4485,7 @@ export default function WBCApp() {
       </div>
       )}
 
-      <div style={{ padding: view === "leaderboard" ? "14px 20px 0 20px" : "14px 20px", paddingBottom: view === "leaderboard" ? 0 : "calc(60px + env(safe-area-inset-bottom, 0px) + 14px)", flex: 1, overflowY: view === "leaderboard" ? "hidden" : "auto", overflowX: "hidden", display: view === "leaderboard" ? "flex" : "block", flexDirection: "column" }}>
+      <div style={{ padding: view === "leaderboard" ? "14px 20px 0 20px" : "14px 20px", paddingBottom: "calc(60px + env(safe-area-inset-bottom, 0px))", flex: 1, overflowY: view === "leaderboard" ? "hidden" : "auto", overflowX: "hidden", display: view === "leaderboard" ? "flex" : "block", flexDirection: "column", minHeight: 0 }}>
         {view === "leaderboard" && <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} teeData={teeData} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} />}
         <div style={{ display: view === "scoring" ? "block" : "none" }}>
           <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeData={teeData} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onNavigate={setView} onGoToAdminCourses={() => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); }} markPlayerWD={markPlayerWD} />
