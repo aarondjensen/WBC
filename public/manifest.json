@@ -1,0 +1,24 @@
+{
+  "name": "WBC 2026",
+  "short_name": "WBC 2026",
+  "description": "Wannabe Cup 2026 Tournament App",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#080f1e",
+  "theme_color": "#080f1e",
+  "icons": [
+    {
+      "src": "/wbc-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/wbc-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
