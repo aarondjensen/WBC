@@ -825,6 +825,8 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
   const [expandedScores, setExpandedScores] = useState(null);
   const [editingCompleted, setEditingCompleted] = useState(false);
   const [navSource, setNavSource] = useState("auto");
+  const navSourceRef = useRef("auto");
+  const setNavSourceSynced = (v) => { navSourceRef.current = v; setNavSource(v); };
   const [holeTransition, setHoleTransition] = useState("idle");
   const [transitionDir, setTransitionDir] = useState(1); // 1 = forward (→), -1 = backward (←)
   const [showFinalize, setShowFinalize] = useState(false);
@@ -865,13 +867,13 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
       const allDone = gPlayers.every(p => (holeData[`${p.id}_${round}`] || {})[i] > 0);
       if (!allDone) {
         setCurrentHole(i);
-        setNavSource("manual"); // prevent auto-advance on load
+        setNavSourceSynced("auto"); // incomplete hole — allow auto-advance after scoring
         return;
       }
     }
-    // All 18 complete — land on hole 18, mark as editing so auto-advance doesn't fire
+    // All 18 complete — land on hole 18, manual so editing mode shows
     setCurrentHole(17);
-    setNavSource("manual");
+    setNavSourceSynced("manual");
     setEditingCompleted(true);
   }, [group]);
 
@@ -912,7 +914,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
     setTransitionDir(dir);
     setHoleTransition("out");
     setTimeout(() => {
-      setNavSource("manual");
+      setNavSourceSynced("manual");
       setEditingCompleted(false);
       setExpandedScores(null);
       setCurrentHole(holeIdx);
@@ -926,7 +928,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
 
   const returnToPlay = () => {
     const next = findNextIncompleteHole();
-    setNavSource("auto");
+    setNavSourceSynced("auto");
     setEditingCompleted(false);
     setExpandedScores(null);
     setCurrentHole(next);
@@ -950,7 +952,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
     if (allRoundComplete && !isFinalized && !shownFinalizeRef.current) {
       shownFinalizeRef.current = true;
       setCurrentHole(17);
-      setNavSource("manual");
+      setNavSourceSynced("manual");
       setTimeout(() => setShowFinalize(true), 400);
     }
     if (!allRoundComplete) shownFinalizeRef.current = false;
@@ -958,12 +960,20 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
 
   // Auto-advance after short delay when all scored (only on fresh scoring, not editing)
   useEffect(() => {
-    if (allScored && currentHole < 17 && navSource === "auto" && !editingCompleted && !allRoundComplete) {
+    if (allScored && currentHole < 17 && navSourceRef.current === "auto" && !editingCompleted && !allRoundComplete) {
       const timer = setTimeout(() => {
         setTransitionDir(1);
         setHoleTransition("out");
         const advance = setTimeout(() => {
-          setCurrentHole(h => h + 1);
+          setCurrentHole(h => {
+            // Skip over any already-completed holes when auto-advancing
+            let next = h + 1;
+            while (next < 17 && groupPlayers.every(p => (holeData[`${p.id}_${round}`] || {})[next] > 0)) {
+              next++;
+            }
+            return next;
+          });
+          setNavSourceSynced("auto");
           setExpandedScores(null);
           setHoleTransition("in-start");
           requestAnimationFrame(() => requestAnimationFrame(() => {
@@ -975,7 +985,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
       }, 1500);
       return () => clearTimeout(timer);
     }
-  }, [allScored, currentHole, navSource, editingCompleted]);
+  }, [allScored, currentHole, editingCompleted]);
 
   const getCH = (p) => {
     if (!course) return 0;
@@ -1074,25 +1084,36 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
                 const s = holeData[`${p.id}_${round}`] || {};
                 return Object.values(s).filter(v => v > 0).length;
               }), 0);
+              const allComplete = grpPlayers.every(p => { for (let h = 0; h < 18; h++) { if (!((holeData[`${p.id}_${round}`] || {})[h] > 0)) return false; } return true; });
               return (
-                <button key={gi} onClick={() => { setGroup(grp); setManualOverride(true); }} style={{
-                  background: K.card, border: `1px solid ${K.bdr}`, borderRadius: 12,
-                  padding: "12px 16px", cursor: "pointer", textAlign: "left",
-                  display: "flex", justifyContent: "space-between", alignItems: "center",
-                }}>
-                  <div>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: K.acc, marginBottom: 4 }}>Group {gi + 1}</div>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: K.t1 }}>{grpPlayers.map(p => p.name.split(" ")[0]).join(", ")}</div>
-                  </div>
-                  <div style={{ textAlign: "right" }}>
-                    {isFinalized
-                      ? <span style={{ fontSize: 10, fontWeight: 700, color: K.acc, background: K.accGlow, padding: "3px 8px", borderRadius: 6 }}>Final</span>
-                      : holesScored > 0
-                        ? <span style={{ fontSize: 10, fontWeight: 600, color: K.warn }}>Thru {holesScored}</span>
-                        : <span style={{ fontSize: 10, color: K.t3 }}>Not started</span>
-                    }
-                  </div>
-                </button>
+                <div key={gi} style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
+                  <button onClick={() => { setGroup(grp); setManualOverride(true); }} style={{
+                    flex: 1, background: K.card, border: `1px solid ${K.bdr}`, borderRadius: 12,
+                    padding: "12px 16px", cursor: "pointer", textAlign: "left",
+                    display: "flex", justifyContent: "space-between", alignItems: "center",
+                  }}>
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: K.acc, marginBottom: 4 }}>Group {gi + 1}</div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: K.t1 }}>{grpPlayers.map(p => p.name.split(" ")[0]).join(", ")}</div>
+                    </div>
+                    <div style={{ textAlign: "right" }}>
+                      {isFinalized
+                        ? <span style={{ fontSize: 10, fontWeight: 700, color: K.acc, background: K.accGlow, padding: "3px 8px", borderRadius: 6 }}>✓ Final</span>
+                        : allComplete
+                          ? <span style={{ fontSize: 10, fontWeight: 700, color: "#fbbf24", background: "#fbbf2415", padding: "3px 8px", borderRadius: 6 }}>18 ✓ Ready</span>
+                          : holesScored > 0
+                            ? <span style={{ fontSize: 10, fontWeight: 600, color: K.warn }}>Thru {holesScored}</span>
+                            : <span style={{ fontSize: 10, color: K.t3 }}>Not started</span>
+                      }
+                    </div>
+                  </button>
+                  {allComplete && !isFinalized && (
+                    <button onClick={() => { onFinalizeRound(grpKey); notify("Group finalized! ✓"); }} style={{
+                      padding: "0 16px", borderRadius: 12, background: K.acc, border: "none",
+                      color: K.bg, fontSize: 11, fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap",
+                    }}>✓ Finalize</button>
+                  )}
+                </div>
               );
             })}
           </div>
@@ -2448,7 +2469,7 @@ function PlayerRow({ player, onUpdateHI, onUpdateName, onRemove, onSavePassword,
   );
 }
 
-function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, passwords, setPasswords, holeData, finalizedRounds, onFinalizeRound, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, onExternalSettingsHandled, currentUser, teesSaved, onTeesSave, teesModified, setTeesModified }) {
+function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, passwords, setPasswords, holeData, finalizedRounds, onFinalizeRound, onUnfinalizeRound, notify, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, onExternalSettingsHandled, currentUser, teesSaved, onTeesSave, teesModified, setTeesModified }) {
   const [tab, setTab] = useState("tees");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState("players");
@@ -2855,7 +2876,17 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
         const _teeTimesDone = _rg.length > 0 && _rg.every((_, gi) => _rt[gi] && _rt[gi].trim() !== "");
         const _pairingsDone = _hasCourse && _groupsDone && _teeTimesDone;
         const _isFinal = finalizedRounds[editRound];
-        const subDone = { tees: _teeDone, pairings: _pairingsDone };
+        const _finalizePending = Object.entries(pairingsData || {}).some(([rnd, groups]) =>
+          groups.some(grp => {
+            const gk = `${rnd}_${grp.slice().sort().join(",")}`;
+            if (finalizedRounds[gk] || finalizedRounds[parseInt(rnd)]) return false;
+            return grp.every(pid => {
+              const pd = holeData[`${pid}_${rnd}`] || {};
+              return Object.values(pd).filter(s => s > 0).length === 18;
+            });
+          })
+        );
+        const subDone = { tees: _teeDone, pairings: _pairingsDone, finalize: !_finalizePending };
         return (
           <div style={{ position: "relative", display: "flex", background: K.card, borderRadius: 10, border: `1px solid ${K.bdr}`, padding: 3, marginBottom: 14, gap: 0 }}>
             {/* Sliding pill */}
@@ -2868,7 +2899,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
               transition: "left 0.2s ease",
               pointerEvents: "none",
             }} />
-            {[["tees","Tees"],["pairings","Pairings"]].map(([k,l]) => {
+            {[["tees","Tees"],["pairings","Pairings"],["finalize","Finalize"]].map(([k,l]) => {
               const isActive = tab === k;
               const isDone = !_isFinal && subDone[k];
               return (
@@ -3721,6 +3752,84 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
         <TeeAssigner activePlayers={activePlayers} numRounds={numRounds} tRounds={tRounds} courses={courses} teeData={teeData} setTeeBulk={setTeeBulk} finalizedRounds={finalizedRounds} editRound={editRound} setEditRound={r => { setEditRound(r); setTab("tees"); }} onOpenCourseSettings={() => { setSettingsOpen(true); setSettingsTab("course"); }} teesSaved={teesSaved} onTeesSave={onTeesSave} teesModified={teesModified} onTeesModify={r => setTeesModified(prev => ({ ...prev, [r]: true }))} />
       )}
 
+      {tab === "finalize" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ fontSize: 11, color: K.t3, marginBottom: 2 }}>
+            Finalize a group once all 18 holes are entered and scores are confirmed. Finalized scores appear on the leaderboard.
+          </div>
+          {[1,2,3,4].map(rnd => {
+            const rndGroups = (pairingsData || {})[rnd] || [];
+            const tr = tRounds.find(t => t.round_number === rnd);
+            const courseName = tr ? (courses.find(c => c.id === tr.course_id)?.name || "No course") : "No course";
+            if (rndGroups.length === 0) return null;
+            return (
+              <div key={rnd}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: K.t3, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>
+                  Round {rnd} · {courseName}
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {rndGroups.map((grp, gi) => {
+                    const groupKey = `${rnd}_${grp.slice().sort().join(",")}`;
+                    const isFinalized = finalizedRounds[groupKey] || finalizedRounds[rnd];
+                    const holesComplete = grp.every(pid => {
+                      const pd = holeData[`${pid}_${rnd}`] || {};
+                      return Object.keys(pd).length === 18 && Object.values(pd).every(s => s > 0);
+                    });
+                    const holesEntered = grp.reduce((total, pid) => {
+                      const pd = holeData[`${pid}_${rnd}`] || {};
+                      return Math.max(total, Object.values(pd).filter(s => s > 0).length);
+                    }, 0);
+                    const playerNames = grp.map(pid => {
+                      const p = activePlayers.find(x => x.id === pid);
+                      return p ? p.name.split(" ")[0] : pid;
+                    }).join(", ");
+                    return (
+                      <div key={gi} style={{
+                        background: isFinalized ? K.acc + "10" : K.card,
+                        border: `1px solid ${isFinalized ? K.acc + "40" : K.bdr}`,
+                        borderRadius: 10, padding: "10px 12px",
+                        display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
+                      }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: K.t1, marginBottom: 2 }}>
+                            Group {gi + 1}
+                            {isFinalized && <span style={{ marginLeft: 6, fontSize: 10, color: K.acc, fontWeight: 700 }}>✓ FINAL</span>}
+                          </div>
+                          <div style={{ fontSize: 11, color: K.t3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{playerNames}</div>
+                          <div style={{ fontSize: 10, color: holesComplete ? "#22c55e" : "#fbbf24", marginTop: 3 }}>
+                            {holesComplete ? "All 18 holes entered" : `${holesEntered}/18 holes entered`}
+                          </div>
+                        </div>
+                        {isFinalized ? (
+                          <button onClick={() => { onUnfinalizeRound(groupKey); notify("Round unfinalized"); }} style={{
+                            padding: "6px 10px", borderRadius: 8, fontSize: 11, fontWeight: 600,
+                            background: "transparent", border: `1px solid ${K.bdr}`,
+                            color: K.t3, cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0,
+                          }}>↩ Unfinalize</button>
+                        ) : (
+                          <button
+                            onClick={() => { if (!holesComplete) return; onFinalizeRound(groupKey); notify(`Group ${gi+1} Round ${rnd} finalized`); }}
+                            disabled={!holesComplete}
+                            style={{
+                              padding: "6px 10px", borderRadius: 8, fontSize: 11, fontWeight: 700,
+                              background: holesComplete ? K.acc : K.card,
+                              border: holesComplete ? "none" : `1px solid ${K.bdr}`,
+                              color: holesComplete ? K.bg : K.t3,
+                              cursor: holesComplete ? "pointer" : "not-allowed", whiteSpace: "nowrap", flexShrink: 0,
+                              opacity: holesComplete ? 1 : 0.5,
+                            }}>✓ Finalize</button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+
 
 
     </div>
@@ -4508,7 +4617,7 @@ export default function WBCApp() {
                 });
                 return next;
               });
-            }} passwords={passwords} setPasswords={async pw => { setPasswords(pw); await saveTournamentState(finalizedRounds, pw); }} holeData={holeData} finalizedRounds={finalizedRounds} onFinalizeRound={async rnd => { const nf = { ...finalizedRounds, [rnd]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); if (rnd < 4) setRound(rnd + 1); }} getPlayerTee={getPlayerTee} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); }} currentUser={user} teesSaved={teesSaved} onTeesSave={async r => { const next = { ...teesSaved, [r]: true }; setTeesSaved(next); setTeesModified(prev => ({ ...prev, [r]: false })); await saveTournamentState(finalizedRounds, passwords, next); }} teesModified={teesModified} setTeesModified={setTeesModified} /> : (
+            }} passwords={passwords} setPasswords={async pw => { setPasswords(pw); await saveTournamentState(finalizedRounds, pw); }} holeData={holeData} finalizedRounds={finalizedRounds} onFinalizeRound={async rnd => { const nf = { ...finalizedRounds, [rnd]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); if (rnd < 4) setRound(rnd + 1); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} notify={notify} getPlayerTee={getPlayerTee} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); }} currentUser={user} teesSaved={teesSaved} onTeesSave={async r => { const next = { ...teesSaved, [r]: true }; setTeesSaved(next); setTeesModified(prev => ({ ...prev, [r]: false })); await saveTournamentState(finalizedRounds, passwords, next); }} teesModified={teesModified} setTeesModified={setTeesModified} /> : (
           <div style={{ textAlign: "center", padding: "40px 20px" }}>
             <div style={{ fontSize: 40, marginBottom: 12 }}>🔒</div>
             <div style={{ fontSize: 16, fontWeight: 700, color: K.t1, marginBottom: 6 }}>Directors Only</div>
