@@ -2472,6 +2472,7 @@ function PlayerRow({ player, onUpdateHI, onUpdateName, onRemove, onSavePassword,
 function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, passwords, setPasswords, holeData, finalizedRounds, onFinalizeRound, onUnfinalizeRound, notify, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, onExternalSettingsHandled, currentUser, teesSaved, onTeesSave, teesModified, setTeesModified }) {
   const [tab, setTab] = useState("tees");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [showFinalizeModal, setShowFinalizeModal] = useState(false);
   const [settingsTab, setSettingsTab] = useState("players");
   // Apply external open requests (e.g. from scoring tab)
   useEffect(() => {
@@ -2888,38 +2889,52 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
         );
         const subDone = { tees: _teeDone, pairings: _pairingsDone, finalize: !_finalizePending };
         return (
-          <div style={{ position: "relative", display: "flex", background: K.card, borderRadius: 10, border: `1px solid ${K.bdr}`, padding: 3, marginBottom: 14, gap: 0 }}>
-            {/* Sliding pill */}
-            <div style={{
-              position: "absolute", top: 3, bottom: 3,
-              left: tab === "tees" ? 3 : "calc(50% + 1.5px)",
-              width: "calc(50% - 4.5px)",
-              background: acGlow, borderRadius: 8,
-              border: `1px solid ${ac}50`,
-              transition: "left 0.2s ease",
-              pointerEvents: "none",
-            }} />
-            {[["tees","Tees"],["pairings","Pairings"],["finalize","Finalize"]].map(([k,l]) => {
-              const isActive = tab === k;
-              const isDone = !_isFinal && subDone[k];
-              return (
-                <button key={k} onClick={() => setTab(k)} style={{
-                  flex: 1, padding: "8px 6px", borderRadius: 8, fontSize: 12,
-                  fontWeight: isActive ? 700 : 500,
-                  background: "transparent",
-                  color: isActive ? ac : K.t2,
-                  border: "none", cursor: "pointer", position: "relative", zIndex: 1,
-                  display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
-                }}>
-                  <span>{l}</span>
-                  {!_isFinal && <span style={{
-                    width: 6, height: 6, borderRadius: "50%", flexShrink: 0,
-                    background: isDone ? "#22c55e" : "transparent",
-                    border: `1.5px solid ${isDone ? "#22c55e" : K.t3 + "60"}`,
-                  }} />}
-                </button>
-              );
-            })}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+            <div style={{ position: "relative", display: "flex", flex: 1, background: K.card, borderRadius: 10, border: `1px solid ${K.bdr}`, padding: 3, gap: 0 }}>
+              {/* Sliding pill */}
+              <div style={{
+                position: "absolute", top: 3, bottom: 3,
+                left: tab === "tees" ? 3 : "calc(50% + 1.5px)",
+                width: "calc(50% - 4.5px)",
+                background: acGlow, borderRadius: 8,
+                border: `1px solid ${ac}50`,
+                transition: "left 0.2s ease",
+                pointerEvents: "none",
+              }} />
+              {[["tees","Tees"],["pairings","Pairings"]].map(([k,l]) => {
+                const isActive = tab === k;
+                const isDone = !_isFinal && subDone[k];
+                return (
+                  <button key={k} onClick={() => setTab(k)} style={{
+                    flex: 1, padding: "8px 6px", borderRadius: 8, fontSize: 12,
+                    fontWeight: isActive ? 700 : 500,
+                    background: "transparent",
+                    color: isActive ? ac : K.t2,
+                    border: "none", cursor: "pointer", position: "relative", zIndex: 1,
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
+                  }}>
+                    <span>{l}</span>
+                    {!_isFinal && <span style={{
+                      width: 6, height: 6, borderRadius: "50%", flexShrink: 0,
+                      background: isDone ? "#22c55e" : "transparent",
+                      border: `1.5px solid ${isDone ? "#22c55e" : K.t3 + "60"}`,
+                    }} />}
+                  </button>
+                );
+              })}
+            </div>
+            {/* Finalize button — opens modal */}
+            <button onClick={() => setShowFinalizeModal(true)} style={{
+              padding: "8px 12px", borderRadius: 10, fontSize: 12, fontWeight: 700,
+              background: _finalizePending ? ac : K.card,
+              border: `1px solid ${_finalizePending ? ac : K.bdr}`,
+              color: _finalizePending ? K.bg : K.t2,
+              cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0,
+              display: "flex", alignItems: "center", gap: 5,
+            }}>
+              {_finalizePending && <span style={{ width: 6, height: 6, borderRadius: "50%", background: K.bg, flexShrink: 0 }} />}
+              Finalize
+            </button>
           </div>
         );
       })()}
@@ -3752,11 +3767,18 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
         <TeeAssigner activePlayers={activePlayers} numRounds={numRounds} tRounds={tRounds} courses={courses} teeData={teeData} setTeeBulk={setTeeBulk} finalizedRounds={finalizedRounds} editRound={editRound} setEditRound={r => { setEditRound(r); setTab("tees"); }} onOpenCourseSettings={() => { setSettingsOpen(true); setSettingsTab("course"); }} teesSaved={teesSaved} onTeesSave={onTeesSave} teesModified={teesModified} onTeesModify={r => setTeesModified(prev => ({ ...prev, [r]: true }))} />
       )}
 
-      {tab === "finalize" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <div style={{ fontSize: 11, color: K.t3, marginBottom: 2 }}>
-            Finalize a group once all 18 holes are entered and scores are confirmed. Finalized scores appear on the leaderboard.
-          </div>
+      {showFinalizeModal && (
+        <div style={{ position: "fixed", top: 0, bottom: 0, left: 0, right: 0, background: "#00000090", zIndex: 200, display: "flex", alignItems: "flex-end", justifyContent: "center" }}
+          onClick={() => setShowFinalizeModal(false)}>
+          <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 480, maxHeight: "80vh", background: K.bg, borderRadius: "16px 16px 0 0", border: `1px solid ${K.bdr}`, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+            <div style={{ padding: "14px 16px 10px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${K.bdr}`, flexShrink: 0 }}>
+              <span style={{ fontWeight: 700, fontSize: 15, color: K.t1 }}>Finalize Rounds</span>
+              <button onClick={() => setShowFinalizeModal(false)} style={{ background: "transparent", border: "none", color: K.t3, fontSize: 20, cursor: "pointer", lineHeight: 1 }}>✕</button>
+            </div>
+            <div style={{ overflowY: "auto", padding: "12px 16px 32px", display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ fontSize: 11, color: K.t3, marginBottom: 2 }}>
+              Finalize a group once all 18 holes are entered and scores are confirmed. Finalized scores are locked on the leaderboard.
+            </div>
           {[1,2,3,4].map(rnd => {
             const rndGroups = (pairingsData || {})[rnd] || [];
             const tr = tRounds.find(t => t.round_number === rnd);
@@ -3826,6 +3848,8 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
               </div>
             );
           })}
+            </div>
+          </div>
         </div>
       )}
 
