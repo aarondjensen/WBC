@@ -4116,9 +4116,23 @@ export default function WBCApp() {
         const isWDRound = Object.values(scores).some(s => s === 99);
         if (thru > 0 || isWDRound) {
           const gross = realEntries.reduce((a, [_, s]) => a + s, 0);
-          const parForHoles = realEntries.reduce((a, [h]) => a + (course.hole_pars[parseInt(h)] || 4), 0);
+          const parForHoles = realEntries.reduce((a, [h]) => a + ((course.hole_pars || [])[parseInt(h)] || 4), 0);
+          // Distribute handicap strokes by hole difficulty order, only count strokes for played holes
           const ch = calcCH(p.handicap_index, slope, rating, par);
-          const netToPar = gross - parForHoles - ch;
+          const holeHcps = course.hole_handicaps || [];
+          const sorted = holeHcps.length
+            ? holeHcps.map((h, i) => ({ idx: i, hcp: h })).sort((a, b) => a.hcp - b.hcp)
+            : Array.from({ length: 18 }, (_, i) => ({ idx: i, hcp: i + 1 }));
+          const strokeMap = {};
+          let rem = Math.abs(ch);
+          for (let pass = 0; pass < 3 && rem > 0; pass++) {
+            for (const h of sorted) { if (rem <= 0) break; strokeMap[h.idx] = (strokeMap[h.idx] || 0) + 1; rem--; }
+          }
+          // Only sum strokes for holes that were actually played
+          const strokesForPlayedHoles = realEntries.reduce((a, [h]) => a + (strokeMap[parseInt(h)] || 0), 0);
+          const netToPar = ch >= 0
+            ? gross - parForHoles - strokesForPlayedHoles
+            : gross - parForHoles + strokesForPlayedHoles;
           if (!p.isWD) { roundsPlayed++; totalNetToPar += netToPar; totalThru += thru; }
           rds.push({ netToPar, thru, wd: p.isWD && r >= round });
         } else { rds.push({ netToPar: null, thru: 0, wd: false }); }
