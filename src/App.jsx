@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
-const WBC_LOGO = "/wbc-icon-512.png";
-const WBC_FAVICON = "/wbc-icon-192.png";
+import WBC_LOGO from "./wbcicon512.png";
+import WBC_FAVICON from "./wbcicon192.png";
 
 const WBC_TROPHY = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIoAAADgAgMAAAChhhbLAAAACVBMVEX///8i06f///8qYg9HAAAAAXRSTlMAQObYZgAAAAFiS0dEAIgFHUgAAAAHdElNRQfqAhwPCRGrKvWFAAACeElEQVRYw+3YW3LdIAwAUPHBDsp+9NN/dQb2v5WaxzUgJFCapNOkZvK8PmM9kO2bAAwrpNdCUFYnKhpJSpJwiS1aTVrWEs6vJu2TkU16zH9pwj8W6zGKyQdRNfVo/kqqScWknfHdxK0huD6casL1mQ3uTD5yGdgZehkwGr81aDNJNXibIJrYDJbTec1E6AZl46ibq0GiycdyMsUk2ZRHxhvMtW9Sn/1tojKptbJuZBRhMkp/jobeZtL7jSuDU3/cGffpBuuBsleaqWX5bmBvcG+wzuLOlMOelBuZ3aS7OJvxW6MMRzQbZzGxn+1kcGN8M/ROE2j4przPbMbvTJuKGlIzMJQnG2cxbUcgikNGQ+mvmLJpF3S+9WqmDXIb64OpU8ZNmeP72VyT/1MTXmW14kVDt0kGEyQz7OjdoLAaN7wtKd0UjO+hamGCCaNJ68bHOZ32i2AGUrdl2S4XR1NvaNz4yTjZ0GhgLQxba/v6YTBBMnE2eRRnc704p1OSXgyejWMGuMlPG0ZyYZ6Z5f3qlbSbjYuLobO5XmGG7QTUOZi3Kywkz/RYGJbt4cGQGRIMzcYJBub3Uu1mwg1OJkgG4mjW7tQTDQ2KYqir9F9sNoTF+iwvNqpysGOoOZhm4JzOGIwMBlXjz6F60nqonvTO+FPlRuOOKd8J0daEQ3fuhPanqQnhY76dgQ86zxczYKi9XDwfYf5iny3XsuWeYDCGe1R/yBmIhhJbeip90T6QlnhIx2Dq3++7UEIwwXzW/2mdZPAxb+nhYx7zpQ3OxHJdeMnQbIJk4jc1rHaxP6yHlr0wPS8sz6b1RARnhIKZ0/4J8jqdZBo0Jn4DUtjOuhjt96MAAAAASUVORK5CYII=";
 
@@ -1135,6 +1135,13 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
   const isGroupFinalized = _groupKey && (finalizedRounds[_groupKey] || finalizedRounds[round]);
   if (isGroupFinalized) return (
     <div style={{ padding: "24px 16px", display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* Director: back to group picker */}
+      {user.isDirector && presetGroups.length > 1 && (
+        <button onClick={() => { setGroup(null); setManualOverride(false); }} style={{
+          background: "transparent", border: "none", color: K.acc, fontSize: 12,
+          fontWeight: 600, cursor: "pointer", padding: "0 0 4px 0", display: "flex", alignItems: "center", gap: 4,
+        }}>← All Groups</button>
+      )}
       {/* Round banner */}
       {(() => {
         const tr = tRounds.find(t => t.round_number === round);
