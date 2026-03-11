@@ -1906,7 +1906,7 @@ function GroupsView({ players, round, tRounds, courses, pairingsData, teeTimesDa
               {grp.map((pid, pi) => {
                 const p = players.find(pl => pl.id === pid);
                 if (!p) return null;
-                const ch = course ? (() => { const tee = getPlayerTee(viewRound, pid, course); return calcCH(p.handicap_index, tee?.slope || course.slope, tee?.rating || course.rating, tee?.par || course.par); })() : 0;
+                const ch = course ? (() => { const tee = getPlayerTee(round, pid, course); return calcCH(p.handicap_index, tee?.slope || course.slope, tee?.rating || course.rating, tee?.par || course.par); })() : 0;
                 const teeName = getTeeName(p);
                 const teeClr = getTeeColor(p);
                 const isMe = pid === user.id;
