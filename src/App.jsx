@@ -608,7 +608,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
   };
 
   return (
-    <div style={{ position: "relative", height: "100%", display: "flex", flexDirection: "column" }}>
+    <div style={{ position: "relative", height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
       {/* Giant trophy silhouette behind entire leaderboard — fixed so it never shifts */}
       <img src={WBC_TROPHY_SILHOUETTE} alt="" style={{
         position: "fixed", top: "50%", left: "50%",
@@ -621,7 +621,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
         zIndex: 0,
         objectFit: "contain",
       }} />
-      <div style={{ position: "relative", zIndex: 1, flex: 1, display: "flex", flexDirection: "column" }}>
+      <div style={{ position: "relative", zIndex: 1, flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
       {/* Title inline with stacked pills */}
       <div style={{ display: "flex", alignItems: "center", marginBottom: 10, gap: 8 }}>
         {/* Left pill — Net/Gross */}
@@ -698,13 +698,13 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
                 {allPriorRounds.map(r => <span key={r} style={{ textAlign: "center" }}>R{r}</span>)}
               </div>
               {lb.length === 0 && <div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: 12 }}>No scores yet — be the first!</div>}
-              <div style={{ display: "flex", flexDirection: "column", flex: 1 }}>
+              <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden" }}>
               {(() => {
                 // Pre-compute tied positions
                 const posMap = {};
                 let i = 0;
                 while (i < lb.length) {
-                  if (lb[i].roundsPlayed === 0) { posMap[lb[i].id] = "—"; i++; continue; }
+                  if (lb[i].roundsPlayed === 0) { posMap[lb[i].id] = i + 1; i++; continue; }
                   let j = i + 1;
                   while (j < lb.length && lb[j].roundsPlayed > 0 && lb[j].totalNetToPar === lb[i].totalNetToPar) j++;
                   const tied = j - i > 1;
@@ -712,7 +712,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
                   i = j;
                 }
                 const rows = lb.map((p, idx) => {
-                const pos = posMap[p.id] ?? (p.roundsPlayed === 0 ? "—" : idx + 1);
+                const pos = posMap[p.id] ?? idx + 1;
                 const rd = p.rds[round - 1];
                 const top3 = pos === 1 || pos === "T1";
                 const isExpanded = expanded === p.id;
