@@ -1887,7 +1887,7 @@ function SkinsCtpView({ players, round, tRounds, courses, holeData, ctpData, onS
           </colgroup>
           <thead>
             <tr style={{ borderBottom: cellBdr }}>
-              <td style={{ padding: "3px 4px" }}></td>
+              <td style={{ fontSize: 9, fontWeight: 600, color: K.t3, padding: "3px 4px" }}>Hole</td>
               {holes.map(i => (
                 <td key={i} style={{ textAlign: "center", fontSize: skinByHole[i]?.winner ? 10 : 9, fontWeight: skinByHole[i]?.winner ? 800 : 600, color: skinByHole[i]?.winner ? "#d4a843" : K.t1, padding: "3px 1px", borderLeft: cellBdr }}>
                   {i + 1}
@@ -1895,8 +1895,8 @@ function SkinsCtpView({ players, round, tRounds, courses, holeData, ctpData, onS
               ))}
             </tr>
             <tr style={{ borderBottom: cellBdr }}>
-              <td style={{ fontSize: 8, color: K.t3, opacity: 0.5, padding: "2px 4px" }}>Par</td>
-              {holes.map(i => <td key={i} style={{ textAlign: "center", fontSize: 8, color: K.t3, opacity: 0.45, padding: "2px 1px", borderLeft: cellBdr }}>{pars[i] || ""}</td>)}
+              <td style={{ fontSize: 8, color: K.t2, padding: "2px 4px" }}>Par</td>
+              {holes.map(i => <td key={i} style={{ textAlign: "center", fontSize: 8, color: K.t2, padding: "2px 1px", borderLeft: cellBdr }}>{pars[i] || ""}</td>)}
             </tr>
           </thead>
           <tbody>
