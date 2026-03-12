@@ -1837,24 +1837,19 @@ function SkinsCtpView({ players, round, tRounds, courses, holeData, ctpData, onS
           const fTot = tot(front9), bTot = tot(back9);
           const fPar = par(front9), bPar = par(back9);
           const totClr = (n, p2) => { if (!n) return K.t3; const d = n - p2; return d < 0 ? "#ef4444" : d > 0 ? "#eab308" : K.t2; };
-          const HalfGrid = ({ holes, label, halfTot, halfPar }) => (
-            <div style={{ marginBottom: holes[0] === 0 ? 0 : 0, paddingBottom: 5, borderBottom: holes[0] === 0 ? `1px solid ${K.bdr}30` : "none", marginBottom: holes[0] === 0 ? 6 : 0 }}>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(10, 1fr)", gap: 1 }}>
-                {holes.map(i => <div key={i} style={{ textAlign: "center", fontSize: 8, color: K.t3 }}>{i + 1}</div>)}
-                <div style={{ textAlign: "center", fontSize: 8, color: K.t3 }}>{label}</div>
-                {holes.map(i => <div key={i} style={{ textAlign: "center", fontSize: 8, color: K.t3, opacity: 0.5 }}>{pars[i] || ""}</div>)}
-                <div style={{ textAlign: "center", fontSize: 8, color: K.t3, opacity: 0.5 }}>{halfPar}</div>
+          const HalfGrid = ({ holes }) => (
+            <div style={{ paddingBottom: 5, borderBottom: holes[0] === 0 ? `1px solid ${K.bdr}25` : "none", marginBottom: holes[0] === 0 ? 5 : 0 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(9, 1fr)", gap: 2 }}>
+                {holes.map(i => <div key={i} style={{ textAlign: "center", fontSize: 9, fontWeight: 600, color: K.t2 }}>{i + 1}</div>)}
+                {holes.map(i => <div key={i} style={{ textAlign: "center", fontSize: 8, color: K.t3, opacity: 0.45 }}>{pars[i] || ""}</div>)}
                 {holes.map(i => <ScoreCell key={i} score={scores[i]} par={pars[i] || 0} isSkin={skinHolesSet.has(i + 1)} />)}
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <span style={{ fontSize: 10, fontWeight: 800, color: totClr(halfTot, halfPar) }}>{halfTot || ""}</span>
-                </div>
               </div>
             </div>
           );
           return (
             <div key={r} style={{ marginBottom: 8 }}>
-              <HalfGrid holes={front9} label="F" halfTot={fTot} halfPar={fPar} />
-              <HalfGrid holes={back9}  label="B" halfTot={bTot} halfPar={bPar} />
+              <HalfGrid holes={front9} />
+              <HalfGrid holes={back9} />
             </div>
           );
         })}
@@ -1882,62 +1877,54 @@ function SkinsCtpView({ players, round, tRounds, courses, holeData, ctpData, onS
     if (activePlayers.length === 0) return (
       <div style={{ background: K.card, borderRadius: 12, border: `1px solid ${K.bdr}`, padding: 20, textAlign: "center", color: K.t3, fontSize: 12 }}>No scores yet this round</div>
     );
+    const cellBdr = `1px solid ${K.bdr}20`;
     const HalfTable = ({ holes }) => (
-      <div style={{ overflowX: "auto", marginBottom: 0, paddingBottom: 8, borderBottom: holes[0] === 0 ? `1px solid ${K.bdr}` : "none", marginBottom: holes[0] === 0 ? 8 : 0 }}>
+      <div style={{ marginBottom: holes[0] === 0 ? 0 : 0, paddingBottom: holes[0] === 0 ? 8 : 0, borderBottom: holes[0] === 0 ? `1px solid ${K.bdr}` : "none" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
           <colgroup>
-            <col style={{ width: "22%" }} />
-            {holes.map((_, i) => <col key={i} style={{ width: `${78 / holes.length}%` }} />)}
-            <col style={{ width: "8%" }} />
+            <col style={{ width: "20%" }} />
+            {holes.map((_, i) => <col key={i} style={{ width: `${80 / holes.length}%` }} />)}
           </colgroup>
           <thead>
-            <tr>
-              <td style={{ fontSize: 9, color: K.t3, padding: "2px 4px" }}></td>
+            <tr style={{ borderBottom: cellBdr }}>
+              <td style={{ padding: "3px 4px" }}></td>
               {holes.map(i => (
-                <td key={i} style={{ textAlign: "center", fontSize: skinByHole[i]?.winner ? 9 : 8, fontWeight: skinByHole[i]?.winner ? 800 : 400, color: skinByHole[i]?.winner ? "#d4a843" : K.t3, padding: "2px 1px" }}>
+                <td key={i} style={{ textAlign: "center", fontSize: skinByHole[i]?.winner ? 10 : 9, fontWeight: skinByHole[i]?.winner ? 800 : 600, color: skinByHole[i]?.winner ? "#d4a843" : K.t1, padding: "3px 1px", borderLeft: cellBdr }}>
                   {i + 1}
                 </td>
               ))}
-              <td style={{ textAlign: "center", fontSize: 9, color: K.t3, padding: "2px 1px" }}>{holes[0] === 0 ? "F" : "B"}</td>
             </tr>
-            <tr>
-              <td style={{ fontSize: 9, color: K.t3, opacity: 0.6, padding: "0 4px 3px" }}>Par</td>
-              {holes.map(i => <td key={i} style={{ textAlign: "center", fontSize: 9, color: K.t3, opacity: 0.6, padding: "0 1px 3px" }}>{pars[i] || ""}</td>)}
-              <td style={{ textAlign: "center", fontSize: 9, color: K.t3, opacity: 0.6, padding: "0 1px 3px" }}>{holes.reduce((s, i) => s + (pars[i] || 0), 0)}</td>
+            <tr style={{ borderBottom: cellBdr }}>
+              <td style={{ fontSize: 8, color: K.t3, opacity: 0.5, padding: "2px 4px" }}>Par</td>
+              {holes.map(i => <td key={i} style={{ textAlign: "center", fontSize: 8, color: K.t3, opacity: 0.45, padding: "2px 1px", borderLeft: cellBdr }}>{pars[i] || ""}</td>)}
             </tr>
           </thead>
           <tbody>
-            {activePlayers.map(p => {
+            {activePlayers.map((p, pi) => {
               const scores = holeData[`${p.id}_${round}`] || {};
-              const halfTot = holes.reduce((s, i) => s + (scores[i] || 0), 0);
-              const halfPar = holes.reduce((s, i) => s + (pars[i] || 0), 0);
               return (
-                <tr key={p.id}>
-                  <td style={{ fontSize: 10, fontWeight: 600, color: K.t1, padding: "2px 4px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                <tr key={p.id} style={{ borderTop: cellBdr, background: pi % 2 === 1 ? `${K.bdr}08` : "transparent" }}>
+                  <td style={{ fontSize: 10, fontWeight: 600, color: K.t1, padding: "3px 4px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                     {p.name.split(" ")[0]}
                   </td>
                   {holes.map(i => {
                     const s = scores[i];
                     const par = pars[i] || 0;
                     const isSkinWinner = skinByHole[i]?.winnerId === p.id;
-                    const isTied = skinByHole[i]?.tied;
                     const d = s ? s - par : null;
                     const isUnder = d !== null && d < 0;
                     const isDouble = d !== null && d <= -2;
                     const circleClr = isSkinWinner ? "#d4a843" : "#8b9ec2";
                     return (
-                      <td key={i} style={{ textAlign: "center", padding: "1px 1px", position: "relative" }}>
-                        <div style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 16, height: 16, position: "relative" }}>
+                      <td key={i} style={{ textAlign: "center", padding: "2px 1px", borderLeft: cellBdr }}>
+                        <div style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 18, height: 18, position: "relative" }}>
                           {s && (isUnder || isSkinWinner) && <div style={{ position: "absolute", inset: 0, borderRadius: "50%", border: `1.5px solid ${circleClr}` }} />}
                           {s && isDouble && <div style={{ position: "absolute", inset: 3, borderRadius: "50%", border: `1px solid ${circleClr}` }} />}
-                          <span style={{ fontSize: 9, fontWeight: 600, color: s ? (isSkinWinner ? "#d4a843" : K.t2) : K.t3, position: "relative", zIndex: 1 }}>{s || "–"}</span>
+                          <span style={{ fontSize: 10, fontWeight: 600, color: s ? (isSkinWinner ? "#d4a843" : K.t2) : K.t3, position: "relative", zIndex: 1 }}>{s || "–"}</span>
                         </div>
                       </td>
                     );
                   })}
-                  <td style={{ textAlign: "center", fontSize: 10, fontWeight: 800, color: halfTot ? (halfTot - halfPar < 0 ? "#22c55e" : halfTot - halfPar > 0 ? "#ef4444" : K.t1) : K.t3, padding: "2px 1px" }}>
-                    {halfTot || ""}
-                  </td>
                 </tr>
               );
             })}
@@ -1945,17 +1932,10 @@ function SkinsCtpView({ players, round, tRounds, courses, holeData, ctpData, onS
         </table>
       </div>
     );
-    const won = roundSkinResults.filter(r => r.winner).length;
-    const tied = roundSkinResults.filter(r => r.tied).length;
     return (
-      <div style={{ background: K.card, borderRadius: 12, border: `1px solid ${K.bdr}`, padding: "12px 10px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-          <span style={{ fontSize: 11, fontWeight: 700, color: K.t1 }}>Round {round} Scorecard</span>
-          <span style={{ fontSize: 10, color: K.t3 }}>💰 {won} skins · {tied} tied</span>
-        </div>
+      <div style={{ background: K.card, borderRadius: 12, border: `1px solid ${K.bdr}`, padding: "10px 10px" }}>
         <HalfTable holes={front9} />
         <HalfTable holes={back9} />
-        <div style={{ fontSize: 9, color: K.t3, marginTop: 4 }}>💰 = skin winner · circle = under par · square = over par</div>
       </div>
     );
   };
