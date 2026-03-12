@@ -1810,61 +1810,51 @@ function SkinsCtpView({ players, round, tRounds, courses, holeData, ctpData, onS
       const skinHolesSet = new Set(allSkinResults.filter(s => s.round === r && s.winnerId === p.id).map(s => s.hole));
       rows.push({ r, rCourse, scores, pars, skinHolesSet });
     }
-    // score cell — leaderboard style with circles/squares + gold skin glow
+    // birdie = thin red circle, eagle = thin blue double-circle, bogey = thin yellow square, dbl = red square
+    // skin = just a larger 💰 above the score, no border ring
     const ScoreCell = ({ score, par, isSkin }) => {
       if (!score) return <div style={{ width: "100%", aspectRatio: "1", display: "flex", alignItems: "center", justifyContent: "center" }}><span style={{ fontSize: 9, color: K.t3 }}>–</span></div>;
       const d = score - par;
-      const clr = d <= -2 ? "#3b82f6" : d === -1 ? "#22c55e" : d === 0 ? K.t2 : d === 1 ? "#eab308" : "#ef4444";
+      const clr = d <= -2 ? "#3b82f6" : d === -1 ? "#ef4444" : d === 0 ? K.t2 : d === 1 ? "#eab308" : "#ef4444";
       const isUnder = d < 0;
       const isDouble = Math.abs(d) >= 2;
       return (
-        <div style={{ width: "100%", aspectRatio: "1", display: "flex", alignItems: "center", justifyContent: "center", position: "relative" }}>
-          {/* skin glow ring */}
-          {isSkin && <div style={{ position: "absolute", inset: -2, borderRadius: isUnder ? "50%" : 3, border: "2px solid #fbbf24", boxShadow: "0 0 6px #fbbf2480", zIndex: 0 }} />}
-          {/* score shape */}
-          <div style={{ position: "relative", width: "80%", aspectRatio: "1", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <div style={{ position: "absolute", inset: 0, borderRadius: isUnder ? "50%" : 3, border: `1.5px solid ${clr}`, background: `${clr}18` }} />
+        <div style={{ width: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", gap: 0, position: "relative" }}>
+          {isSkin && <span style={{ fontSize: 11, lineHeight: 1, marginBottom: 1 }}>💰</span>}
+          <div style={{ position: "relative", width: "85%", aspectRatio: "1", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div style={{ position: "absolute", inset: 0, borderRadius: isUnder ? "50%" : 3, border: `1.5px solid ${clr}` }} />
             {isDouble && <div style={{ position: "absolute", inset: 3, borderRadius: isUnder ? "50%" : 2, border: `1px solid ${clr}` }} />}
             <span style={{ fontSize: 9, fontWeight: 700, color: clr, position: "relative", zIndex: 1 }}>{score}</span>
           </div>
-          {isSkin && <span style={{ position: "absolute", top: -1, right: -1, fontSize: 7, zIndex: 2 }}>💰</span>}
         </div>
       );
     };
     return (
-      <div style={{ padding: "10px 12px 4px", borderTop: `1px solid ${K.bdr}20` }}>
-        {rows.map(({ r, rCourse, scores, pars, skinHolesSet }) => {
+      <div style={{ padding: "8px 10px 6px", borderTop: `1px solid ${K.bdr}20` }}>
+        {rows.map(({ r, scores, pars, skinHolesSet }) => {
           const front9 = Array.from({length: 9}, (_, i) => i);
           const back9  = Array.from({length: 9}, (_, i) => i + 9);
           const tot = (hs) => hs.reduce((s, i) => s + (scores[i] || 0), 0);
           const par = (hs) => hs.reduce((s, i) => s + (pars[i] || 0), 0);
-          const fTot = tot(front9), bTot = tot(back9), gTot = fTot + bTot;
-          const fPar = par(front9), bPar = par(back9), gPar = fPar + bPar;
-          const toRelStr = (n, p2) => { if (!n) return "–"; const d = n - p2; return d === 0 ? "E" : d > 0 ? `+${d}` : `${d}`; };
-          const toRelClr = (n, p2) => { if (!n) return K.t3; const d = n - p2; return d < 0 ? "#22c55e" : d > 0 ? "#ef4444" : K.t1; };
+          const fTot = tot(front9), bTot = tot(back9);
+          const fPar = par(front9), bPar = par(back9);
+          const totClr = (n, p2) => { if (!n) return K.t3; const d = n - p2; return d < 0 ? "#ef4444" : d > 0 ? "#eab308" : K.t2; };
           const HalfGrid = ({ holes, label, halfTot, halfPar }) => (
-            <div style={{ marginBottom: 6 }}>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(10, 1fr)", gap: 1, alignItems: "end" }}>
-                {/* hole numbers */}
-                {holes.map(i => <div key={i} style={{ textAlign: "center", fontSize: 8, color: K.t3, paddingBottom: 1 }}>{i + 1}</div>)}
-                <div style={{ textAlign: "center", fontSize: 8, color: K.t3, paddingBottom: 1 }}>{label}</div>
-                {/* pars */}
-                {holes.map(i => <div key={i} style={{ textAlign: "center", fontSize: 8, color: K.t3, opacity: 0.6 }}>{pars[i] || ""}</div>)}
-                <div style={{ textAlign: "center", fontSize: 8, color: K.t3, opacity: 0.6 }}>{halfPar}</div>
-                {/* scores */}
+            <div style={{ marginBottom: 4 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(10, 1fr)", gap: 1 }}>
+                {holes.map(i => <div key={i} style={{ textAlign: "center", fontSize: 8, color: K.t3 }}>{i + 1}</div>)}
+                <div style={{ textAlign: "center", fontSize: 8, color: K.t3 }}>{label}</div>
+                {holes.map(i => <div key={i} style={{ textAlign: "center", fontSize: 8, color: K.t3, opacity: 0.5 }}>{pars[i] || ""}</div>)}
+                <div style={{ textAlign: "center", fontSize: 8, color: K.t3, opacity: 0.5 }}>{halfPar}</div>
                 {holes.map(i => <ScoreCell key={i} score={scores[i]} par={pars[i] || 0} isSkin={skinHolesSet.has(i + 1)} />)}
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", aspectRatio: "1" }}>
-                  <span style={{ fontSize: 10, fontWeight: 800, color: toRelClr(halfTot, halfPar) }}>{halfTot || ""}</span>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <span style={{ fontSize: 10, fontWeight: 800, color: totClr(halfTot, halfPar) }}>{halfTot || ""}</span>
                 </div>
               </div>
             </div>
           );
           return (
-            <div key={r} style={{ marginBottom: 10 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                <span style={{ fontSize: 10, fontWeight: 700, color: K.acc }}>R{r} · {rCourse.name}</span>
-                <span style={{ fontSize: 10, fontWeight: 800, color: toRelClr(gTot, gPar) }}>{toRelStr(gTot, gPar)} ({gTot || "–"})</span>
-              </div>
+            <div key={r} style={{ marginBottom: 8 }}>
               <HalfGrid holes={front9} label="F" halfTot={fTot} halfPar={fPar} />
               <HalfGrid holes={back9}  label="B" halfTot={bTot} halfPar={bPar} />
             </div>
@@ -1906,8 +1896,10 @@ function SkinsCtpView({ players, round, tRounds, courses, holeData, ctpData, onS
             <tr>
               <td style={{ fontSize: 9, color: K.t3, padding: "2px 4px" }}></td>
               {holes.map(i => (
-                <td key={i} style={{ textAlign: "center", fontSize: 9, color: skinByHole[i]?.winner ? "#fbbf24" : K.t3, fontWeight: skinByHole[i]?.winner ? 800 : 400, padding: "2px 1px" }}>
-                  {i + 1}{skinByHole[i]?.winner ? "💰" : ""}
+                <td key={i} style={{ textAlign: "center", fontSize: 9, padding: "0 1px 1px", lineHeight: 1 }}>
+                  {skinByHole[i]?.winner
+                    ? <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 0 }}><span style={{ fontSize: 10 }}>💰</span><span style={{ fontSize: 8, color: "#fbbf24", fontWeight: 800 }}>{i + 1}</span></div>
+                    : <span style={{ color: K.t3 }}>{i + 1}</span>}
                 </td>
               ))}
               <td style={{ textAlign: "center", fontSize: 9, color: K.t3, padding: "2px 1px" }}>{holes[0] === 0 ? "F" : "B"}</td>
@@ -1934,18 +1926,20 @@ function SkinsCtpView({ players, round, tRounds, courses, holeData, ctpData, onS
                     const isSkinWinner = skinByHole[i]?.winnerId === p.id;
                     const isTied = skinByHole[i]?.tied;
                     const d = s ? s - par : null;
-                    const clr = d === null ? K.t3 : d <= -2 ? "#3b82f6" : d === -1 ? "#22c55e" : d === 0 ? K.t2 : d === 1 ? "#eab308" : "#ef4444";
+                    const clr = d === null ? K.t3 : d <= -2 ? "#3b82f6" : d === -1 ? "#ef4444" : d === 0 ? K.t2 : d === 1 ? "#eab308" : "#ef4444";
                     const isUnder = d !== null && d < 0;
                     const isDouble = d !== null && Math.abs(d) >= 2;
                     return (
-                      <td key={i} style={{ textAlign: "center", padding: "2px 1px", position: "relative" }}>
-                        <div style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 18, height: 18, position: "relative" }}>
-                          {isSkinWinner && <div style={{ position: "absolute", inset: -3, borderRadius: isUnder ? "50%" : 4, border: "2px solid #fbbf24", boxShadow: "0 0 5px #fbbf2460" }} />}
-                          {s && <div style={{ position: "absolute", inset: 0, borderRadius: isUnder ? "50%" : 3, border: `1.5px solid ${clr}`, background: `${clr}15` }} />}
-                          {s && isDouble && <div style={{ position: "absolute", inset: 3, borderRadius: isUnder ? "50%" : 2, border: `1px solid ${clr}` }} />}
-                          <span style={{ fontSize: 9, fontWeight: isSkinWinner ? 800 : 600, color: s ? clr : K.t3, position: "relative", zIndex: 1 }}>{s || "–"}</span>
+                      <td key={i} style={{ textAlign: "center", padding: "1px 1px", position: "relative" }}>
+                        <div style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", lineHeight: 1 }}>
+                          {isSkinWinner && <span style={{ fontSize: 9, lineHeight: 1, marginBottom: 1 }}>💰</span>}
+                          <div style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 16, height: 16, position: "relative" }}>
+                            {s && <div style={{ position: "absolute", inset: 0, borderRadius: isUnder ? "50%" : 3, border: `1.5px solid ${clr}` }} />}
+                            {s && isDouble && <div style={{ position: "absolute", inset: 3, borderRadius: isUnder ? "50%" : 2, border: `1px solid ${clr}` }} />}
+                            <span style={{ fontSize: 9, fontWeight: 600, color: s ? clr : K.t3, position: "relative", zIndex: 1 }}>{s || "–"}</span>
+                          </div>
                         </div>
-                        {isTied && s && <div style={{ position: "absolute", bottom: 0, left: "50%", transform: "translateX(-50%)", width: 3, height: 3, borderRadius: "50%", background: "#fbbf2460" }} />}
+                        {isTied && s && <div style={{ position: "absolute", bottom: 0, left: "50%", transform: "translateX(-50%)", width: 3, height: 3, borderRadius: "50%", background: `${K.t3}40` }} />}
                       </td>
                     );
                   })}
