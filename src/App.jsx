@@ -1810,19 +1810,18 @@ function SkinsCtpView({ players, round, tRounds, courses, holeData, ctpData, onS
       const skinHolesSet = new Set(allSkinResults.filter(s => s.round === r && s.winnerId === p.id).map(s => s.hole));
       rows.push({ r, rCourse, scores, pars, skinHolesSet });
     }
-    // Gray circle/square for all scores; gold only if skin winner
+    // Circles for under par only; gold number + single circle for skin winners; plain number otherwise
     const ScoreCell = ({ score, par, isSkin }) => {
       if (!score) return <div style={{ width: "100%", aspectRatio: "1", display: "flex", alignItems: "center", justifyContent: "center" }}><span style={{ fontSize: 9, color: K.t3 }}>–</span></div>;
       const d = score - par;
-      const clr = isSkin ? "#d4a843" : "#8b9ec2";
       const isUnder = d < 0;
-      const isDouble = Math.abs(d) >= 2;
+      const isDouble = d <= -2;
+      const circleClr = isSkin ? "#d4a843" : "#8b9ec2";
       return (
-        <div style={{ width: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", gap: 0 }}>
-          {isSkin && <span style={{ fontSize: 11, lineHeight: 1, marginBottom: 1 }}>💰</span>}
+        <div style={{ width: "100%", aspectRatio: "1", display: "flex", alignItems: "center", justifyContent: "center" }}>
           <div style={{ position: "relative", width: "85%", aspectRatio: "1", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            {d !== 0 && <div style={{ position: "absolute", inset: 0, borderRadius: isUnder ? "50%" : 3, border: `1.5px solid ${clr}` }} />}
-            {d !== 0 && isDouble && <div style={{ position: "absolute", inset: 3, borderRadius: isUnder ? "50%" : 2, border: `1px solid ${clr}` }} />}
+            {(isUnder || isSkin) && <div style={{ position: "absolute", inset: 0, borderRadius: "50%", border: `1.5px solid ${circleClr}` }} />}
+            {isDouble && <div style={{ position: "absolute", inset: 3, borderRadius: "50%", border: `1px solid ${circleClr}` }} />}
             <span style={{ fontSize: 9, fontWeight: 700, color: isSkin ? "#d4a843" : K.t2, position: "relative", zIndex: 1 }}>{score}</span>
           </div>
         </div>
@@ -1839,7 +1838,7 @@ function SkinsCtpView({ players, round, tRounds, courses, holeData, ctpData, onS
           const fPar = par(front9), bPar = par(back9);
           const totClr = (n, p2) => { if (!n) return K.t3; const d = n - p2; return d < 0 ? "#ef4444" : d > 0 ? "#eab308" : K.t2; };
           const HalfGrid = ({ holes, label, halfTot, halfPar }) => (
-            <div style={{ marginBottom: 4 }}>
+            <div style={{ marginBottom: holes[0] === 0 ? 0 : 0, paddingBottom: 5, borderBottom: holes[0] === 0 ? `1px solid ${K.bdr}30` : "none", marginBottom: holes[0] === 0 ? 6 : 0 }}>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(10, 1fr)", gap: 1 }}>
                 {holes.map(i => <div key={i} style={{ textAlign: "center", fontSize: 8, color: K.t3 }}>{i + 1}</div>)}
                 <div style={{ textAlign: "center", fontSize: 8, color: K.t3 }}>{label}</div>
@@ -1884,7 +1883,7 @@ function SkinsCtpView({ players, round, tRounds, courses, holeData, ctpData, onS
       <div style={{ background: K.card, borderRadius: 12, border: `1px solid ${K.bdr}`, padding: 20, textAlign: "center", color: K.t3, fontSize: 12 }}>No scores yet this round</div>
     );
     const HalfTable = ({ holes }) => (
-      <div style={{ overflowX: "auto", marginBottom: 8 }}>
+      <div style={{ overflowX: "auto", marginBottom: 0, paddingBottom: 8, borderBottom: holes[0] === 0 ? `1px solid ${K.bdr}` : "none", marginBottom: holes[0] === 0 ? 8 : 0 }}>
         <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
           <colgroup>
             <col style={{ width: "22%" }} />
@@ -1895,10 +1894,8 @@ function SkinsCtpView({ players, round, tRounds, courses, holeData, ctpData, onS
             <tr>
               <td style={{ fontSize: 9, color: K.t3, padding: "2px 4px" }}></td>
               {holes.map(i => (
-                <td key={i} style={{ textAlign: "center", fontSize: 9, padding: "0 1px 1px", lineHeight: 1 }}>
-                  {skinByHole[i]?.winner
-                    ? <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 0 }}><span style={{ fontSize: 10 }}>💰</span><span style={{ fontSize: 8, color: "#fbbf24", fontWeight: 800 }}>{i + 1}</span></div>
-                    : <span style={{ color: K.t3 }}>{i + 1}</span>}
+                <td key={i} style={{ textAlign: "center", fontSize: skinByHole[i]?.winner ? 9 : 8, fontWeight: skinByHole[i]?.winner ? 800 : 400, color: skinByHole[i]?.winner ? "#d4a843" : K.t3, padding: "2px 1px" }}>
+                  {i + 1}
                 </td>
               ))}
               <td style={{ textAlign: "center", fontSize: 9, color: K.t3, padding: "2px 1px" }}>{holes[0] === 0 ? "F" : "B"}</td>
@@ -1925,20 +1922,16 @@ function SkinsCtpView({ players, round, tRounds, courses, holeData, ctpData, onS
                     const isSkinWinner = skinByHole[i]?.winnerId === p.id;
                     const isTied = skinByHole[i]?.tied;
                     const d = s ? s - par : null;
-                    const clr = isSkinWinner ? "#d4a843" : "#8b9ec2";
                     const isUnder = d !== null && d < 0;
-                    const isDouble = d !== null && Math.abs(d) >= 2;
+                    const isDouble = d !== null && d <= -2;
+                    const circleClr = isSkinWinner ? "#d4a843" : "#8b9ec2";
                     return (
                       <td key={i} style={{ textAlign: "center", padding: "1px 1px", position: "relative" }}>
-                        <div style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", lineHeight: 1 }}>
-                          {isSkinWinner && <span style={{ fontSize: 9, lineHeight: 1, marginBottom: 1 }}>💰</span>}
-                          <div style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 16, height: 16, position: "relative" }}>
-                            {s && d !== 0 && <div style={{ position: "absolute", inset: 0, borderRadius: isUnder ? "50%" : 3, border: `1.5px solid ${clr}` }} />}
-                            {s && d !== 0 && isDouble && <div style={{ position: "absolute", inset: 3, borderRadius: isUnder ? "50%" : 2, border: `1px solid ${clr}` }} />}
-                            <span style={{ fontSize: 9, fontWeight: 600, color: s ? (isSkinWinner ? "#d4a843" : K.t2) : K.t3, position: "relative", zIndex: 1 }}>{s || "–"}</span>
-                          </div>
+                        <div style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 16, height: 16, position: "relative" }}>
+                          {s && (isUnder || isSkinWinner) && <div style={{ position: "absolute", inset: 0, borderRadius: "50%", border: `1.5px solid ${circleClr}` }} />}
+                          {s && isDouble && <div style={{ position: "absolute", inset: 3, borderRadius: "50%", border: `1px solid ${circleClr}` }} />}
+                          <span style={{ fontSize: 9, fontWeight: 600, color: s ? (isSkinWinner ? "#d4a843" : K.t2) : K.t3, position: "relative", zIndex: 1 }}>{s || "–"}</span>
                         </div>
-                        {isTied && s && <div style={{ position: "absolute", bottom: 0, left: "50%", transform: "translateX(-50%)", width: 3, height: 3, borderRadius: "50%", background: `${K.t3}40` }} />}
                       </td>
                     );
                   })}
