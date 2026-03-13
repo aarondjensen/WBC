@@ -4643,7 +4643,7 @@ export default function WBCApp() {
 
   if (!user) {
     return (
-      <div style={{ height: "100dvh", background: `radial-gradient(ellipse at 20% 50%, #0d1f3c 0%, ${K.bg} 70%)`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", paddingTop: "max(20px, env(safe-area-inset-top, 0px))", paddingBottom: "max(20px, env(safe-area-inset-bottom, 0px))", paddingLeft: 20, paddingRight: 20, boxSizing: "border-box" }}>
+      <div style={{ position: "fixed", inset: 0, background: `radial-gradient(ellipse at 20% 50%, #0d1f3c 0%, ${K.bg} 70%)`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", paddingTop: "max(20px, env(safe-area-inset-top, 0px))", paddingBottom: "max(20px, env(safe-area-inset-bottom, 0px))", paddingLeft: 20, paddingRight: 20, boxSizing: "border-box" }}>
         <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
       <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
         <style>{`
@@ -4702,7 +4702,7 @@ export default function WBCApp() {
               {activePlayers.map(p => {
                 const isDirector = p.id === "aaron_j" || p.id === "scott_r";
                 return (
-                  <button key={p.id} onClick={() => setLoginPrompt({ id: p.id, name: p.name, isDirector })}
+                  <button key={p.id} onClick={() => { const isDir = p.id === "aaron_j" || p.id === "scott_r"; setUser({ id: p.id, name: p.name, isDirector: isDir }); }}}
                     style={{ background: K.card, border: `1px solid ${K.bdr}`, borderRadius: 10, padding: "12px 6px", cursor: "pointer", color: K.t1, fontSize: 13, fontWeight: 600, textAlign: "center", transition: "all 0.15s" }}
                     onMouseEnter={e => { e.currentTarget.style.borderColor = K.acc; e.currentTarget.style.background = K.hover; }}
                     onMouseLeave={e => { e.currentTarget.style.borderColor = K.bdr; e.currentTarget.style.background = K.card; }}>
@@ -4728,7 +4728,7 @@ export default function WBCApp() {
   ];
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: K.bg, display: "flex", justifyContent: "center", overflow: "hidden", paddingTop: "env(safe-area-inset-top, 0px)", boxSizing: "border-box" }}>
+    <div style={{ position: "fixed", inset: 0, background: K.bg, display: "flex", justifyContent: "center", overflow: "hidden", paddingTop: "env(safe-area-inset-top, 0px)", paddingBottom: "env(safe-area-inset-bottom, 0px)", boxSizing: "border-box" }}>
     <div style={{ flex: 1, display: "flex", flexDirection: "column", background: K.bg, fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", color: K.t1, width: "100%", maxWidth: 480, position: "relative", boxShadow: "0 0 80px rgba(0,0,0,0.8)", flexShrink: 1, minHeight: 0, overflow: "hidden" }}>
       <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
       <style>{`:root { --sab: env(safe-area-inset-bottom, 0px); }`}</style>
@@ -4812,7 +4812,7 @@ export default function WBCApp() {
         )}</div>}
       </div>
 
-      <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 480, display: "flex", background: K.bg, borderTop: `1px solid ${K.bdr}`, zIndex: 100, paddingBottom: "env(safe-area-inset-bottom, 0px)", overflow: "visible", alignItems: "flex-end" }}>
+      <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 480, display: "flex", background: "rgba(14,24,41,0.97)", borderTop: `1px solid ${K.bdr}`, zIndex: 100, paddingBottom: 0, overflow: "visible", alignItems: "flex-end" }}>
         {navItems.map(item => {
           const active = view === item.key;
           const clr = active ? K.acc : K.t3;
