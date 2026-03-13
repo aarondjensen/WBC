@@ -4845,7 +4845,19 @@ export default function WBCApp() {
               background: "transparent", border: "none", cursor: "pointer", color: clr, position: "relative",
               marginTop: 0,
             }}>
-
+              {isTrophy && (
+                <div style={{
+                  position: "absolute", top: "-22px", left: "50%", transform: "translateX(-50%)",
+                  width: 72, height: 24,
+                  background: "rgba(14,24,41,0.97)",
+                  borderRadius: "36px 36px 0 0",
+                  borderTop: `1px solid ${K.bdr}`,
+                  borderLeft: `1px solid ${K.bdr}`,
+                  borderRight: `1px solid ${K.bdr}`,
+                  zIndex: 1,
+                  pointerEvents: "none",
+                }} />
+              )}
               {navIcon()}
               {item.key === "admin" && adminActionNeeded && user.isDirector && (
                 <span style={{
