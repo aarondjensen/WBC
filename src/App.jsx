@@ -4841,14 +4841,14 @@ export default function WBCApp() {
               }
               setView(item.key);
             }} style={{
-              flex: 1, padding: isTrophy ? "0 4px 14px" : "10px 4px 14px", display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
+              flex: 1, padding: isTrophy ? "0 4px 6px" : "10px 4px 6px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2,
               background: "transparent", border: "none", cursor: "pointer", color: clr, position: "relative",
-              marginTop: isTrophy ? "-22px" : 0,
+              marginTop: isTrophy ? "-12px" : 0,
             }}>
               {isTrophy && (
                 <div style={{
                   position: "absolute", top: 0, left: "50%", transform: "translateX(-50%)",
-                  width: 64, height: 28,
+                  width: 64, height: 18,
                   background: "rgba(14,24,41,0.97)",
                   borderRadius: "32px 32px 0 0",
                   borderTop: `1px solid ${K.bdr}`,
