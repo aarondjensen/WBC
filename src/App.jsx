@@ -4728,7 +4728,7 @@ export default function WBCApp() {
   ];
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: K.bg, display: "flex", justifyContent: "center", overflow: "hidden", paddingTop: "env(safe-area-inset-top, 0px)", paddingBottom: "env(safe-area-inset-bottom, 0px)", boxSizing: "border-box" }}>
+    <div style={{ position: "fixed", inset: 0, background: K.bg, display: "flex", justifyContent: "center", overflow: "hidden", paddingTop: "env(safe-area-inset-top, 0px)", boxSizing: "border-box" }}>
     <div style={{ flex: 1, display: "flex", flexDirection: "column", background: K.bg, fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", color: K.t1, width: "100%", maxWidth: 480, position: "relative", boxShadow: "0 0 80px rgba(0,0,0,0.8)", flexShrink: 1, minHeight: 0, overflow: "hidden" }}>
       <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
       <style>{`:root { --sab: env(safe-area-inset-bottom, 0px); }`}</style>
@@ -4780,7 +4780,7 @@ export default function WBCApp() {
       </div>
       )}
 
-      <div style={{ padding: "0", flex: 1, overflowY: (view === "leaderboard" || view === "admin") ? "hidden" : "auto", overflowX: "hidden", display: "flex", flexDirection: "column", minHeight: 0 }}>
+      <div style={{ padding: "0", paddingBottom: "calc(72px + env(safe-area-inset-bottom, 0px))", flex: 1, overflowY: (view === "leaderboard" || view === "admin") ? "hidden" : "auto", overflowX: "hidden", display: "flex", flexDirection: "column", minHeight: 0 }}>
         {view === "leaderboard" && <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} teeData={teeData} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} />}
         <div style={{ display: view === "scoring" ? "block" : "none", padding: "14px 20px", paddingBottom: "72px", flex: view === "scoring" ? 1 : undefined, overflowY: "auto" }}>
           <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeData={teeData} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onNavigate={setView} onGoToAdminCourses={() => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); }} markPlayerWD={markPlayerWD} />
@@ -4812,7 +4812,7 @@ export default function WBCApp() {
         )}</div>}
       </div>
 
-      <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 480, display: "flex", background: "rgba(14,24,41,0.97)", borderTop: `1px solid ${K.bdr}`, zIndex: 100, paddingBottom: 0, overflow: "visible", alignItems: "flex-end" }}>
+      <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 480, display: "flex", background: "rgba(14,24,41,0.97)", borderTop: `1px solid ${K.bdr}`, zIndex: 100, paddingBottom: "env(safe-area-inset-bottom, 0px)", overflow: "visible", alignItems: "flex-end" }}>
         {navItems.map(item => {
           const active = view === item.key;
           const clr = active ? K.acc : K.t3;
