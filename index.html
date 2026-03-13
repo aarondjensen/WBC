@@ -15,6 +15,18 @@
   .wbc-header {
     padding-top: max(10px, calc(env(safe-area-inset-top, 0px) + 10px)) !important;
   }
+  
+  /* Forces the body to fill the safe area with the app background color
+     so dead space shows the right color while JS loads */
+  body {
+    background-color: #080f1e;
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+  
+  #root {
+    padding-top: 0;
+    margin-top: calc(-1 * env(safe-area-inset-top, 0px));
+  }
 </style>
   </head>
   <body>
