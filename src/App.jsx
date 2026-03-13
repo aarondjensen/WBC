@@ -466,10 +466,8 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
   useEffect(() => {
     const calc = () => {
       if (!containerRef.current || !headerRef.current || lb.length === 0) return;
-      // Use the container's own bounding rect — it already lives inside the padded content area
       const containerRect = containerRef.current.getBoundingClientRect();
       const headerH = headerRef.current.offsetHeight;
-      // Available = space from bottom of grid header to bottom of container
       const available = containerRect.height - headerH;
       const perRow = Math.floor(available / lb.length);
       const clampedPerRow = Math.min(perRow, 36);
@@ -4780,7 +4778,7 @@ export default function WBCApp() {
       </div>
       )}
 
-      <div style={{ padding: "0", paddingBottom: "calc(72px + env(safe-area-inset-bottom, 0px))", flex: 1, overflowY: (view === "leaderboard" || view === "admin") ? "hidden" : "auto", overflowX: "hidden", display: "flex", flexDirection: "column", minHeight: 0 }}>
+      <div style={{ padding: "0", flex: 1, overflowY: (view === "leaderboard" || view === "admin") ? "hidden" : "auto", overflowX: "hidden", display: "flex", flexDirection: "column", minHeight: 0 }}>
         {view === "leaderboard" && <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} teeData={teeData} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} />}
         <div style={{ display: view === "scoring" ? "block" : "none", padding: "14px 20px", paddingBottom: "72px", flex: view === "scoring" ? 1 : undefined, overflowY: "auto" }}>
           <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeData={teeData} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onNavigate={setView} onGoToAdminCourses={() => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); }} markPlayerWD={markPlayerWD} />
