@@ -4643,7 +4643,7 @@ export default function WBCApp() {
 
   if (!user) {
     return (
-      <div style={{ position: "fixed", inset: 0, background: `radial-gradient(ellipse at 20% 50%, #0d1f3c 0%, ${K.bg} 70%)`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", paddingTop: "max(20px, env(safe-area-inset-top, 0px))", paddingBottom: "max(20px, env(safe-area-inset-bottom, 0px))", paddingLeft: 20, paddingRight: 20, boxSizing: "border-box" }}>
+      <div style={{ height: "100dvh", background: `radial-gradient(ellipse at 20% 50%, #0d1f3c 0%, ${K.bg} 70%)`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", paddingTop: "max(20px, env(safe-area-inset-top, 0px))", paddingBottom: "max(20px, env(safe-area-inset-bottom, 0px))", paddingLeft: 20, paddingRight: 20, boxSizing: "border-box" }}>
         <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
       <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
         <style>{`
