@@ -4780,7 +4780,7 @@ export default function WBCApp() {
       </div>
       )}
 
-      <div style={{ padding: (view === "leaderboard" || view === "admin") ? "14px 20px 0 20px" : "14px 20px", paddingBottom: "calc(60px + env(safe-area-inset-bottom, 0px))", flex: 1, overflowY: (view === "leaderboard" || view === "admin") ? "hidden" : "auto", overflowX: "hidden", display: (view === "leaderboard" || view === "admin") ? "flex" : "block", flexDirection: "column", minHeight: 0 }}>
+      <div style={{ padding: (view === "leaderboard" || view === "admin") ? "14px 20px 0 20px" : "14px 20px", paddingBottom: "calc(70px + env(safe-area-inset-bottom, 0px))", flex: 1, overflowY: (view === "leaderboard" || view === "admin") ? "hidden" : "auto", overflowX: "hidden", display: (view === "leaderboard" || view === "admin") ? "flex" : "block", flexDirection: "column", minHeight: 0 }}>
         {view === "leaderboard" && <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} teeData={teeData} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} />}
         <div style={{ display: view === "scoring" ? "block" : "none", paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
           <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeData={teeData} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onNavigate={setView} onGoToAdminCourses={() => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); }} markPlayerWD={markPlayerWD} />
@@ -4818,7 +4818,7 @@ export default function WBCApp() {
           const clr = active ? K.acc : K.t3;
           const iconSz = 18;
           const navIcon = () => {
-            if (item.icon === "trophy") return <img src="/wbc-trophy.png" alt="Board" style={{ width: 54, height: 54, objectFit: "contain", filter: active ? "none" : "brightness(0) invert(0.5)", position: "relative", top: "-18px" }} />;
+            if (item.icon === "trophy") return <img src="/wbc-trophy.png" alt="Board" style={{ width: 54, height: 54, objectFit: "contain", filter: active ? "none" : "brightness(0) invert(0.5)", position: "relative", top: "-18px", zIndex: 2 }} />;
             if (item.icon === "pairings") return <svg width={iconSz} height={iconSz} viewBox="0 0 24 24" fill="none" stroke={clr} strokeWidth="2" strokeLinecap="round"><circle cx="9" cy="7" r="3"/><circle cx="17" cy="7" r="3"/><path d="M3 21v-2a4 4 0 014-4h4a4 4 0 014 4v2"/><path d="M21 21v-2a3 3 0 00-2-2.83"/></svg>;
             if (item.icon === "score") return <svg width={iconSz} height={iconSz} viewBox="0 0 24 24" fill="none" stroke={clr} strokeWidth="2" strokeLinecap="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4z"/></svg>;
             if (item.icon === "betting") return <svg width={iconSz} height={iconSz} viewBox="0 0 24 24" fill="none" stroke={clr} strokeWidth="2" strokeLinecap="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>;
@@ -4847,10 +4847,10 @@ export default function WBCApp() {
             }}>
               {isTrophy && (
                 <div style={{
-                  position: "absolute", top: "-22px", left: "50%", transform: "translateX(-50%)",
-                  width: 72, height: 24,
+                  position: "absolute", top: "-30px", left: "50%", transform: "translateX(-50%)",
+                  width: 80, height: 32,
                   background: "rgba(14,24,41,0.97)",
-                  borderRadius: "36px 36px 0 0",
+                  borderRadius: "40px 40px 0 0",
                   borderTop: `1px solid ${K.bdr}`,
                   borderLeft: `1px solid ${K.bdr}`,
                   borderRight: `1px solid ${K.bdr}`,
