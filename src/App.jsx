@@ -4023,13 +4023,11 @@ export default function WBCApp() {
   useEffect(() => {
     // Set tab title
     document.title = "WBC 2026";
-    // Set favicon to WBC trophy
-    const FAVICON = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAABCGlDQ1BJQ0MgUHJvZmlsZQAAeJxjYGA8wQAELAYMDLl5JUVB7k4KEZFRCuwPGBiBEAwSk4sLGHADoKpv1yBqL+viUYcLcKakFicD6Q9ArFIEtBxopAiQLZIOYWuA2EkQtg2IXV5SUAJkB4DYRSFBzkB2CpCtkY7ETkJiJxcUgdT3ANk2uTmlyQh3M/Ck5oUGA2kOIJZhKGYIYnBncAL5H6IkfxEDg8VXBgbmCQixpJkMDNtbGRgkbiHEVBYwMPC3MDBsO48QQ4RJQWJRIliIBYiZ0tIYGD4tZ2DgjWRgEL7AwMAVDQsIHG5TALvNnSEfCNMZchhSgSKeDHkMyQx6QJYRgwGDIYMZAKbWPz9HbOBQAAAAmUlEQVR4nO3QQRHAIADAMEAK5hGEoCEjjzUKep37nm/82NIBWgN0gNYAHaA1QAdoDdABWgN0gNYAHaA1QAdoDdABWgN0gNYAHaA1QAdoDdABWgN0gNYAHaA1QAdoDdABWgN0gNYAHaA1QAdoDdABWgN0gNYAHaA1QAdoDdABWgN0gNYAHaA1QAdoDdABWgN0gNYAHaA1QAdoD7oAAxtuXdMZAAAAAElFTkSuQmCC";
     const link = document.querySelector("link[rel*='icon']") || document.createElement("link");
-    link.type = "image/png"; link.rel = "shortcut icon"; link.href = FAVICON;
+    link.type = "image/png"; link.rel = "shortcut icon"; link.href = "/wbc-trophy.png";
     document.head.appendChild(link);
     const apple = document.querySelector("link[rel='apple-touch-icon']") || document.createElement("link");
-    apple.rel = "apple-touch-icon"; apple.href = FAVICON;
+    apple.rel = "apple-touch-icon"; apple.href = "/wbc-icon-192.png";
     document.head.appendChild(apple);
   }, []);
 
