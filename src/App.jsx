@@ -611,7 +611,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
   };
 
   return (
-    <div style={{ position: "relative", height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
+    <div style={{ position: "relative", flex: 1, display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden" }}>
       {/* Giant trophy silhouette behind entire leaderboard — fixed so it never shifts */}
       <img src={WBC_TROPHY_SILHOUETTE} alt="" style={{
         position: "fixed", top: "50%", left: "50%",
@@ -4780,7 +4780,7 @@ export default function WBCApp() {
       </div>
       )}
 
-      <div style={{ padding: (view === "leaderboard" || view === "admin") ? "14px 20px 0 20px" : "14px 20px", paddingBottom: "72px", flex: 1, overflowY: (view === "leaderboard" || view === "admin") ? "hidden" : "auto", overflowX: "hidden", display: (view === "leaderboard" || view === "admin") ? "flex" : "block", flexDirection: "column", minHeight: 0 }}>
+      <div style={{ padding: view === "leaderboard" ? "14px 20px 0 20px" : view === "admin" ? "14px 20px 0 20px" : "14px 20px", paddingBottom: view === "leaderboard" ? "72px" : "calc(72px + env(safe-area-inset-bottom, 0px))", flex: 1, overflowY: (view === "leaderboard" || view === "admin") ? "hidden" : "auto", overflowX: "hidden", display: (view === "leaderboard" || view === "admin") ? "flex" : "block", flexDirection: "column", minHeight: 0, boxSizing: "border-box" }}>
         {view === "leaderboard" && <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} teeData={teeData} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} />}
         <div style={{ display: view === "scoring" ? "block" : "none", paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
           <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeData={teeData} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onNavigate={setView} onGoToAdminCourses={() => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); }} markPlayerWD={markPlayerWD} />
