@@ -843,6 +843,8 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
 
   // Auto-assign group from pairings if available and not manually overridden
   useEffect(() => {
+    // Always reset editing state when round changes
+    setEditingCompleted(false);
     if (myPresetGroup && !manualOverride) {
       // Update group if pairings were set/changed (even if group already exists)
       const currentIds = (group || []).slice().sort().join(",");
@@ -873,9 +875,10 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
       }
     }
     // All 18 complete — land on hole 18, manual so editing mode shows
+    const hasAnyScores = gPlayers.some(p => Object.values(holeData[`${p.id}_${round}`] || {}).some(s => s > 0));
     setCurrentHole(17);
     setNavSourceSynced("manual");
-    setEditingCompleted(true);
+    if (hasAnyScores) setEditingCompleted(true);
   }, [group]);
 
   // Note: round changes from other tabs should NOT reset scoring state
@@ -2052,15 +2055,16 @@ function GroupsView({ players, round, tRounds, courses, pairingsData, teeTimesDa
                 const teeClr = getTeeColor(p);
                 const isMe = pid === user.id;
                 return (
-                  <div key={pid} style={{ padding: "5px 12px", display: "grid", gridTemplateColumns: "5fr 2fr 3fr", alignItems: "center", borderBottom: pi < grp.length - 1 ? `1px solid ${K.bdr}10` : "none", background: isMe ? "#8b9ec215" : "transparent" }}>
+                  <div key={pid} style={{ padding: "5px 12px", display: "grid", gridTemplateColumns: "5fr 1.6fr 2.4fr 2fr", alignItems: "center", borderBottom: pi < grp.length - 1 ? `1px solid ${K.bdr}10` : "none", background: isMe ? "#8b9ec215" : "transparent" }}>
                     <span style={{ fontWeight: 600, fontSize: 13, color: isMe ? "#d4a843" : K.t1 }}>{p.name}</span>
-                    <span style={{ display: "inline-flex", alignItems: "center", gap: 2, fontSize: 9, fontWeight: 600, color: isLightTee(teeClr) ? K.t3 : teeClr, justifyContent: "center" }}>
+                    <span style={{ fontSize: 10, fontWeight: 600, color: K.t2, textAlign: "center" }}>{p.handicap_index}</span>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 10, fontWeight: 600, color: isDarkTee(teeClr) ? "#9ca3af" : isLightTee(teeClr) ? K.t3 : teeClr }}>
                       {teeName && <>
-                        <TeeColorSwatch color={teeClr} name={teeName} size={6} />
+                        <TeeColorSwatch color={teeClr} name={teeName} size={7} />
                         {teeName}
                       </>}
                     </span>
-                    <span style={{ color: K.t2, fontSize: 9, textAlign: "right" }}>{course ? `HI ${p.handicap_index} · CH ${ch}` : `HI ${p.handicap_index}`}</span>
+                    <span style={{ color: K.t2, fontSize: 10, fontWeight: 500, textAlign: "right" }}>{course ? `CH ${ch}` : "–"}</span>
                   </div>
                 );
               })}
