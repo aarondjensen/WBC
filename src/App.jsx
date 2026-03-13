@@ -4841,22 +4841,11 @@ export default function WBCApp() {
               }
               setView(item.key);
             }} style={{
-              flex: 1, padding: isTrophy ? "0 4px 14px" : "10px 4px 14px", display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
+              flex: 1, padding: "10px 4px 14px", display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
               background: "transparent", border: "none", cursor: "pointer", color: clr, position: "relative",
-              marginTop: isTrophy ? "-36px" : 0,
+              marginTop: 0,
             }}>
-              {isTrophy && (
-                <div style={{
-                  position: "absolute", top: 0, left: "50%", transform: "translateX(-50%)",
-                  width: 76, height: 38,
-                  background: "rgba(14,24,41,0.97)",
-                  borderRadius: "38px 38px 0 0",
-                  borderTop: `1px solid ${K.bdr}`,
-                  borderLeft: `1px solid ${K.bdr}`,
-                  borderRight: `1px solid ${K.bdr}`,
-                  zIndex: -1,
-                }} />
-              )}
+
               {navIcon()}
               {item.key === "admin" && adminActionNeeded && user.isDirector && (
                 <span style={{
