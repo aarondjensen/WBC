@@ -4818,13 +4818,14 @@ export default function WBCApp() {
           const clr = active ? K.acc : K.t3;
           const iconSz = 18;
           const navIcon = () => {
-            if (item.icon === "trophy") return <img src="/wbc-trophy.png" alt="Board" style={{ width: 36, height: 36, objectFit: "contain", filter: active ? "none" : "brightness(0) invert(0.5)" }} />;
+            if (item.icon === "trophy") return <img src="/wbc-trophy.png" alt="Board" style={{ width: 38, height: 38, objectFit: "contain", filter: active ? "none" : "brightness(0) invert(0.5)" }} />;
             if (item.icon === "pairings") return <svg width={iconSz} height={iconSz} viewBox="0 0 24 24" fill="none" stroke={clr} strokeWidth="2" strokeLinecap="round"><circle cx="9" cy="7" r="3"/><circle cx="17" cy="7" r="3"/><path d="M3 21v-2a4 4 0 014-4h4a4 4 0 014 4v2"/><path d="M21 21v-2a3 3 0 00-2-2.83"/></svg>;
             if (item.icon === "score") return <svg width={iconSz} height={iconSz} viewBox="0 0 24 24" fill="none" stroke={clr} strokeWidth="2" strokeLinecap="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4z"/></svg>;
             if (item.icon === "betting") return <svg width={iconSz} height={iconSz} viewBox="0 0 24 24" fill="none" stroke={clr} strokeWidth="2" strokeLinecap="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>;
             if (item.icon === "admin") return <svg width={iconSz} height={iconSz} viewBox="0 0 24 24" fill="none" stroke={clr} strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>;
             return null;
           };
+          const isTrophy = item.key === "leaderboard";
           return (
             <button key={item.key} onClick={() => {
               if (item.key === "scoring") {
@@ -4840,9 +4841,22 @@ export default function WBCApp() {
               }
               setView(item.key);
             }} style={{
-              flex: 1, padding: "10px 4px 14px", display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
+              flex: 1, padding: isTrophy ? "0 4px 14px" : "10px 4px 14px", display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
               background: "transparent", border: "none", cursor: "pointer", color: clr, position: "relative",
+              marginTop: isTrophy ? "-22px" : 0,
             }}>
+              {isTrophy && (
+                <div style={{
+                  position: "absolute", top: 0, left: "50%", transform: "translateX(-50%)",
+                  width: 64, height: 28,
+                  background: "rgba(14,24,41,0.97)",
+                  borderRadius: "32px 32px 0 0",
+                  borderTop: `1px solid ${K.bdr}`,
+                  borderLeft: `1px solid ${K.bdr}`,
+                  borderRight: `1px solid ${K.bdr}`,
+                  zIndex: -1,
+                }} />
+              )}
               {navIcon()}
               {item.key === "admin" && adminActionNeeded && user.isDirector && (
                 <span style={{
@@ -4851,7 +4865,7 @@ export default function WBCApp() {
                   border: "2px solid rgba(14,24,41,0.97)",
                 }} />
               )}
-              <span style={{ fontSize: 9, fontWeight: active ? 700 : 500, color: clr }}>{item.key === "leaderboard" ? "" : item.label}</span>
+              <span style={{ fontSize: 9, fontWeight: active ? 700 : 500, color: clr }}>{isTrophy ? "" : item.label}</span>
             </button>
           );
         })}
