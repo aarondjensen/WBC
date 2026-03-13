@@ -12,22 +12,12 @@
     <meta name="apple-mobile-web-app-title" content="WBC 2026" />
     <title>WBC 2026</title>
     <style>
-  .wbc-header {
-    padding-top: max(10px, calc(env(safe-area-inset-top, 0px) + 10px)) !important;
-  }
-  
-  /* Forces the body to fill the safe area with the app background color
-     so dead space shows the right color while JS loads */
-  body {
-    background-color: #080f1e;
-    padding-top: env(safe-area-inset-top, 0px);
-  }
-  
-  #root {
-    padding-top: 0;
-    margin-top: calc(-1 * env(safe-area-inset-top, 0px));
-  }
-</style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body, #root { height: 100%; background: #080f1e; }
+      .wbc-header {
+        padding-top: max(10px, calc(env(safe-area-inset-top, 0px) + 10px)) !important;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>
