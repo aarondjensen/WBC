@@ -14,10 +14,19 @@
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
       html, body, #root { height: 100%; background: #080f1e; }
-      .wbc-header {
-        padding-top: max(10px, calc(env(safe-area-inset-top, 0px) + 10px)) !important;
-      }
     </style>
+    <script>
+      // Set --app-height before first paint so React uses the correct value immediately.
+      // 100dvh is unreliable on iOS Safari PWA — window.innerHeight is always correct.
+      function setAppHeight() {
+        document.documentElement.style.setProperty('--app-height', window.innerHeight + 'px');
+      }
+      setAppHeight();
+      window.addEventListener('resize', setAppHeight);
+      window.addEventListener('orientationchange', function() {
+        setTimeout(setAppHeight, 200);
+      });
+    </script>
   </head>
   <body>
     <div id="root"></div>
