@@ -13,11 +13,9 @@
     <title>WBC 2026</title>
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
-      html, body, #root { height: 100%; background: #080f1e; }
+      html, body, #root { height: 100%; overflow: hidden; background: #080f1e; }
     </style>
     <script>
-      // Set --app-height before first paint so React uses the correct value immediately.
-      // 100dvh is unreliable on iOS Safari PWA — window.innerHeight is always correct.
       function setAppHeight() {
         document.documentElement.style.setProperty('--app-height', window.innerHeight + 'px');
       }
