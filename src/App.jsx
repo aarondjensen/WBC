@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 const WBC_LOGO = "/wbc-icon-512.png";
+const WBC_TROPHY_LOGO = "/wbc-trophy.png";
 const WBC_FAVICON = "/wbc-icon-192.png";
 
 const WBC_TROPHY = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIoAAADgAgMAAAChhhbLAAAACVBMVEX///8i06f///8qYg9HAAAAAXRSTlMAQObYZgAAAAFiS0dEAIgFHUgAAAAHdElNRQfqAhwPCRGrKvWFAAACeElEQVRYw+3YW3LdIAwAUPHBDsp+9NN/dQb2v5WaxzUgJFCapNOkZvK8PmM9kO2bAAwrpNdCUFYnKhpJSpJwiS1aTVrWEs6vJu2TkU16zH9pwj8W6zGKyQdRNfVo/kqqScWknfHdxK0huD6casL1mQ3uTD5yGdgZehkwGr81aDNJNXibIJrYDJbTec1E6AZl46ibq0GiycdyMsUk2ZRHxhvMtW9Sn/1tojKptbJuZBRhMkp/jobeZtL7jSuDU3/cGffpBuuBsleaqWX5bmBvcG+wzuLOlMOelBuZ3aS7OJvxW6MMRzQbZzGxn+1kcGN8M/ROE2j4przPbMbvTJuKGlIzMJQnG2cxbUcgikNGQ+mvmLJpF3S+9WqmDXIb64OpU8ZNmeP72VyT/1MTXmW14kVDt0kGEyQz7OjdoLAaN7wtKd0UjO+hamGCCaNJ68bHOZ32i2AGUrdl2S4XR1NvaNz4yTjZ0GhgLQxba/v6YTBBMnE2eRRnc704p1OSXgyejWMGuMlPG0ZyYZ6Z5f3qlbSbjYuLobO5XmGG7QTUOZi3Kywkz/RYGJbt4cGQGRIMzcYJBub3Uu1mwg1OJkgG4mjW7tQTDQ2KYqir9F9sNoTF+iwvNqpysGOoOZhm4JzOGIwMBlXjz6F60nqonvTO+FPlRuOOKd8J0daEQ3fuhPanqQnhY76dgQ86zxczYKi9XDwfYf5iny3XsuWeYDCGe1R/yBmIhhJbeip90T6QlnhIx2Dq3++7UEIwwXzW/2mdZPAxb+nhYx7zpQ3OxHJdeMnQbIJk4jc1rHaxP6yHlr0wPS8sz6b1RARnhIKZ0/4J8jqdZBo0Jn4DUtjOuhjt96MAAAAASUVORK5CYII=";
@@ -4023,7 +4024,7 @@ export default function WBCApp() {
     // Set tab title
     document.title = "WBC 2026";
     // Set favicon to WBC trophy
-    const FAVICON = WBC_FAVICON;
+    const FAVICON = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAABCGlDQ1BJQ0MgUHJvZmlsZQAAeJxjYGA8wQAELAYMDLl5JUVB7k4KEZFRCuwPGBiBEAwSk4sLGHADoKpv1yBqL+viUYcLcKakFicD6Q9ArFIEtBxopAiQLZIOYWuA2EkQtg2IXV5SUAJkB4DYRSFBzkB2CpCtkY7ETkJiJxcUgdT3ANk2uTmlyQh3M/Ck5oUGA2kOIJZhKGYIYnBncAL5H6IkfxEDg8VXBgbmCQixpJkMDNtbGRgkbiHEVBYwMPC3MDBsO48QQ4RJQWJRIliIBYiZ0tIYGD4tZ2DgjWRgEL7AwMAVDQsIHG5TALvNnSEfCNMZchhSgSKeDHkMyQx6QJYRgwGDIYMZAKbWPz9HbOBQAAAAmUlEQVR4nO3QQRHAIADAMEAK5hGEoCEjjzUKep37nm/82NIBWgN0gNYAHaA1QAdoDdABWgN0gNYAHaA1QAdoDdABWgN0gNYAHaA1QAdoDdABWgN0gNYAHaA1QAdoDdABWgN0gNYAHaA1QAdoDdABWgN0gNYAHaA1QAdoDdABWgN0gNYAHaA1QAdoDdABWgN0gNYAHaA1QAdoD7oAAxtuXdMZAAAAAElFTkSuQmCC";
     const link = document.querySelector("link[rel*='icon']") || document.createElement("link");
     link.type = "image/png"; link.rel = "shortcut icon"; link.href = FAVICON;
     document.head.appendChild(link);
@@ -4739,7 +4740,7 @@ export default function WBCApp() {
 
       <div style={{ padding: "10px 20px", paddingTop: "max(10px, calc(env(safe-area-inset-top, 0px) + 10px))", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${K.bdr}`, background: "rgba(14,24,41,0.95)", position: "sticky", top: 0, zIndex: 50 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <img src={WBC_LOGO} alt="WBC" style={{ height: 32 }} />
+          <img src={WBC_TROPHY_LOGO} alt="WBC" style={{ height: 32 }} />
           <div>
             <h1 style={{ fontFamily: "'Montserrat', sans-serif", fontSize: 18, margin: 0, fontWeight: 800 }}>WBC 2026</h1>
             <p style={{ color: K.t2, fontSize: 11, margin: 0 }}>Gaylord, MI · Aug 26–29</p>
