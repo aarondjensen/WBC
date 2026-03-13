@@ -4728,10 +4728,10 @@ export default function WBCApp() {
   ];
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "#030810", display: "flex", justifyContent: "center", overflow: "hidden", boxSizing: "border-box" }}>
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", background: K.bg, fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", color: K.t1, width: "100%", maxWidth: 480, position: "relative", boxShadow: "0 0 80px rgba(0,0,0,0.8)", overflow: "hidden" }}>
+    <div style={{ height: "100dvh", background: "#030810", display: "flex", justifyContent: "center", overflow: "hidden" }}>
+    <div style={{ height: "100dvh", display: "flex", flexDirection: "column", background: K.bg, fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", color: K.t1, width: "100%", maxWidth: 480, position: "relative", boxShadow: "0 0 80px rgba(0,0,0,0.8)", flexShrink: 0, overflow: "hidden" }}>
       <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-      <style>{`:root { --sab: env(safe-area-inset-bottom, 0px); }`}</style>
+      <style>{`html, body, #root { height: 100%; overflow: hidden; background: #080f1e; } :root { --sab: env(safe-area-inset-bottom, 0px); }`}</style>
       <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
 
       {notif && <div style={{ position: "fixed", top: 16, left: "50%", transform: "translateX(-50%)", background: K.accDim, color: "white", padding: "10px 24px", borderRadius: 12, fontSize: 13, fontWeight: 600, zIndex: 1000, boxShadow: "0 8px 32px rgba(0,0,0,0.4)" }}>{notif}</div>}
@@ -4818,7 +4818,7 @@ export default function WBCApp() {
           const clr = active ? K.acc : K.t3;
           const iconSz = 18;
           const navIcon = () => {
-            if (item.icon === "trophy") return <img src="/wbc-trophy.png" alt="Board" style={{ width: 54, height: 54, objectFit: "contain", filter: active ? "none" : "brightness(0) invert(0.5)", position: "relative", top: "-18px", zIndex: 2 }} />;
+            if (item.icon === "trophy") return <img src="/wbc-trophy.png" alt="Board" style={{ width: 54, height: 54, objectFit: "contain", filter: active ? "none" : "brightness(0) invert(0.5)", marginTop: "-20px" }} />;
             if (item.icon === "pairings") return <svg width={iconSz} height={iconSz} viewBox="0 0 24 24" fill="none" stroke={clr} strokeWidth="2" strokeLinecap="round"><circle cx="9" cy="7" r="3"/><circle cx="17" cy="7" r="3"/><path d="M3 21v-2a4 4 0 014-4h4a4 4 0 014 4v2"/><path d="M21 21v-2a3 3 0 00-2-2.83"/></svg>;
             if (item.icon === "score") return <svg width={iconSz} height={iconSz} viewBox="0 0 24 24" fill="none" stroke={clr} strokeWidth="2" strokeLinecap="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4z"/></svg>;
             if (item.icon === "betting") return <svg width={iconSz} height={iconSz} viewBox="0 0 24 24" fill="none" stroke={clr} strokeWidth="2" strokeLinecap="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>;
@@ -4854,7 +4854,7 @@ export default function WBCApp() {
                   borderTop: `1px solid ${K.bdr}`,
                   borderLeft: `1px solid ${K.bdr}`,
                   borderRight: `1px solid ${K.bdr}`,
-                  zIndex: 1,
+                  zIndex: 0,
                   pointerEvents: "none",
                 }} />
               )}
