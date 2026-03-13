@@ -700,7 +700,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
                 {allPriorRounds.map(r => <span key={r} style={{ textAlign: "center" }}>R{r}</span>)}
               </div>
               {lb.length === 0 && <div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: 12 }}>No scores yet — be the first!</div>}
-              <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden" }}>
+              <div style={{ display: "flex", flexDirection: "column", flex: 1, overflowY: "auto" }}>
               {(() => {
                 // Pre-compute tied positions
                 const posMap = {};
@@ -4780,7 +4780,7 @@ export default function WBCApp() {
       </div>
       )}
 
-      <div style={{ padding: (view === "leaderboard" || view === "admin") ? "14px 20px 0 20px" : "14px 20px", paddingBottom: "calc(60px + env(safe-area-inset-bottom, 0px))", flex: 1, overflowY: (view === "leaderboard" || view === "admin") ? "hidden" : "auto", overflowX: "hidden", display: (view === "leaderboard" || view === "admin") ? "flex" : "block", flexDirection: "column", minHeight: 0 }}>
+      <div style={{ padding: (view === "leaderboard" || view === "admin") ? "14px 20px 0 20px" : "14px 20px", paddingBottom: "calc(72px + env(safe-area-inset-bottom, 0px))", flex: 1, overflowY: (view === "leaderboard" || view === "admin") ? "hidden" : "auto", overflowX: "hidden", display: (view === "leaderboard" || view === "admin") ? "flex" : "block", flexDirection: "column", minHeight: 0 }}>
         {view === "leaderboard" && <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} teeData={teeData} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} />}
         <div style={{ display: view === "scoring" ? "block" : "none", paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
           <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeData={teeData} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onNavigate={setView} onGoToAdminCourses={() => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); }} markPlayerWD={markPlayerWD} />
@@ -4812,7 +4812,7 @@ export default function WBCApp() {
         ))}
       </div>
 
-      <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 480, display: "flex", background: "rgba(14,24,41,0.97)", borderTop: `1px solid ${K.bdr}`, zIndex: 100, paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
+      <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 480, display: "flex", background: "rgba(14,24,41,0.97)", borderTop: `1px solid ${K.bdr}`, zIndex: 100, paddingBottom: "env(safe-area-inset-bottom, 0px)", overflow: "visible", alignItems: "flex-end" }}>
         {navItems.map(item => {
           const active = view === item.key;
           const clr = active ? K.acc : K.t3;
@@ -4841,14 +4841,13 @@ export default function WBCApp() {
               }
               setView(item.key);
             }} style={{
-              flex: 1, padding: isTrophy ? "0 4px 6px" : "10px 4px 6px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2,
+              flex: 1, padding: isTrophy ? "0 4px 6px" : "10px 4px 6px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", gap: 2,
               background: "transparent", border: "none", cursor: "pointer", color: clr, position: "relative",
-              marginTop: isTrophy ? "-12px" : 0,
             }}>
               {isTrophy && (
                 <div style={{
-                  position: "absolute", top: 0, left: "50%", transform: "translateX(-50%)",
-                  width: 64, height: 18,
+                  position: "absolute", bottom: "100%", left: "50%", transform: "translateX(-50%)",
+                  width: 64, height: 20,
                   background: "rgba(14,24,41,0.97)",
                   borderRadius: "32px 32px 0 0",
                   borderTop: `1px solid ${K.bdr}`,
