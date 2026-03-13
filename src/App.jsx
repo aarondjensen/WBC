@@ -4728,7 +4728,7 @@ export default function WBCApp() {
   ];
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "#030810", display: "flex", justifyContent: "center", overflow: "hidden", paddingTop: "env(safe-area-inset-top, 0px)", boxSizing: "border-box" }}>
+    <div style={{ position: "fixed", inset: 0, background: "#030810", display: "flex", justifyContent: "center", overflow: "hidden", boxSizing: "border-box" }}>
     <div style={{ flex: 1, display: "flex", flexDirection: "column", background: K.bg, fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", color: K.t1, width: "100%", maxWidth: 480, position: "relative", boxShadow: "0 0 80px rgba(0,0,0,0.8)", overflow: "hidden" }}>
       <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
       <style>{`:root { --sab: env(safe-area-inset-bottom, 0px); }`}</style>
