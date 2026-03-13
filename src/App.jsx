@@ -4841,7 +4841,7 @@ export default function WBCApp() {
               }
               setView(item.key);
             }} style={{
-              flex: 1, padding: "4px 4px 14px", display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
+              flex: 1, padding: isTrophy ? "4px 4px 14px" : "38px 4px 14px", display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
               background: "transparent", border: "none", cursor: "pointer", color: clr, position: "relative",
               marginTop: 0,
             }}>
