@@ -690,7 +690,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
                 {allPriorRounds.map(r => <span key={r} style={{ textAlign: "center" }}>R{r}</span>)}
               </div>
               {lb.length === 0 && <div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: 12 }}>No scores yet — be the first!</div>}
-              <div style={{ display: "flex", flexDirection: "column", flex: 1, overflowY: expanded ? "auto" : "hidden" }}>
+              <div style={{ display: "flex", flexDirection: "column", flex: 1, overflowY: "auto" }}>
               {(() => {
                 // Pre-compute tied positions
                 const posMap = {};
@@ -743,7 +743,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
                     })()
                   : rd?.netToPar;
                 return (
-                  <div key={p.id} style={{ flex: isExpanded ? "0 0 auto" : 1, display: "flex", flexDirection: "column", justifyContent: "center", flexShrink: 0 }}>
+                  <div key={p.id} style={{ flex: "0 0 auto", display: "flex", flexDirection: "column", justifyContent: "center" }}>
                     <div onClick={() => { setExpanded(isExpanded ? null : p.id); setScorecardRound(null); }} style={{ ...gridStyle, padding: "0 12px", minHeight: 28, height: "100%", alignItems: "center", borderBottom: `1px solid ${K.bdr}10`, background: "transparent", cursor: "pointer", fontSize: rowStyle.fontSize, lineHeight: 1 }}>
                       {/* # */}
                       <span style={{ fontWeight: 800, fontSize: rowStyle.fontSize, color: top3 ? K.acc : K.t3, display: "flex", alignItems: "center", gap: 1 }}>
@@ -3025,28 +3025,19 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
         const subDone = { tees: _teeDone, pairings: _pairingsDone };
         return (<>
           {_finalizePending && (
-            <button onClick={() => setShowFinalizeModal(true)} style={{
-              display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-              width: "100%", padding: "10px 14px", borderRadius: 10, marginBottom: 10,
-              background: "#fbbf24", border: "none", color: "#1a1100",
-              fontSize: 13, fontWeight: 800, cursor: "pointer", letterSpacing: "0.01em",
-            }}>
-              <span style={{ fontSize: 15 }}>🏆</span>
-              Round ready to finalize — tap to close out
+            <button onClick={() => setShowFinalizeModal(true)} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", padding: "10px 14px", borderRadius: 10, marginBottom: 10, background: "#fbbf24", border: "none", color: "#1a1100", fontSize: 13, fontWeight: 800, cursor: "pointer", letterSpacing: "0.01em" }}>
+              <span style={{ fontSize: 15 }}>🏆</span>Round ready to finalize — tap to close out
             </button>
           )}
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
             <div style={{ position: "relative", display: "flex", flex: 1, background: K.card, borderRadius: 10, border: `1px solid ${K.bdr}`, padding: 3, gap: 0 }}>
               <div style={{ position: "absolute", top: 3, bottom: 3, left: tab === "tees" ? 3 : "calc(50% + 1.5px)", width: "calc(50% - 4.5px)", background: acGlow, borderRadius: 8, border: `1px solid ${ac}50`, transition: "left 0.2s ease", pointerEvents: "none" }} />
               {[["tees","Tees"],["pairings","Pairings"]].map(([k,l]) => {
-                const isActive = tab === k;
-                const isDone = !_isFinal && subDone[k];
-                return (
-                  <button key={k} onClick={() => setTab(k)} style={{ flex: 1, padding: "8px 6px", borderRadius: 8, fontSize: 12, fontWeight: isActive ? 700 : 500, background: "transparent", color: isActive ? ac : K.t2, border: "none", cursor: "pointer", position: "relative", zIndex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
-                    <span>{l}</span>
-                    {!_isFinal && <span style={{ width: 6, height: 6, borderRadius: "50%", flexShrink: 0, background: isDone ? "#22c55e" : "transparent", border: `1.5px solid ${isDone ? "#22c55e" : K.t3 + "60"}` }} />}
-                  </button>
-                );
+                const isActive = tab === k; const isDone = !_isFinal && subDone[k];
+                return (<button key={k} onClick={() => setTab(k)} style={{ flex: 1, padding: "8px 6px", borderRadius: 8, fontSize: 12, fontWeight: isActive ? 700 : 500, background: "transparent", color: isActive ? ac : K.t2, border: "none", cursor: "pointer", position: "relative", zIndex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
+                  <span>{l}</span>
+                  {!_isFinal && <span style={{ width: 6, height: 6, borderRadius: "50%", flexShrink: 0, background: isDone ? "#22c55e" : "transparent", border: `1.5px solid ${isDone ? "#22c55e" : K.t3 + "60"}` }} />}
+                </button>);
               })}
             </div>
             <button onClick={() => setSettingsOpen(true)} title="Tournament Settings" style={{ width: 38, height: 38, borderRadius: 10, background: K.card, border: `1px solid ${K.bdr}`, color: K.t3, fontSize: 16, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>⚙️</button>
@@ -3760,7 +3751,6 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
           </div>
         </div>
       )}
-
       {editingCourse && (() => {
         const d = editingCourse.draft;
         const saveEdit = () => { addCourse({ ...editingCourse.draft }); setEditingCourse(null); setExpandedCourse(null); };
@@ -3773,84 +3763,32 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
               <button onClick={saveEdit} style={{ background: ac, border: "none", borderRadius: 8, color: K.bg, fontSize: 13, fontWeight: 700, padding: "6px 18px", cursor: "pointer" }}>Save</button>
             </div>
             <div style={{ flex: 1, overflowY: "auto", padding: "16px 16px 48px" }}>
-              <div style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 10, color: K.t3, fontWeight: 600, textTransform: "uppercase", marginBottom: 4 }}>Course Name</div>
-                <input value={d.name || ""} onChange={e => setEditingCourse(prev => ({ ...prev, draft: { ...prev.draft, name: e.target.value } }))} style={{ width: "100%", padding: "9px 10px", background: K.inp, border: `1px solid ${ac}40`, borderRadius: 8, color: K.t1, fontSize: 14, boxSizing: "border-box" }} />
-              </div>
-              {[...(d.tee_boxes||[])].sort((a,b) => (parseFloat(b.slope)||0)-(parseFloat(a.slope)||0)).map((tb, tbi) => {
-                const sortedTbs = [...(d.tee_boxes||[])].sort((a,b) => (parseFloat(b.slope)||0)-(parseFloat(a.slope)||0));
-                const origIdx = d.tee_boxes.indexOf(sortedTbs[tbi]);
-                return (
-                  <div key={tbi} style={{ background: K.card, border: `1px solid ${K.bdr}`, borderRadius: 10, padding: "10px 12px", marginBottom: 8 }}>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <TeeColorSwatch color={tb.color} name={tb.name} size={12} />
-                        <span style={{ fontWeight: 700, fontSize: 14, color: K.t1 }}>{tb.name}</span>
-                      </div>
-                      <button onClick={() => setEditingCourse(prev => ({ ...prev, draft: { ...prev.draft, tee_boxes: prev.draft.tee_boxes.filter((_,i) => i !== origIdx) } }))} style={{ background: "transparent", border: "none", color: K.t3, cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 4px" }}>✕</button>
-                    </div>
-                    <div style={{ display: "flex", gap: 8 }}>
-                      {["rating","slope","par"].map(f => (
-                        <div key={f} style={{ flex: 1 }}>
-                          <div style={{ fontSize: 9, color: K.t3, textTransform: "uppercase", marginBottom: 3 }}>{f}</div>
-                          <input inputMode="decimal" value={tb[f]||""} onChange={e => setEditingCourse(prev => { const tbs = [...prev.draft.tee_boxes]; tbs[origIdx] = {...tbs[origIdx],[f]:e.target.value}; return {...prev,draft:{...prev.draft,tee_boxes:tbs}}; })} style={{ width: "100%", padding: "7px 6px", background: K.inp, border: `1px solid ${ac}30`, borderRadius: 6, color: K.t1, fontSize: 13, textAlign: "center", boxSizing: "border-box" }} />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
-              {[["Front", 0, 9], ["Back", 9, 9]].map(([label, start, count]) => {
-                const pars = (d.hole_pars||[]).slice(start, start+count);
-                const hcps = (d.hole_handicaps||[]).slice(start, start+count);
-                return (
-                  <div key={label} style={{ marginBottom: 8 }}>
-                    <div style={{ fontSize: 10, color: K.t3, fontWeight: 600, textTransform: "uppercase", marginBottom: 4 }}>{label} 9</div>
-                    <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 32px`, gap: 2, fontSize: 9 }}>
-                      <div style={{ color: K.t3, fontWeight: 600, padding: "2px 0" }}>Hole</div>
-                      {Array.from({length:count},(_,i)=><div key={i} style={{ textAlign:"center", color:K.t2, fontWeight:700, padding:"2px 0" }}>{start+i+1}</div>)}
-                      <div />
-                    </div>
-                    <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 32px`, gap: 2, background: K.inp, borderRadius: 6, padding: "2px 0", marginBottom: 2 }}>
-                      <div style={{ color: K.t3, fontWeight: 600, padding: "3px 2px", fontSize: 9 }}>Par</div>
-                      {Array.from({length:count},(_,i) => (<input key={i} inputMode="numeric" value={pars[i]??""} onChange={e => setEditingCourse(prev => { const hp=[...(prev.draft.hole_pars||[])]; hp[start+i]=parseInt(e.target.value)||0; return {...prev,draft:{...prev.draft,hole_pars:hp}}; })} style={inpStyle} />))}
-                      <div style={{ textAlign:"center", color:ac, fontWeight:800, padding:"3px 0", fontSize:10 }}>{pars.reduce((a,b)=>a+(+b||0),0)}</div>
-                    </div>
-                    <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 32px`, gap: 2 }}>
-                      <div style={{ color: K.t3, fontWeight: 600, padding: "2px 2px", fontSize: 9 }}>HCP</div>
-                      {Array.from({length:count},(_,i) => (<input key={i} inputMode="numeric" value={hcps[i]??""} onChange={e => setEditingCourse(prev => { const hh=[...(prev.draft.hole_handicaps||[])]; hh[start+i]=parseInt(e.target.value)||0; return {...prev,draft:{...prev.draft,hole_handicaps:hh}}; })} style={{...inpStyle, color:K.t3}} />))}
-                      <div />
-                    </div>
-                  </div>
-                );
-              })}
+              <div style={{ marginBottom: 16 }}><div style={{ fontSize: 10, color: K.t3, fontWeight: 600, textTransform: "uppercase", marginBottom: 4 }}>Course Name</div><input value={d.name || ""} onChange={e => setEditingCourse(prev => ({ ...prev, draft: { ...prev.draft, name: e.target.value } }))} style={{ width: "100%", padding: "9px 10px", background: K.inp, border: `1px solid ${ac}40`, borderRadius: 8, color: K.t1, fontSize: 14, boxSizing: "border-box" }} /></div>
+              {[...(d.tee_boxes||[])].sort((a,b) => (parseFloat(b.slope)||0)-(parseFloat(a.slope)||0)).map((tb, tbi) => { const sortedTbs = [...(d.tee_boxes||[])].sort((a,b) => (parseFloat(b.slope)||0)-(parseFloat(a.slope)||0)); const origIdx = d.tee_boxes.indexOf(sortedTbs[tbi]); return (
+                <div key={tbi} style={{ background: K.card, border: `1px solid ${K.bdr}`, borderRadius: 10, padding: "10px 12px", marginBottom: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}><div style={{ display: "flex", alignItems: "center", gap: 8 }}><TeeColorSwatch color={tb.color} name={tb.name} size={12} /><span style={{ fontWeight: 700, fontSize: 14, color: K.t1 }}>{tb.name}</span></div><button onClick={() => setEditingCourse(prev => ({ ...prev, draft: { ...prev.draft, tee_boxes: prev.draft.tee_boxes.filter((_,i) => i !== origIdx) } }))} style={{ background: "transparent", border: "none", color: K.t3, cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 4px" }}>✕</button></div>
+                  <div style={{ display: "flex", gap: 8 }}>{["rating","slope","par"].map(f => (<div key={f} style={{ flex: 1 }}><div style={{ fontSize: 9, color: K.t3, textTransform: "uppercase", marginBottom: 3 }}>{f}</div><input inputMode="decimal" value={tb[f]||""} onChange={e => setEditingCourse(prev => { const tbs = [...prev.draft.tee_boxes]; tbs[origIdx] = {...tbs[origIdx],[f]:e.target.value}; return {...prev,draft:{...prev.draft,tee_boxes:tbs}}; })} style={{ width: "100%", padding: "7px 6px", background: K.inp, border: `1px solid ${ac}30`, borderRadius: 6, color: K.t1, fontSize: 13, textAlign: "center", boxSizing: "border-box" }} /></div>))}</div>
+                </div>
+              ); })}
+              {[["Front", 0, 9], ["Back", 9, 9]].map(([label, start, count]) => { const pars = (d.hole_pars||[]).slice(start, start+count); const hcps = (d.hole_handicaps||[]).slice(start, start+count); return (
+                <div key={label} style={{ marginBottom: 8 }}>
+                  <div style={{ fontSize: 10, color: K.t3, fontWeight: 600, textTransform: "uppercase", marginBottom: 4 }}>{label} 9</div>
+                  <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 32px`, gap: 2, fontSize: 9 }}><div style={{ color: K.t3, fontWeight: 600, padding: "2px 0" }}>Hole</div>{Array.from({length:count},(_,i)=><div key={i} style={{ textAlign:"center", color:K.t2, fontWeight:700, padding:"2px 0" }}>{start+i+1}</div>)}<div /></div>
+                  <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 32px`, gap: 2, background: K.inp, borderRadius: 6, padding: "2px 0", marginBottom: 2 }}><div style={{ color: K.t3, fontWeight: 600, padding: "3px 2px", fontSize: 9 }}>Par</div>{Array.from({length:count},(_,i) => (<input key={i} inputMode="numeric" value={pars[i]??""} onChange={e => setEditingCourse(prev => { const hp=[...(prev.draft.hole_pars||[])]; hp[start+i]=parseInt(e.target.value)||0; return {...prev,draft:{...prev.draft,hole_pars:hp}}; })} style={inpStyle} />))}<div style={{ textAlign:"center", color:ac, fontWeight:800, padding:"3px 0", fontSize:10 }}>{pars.reduce((a,b)=>a+(+b||0),0)}</div></div>
+                  <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 32px`, gap: 2 }}><div style={{ color: K.t3, fontWeight: 600, padding: "2px 2px", fontSize: 9 }}>HCP</div>{Array.from({length:count},(_,i) => (<input key={i} inputMode="numeric" value={hcps[i]??""} onChange={e => setEditingCourse(prev => { const hh=[...(prev.draft.hole_handicaps||[])]; hh[start+i]=parseInt(e.target.value)||0; return {...prev,draft:{...prev.draft,hole_handicaps:hh}}; })} style={{...inpStyle, color:K.t3}} />))}<div /></div>
+                </div>
+              ); })}
             </div>
           </div>
         );
       })()}
-
       {confirmCourse && (confirmCourse.round || confirmCourse.delete) && (
         <div style={{ position: "fixed", top: 0, bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.6)", zIndex: 500, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }} onClick={() => setConfirmCourse(null)}>
           <div onClick={e => e.stopPropagation()} style={{ background: K.card, borderRadius: 14, padding: "20px 20px 16px", width: "100%", maxWidth: 360, boxShadow: "0 16px 48px rgba(0,0,0,0.6)" }}>
-            {confirmCourse.round ? (<>
-              <div style={{ fontSize: 15, fontWeight: 700, color: K.warn, marginBottom: 8 }}>Reassign Round {confirmCourse.round}?</div>
-              <div style={{ fontSize: 13, color: K.t2, marginBottom: 20, lineHeight: 1.4 }}>Move R{confirmCourse.round} to <strong style={{ color: K.t1 }}>{confirmCourse.course.name}</strong>?</div>
-              <div style={{ display: "flex", gap: 10 }}>
-                <button onClick={() => setConfirmCourse(null)} style={{ flex: 1, padding: "11px 0", borderRadius: 10, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t2, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
-                <button onClick={() => { setCourseForRound(confirmCourse.round, confirmCourse.course); setConfirmCourse(null); }} style={{ flex: 1, padding: "11px 0", borderRadius: 10, background: ac, border: "none", color: K.bg, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>Move</button>
-              </div>
-            </>) : (<>
-              <div style={{ fontSize: 15, fontWeight: 700, color: K.danger, marginBottom: 8 }}>Remove Course?</div>
-              <div style={{ fontSize: 13, color: K.t2, marginBottom: 20, lineHeight: 1.4 }}>Remove <strong style={{ color: K.t1 }}>{confirmCourse.course.name}</strong>?{confirmCourse.assignedRounds.length > 0 && <span style={{ color: K.warn }}> (unassigns R{confirmCourse.assignedRounds.join(", R")})</span>}</div>
-              <div style={{ display: "flex", gap: 10 }}>
-                <button onClick={() => setConfirmCourse(null)} style={{ flex: 1, padding: "11px 0", borderRadius: 10, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t2, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
-                <button onClick={() => { confirmCourse.assignedRounds.forEach(r => setCourseForRound(r, { id: null, name: "" })); addCourse({ _delete: true, id: confirmCourse.course.id }); setConfirmCourse(null); }} style={{ flex: 1, padding: "11px 0", borderRadius: 10, background: K.danger, border: "none", color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>Remove</button>
-              </div>
-            </>)}
+            {confirmCourse.round ? (<><div style={{ fontSize: 15, fontWeight: 700, color: K.warn, marginBottom: 8 }}>Reassign Round {confirmCourse.round}?</div><div style={{ fontSize: 13, color: K.t2, marginBottom: 20, lineHeight: 1.4 }}>Move R{confirmCourse.round} to <strong style={{ color: K.t1 }}>{confirmCourse.course.name}</strong>?</div><div style={{ display: "flex", gap: 10 }}><button onClick={() => setConfirmCourse(null)} style={{ flex: 1, padding: "11px 0", borderRadius: 10, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t2, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>Cancel</button><button onClick={() => { setCourseForRound(confirmCourse.round, confirmCourse.course); setConfirmCourse(null); }} style={{ flex: 1, padding: "11px 0", borderRadius: 10, background: ac, border: "none", color: K.bg, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>Move</button></div></>) : (<><div style={{ fontSize: 15, fontWeight: 700, color: K.danger, marginBottom: 8 }}>Remove Course?</div><div style={{ fontSize: 13, color: K.t2, marginBottom: 20, lineHeight: 1.4 }}>Remove <strong style={{ color: K.t1 }}>{confirmCourse.course.name}</strong>?{confirmCourse.assignedRounds.length > 0 && <span style={{ color: K.warn }}> (unassigns R{confirmCourse.assignedRounds.join(", R")})</span>}</div><div style={{ display: "flex", gap: 10 }}><button onClick={() => setConfirmCourse(null)} style={{ flex: 1, padding: "11px 0", borderRadius: 10, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t2, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>Cancel</button><button onClick={() => { confirmCourse.assignedRounds.forEach(r => setCourseForRound(r, { id: null, name: "" })); addCourse({ _delete: true, id: confirmCourse.course.id }); setConfirmCourse(null); }} style={{ flex: 1, padding: "11px 0", borderRadius: 10, background: K.danger, border: "none", color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>Remove</button></div></>)}
           </div>
         </div>
       )}
-
       {/* Round operation tabs */}
       {tab === "pairings" && (
         <PairingsEditor activePlayers={activePlayers} numRounds={numRounds} pairingsData={pairingsData} setPairings={setPairings} tRounds={tRounds} courses={courses} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
@@ -4301,17 +4239,12 @@ export default function WBCApp() {
 
   // Mark player as WD: set status, fill all unfilled holes in current and future rounds with sentinel 99
   const markPlayerWD = async (pid) => {
-    // Only fill remaining holes in the CURRENT round with 99.
-    // Future rounds are left blank — player may still play them.
-    // The WD status on the leaderboard is permanent once set.
     const tr = tRounds.find(t => t.round_number === round);
     const key = `${pid}_${round}`;
     const existing = holeData[key] || {};
     const updates = [];
     for (let h = 0; h < 18; h++) {
-      if (!(existing[h] > 0)) {
-        updates.push(holeDataToRow(pid, round, h, 99, tr?.course_id));
-      }
+      if (!(existing[h] > 0)) updates.push(holeDataToRow(pid, round, h, 99, tr?.course_id));
     }
     setHoleData(prev => {
       const existing = prev[key] || {};
@@ -4319,7 +4252,6 @@ export default function WBCApp() {
       for (let h = 0; h < 18; h++) { if (!(filled[h] > 0)) filled[h] = 99; }
       return { ...prev, [key]: filled };
     });
-    // Mark WD status — this permanently shows WD on leaderboard
     const tp = tPlayers.find(t => t.player_id === pid);
     if (tp) await sb.upsert("tournament_players", { ...tp, status: "WD" }, "id");
     setTPlayers(prev => prev.map(tp => tp.player_id === pid ? { ...tp, status: "WD" } : tp));
@@ -4672,39 +4604,18 @@ export default function WBCApp() {
             </div>
             )}
           </div>
-
-          {(() => {
-            const roundIsActive = Object.keys(holeData).some(key => { const parts = key.split("_"); const rnd = parseInt(parts[parts.length - 1]); return !finalizedRounds[rnd] && Object.keys(holeData[key] || {}).length > 0; });
-            const btnColor = roundIsActive ? K.acc : K.t2;
-            const btnBorder = roundIsActive ? `1px solid ${K.acc}40` : `1px solid ${K.bdr}`;
-            return (
-              <div style={{ marginTop: 24, borderTop: `1px solid ${K.bdr}30`, paddingTop: 20 }}>
-                <button onClick={() => setUser({ id: "guest", name: "Guest", isDirector: false, isGuest: true })} style={{ width: "100%", padding: "13px 0", borderRadius: 12, background: "transparent", border: btnBorder, color: btnColor, fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, letterSpacing: "0.02em" }} onMouseEnter={e => { e.currentTarget.style.background = btnColor + "12"; }} onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}>
-                  {roundIsActive && <span style={{ width: 7, height: 7, borderRadius: "50%", background: K.acc, display: "inline-block", boxShadow: `0 0 6px ${K.acc}` }} />}
-                  <img src="/wbc-trophy.png" alt="" style={{ height: 18, width: "auto", objectFit: "contain", filter: roundIsActive ? "none" : "brightness(0) invert(0.6)" }} />
-                  Live Leaderboard
-                </button>
-              </div>
-            );
-          })()}
+          {(() => { const roundIsActive = Object.keys(holeData).some(key => { const parts = key.split("_"); const rnd = parseInt(parts[parts.length - 1]); return !finalizedRounds[rnd] && Object.keys(holeData[key] || {}).length > 0; }); const btnColor = roundIsActive ? K.acc : K.t2; const btnBorder = roundIsActive ? `1px solid ${K.acc}40` : `1px solid ${K.bdr}`; return (<div style={{ marginTop: 24, borderTop: `1px solid ${K.bdr}30`, paddingTop: 20 }}><button onClick={() => setUser({ id: "guest", name: "Guest", isDirector: false, isGuest: true })} style={{ width: "100%", padding: "13px 0", borderRadius: 12, background: "transparent", border: btnBorder, color: btnColor, fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, letterSpacing: "0.02em" }} onMouseEnter={e => { e.currentTarget.style.background = btnColor + "12"; }} onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}>{roundIsActive && <span style={{ width: 7, height: 7, borderRadius: "50%", background: K.acc, display: "inline-block", boxShadow: `0 0 6px ${K.acc}` }} />}<img src="/wbc-trophy.png" alt="" style={{ height: 18, width: "auto", objectFit: "contain", filter: roundIsActive ? "none" : "brightness(0) invert(0.6)" }} />Live Leaderboard</button></div>); })()}
         </div>
       </div>
     );
   }
-
   if (user.isGuest) {
     return (
       <div style={{ minHeight: "var(--app-height, 100dvh)", background: "#030810", display: "flex", justifyContent: "center", overflow: "hidden" }}>
       <div style={{ height: "var(--app-height, 100dvh)", display: "flex", flexDirection: "column", background: K.bg, fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", color: K.t1, width: "100%", maxWidth: 480, position: "relative", boxShadow: "0 0 80px rgba(0,0,0,0.8)", flexShrink: 0, overflow: "hidden" }}>
         <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
         <div style={{ padding: "10px 20px", paddingTop: "max(10px, calc(env(safe-area-inset-top, 0px) + 10px))", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${K.bdr}`, background: "rgba(14,24,41,0.95)", flexShrink: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <img src={WBC_LOGO} alt="WBC" style={{ height: 32 }} />
-            <div>
-              <div style={{ fontWeight: 800, fontSize: 15, color: K.t1 }}>WBC 2026</div>
-              <div style={{ fontSize: 11, color: K.t3 }}>Gaylord, MI · Aug 26–29</div>
-            </div>
-          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}><img src={WBC_LOGO} alt="WBC" style={{ height: 32 }} /><div><div style={{ fontWeight: 800, fontSize: 15, color: K.t1 }}>WBC 2026</div><div style={{ fontSize: 11, color: K.t3 }}>Gaylord, MI · Aug 26–29</div></div></div>
           <button onClick={() => setUser(null)} style={{ background: "transparent", border: `1px solid ${K.bdr}`, borderRadius: 8, color: K.t3, fontSize: 12, fontWeight: 600, padding: "5px 12px", cursor: "pointer" }}>Exit</button>
         </div>
         <div style={{ padding: "14px 20px 0 20px", flex: 1, overflowY: "hidden", overflowX: "hidden", display: "flex", flexDirection: "column", minHeight: 0, marginBottom: 8 }}>
