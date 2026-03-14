@@ -2385,7 +2385,7 @@ function TeeAssigner({ activePlayers, numRounds, tRounds, courses, teeData, setT
       const delta = newCH - oldCH;
       if (delta !== 0) {
         setChDeltas(prev => ({ ...prev, [pid]: delta }));
-        setTimeout(() => setChDeltas(prev => { const n = {...prev}; delete n[pid]; return n; }), 2000);
+        setTimeout(() => setChDeltas(prev => { const n = {...prev}; delete n[pid]; return n; }), 3500);
       }
     }
     setTeeBulk(editRound, { ...assignments, [pid]: teeName });
@@ -3011,16 +3011,18 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
         const _teeTimesDone = _rg.length > 0 && _rg.every((_, gi) => _rt[gi] && _rt[gi].trim() !== "");
         const _pairingsDone = _hasCourse && _groupsDone && _teeTimesDone;
         const _isFinal = finalizedRounds[editRound];
-        const _finalizePending = Object.entries(pairingsData || {}).some(([rnd, groups]) =>
-          groups.some(grp => {
+        const _finalizePending = Object.entries(pairingsData || {}).some(([rnd, groups]) => {
+          if (!groups.length) return false;
+          // Show finalize only when ALL groups in the round have all 18 scores entered
+          return groups.every(grp => {
             const gk = `${rnd}_${grp.slice().sort().join(",")}`;
             if (finalizedRounds[gk] || finalizedRounds[parseInt(rnd)]) return false;
             return grp.every(pid => {
               const pd = holeData[`${pid}_${rnd}`] || {};
               return Object.values(pd).filter(s => s > 0).length === 18;
             });
-          })
-        );
+          });
+        });
         const subDone = { tees: _teeDone, pairings: _pairingsDone };
         return (<>
           {_finalizePending && (
@@ -3231,9 +3233,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                                     </div>
                                   ))}
                                 </div>
-                                <button
-                                  onClick={() => setEditingCourse({ courseId: c.id, draft: { ...c, hole_pars: [...(c.hole_pars||Array(18).fill(4))], hole_handicaps: [...(c.hole_handicaps||Array(18).fill(0))], tee_boxes: (c.tee_boxes||[]).map(t=>({...t})) } })}
-                                  style={{ padding: "5px 12px", borderRadius: 8, background: "transparent", border: `1px solid ${ac}60`, color: ac, fontSize: 11, fontWeight: 700, cursor: "pointer", flexShrink: 0, marginTop: 1 }}>Edit</button>
+                                <button onClick={() => setEditingCourse({ courseId: c.id, draft: { ...c, hole_pars: [...(c.hole_pars||Array(18).fill(4))], hole_handicaps: [...(c.hole_handicaps||Array(18).fill(0))], tee_boxes: (c.tee_boxes||[]).map(t=>({...t})) } })} style={{ padding: "5px 12px", borderRadius: 8, background: "transparent", border: `1px solid ${ac}60`, color: ac, fontSize: 11, fontWeight: 700, cursor: "pointer", flexShrink: 0, marginTop: 1 }}>Edit</button>
                               </div>
                             </div>
                           )}
@@ -3823,8 +3823,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                         <TeeColorSwatch color={tb.color} name={tb.name} size={12} />
                         <span style={{ fontWeight: 700, fontSize: 14, color: K.t1 }}>{tb.name}</span>
                       </div>
-                      <button onClick={() => setEditingCourse(prev => ({ ...prev, draft: { ...prev.draft, tee_boxes: prev.draft.tee_boxes.filter((_,i) => i !== origIdx) } }))}
-                        style={{ background: "transparent", border: "none", color: K.t3, cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 4px" }}>✕</button>
+                      <button onClick={() => setEditingCourse(prev => ({ ...prev, draft: { ...prev.draft, tee_boxes: prev.draft.tee_boxes.filter((_,i) => i !== origIdx) } }))} style={{ background: "transparent", border: "none", color: K.t3, cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 4px" }}>✕</button>
                     </div>
                     <div style={{ display: "flex", gap: 8 }}>
                       {["rating","slope","par"].map(f => (
@@ -3883,10 +3882,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
               </div>
             </>) : (<>
               <div style={{ fontSize: 15, fontWeight: 700, color: K.danger, marginBottom: 8 }}>Remove Course?</div>
-              <div style={{ fontSize: 13, color: K.t2, marginBottom: 20, lineHeight: 1.4 }}>
-                Remove <strong style={{ color: K.t1 }}>{confirmCourse.course.name}</strong>?
-                {confirmCourse.assignedRounds.length > 0 && <span style={{ color: K.warn }}> (unassigns R{confirmCourse.assignedRounds.join(", R")})</span>}
-              </div>
+              <div style={{ fontSize: 13, color: K.t2, marginBottom: 20, lineHeight: 1.4 }}>Remove <strong style={{ color: K.t1 }}>{confirmCourse.course.name}</strong>?{confirmCourse.assignedRounds.length > 0 && <span style={{ color: K.warn }}> (unassigns R{confirmCourse.assignedRounds.join(", R")})</span>}</div>
               <div style={{ display: "flex", gap: 10 }}>
                 <button onClick={() => setConfirmCourse(null)} style={{ flex: 1, padding: "11px 0", borderRadius: 10, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t2, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
                 <button onClick={() => { confirmCourse.assignedRounds.forEach(r => setCourseForRound(r, { id: null, name: "" })); addCourse({ _delete: true, id: confirmCourse.course.id }); setConfirmCourse(null); }} style={{ flex: 1, padding: "11px 0", borderRadius: 10, background: K.danger, border: "none", color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>Remove</button>
