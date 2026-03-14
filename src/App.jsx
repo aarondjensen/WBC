@@ -3074,7 +3074,6 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                 );
               })}
             </div>
-            {/* Finalize toast banner — shown when rounds are ready to finalize */}
             {_finalizePending && (
               <button onClick={() => setShowFinalizeModal(true)} style={{
                 padding: "8px 14px", borderRadius: 10, fontSize: 12, fontWeight: 700,
@@ -3233,31 +3232,31 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                             };
                             return (
                               <div style={{ padding: "0 14px 12px", background: ac + "04" }}>
+                                {/* Edit/view controls */}
+                                <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 8, marginBottom: 6 }}>
+                                  {!isEditing
+                                    ? <button onClick={startEdit} style={{ padding: "6px 16px", borderRadius: 8, background: "transparent", border: `1px solid ${ac}60`, color: ac, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Edit</button>
+                                    : <>
+                                        <button onClick={() => setEditingCourse(null)} style={{ padding: "6px 14px", borderRadius: 8, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t3, fontSize: 12, cursor: "pointer" }}>Cancel</button>
+                                        <button onClick={saveEdit} style={{ padding: "6px 16px", borderRadius: 8, background: ac, border: "none", color: K.bg, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Save</button>
+                                      </>}
+                                </div>
                                 {isEditing && (
-                                  <div style={{ marginBottom: 8, marginTop: 4 }}>
+                                  <div style={{ marginBottom: 8 }}>
                                     <span style={{ fontSize: 9, color: K.t3, textTransform: "uppercase", fontWeight: 600 }}>Course Name</span>
                                     <input value={d.name || ""} onChange={e => setEditingCourse(prev => ({ ...prev, draft: { ...prev.draft, name: e.target.value } }))} style={{ display: "block", width: "100%", marginTop: 3, padding: "5px 8px", background: K.inp, border: `1px solid ${ac}40`, borderRadius: 6, color: K.t1, fontSize: 12, boxSizing: "border-box" }} />
                                   </div>
                                 )}
-                                {/* Rating / Slope row */}
-                                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, marginTop: 4 }}>
-                                  {["rating","slope"].map(field => (
-                                    <div key={field} style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                                      <span style={{ fontSize: 9, color: K.t3, textTransform: "capitalize" }}>{field}:</span>
-                                      {isEditing
-                                        ? <input value={d[field]||""} onChange={e => setEditingCourse(prev => ({ ...prev, draft: { ...prev.draft, [field]: e.target.value } }))} style={{ ...inpStyle, width: 44 }} />
-                                        : <span style={{ fontSize: 9, color: K.t2, fontWeight: 700 }}>{d[field]}</span>}
-                                    </div>
-                                  ))}
-                                  <div style={{ marginLeft: "auto", display: "flex", gap: 4, alignItems: "center" }}>
-                                    {!isEditing
-                                      ? <button onClick={startEdit} style={{ padding: "6px 14px", borderRadius: 8, background: "transparent", border: `1px solid ${ac}60`, color: ac, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Edit</button>
-                                      : <>
-                                          <button onClick={saveEdit} style={{ padding: "6px 14px", borderRadius: 8, background: ac, border: "none", color: K.bg, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Save</button>
-                                          <button onClick={() => setEditingCourse(null)} style={{ padding: "6px 14px", borderRadius: 8, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t3, fontSize: 12, cursor: "pointer" }}>Cancel</button>
-                                        </>}
+                                {isEditing && (
+                                  <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                                    {["rating","slope"].map(field => (
+                                      <div key={field} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                                        <span style={{ fontSize: 9, color: K.t3, textTransform: "capitalize" }}>{field}:</span>
+                                        <input value={d[field]||""} onChange={e => setEditingCourse(prev => ({ ...prev, draft: { ...prev.draft, [field]: e.target.value } }))} style={{ ...inpStyle, width: 44 }} />
+                                      </div>
+                                    ))}
                                   </div>
-                                </div>
+                                )}
                                 {/* Tee boxes */}
                                 {(d.tee_boxes||[]).length > 0 && (
                                   <div style={{ marginBottom: 8 }}>
