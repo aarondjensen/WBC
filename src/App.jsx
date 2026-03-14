@@ -3789,19 +3789,22 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
         </div>
       )}
 
-      {/* Course edit modal — full height, header respects safe area */}
+      {/* Course edit modal — full screen with safe area */}
       {editingCourse && (() => {
         const d = editingCourse.draft;
-        const saveEdit = () => { addCourse({ ...editingCourse.draft }); setEditingCourse(null); };
+        const saveEdit = () => {
+          addCourse({ ...editingCourse.draft });
+          setEditingCourse(null);
+          setExpandedCourse(null); // collapse after save
+        };
+        const inpStyle = { background: K.inp, border: `1px solid ${ac}40`, borderRadius: 4, color: K.t1, fontSize: 9, textAlign: "center", width: "100%", padding: "2px 0", boxSizing: "border-box" };
         return (
           <div style={{ position: "fixed", top: 0, bottom: 0, left: 0, right: 0, background: K.bg, zIndex: 200, display: "flex", flexDirection: "column", maxWidth: 480, margin: "0 auto" }}>
-            {/* Header with safe-area top padding so it clears the Dynamic Island */}
             <div style={{ paddingTop: "max(14px, calc(env(safe-area-inset-top, 0px) + 14px))", paddingBottom: 10, paddingLeft: 16, paddingRight: 16, display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${K.bdr}`, flexShrink: 0, background: K.bg }}>
               <button onClick={() => setEditingCourse(null)} style={{ background: "transparent", border: `1px solid ${K.bdr}`, borderRadius: 8, color: K.t2, fontSize: 13, fontWeight: 600, padding: "6px 14px", cursor: "pointer" }}>Cancel</button>
               <span style={{ fontWeight: 700, fontSize: 14, color: K.t1 }}>Edit Course</span>
               <button onClick={saveEdit} style={{ background: ac, border: "none", borderRadius: 8, color: K.bg, fontSize: 13, fontWeight: 700, padding: "6px 18px", cursor: "pointer" }}>Save</button>
             </div>
-            {/* Scrollable content */}
             <div style={{ flex: 1, overflowY: "auto", padding: "16px 16px 48px" }}>
               <div style={{ marginBottom: 16 }}>
                 <div style={{ fontSize: 10, color: K.t3, fontWeight: 600, textTransform: "uppercase", marginBottom: 4 }}>Course Name</div>
@@ -3834,7 +3837,6 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
               {[["Front", 0, 9], ["Back", 9, 9]].map(([label, start, count]) => {
                 const pars = (d.hole_pars||[]).slice(start, start+count);
                 const hcps = (d.hole_handicaps||[]).slice(start, start+count);
-                const inpStyle = { background: K.inp, border: `1px solid ${ac}40`, borderRadius: 4, color: K.t1, fontSize: 9, textAlign: "center", width: "100%", padding: "2px 0", boxSizing: "border-box" };
                 return (
                   <div key={label} style={{ marginBottom: 8 }}>
                     <div style={{ fontSize: 10, color: K.t3, fontWeight: 600, textTransform: "uppercase", marginBottom: 4 }}>{label} 9</div>
@@ -4405,7 +4407,8 @@ export default function WBCApp() {
       const updated = existing
         ? prev.map(t => t.round_number === rnd ? { ...t, course_id: course.id } : t)
         : (course.id ? [...prev, trRow] : prev);
-      setCourseList(cl => sortCoursesByRound(cl, updated));
+      // Delay sort so assignment feels snappy; reorder happens after a brief pause
+      setTimeout(() => setCourseList(cl => sortCoursesByRound(cl, updated)), 800);
       return updated;
     });
     // Only upsert to Supabase if assigning a real course — skip if unassigning (course_id null violates NOT NULL)
