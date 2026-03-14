@@ -3884,7 +3884,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
         );
       })()}
 
-      {/* confirmCourse overlays — vertically centered, safe from Dynamic Island and nav bar */}
+      {/* confirmCourse — centered modal, safe from Dynamic Island and nav */}
       {confirmCourse && (confirmCourse.round || confirmCourse.delete) && (
         <div style={{ position: "fixed", top: 0, bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.6)", zIndex: 500, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }} onClick={() => setConfirmCourse(null)}>
           <div onClick={e => e.stopPropagation()} style={{ background: K.card, borderRadius: 14, padding: "20px 20px 16px", width: "100%", maxWidth: 360, boxShadow: "0 16px 48px rgba(0,0,0,0.6)" }}>
@@ -4800,7 +4800,7 @@ export default function WBCApp() {
       <style>{`:root { --sab: env(safe-area-inset-bottom, 0px); }`}</style>
       <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
 
-      {notif && <div style={{ position: "fixed", top: 16, left: "50%", transform: "translateX(-50%)", background: K.accDim, color: "white", padding: "10px 24px", borderRadius: 12, fontSize: 13, fontWeight: 600, zIndex: 1000, boxShadow: "0 8px 32px rgba(0,0,0,0.4)" }}>{notif}</div>}
+      {notif && <div style={{ position: "fixed", top: "50%", left: "50%", transform: "translate(-50%, -50%)", background: K.accDim, color: "white", padding: "12px 28px", borderRadius: 12, fontSize: 13, fontWeight: 600, zIndex: 1000, boxShadow: "0 8px 32px rgba(0,0,0,0.4)", textAlign: "center", maxWidth: "80vw" }}>{notif}</div>}
 
       <div style={{ padding: "10px 20px", paddingTop: "max(10px, calc(env(safe-area-inset-top, 0px) + 10px))", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${K.bdr}`, background: "rgba(14,24,41,0.95)", position: "sticky", top: 0, zIndex: 50 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
