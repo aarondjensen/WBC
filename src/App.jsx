@@ -1662,7 +1662,6 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
           ✓ Hole {currentHole + 1} saved — advancing...
         </div>
       )}
-      {/* Finalize banner - fixed at top when all 18 complete */}
       {allRoundComplete && !isGroupFinalized && !showFinalize && (
         <div style={{
           position: "fixed", top: 80, left: "50%", transform: "translateX(-50%)",
@@ -1672,10 +1671,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
           boxShadow: "0 8px 32px rgba(0,0,0,0.4)", animation: "toastDown 0.3s ease",
         }}>
           <span style={{ flex: 1 }}>🏆 Round complete!</span>
-          <button onClick={() => setShowFinalize(true)} style={{
-            background: K.bg, color: K.acc, border: "none", borderRadius: 8,
-            padding: "6px 16px", fontSize: 12, fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap",
-          }}>Finalize Group</button>
+          <button onClick={() => setShowFinalize(true)} style={{ background: K.bg, color: K.acc, border: "none", borderRadius: 8, padding: "6px 16px", fontSize: 12, fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap" }}>Finalize Group</button>
         </div>
       )}
     </div>
@@ -3137,6 +3133,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
             <div style={{ display: "flex", gap: 4, padding: "10px 16px 0" }}>
               {[["course","Courses"],["players","Players"]].map(([k,l]) => {
                 const isActive = settingsTab === k;
+                const count = k === "course" ? courses.length : activePlayers.length;
                 return (
                   <button key={k} onClick={() => setSettingsTab(k)} style={{
                     flex: 1, padding: "8px 0", borderRadius: 8, fontSize: 12, fontWeight: isActive ? 700 : 500,
@@ -3144,7 +3141,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                     color: isActive ? K.tourn : K.t2,
                     border: `1px solid ${isActive ? K.tourn + "40" : K.bdr}`,
                     cursor: "pointer",
-                  }}>{l}</button>
+                  }}>{l} <span style={{ opacity: 0.7, fontWeight: 400 }}>({count})</span></button>
                 );
               })}
             </div>
@@ -3184,8 +3181,10 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
               {settingsTab === "course" && (
                 <div>
                   <div style={{ background: K.card, borderRadius: 12, border: `1px solid ${K.bdr}`, overflow: "hidden" }}>
-                    <div style={{ padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${K.bdr}` }}>
-                      <span style={{ fontSize: 10, fontWeight: 600, color: K.t3, textTransform: "uppercase" }}>Courses <span style={{ fontWeight: 400 }}>({courses.length})</span></span>
+                    <div style={{ padding: "10px 14px", display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 6, borderBottom: `1px solid ${K.bdr}` }}>
+                      {Array.from({ length: numRounds }, (_, ri) => ri + 1).every(r => tRounds.find(t => t.round_number === r && t.course_id)) && !searching && (
+                        <button onClick={() => setSettingsOpen(false)} style={{ padding: "4px 12px", borderRadius: 6, background: ac, border: "none", color: K.bg, fontSize: 10, fontWeight: 700, cursor: "pointer" }}>✓ All Rounds Set</button>
+                      )}
                       <button onClick={() => { setSearching(!searching); setCourseSearch(""); setSearchResults([]); }} style={{ padding: "3px 8px", borderRadius: 6, background: "transparent", border: `1px solid ${ac}50`, color: ac, fontSize: 10, fontWeight: 600, cursor: "pointer" }}>{searching ? "Done" : "+ Add"}</button>
                     </div>
                     {courses.map((c, i) => {
@@ -3195,7 +3194,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                           <div style={{ padding: "10px 14px", display: "flex", alignItems: "center", gap: 8 }}>
                             <button onClick={() => setExpandedCourse(expandedCourse === c.id ? null : c.id)} style={{ flex: 1, background: "transparent", border: "none", cursor: "pointer", textAlign: "left", color: K.t1, padding: 0 }}>
                               <div style={{ fontWeight: 600, fontSize: 13 }}>{c.name}</div>
-                              <div style={{ fontSize: 10, color: K.t3 }}>{c.city}, {c.state} · Par {c.par} · Slope {c.slope}</div>
+                              <div style={{ fontSize: 10, color: K.t3 }}>{c.city}, {c.state}</div>
                             </button>
                             <div style={{ display: "flex", gap: 3 }}>
                               {Array.from({ length: numRounds }, (_, ri) => ri + 1).map(r => {
@@ -3232,39 +3231,13 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                             };
                             return (
                               <div style={{ padding: "0 14px 12px", background: ac + "04" }}>
-                                {/* Edit/view controls */}
-                                <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 8, marginBottom: 6 }}>
-                                  {!isEditing
-                                    ? <button onClick={startEdit} style={{ padding: "6px 16px", borderRadius: 8, background: "transparent", border: `1px solid ${ac}60`, color: ac, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Edit</button>
-                                    : <>
-                                        <button onClick={() => setEditingCourse(null)} style={{ padding: "6px 14px", borderRadius: 8, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t3, fontSize: 12, cursor: "pointer" }}>Cancel</button>
-                                        <button onClick={saveEdit} style={{ padding: "6px 16px", borderRadius: 8, background: ac, border: "none", color: K.bg, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Save</button>
-                                      </>}
-                                </div>
-                                {isEditing && (
-                                  <div style={{ marginBottom: 8 }}>
-                                    <span style={{ fontSize: 9, color: K.t3, textTransform: "uppercase", fontWeight: 600 }}>Course Name</span>
-                                    <input value={d.name || ""} onChange={e => setEditingCourse(prev => ({ ...prev, draft: { ...prev.draft, name: e.target.value } }))} style={{ display: "block", width: "100%", marginTop: 3, padding: "5px 8px", background: K.inp, border: `1px solid ${ac}40`, borderRadius: 6, color: K.t1, fontSize: 12, boxSizing: "border-box" }} />
-                                  </div>
-                                )}
-                                {isEditing && (
-                                  <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-                                    {["rating","slope"].map(field => (
-                                      <div key={field} style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                                        <span style={{ fontSize: 9, color: K.t3, textTransform: "capitalize" }}>{field}:</span>
-                                        <input value={d[field]||""} onChange={e => setEditingCourse(prev => ({ ...prev, draft: { ...prev.draft, [field]: e.target.value } }))} style={{ ...inpStyle, width: 44 }} />
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
-                                {/* Tee boxes */}
-                                {(d.tee_boxes||[]).length > 0 && (
-                                  <div style={{ marginBottom: 8 }}>
-                                    <div style={{ fontSize: 8, color: K.t3, fontWeight: 600, marginBottom: 3, textTransform: "uppercase" }}>Tee Boxes</div>
+                                {/* Tee boxes row + Edit button aligned to the right */}
+                                <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginTop: 6, marginBottom: 6 }}>
+                                  <div style={{ flex: 1 }}>
                                     {(d.tee_boxes||[]).map((tb, tbi) => (
                                       <div key={tbi} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 3, fontSize: 9 }}>
                                         <TeeColorSwatch color={tb.color} name={tb.name} size={10} />
-                                        <span style={{ color: K.t2, fontWeight: 600, width: 52 }}>{tb.name}</span>
+                                        <span style={{ color: K.t2, fontWeight: 600, width: 44 }}>{tb.name}</span>
                                         {["rating","slope","par"].map(f => (
                                           <div key={f} style={{ display: "flex", alignItems: "center", gap: 2 }}>
                                             <span style={{ color: K.t3, fontSize: 8 }}>{f[0].toUpperCase()+f.slice(1)}:</span>
@@ -3279,6 +3252,28 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                                         )}
                                       </div>
                                     ))}
+                                  </div>
+                                  <div style={{ display: "flex", gap: 4, flexShrink: 0, paddingTop: 1 }}>
+                                    {!isEditing
+                                      ? <button onClick={startEdit} style={{ padding: "5px 12px", borderRadius: 8, background: "transparent", border: `1px solid ${ac}60`, color: ac, fontSize: 11, fontWeight: 700, cursor: "pointer" }}>Edit</button>
+                                      : <>
+                                          <button onClick={() => setEditingCourse(null)} style={{ padding: "5px 10px", borderRadius: 8, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t3, fontSize: 11, cursor: "pointer" }}>Cancel</button>
+                                          <button onClick={saveEdit} style={{ padding: "5px 12px", borderRadius: 8, background: ac, border: "none", color: K.bg, fontSize: 11, fontWeight: 700, cursor: "pointer" }}>Save</button>
+                                        </>}
+                                  </div>
+                                </div>
+                                {isEditing && (
+                                  <div style={{ marginBottom: 8 }}>
+                                    <span style={{ fontSize: 9, color: K.t3, textTransform: "uppercase", fontWeight: 600 }}>Course Name</span>
+                                    <input value={d.name || ""} onChange={e => setEditingCourse(prev => ({ ...prev, draft: { ...prev.draft, name: e.target.value } }))} style={{ display: "block", width: "100%", marginTop: 3, padding: "5px 8px", background: K.inp, border: `1px solid ${ac}40`, borderRadius: 6, color: K.t1, fontSize: 12, boxSizing: "border-box" }} />
+                                    <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+                                      {["rating","slope"].map(field => (
+                                        <div key={field} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                                          <span style={{ fontSize: 9, color: K.t3, textTransform: "capitalize" }}>{field}:</span>
+                                          <input value={d[field]||""} onChange={e => setEditingCourse(prev => ({ ...prev, draft: { ...prev.draft, [field]: e.target.value } }))} style={{ ...inpStyle, width: 44 }} />
+                                        </div>
+                                      ))}
+                                    </div>
                                   </div>
                                 )}
                                 {/* Hole par / HCP grid */}
@@ -3854,14 +3849,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                       </div>
                     )}
                   </div>
-                  {/* Done button when all rounds have courses assigned */}
-                  {Array.from({ length: numRounds }, (_, ri) => ri + 1).every(r => tRounds.find(t => t.round_number === r && t.course_id)) && !searching && (
-                    <button onClick={() => setSettingsOpen(false)} style={{
-                      width: "100%", marginTop: 10, padding: "12px 0", borderRadius: 10,
-                      background: ac, border: "none", color: K.bg,
-                      fontSize: 13, fontWeight: 700, cursor: "pointer",
-                    }}>✓ All Rounds Set — Done</button>
-                  )}
+
                   {confirmCourse && confirmCourse.round && (
                     <div style={{ background: K.warn + "10", border: `1px solid ${K.warn}40`, borderRadius: 10, padding: 12, marginTop: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <span style={{ fontSize: 11, color: K.warn, fontWeight: 600 }}>Move R{confirmCourse.round} to {confirmCourse.course.name}?</span>
