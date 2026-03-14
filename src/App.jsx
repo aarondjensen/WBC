@@ -2462,7 +2462,6 @@ function TeeAssigner({ activePlayers, numRounds, tRounds, courses, teeData, setT
                 <div key={p.id} style={{
                   padding: "5px 12px", display: "flex", justifyContent: "space-between", alignItems: "center",
                   borderBottom: i < activePlayers.length - 1 ? `1px solid ${K.bdr}10` : "none",
-                  transition: "background 0.2s ease",
                 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
                     <span style={{ fontWeight: 600, fontSize: 12 }}>{p.name}</span>
@@ -4182,8 +4181,19 @@ export default function WBCApp() {
 
     // Tee assignments
     unsubs.push(sb.subscribe("tee_assignments", null, async (data) => {
-      const rows = await sb.get("tee_assignments", `tournament_id=eq.${TOURNAMENT_ID}`);
-      if (rows) setTeeData(rowsToTeeData(rows));
+      // Merge the single changed row directly instead of re-fetching everything.
+      // Re-fetching caused a flicker: optimistic state → server re-fetch overwrites with stale data → settles.
+      const record = data?.record || data?.new;
+      if (record?.player_id && record?.round_number != null && record?.tee_name) {
+        setTeeData(prev => ({
+          ...prev,
+          [record.round_number]: { ...(prev[record.round_number] || {}), [record.player_id]: record.tee_name }
+        }));
+      } else {
+        // Fallback for DELETE or malformed payload: full re-fetch
+        const rows = await sb.get("tee_assignments", `tournament_id=eq.${TOURNAMENT_ID}`);
+        if (rows) setTeeData(rowsToTeeData(rows));
+      }
     }));
 
     // Tournament state (finalized rounds)
