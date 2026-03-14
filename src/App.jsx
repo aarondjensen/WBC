@@ -1652,23 +1652,12 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
       })()}
 
       {allScored && currentHole < 17 && navSource === "auto" && !editingCompleted && (
-        <div style={{
-          position: "fixed", top: 80, left: "50%", transform: "translateX(-50%)",
-          background: K.acc, color: K.bg, padding: "12px 48px", borderRadius: 12,
-          fontSize: 13, fontWeight: 700, zIndex: 1000, whiteSpace: "nowrap", minWidth: 280, textAlign: "center",
-          boxShadow: "0 8px 32px rgba(0,0,0,0.4)", animation: "toastDown 0.3s ease",
-        }}>
+        <div style={{ position: "fixed", top: 80, left: "50%", transform: "translateX(-50%)", background: K.acc, color: K.bg, padding: "12px 48px", borderRadius: 12, fontSize: 13, fontWeight: 700, zIndex: 1000, whiteSpace: "nowrap", minWidth: 280, textAlign: "center", boxShadow: "0 8px 32px rgba(0,0,0,0.4)", animation: "toastDown 0.3s ease" }}>
           ✓ Hole {currentHole + 1} saved — advancing...
         </div>
       )}
       {allRoundComplete && !isGroupFinalized && !showFinalize && (
-        <div style={{
-          position: "fixed", top: 80, left: "50%", transform: "translateX(-50%)",
-          display: "flex", alignItems: "center", gap: 12,
-          background: K.acc, color: K.bg, padding: "12px 20px", borderRadius: 12,
-          fontSize: 13, fontWeight: 700, zIndex: 1000, minWidth: 280, maxWidth: "calc(100vw - 40px)",
-          boxShadow: "0 8px 32px rgba(0,0,0,0.4)", animation: "toastDown 0.3s ease",
-        }}>
+        <div style={{ position: "fixed", top: 80, left: "50%", transform: "translateX(-50%)", display: "flex", alignItems: "center", gap: 12, background: K.acc, color: K.bg, padding: "12px 20px", borderRadius: 12, fontSize: 13, fontWeight: 700, zIndex: 1000, minWidth: 280, maxWidth: "calc(100vw - 40px)", boxShadow: "0 8px 32px rgba(0,0,0,0.4)", animation: "toastDown 0.3s ease" }}>
           <span style={{ flex: 1 }}>🏆 Round complete!</span>
           <button onClick={() => setShowFinalize(true)} style={{ background: K.bg, color: K.acc, border: "none", borderRadius: 8, padding: "6px 16px", fontSize: 12, fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap" }}>Finalize Group</button>
         </div>
@@ -3070,12 +3059,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
               })}
             </div>
             {_finalizePending && (
-              <button onClick={() => setShowFinalizeModal(true)} style={{
-                padding: "8px 14px", borderRadius: 10, fontSize: 12, fontWeight: 700,
-                background: ac, border: "none", color: K.bg,
-                cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0,
-                display: "flex", alignItems: "center", gap: 6,
-              }}>
+              <button onClick={() => setShowFinalizeModal(true)} style={{ padding: "8px 14px", borderRadius: 10, fontSize: 12, fontWeight: 700, background: ac, border: "none", color: K.bg, cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0, display: "flex", alignItems: "center", gap: 6 }}>
                 <span style={{ width: 6, height: 6, borderRadius: "50%", background: K.bg, flexShrink: 0 }} />
                 Finalize
               </button>
@@ -3181,8 +3165,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                 <div>
                   <div style={{ background: K.card, borderRadius: 12, border: `1px solid ${K.bdr}`, overflow: "hidden" }}>
                     {(() => {
-                      const assignedRoundNums = Array.from({ length: numRounds }, (_, ri) => ri + 1).filter(r => tRounds.find(t => t.round_number === r && t.course_id));
-                      const allSet = assignedRoundNums.length === numRounds;
+                      const allSet = Array.from({ length: numRounds }, (_, ri) => ri + 1).every(r => tRounds.find(t => t.round_number === r && t.course_id));
                       const unassigned = Array.from({ length: numRounds }, (_, ri) => ri + 1).filter(r => !tRounds.find(t => t.round_number === r && t.course_id));
                       return (
                         <div style={{ padding: "9px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${K.bdr}` }}>
@@ -3806,86 +3789,77 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
         </div>
       )}
 
-      {/* Course edit modal */}
+      {/* Course edit modal — full height, header respects safe area */}
       {editingCourse && (() => {
         const d = editingCourse.draft;
-        const inpStyle = { background: K.inp, border: `1px solid ${ac}40`, borderRadius: 4, color: K.t1, fontSize: 9, textAlign: "center", width: "100%", padding: "2px 0", boxSizing: "border-box", inputMode: "decimal" };
         const saveEdit = () => { addCourse({ ...editingCourse.draft }); setEditingCourse(null); };
         return (
-          <div style={{ position: "fixed", top: 0, bottom: 0, left: 0, right: 0, background: "#00000090", zIndex: 200, display: "flex", alignItems: "flex-end", justifyContent: "center" }} onClick={() => setEditingCourse(null)}>
-            <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 480, height: "92vh", background: K.bg, borderRadius: "16px 16px 0 0", border: `1px solid ${K.bdr}`, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-              {/* Header — always visible */}
-              <div style={{ padding: "14px 16px 10px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${K.bdr}`, flexShrink: 0 }}>
-                <button onClick={() => setEditingCourse(null)} style={{ background: "transparent", border: `1px solid ${K.bdr}`, borderRadius: 8, color: K.t2, fontSize: 13, fontWeight: 600, padding: "6px 14px", cursor: "pointer" }}>Cancel</button>
-                <span style={{ fontWeight: 700, fontSize: 14, color: K.t1 }}>Edit Course</span>
-                <button onClick={saveEdit} style={{ background: ac, border: "none", borderRadius: 8, color: K.bg, fontSize: 13, fontWeight: 700, padding: "6px 18px", cursor: "pointer" }}>Save</button>
+          <div style={{ position: "fixed", top: 0, bottom: 0, left: 0, right: 0, background: K.bg, zIndex: 200, display: "flex", flexDirection: "column", maxWidth: 480, margin: "0 auto" }}>
+            {/* Header with safe-area top padding so it clears the Dynamic Island */}
+            <div style={{ paddingTop: "max(14px, calc(env(safe-area-inset-top, 0px) + 14px))", paddingBottom: 10, paddingLeft: 16, paddingRight: 16, display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${K.bdr}`, flexShrink: 0, background: K.bg }}>
+              <button onClick={() => setEditingCourse(null)} style={{ background: "transparent", border: `1px solid ${K.bdr}`, borderRadius: 8, color: K.t2, fontSize: 13, fontWeight: 600, padding: "6px 14px", cursor: "pointer" }}>Cancel</button>
+              <span style={{ fontWeight: 700, fontSize: 14, color: K.t1 }}>Edit Course</span>
+              <button onClick={saveEdit} style={{ background: ac, border: "none", borderRadius: 8, color: K.bg, fontSize: 13, fontWeight: 700, padding: "6px 18px", cursor: "pointer" }}>Save</button>
+            </div>
+            {/* Scrollable content */}
+            <div style={{ flex: 1, overflowY: "auto", padding: "16px 16px 48px" }}>
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 10, color: K.t3, fontWeight: 600, textTransform: "uppercase", marginBottom: 4 }}>Course Name</div>
+                <input value={d.name || ""} onChange={e => setEditingCourse(prev => ({ ...prev, draft: { ...prev.draft, name: e.target.value } }))} style={{ width: "100%", padding: "9px 10px", background: K.inp, border: `1px solid ${ac}40`, borderRadius: 8, color: K.t1, fontSize: 14, boxSizing: "border-box" }} />
               </div>
-              {/* Scrollable content */}
-              <div style={{ flex: 1, overflowY: "auto", padding: "16px 16px 32px" }}>
-                {/* Course Name only — no top-level rating/slope, those are tee-specific */}
-                <div style={{ marginBottom: 16 }}>
-                  <div style={{ fontSize: 10, color: K.t3, fontWeight: 600, textTransform: "uppercase", marginBottom: 4 }}>Course Name</div>
-                  <input value={d.name || ""} onChange={e => setEditingCourse(prev => ({ ...prev, draft: { ...prev.draft, name: e.target.value } }))} style={{ width: "100%", padding: "9px 10px", background: K.inp, border: `1px solid ${ac}40`, borderRadius: 8, color: K.t1, fontSize: 14, boxSizing: "border-box" }} />
-                </div>
-                {/* Tee boxes — sorted by slope descending */}
-                {[...(d.tee_boxes||[])].sort((a,b) => (parseFloat(b.slope)||0)-(parseFloat(a.slope)||0)).map((tb, tbi) => {
-                  const sortedTbs = [...(d.tee_boxes||[])].sort((a,b) => (parseFloat(b.slope)||0)-(parseFloat(a.slope)||0));
-                  const origIdx = d.tee_boxes.indexOf(sortedTbs[tbi]);
-                  return (
-                    <div key={tbi} style={{ background: K.card, border: `1px solid ${K.bdr}`, borderRadius: 10, padding: "10px 12px", marginBottom: 8 }}>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <TeeColorSwatch color={tb.color} name={tb.name} size={12} />
-                          <span style={{ fontWeight: 700, fontSize: 14, color: K.t1 }}>{tb.name}</span>
+              {[...(d.tee_boxes||[])].sort((a,b) => (parseFloat(b.slope)||0)-(parseFloat(a.slope)||0)).map((tb, tbi) => {
+                const sortedTbs = [...(d.tee_boxes||[])].sort((a,b) => (parseFloat(b.slope)||0)-(parseFloat(a.slope)||0));
+                const origIdx = d.tee_boxes.indexOf(sortedTbs[tbi]);
+                return (
+                  <div key={tbi} style={{ background: K.card, border: `1px solid ${K.bdr}`, borderRadius: 10, padding: "10px 12px", marginBottom: 8 }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <TeeColorSwatch color={tb.color} name={tb.name} size={12} />
+                        <span style={{ fontWeight: 700, fontSize: 14, color: K.t1 }}>{tb.name}</span>
+                      </div>
+                      <button onClick={() => setEditingCourse(prev => ({ ...prev, draft: { ...prev.draft, tee_boxes: prev.draft.tee_boxes.filter((_,i) => i !== origIdx) } }))}
+                        style={{ background: "transparent", border: "none", color: K.t3, cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 4px" }}>✕</button>
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      {["rating","slope","par"].map(f => (
+                        <div key={f} style={{ flex: 1 }}>
+                          <div style={{ fontSize: 9, color: K.t3, textTransform: "uppercase", marginBottom: 3 }}>{f}</div>
+                          <input inputMode="decimal" value={tb[f]||""} onChange={e => setEditingCourse(prev => { const tbs = [...prev.draft.tee_boxes]; tbs[origIdx] = {...tbs[origIdx],[f]:e.target.value}; return {...prev,draft:{...prev.draft,tee_boxes:tbs}}; })} style={{ width: "100%", padding: "7px 6px", background: K.inp, border: `1px solid ${ac}30`, borderRadius: 6, color: K.t1, fontSize: 13, textAlign: "center", boxSizing: "border-box" }} />
                         </div>
-                        <button onClick={() => setEditingCourse(prev => ({ ...prev, draft: { ...prev.draft, tee_boxes: prev.draft.tee_boxes.filter((_,i) => i !== origIdx) } }))}
-                          style={{ background: "transparent", border: "none", color: K.t3, cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 4px" }}>✕</button>
-                      </div>
-                      <div style={{ display: "flex", gap: 8 }}>
-                        {["rating","slope","par"].map(f => (
-                          <div key={f} style={{ flex: 1 }}>
-                            <div style={{ fontSize: 9, color: K.t3, textTransform: "uppercase", marginBottom: 3 }}>{f}</div>
-                            <input
-                              inputMode="decimal"
-                              value={tb[f]||""}
-                              onChange={e => setEditingCourse(prev => { const tbs = [...prev.draft.tee_boxes]; tbs[origIdx] = {...tbs[origIdx],[f]:e.target.value}; return {...prev,draft:{...prev.draft,tee_boxes:tbs}}; })}
-                              style={{ width: "100%", padding: "7px 6px", background: K.inp, border: `1px solid ${ac}30`, borderRadius: 6, color: K.t1, fontSize: 13, textAlign: "center", boxSizing: "border-box" }} />
-                          </div>
-                        ))}
-                      </div>
+                      ))}
                     </div>
-                  );
-                })}
-                {/* Hole Par / HCP grids */}
-                {[["Front", 0, 9], ["Back", 9, 9]].map(([label, start, count]) => {
-                  const pars = (d.hole_pars||[]).slice(start, start+count);
-                  const hcps = (d.hole_handicaps||[]).slice(start, start+count);
-                  return (
-                    <div key={label} style={{ marginBottom: 8 }}>
-                      <div style={{ fontSize: 10, color: K.t3, fontWeight: 600, textTransform: "uppercase", marginBottom: 4 }}>{label} 9</div>
-                      <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 32px`, gap: 2, fontSize: 9 }}>
-                        <div style={{ color: K.t3, fontWeight: 600, padding: "2px 0" }}>Hole</div>
-                        {Array.from({length:count},(_,i)=><div key={i} style={{ textAlign:"center", color:K.t2, fontWeight:700, padding:"2px 0" }}>{start+i+1}</div>)}
-                        <div />
-                      </div>
-                      <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 32px`, gap: 2, background: K.inp, borderRadius: 6, padding: "2px 0", marginBottom: 2 }}>
-                        <div style={{ color: K.t3, fontWeight: 600, padding: "3px 2px", fontSize: 9 }}>Par</div>
-                        {Array.from({length:count},(_,i) => (
-                          <input key={i} inputMode="numeric" value={pars[i]??""} onChange={e => setEditingCourse(prev => { const hp=[...(prev.draft.hole_pars||[])]; hp[start+i]=parseInt(e.target.value)||0; return {...prev,draft:{...prev.draft,hole_pars:hp}}; })} style={{ background: K.inp, border: `1px solid ${ac}40`, borderRadius: 4, color: K.t1, fontSize: 9, textAlign: "center", width: "100%", padding: "2px 0", boxSizing: "border-box" }} />
-                        ))}
-                        <div style={{ textAlign:"center", color:ac, fontWeight:800, padding:"3px 0", fontSize:10 }}>{pars.reduce((a,b)=>a+(+b||0),0)}</div>
-                      </div>
-                      <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 32px`, gap: 2 }}>
-                        <div style={{ color: K.t3, fontWeight: 600, padding: "2px 2px", fontSize: 9 }}>HCP</div>
-                        {Array.from({length:count},(_,i) => (
-                          <input key={i} inputMode="numeric" value={hcps[i]??""} onChange={e => setEditingCourse(prev => { const hh=[...(prev.draft.hole_handicaps||[])]; hh[start+i]=parseInt(e.target.value)||0; return {...prev,draft:{...prev.draft,hole_handicaps:hh}}; })} style={{ background: K.inp, border: `1px solid ${ac}40`, borderRadius: 4, color: K.t3, fontSize: 9, textAlign: "center", width: "100%", padding: "2px 0", boxSizing: "border-box" }} />
-                        ))}
-                        <div />
-                      </div>
+                  </div>
+                );
+              })}
+              {[["Front", 0, 9], ["Back", 9, 9]].map(([label, start, count]) => {
+                const pars = (d.hole_pars||[]).slice(start, start+count);
+                const hcps = (d.hole_handicaps||[]).slice(start, start+count);
+                const inpStyle = { background: K.inp, border: `1px solid ${ac}40`, borderRadius: 4, color: K.t1, fontSize: 9, textAlign: "center", width: "100%", padding: "2px 0", boxSizing: "border-box" };
+                return (
+                  <div key={label} style={{ marginBottom: 8 }}>
+                    <div style={{ fontSize: 10, color: K.t3, fontWeight: 600, textTransform: "uppercase", marginBottom: 4 }}>{label} 9</div>
+                    <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 32px`, gap: 2, fontSize: 9 }}>
+                      <div style={{ color: K.t3, fontWeight: 600, padding: "2px 0" }}>Hole</div>
+                      {Array.from({length:count},(_,i)=><div key={i} style={{ textAlign:"center", color:K.t2, fontWeight:700, padding:"2px 0" }}>{start+i+1}</div>)}
+                      <div />
                     </div>
-                  );
-                })}
-              </div>
+                    <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 32px`, gap: 2, background: K.inp, borderRadius: 6, padding: "2px 0", marginBottom: 2 }}>
+                      <div style={{ color: K.t3, fontWeight: 600, padding: "3px 2px", fontSize: 9 }}>Par</div>
+                      {Array.from({length:count},(_,i) => (
+                        <input key={i} inputMode="numeric" value={pars[i]??""} onChange={e => setEditingCourse(prev => { const hp=[...(prev.draft.hole_pars||[])]; hp[start+i]=parseInt(e.target.value)||0; return {...prev,draft:{...prev.draft,hole_pars:hp}}; })} style={inpStyle} />
+                      ))}
+                      <div style={{ textAlign:"center", color:ac, fontWeight:800, padding:"3px 0", fontSize:10 }}>{pars.reduce((a,b)=>a+(+b||0),0)}</div>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 32px`, gap: 2 }}>
+                      <div style={{ color: K.t3, fontWeight: 600, padding: "2px 2px", fontSize: 9 }}>HCP</div>
+                      {Array.from({length:count},(_,i) => (
+                        <input key={i} inputMode="numeric" value={hcps[i]??""} onChange={e => setEditingCourse(prev => { const hh=[...(prev.draft.hole_handicaps||[])]; hh[start+i]=parseInt(e.target.value)||0; return {...prev,draft:{...prev.draft,hole_handicaps:hh}}; })} style={{...inpStyle, color:K.t3}} />
+                      ))}
+                      <div />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         );
@@ -4741,19 +4715,12 @@ export default function WBCApp() {
           </div>
 
           {(() => {
-            const roundIsActive = Object.keys(holeData).some(key => {
-              const parts = key.split("_");
-              const rnd = parseInt(parts[parts.length - 1]);
-              return !finalizedRounds[rnd] && Object.keys(holeData[key] || {}).length > 0;
-            });
+            const roundIsActive = Object.keys(holeData).some(key => { const parts = key.split("_"); const rnd = parseInt(parts[parts.length - 1]); return !finalizedRounds[rnd] && Object.keys(holeData[key] || {}).length > 0; });
             const btnColor = roundIsActive ? K.acc : K.t2;
             const btnBorder = roundIsActive ? `1px solid ${K.acc}40` : `1px solid ${K.bdr}`;
             return (
               <div style={{ marginTop: 24, borderTop: `1px solid ${K.bdr}30`, paddingTop: 20 }}>
-                <button onClick={() => setUser({ id: "guest", name: "Guest", isDirector: false, isGuest: true })}
-                  style={{ width: "100%", padding: "13px 0", borderRadius: 12, background: "transparent", border: btnBorder, color: btnColor, fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, letterSpacing: "0.02em", transition: "all 0.15s" }}
-                  onMouseEnter={e => { e.currentTarget.style.background = btnColor + "12"; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}>
+                <button onClick={() => setUser({ id: "guest", name: "Guest", isDirector: false, isGuest: true })} style={{ width: "100%", padding: "13px 0", borderRadius: 12, background: "transparent", border: btnBorder, color: btnColor, fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, letterSpacing: "0.02em" }} onMouseEnter={e => { e.currentTarget.style.background = btnColor + "12"; }} onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}>
                   {roundIsActive && <span style={{ width: 7, height: 7, borderRadius: "50%", background: K.acc, display: "inline-block", boxShadow: `0 0 6px ${K.acc}` }} />}
                   <img src="/wbc-trophy.png" alt="" style={{ height: 18, width: "auto", objectFit: "contain", filter: roundIsActive ? "none" : "brightness(0) invert(0.6)" }} />
                   Live Leaderboard
