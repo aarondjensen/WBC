@@ -3304,10 +3304,10 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                                     </div>
                                   );
                                 })}
-                              <button onClick={() => { setExpandedCourse(null); setEditingCourse(null); }} style={{ display: "block", width: "100%", marginTop: 14, padding: "11px 0", borderRadius: 10, background: K.inp, border: `1px solid ${K.bdr}`, color: K.t2, fontSize: 13, fontWeight: 600, cursor: "pointer", letterSpacing: "0.02em" }}>Close</button>
+                              <button onClick={() => { setExpandedCourse(null); setEditingCourse(null); }} style={{ display: "block", width: "100%", marginTop: 14, padding: "11px 0", borderRadius: 10, background: K.inp, border: `1px solid ${K.bdr}`, color: K.t2, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Close</button>
                             </div>
                             );
-                          })()
+                          })()}
                         </div>
                       );
                     })}
