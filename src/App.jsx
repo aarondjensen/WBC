@@ -1661,16 +1661,34 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
         );
       })()}
 
-      {/* Advancing toast - fixed at bottom, outside animated container */}
+      {/* Advancing toast - fixed at top */}
       {allScored && currentHole < 17 && navSource === "auto" && !editingCompleted && (
         <div style={{
-          position: "fixed", bottom: 80, left: "50%", transform: "translateX(-50%)",
+          position: "fixed", top: 80, left: "50%", transform: "translateX(-50%)",
           background: K.acc, color: K.bg, padding: "12px 48px", borderRadius: 12,
           fontSize: 13, fontWeight: 700, zIndex: 1000, whiteSpace: "nowrap", minWidth: 280, textAlign: "center",
           boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
-          animation: "toastUp 0.3s ease",
+          animation: "toastDown 0.3s ease",
         }}>
           ✓ Hole {currentHole + 1} saved — advancing...
+        </div>
+      )}
+
+      {/* Finalize banner - fixed at top when all 18 complete */}
+      {allRoundComplete && !isGroupFinalized && !showFinalize && (
+        <div style={{
+          position: "fixed", top: 80, left: "50%", transform: "translateX(-50%)",
+          display: "flex", alignItems: "center", gap: 12,
+          background: K.acc, color: K.bg, padding: "12px 20px", borderRadius: 12,
+          fontSize: 13, fontWeight: 700, zIndex: 1000, minWidth: 280, maxWidth: "calc(100vw - 40px)",
+          boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+          animation: "toastDown 0.3s ease",
+        }}>
+          <span style={{ flex: 1 }}>🏆 Round complete!</span>
+          <button onClick={() => setShowFinalize(true)} style={{
+            background: K.bg, color: K.acc, border: "none", borderRadius: 8,
+            padding: "6px 16px", fontSize: 12, fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap",
+          }}>Finalize Group</button>
         </div>
       )}
     </div>
@@ -3251,12 +3269,11 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                                   ))}
                                   <div style={{ marginLeft: "auto", display: "flex", gap: 4, alignItems: "center" }}>
                                     {!isEditing
-                                      ? <button onClick={startEdit} style={{ padding: "3px 8px", borderRadius: 4, background: "transparent", border: `1px solid ${ac}60`, color: ac, fontSize: 9, fontWeight: 700, cursor: "pointer" }}>✏️ Edit</button>
+                                      ? <button onClick={startEdit} style={{ padding: "6px 14px", borderRadius: 8, background: "transparent", border: `1px solid ${ac}60`, color: ac, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>✏️ Edit</button>
                                       : <>
-                                          <button onClick={saveEdit} style={{ padding: "3px 8px", borderRadius: 4, background: ac, border: "none", color: K.bg, fontSize: 9, fontWeight: 700, cursor: "pointer" }}>Save</button>
-                                          <button onClick={() => setEditingCourse(null)} style={{ padding: "3px 8px", borderRadius: 4, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t3, fontSize: 9, cursor: "pointer" }}>Cancel</button>
+                                          <button onClick={saveEdit} style={{ padding: "6px 14px", borderRadius: 8, background: ac, border: "none", color: K.bg, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Save</button>
+                                          <button onClick={() => setEditingCourse(null)} style={{ padding: "6px 14px", borderRadius: 8, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t3, fontSize: 12, cursor: "pointer" }}>Cancel</button>
                                         </>}
-                                    <button onClick={() => { setExpandedCourse(null); setEditingCourse(null); }} style={{ padding: "2px 6px", borderRadius: 4, background: "transparent", border: "none", color: K.t3, fontSize: 14, cursor: "pointer", lineHeight: 1 }} title="Collapse">✕</button>
                                   </div>
                                 </div>
                                 {/* Tee boxes */}
@@ -3312,6 +3329,11 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                                   );
                                 })}
                               </div>
+                              {/* Done button — easy to tap on mobile */}
+                              <button
+                                onClick={() => { setExpandedCourse(null); setEditingCourse(null); }}
+                                style={{ display: "block", width: "100%", marginTop: 14, padding: "11px 0", borderRadius: 10, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t2, fontSize: 14, fontWeight: 700, cursor: "pointer", letterSpacing: "0.02em" }}
+                              >Done</button>
                             );
                           })()}
                         </div>
@@ -4659,7 +4681,7 @@ export default function WBCApp() {
           @keyframes loginPulse { 0% { transform: scale(0.8); opacity: 0; } 50% { transform: scale(1.05); opacity: 1; } 100% { transform: scale(1); opacity: 1; } }
           @keyframes loginCheck { 0% { stroke-dashoffset: 24; } 100% { stroke-dashoffset: 0; } }
           @keyframes loginFade { 0% { opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; } }
-          @keyframes toastUp { 0% { transform: translateX(-50%) translateY(20px); opacity: 0; } 100% { transform: translateX(-50%) translateY(0); opacity: 1; } }
+          @keyframes toastDown { 0% { transform: translateX(-50%) translateY(-20px); opacity: 0; } 100% { transform: translateX(-50%) translateY(0); opacity: 1; } }
           @keyframes shake { 0%,100% { transform: translateX(0); } 20%,60% { transform: translateX(-6px); } 40%,80% { transform: translateX(6px); } }
           @keyframes finalizeGlow { 0%,100% { box-shadow: 0 0 4px rgba(212,168,67,0.2); } 50% { box-shadow: 0 0 14px rgba(212,168,67,0.5); } }
           @keyframes pulse { 0%,100% { opacity: 0.5; } 50% { opacity: 0.2; } }
@@ -4723,32 +4745,35 @@ export default function WBCApp() {
             )}
           </div>
 
-          {/* Live Leaderboard guest access */}
-          <div style={{ marginTop: 24, borderTop: `1px solid ${K.bdr}30`, paddingTop: 20 }}>
-            <button
-              onClick={() => setUser({ id: "guest", name: "Guest", isDirector: false, isGuest: true })}
-              style={{
-                width: "100%", padding: "13px 0", borderRadius: 12,
-                background: "transparent",
-                border: `1px solid ${K.acc}40`,
-                color: K.acc, fontSize: 14, fontWeight: 700, cursor: "pointer",
-                display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-                letterSpacing: "0.02em",
-                transition: "all 0.15s",
-              }}
-              onMouseEnter={e => { e.currentTarget.style.background = K.acc + "12"; e.currentTarget.style.borderColor = K.acc + "80"; }}
-              onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.borderColor = K.acc + "40"; }}
-            >
-              <svg width="16" height="16" viewBox="0 0 200 300" fill={K.acc}>
-                <path d="M62,14 L138,14 C140,14 142,15 142,17 L140,88 C138,102 126,114 112,120 L88,120 C74,114 62,102 60,88 L58,17 C58,15 60,14 62,14Z"/>
-                <rect x="92" y="128" width="16" height="18" rx="2"/>
-                <rect x="74" y="144" width="52" height="8" rx="2"/>
-                <rect x="60" y="152" width="80" height="60" rx="2"/>
-                <rect x="50" y="210" width="100" height="10" rx="2"/>
-              </svg>
-              Live Leaderboard
-            </button>
-          </div>
+          {(() => {
+            const roundIsActive = Object.keys(holeData).some(key => {
+              const parts = key.split("_");
+              const rnd = parseInt(parts[parts.length - 1]);
+              return !finalizedRounds[rnd] && Object.keys(holeData[key] || {}).length > 0;
+            });
+            const btnColor = roundIsActive ? K.acc : K.t2;
+            const btnBorder = roundIsActive ? `1px solid ${K.acc}40` : `1px solid ${K.bdr}`;
+            return (
+              <div style={{ marginTop: 24, borderTop: `1px solid ${K.bdr}30`, paddingTop: 20 }}>
+                <button
+                  onClick={() => setUser({ id: "guest", name: "Guest", isDirector: false, isGuest: true })}
+                  style={{ width: "100%", padding: "13px 0", borderRadius: 12, background: "transparent", border: btnBorder, color: btnColor, fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, letterSpacing: "0.02em", transition: "all 0.15s" }}
+                  onMouseEnter={e => { e.currentTarget.style.background = btnColor + "12"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
+                >
+                  {roundIsActive && <span style={{ width: 7, height: 7, borderRadius: "50%", background: K.acc, display: "inline-block", boxShadow: `0 0 6px ${K.acc}` }} />}
+                  <svg width="15" height="15" viewBox="0 0 200 300" fill={btnColor}>
+                    <path d="M62,14 L138,14 C140,14 142,15 142,17 L140,88 C138,102 126,114 112,120 L88,120 C74,114 62,102 60,88 L58,17 C58,15 60,14 62,14Z"/>
+                    <rect x="92" y="128" width="16" height="18" rx="2"/>
+                    <rect x="74" y="144" width="52" height="8" rx="2"/>
+                    <rect x="60" y="152" width="80" height="60" rx="2"/>
+                    <rect x="50" y="210" width="100" height="10" rx="2"/>
+                  </svg>
+                  Live Leaderboard
+                </button>
+              </div>
+            );
+          })()}
         </div>
       </div>
     );
