@@ -3231,7 +3231,6 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                             };
                             return (
                               <div style={{ padding: "0 14px 12px", background: ac + "04" }}>
-                                {/* Tee boxes + Edit button side by side */}
                                 <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginTop: 6, marginBottom: 6 }}>
                                   <div style={{ flex: 1 }}>
                                     {(d.tee_boxes||[]).map((tb, tbi) => (
@@ -3850,7 +3849,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                     )}
                   </div>
 
-                  {/* confirmCourse toasts rendered as fixed overlay — see below modal */}
+
                 </div>
               )}
 
@@ -3867,25 +3866,25 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
         </div>
       )}
 
-      {/* confirmCourse fixed overlays — always visible regardless of scroll */}
+      {/* confirmCourse fixed overlays — bottom center, always visible */}
       {confirmCourse && confirmCourse.round && (
-        <div style={{ position: "fixed", bottom: 80, left: "50%", transform: "translateX(-50%)", zIndex: 300, width: "calc(100% - 32px)", maxWidth: 440, animation: "toastDown 0.25s ease" }}>
-          <div style={{ background: K.card, border: `1px solid ${K.warn}50`, borderRadius: 12, padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", boxShadow: "0 8px 32px rgba(0,0,0,0.5)" }}>
+        <div style={{ position: "fixed", bottom: "max(100px, calc(80px + env(safe-area-inset-bottom, 0px)))", left: "50%", transform: "translateX(-50%)", zIndex: 500, width: "calc(100% - 32px)", maxWidth: 440 }}>
+          <div style={{ background: K.card, border: `1px solid ${K.warn}50`, borderRadius: 12, padding: "13px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", boxShadow: "0 8px 32px rgba(0,0,0,0.6)" }}>
             <span style={{ fontSize: 13, color: K.warn, fontWeight: 600 }}>Move R{confirmCourse.round} to {confirmCourse.course.name}?</span>
-            <div style={{ display: "flex", gap: 6 }}>
-              <button onClick={() => setConfirmCourse(null)} style={{ padding: "6px 14px", borderRadius: 8, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t2, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>No</button>
-              <button onClick={() => { setCourseForRound(confirmCourse.round, confirmCourse.course); setConfirmCourse(null); }} style={{ padding: "6px 14px", borderRadius: 8, background: ac, border: "none", color: K.bg, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Yes</button>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => setConfirmCourse(null)} style={{ padding: "7px 16px", borderRadius: 8, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t2, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>No</button>
+              <button onClick={() => { setCourseForRound(confirmCourse.round, confirmCourse.course); setConfirmCourse(null); }} style={{ padding: "7px 16px", borderRadius: 8, background: ac, border: "none", color: K.bg, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Yes</button>
             </div>
           </div>
         </div>
       )}
       {confirmCourse && confirmCourse.delete && (
-        <div style={{ position: "fixed", bottom: 80, left: "50%", transform: "translateX(-50%)", zIndex: 300, width: "calc(100% - 32px)", maxWidth: 440, animation: "toastDown 0.25s ease" }}>
-          <div style={{ background: K.card, border: `1px solid ${K.danger}50`, borderRadius: 12, padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", boxShadow: "0 8px 32px rgba(0,0,0,0.5)" }}>
+        <div style={{ position: "fixed", bottom: "max(100px, calc(80px + env(safe-area-inset-bottom, 0px)))", left: "50%", transform: "translateX(-50%)", zIndex: 500, width: "calc(100% - 32px)", maxWidth: 440 }}>
+          <div style={{ background: K.card, border: `1px solid ${K.danger}50`, borderRadius: 12, padding: "13px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", boxShadow: "0 8px 32px rgba(0,0,0,0.6)" }}>
             <span style={{ fontSize: 12, color: K.danger, fontWeight: 600, flex: 1, marginRight: 8 }}>Remove "{confirmCourse.course.name}"?{confirmCourse.assignedRounds.length > 0 ? ` (unassigns R${confirmCourse.assignedRounds.join(", R")})` : ""}</span>
-            <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-              <button onClick={() => setConfirmCourse(null)} style={{ padding: "6px 14px", borderRadius: 8, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t2, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>No</button>
-              <button onClick={() => { confirmCourse.assignedRounds.forEach(r => setCourseForRound(r, { id: null, name: "" })); addCourse({ _delete: true, id: confirmCourse.course.id }); setConfirmCourse(null); }} style={{ padding: "6px 14px", borderRadius: 8, background: K.danger, border: "none", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Remove</button>
+            <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+              <button onClick={() => setConfirmCourse(null)} style={{ padding: "7px 16px", borderRadius: 8, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t2, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>No</button>
+              <button onClick={() => { confirmCourse.assignedRounds.forEach(r => setCourseForRound(r, { id: null, name: "" })); addCourse({ _delete: true, id: confirmCourse.course.id }); setConfirmCourse(null); }} style={{ padding: "7px 16px", borderRadius: 8, background: K.danger, border: "none", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Remove</button>
             </div>
           </div>
         </div>
