@@ -645,17 +645,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
         </div>
         {/* Center — title */}
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 300" style={{ height: 22, width: "auto" }}>
-            <rect x="62" y="14" width="76" height="10" rx="2" fill="currentColor"/>
-            <path d="M68,18 C52,18 36,26 34,46 C32,64 44,80 62,88 C58,88 50,80 48,68 C44,54 48,34 58,26 C62,22 66,20 68,20Z" fill="currentColor"/>
-            <path d="M132,18 C148,18 164,26 166,46 C168,64 156,80 138,88 C142,88 150,80 152,68 C156,54 152,34 142,26 C138,22 134,20 132,20Z" fill="currentColor"/>
-            <path d="M62,14 L138,14 C140,14 142,15 142,17 L140,88 C138,102 126,114 112,120 L88,120 C74,114 62,102 60,88 L58,17 C58,15 60,14 62,14Z" fill="currentColor"/>
-            <ellipse cx="100" cy="128" rx="16" ry="5" fill="currentColor"/>
-            <rect x="92" y="128" width="16" height="18" rx="2" fill="currentColor"/>
-            <rect x="74" y="144" width="52" height="8" rx="2" fill="currentColor"/>
-            <rect x="60" y="152" width="80" height="60" rx="2" fill="currentColor"/>
-            <rect x="50" y="210" width="100" height="10" rx="2" fill="currentColor"/>
-          </svg>
+          <img src="/wbc-trophy.png" alt="" style={{ height: 22, width: "auto", objectFit: "contain" }} />
           <h2 style={{ fontFamily: "'Montserrat', sans-serif", fontSize: 20, margin: 0, fontWeight: 800 }}>Leaderboard</h2>
           {(() => {
             const isFinalized = finalizedRounds[round];
@@ -4750,13 +4740,7 @@ export default function WBCApp() {
                   onMouseEnter={e => { e.currentTarget.style.background = btnColor + "12"; }}
                   onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}>
                   {roundIsActive && <span style={{ width: 7, height: 7, borderRadius: "50%", background: K.acc, display: "inline-block", boxShadow: `0 0 6px ${K.acc}` }} />}
-                  <svg width="15" height="15" viewBox="0 0 200 300" fill={btnColor}>
-                    <path d="M62,14 L138,14 C140,14 142,15 142,17 L140,88 C138,102 126,114 112,120 L88,120 C74,114 62,102 60,88 L58,17 C58,15 60,14 62,14Z"/>
-                    <rect x="92" y="128" width="16" height="18" rx="2"/>
-                    <rect x="74" y="144" width="52" height="8" rx="2"/>
-                    <rect x="60" y="152" width="80" height="60" rx="2"/>
-                    <rect x="50" y="210" width="100" height="10" rx="2"/>
-                  </svg>
+                  <img src="/wbc-trophy.png" alt="" style={{ height: 18, width: "auto", objectFit: "contain", filter: roundIsActive ? "none" : "brightness(0) invert(0.6)" }} />
                   Live Leaderboard
                 </button>
               </div>
