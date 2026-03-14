@@ -2996,10 +2996,6 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
             </button>
           );
         })}
-        <button onClick={() => setSettingsOpen(true)} title="Tournament Settings" style={{
-          width: 38, height: 38, borderRadius: 10, background: K.card, border: `1px solid ${K.bdr}`,
-          color: K.t3, fontSize: 16, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-        }}>⚙️</button>
       </div>
 
       {/* Sub-tabs: Tees / Pairings for selected round */}
@@ -3022,11 +3018,23 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
             });
           })
         );
-        const subDone = { tees: _teeDone, pairings: _pairingsDone, finalize: !_finalizePending };
-        return (
+        const subDone = { tees: _teeDone, pairings: _pairingsDone };
+        return (<>
+          {/* Finalize banner — bright yellow, between round pills and tab toggle */}
+          {_finalizePending && (
+            <button onClick={() => setShowFinalizeModal(true)} style={{
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+              width: "100%", padding: "10px 14px", borderRadius: 10, marginBottom: 10,
+              background: "#fbbf24", border: "none", color: "#1a1100",
+              fontSize: 13, fontWeight: 800, cursor: "pointer", letterSpacing: "0.01em",
+            }}>
+              <span style={{ fontSize: 15 }}>🏆</span>
+              Round ready to finalize — tap to close out
+            </button>
+          )}
+          {/* Toggle row with settings icon */}
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
             <div style={{ position: "relative", display: "flex", flex: 1, background: K.card, borderRadius: 10, border: `1px solid ${K.bdr}`, padding: 3, gap: 0 }}>
-              {/* Sliding pill */}
               <div style={{
                 position: "absolute", top: 3, bottom: 3,
                 left: tab === "tees" ? 3 : "calc(50% + 1.5px)",
@@ -3058,14 +3066,13 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                 );
               })}
             </div>
-            {_finalizePending && (
-              <button onClick={() => setShowFinalizeModal(true)} style={{ padding: "8px 14px", borderRadius: 10, fontSize: 12, fontWeight: 700, background: ac, border: "none", color: K.bg, cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0, display: "flex", alignItems: "center", gap: 6 }}>
-                <span style={{ width: 6, height: 6, borderRadius: "50%", background: K.bg, flexShrink: 0 }} />
-                Finalize
-              </button>
-            )}
+            {/* Settings icon — next to toggle */}
+            <button onClick={() => setSettingsOpen(true)} title="Tournament Settings" style={{
+              width: 38, height: 38, borderRadius: 10, background: K.card, border: `1px solid ${K.bdr}`,
+              color: K.t3, fontSize: 16, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+            }}>⚙️</button>
           </div>
-        );
+        </>);
       })()}
 
       {/* Warning banner for incomplete round setup */}
@@ -3789,14 +3796,10 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
         </div>
       )}
 
-      {/* Course edit modal — full screen with safe area */}
+      {/* Course edit modal */}
       {editingCourse && (() => {
         const d = editingCourse.draft;
-        const saveEdit = () => {
-          addCourse({ ...editingCourse.draft });
-          setEditingCourse(null);
-          setExpandedCourse(null); // collapse after save
-        };
+        const saveEdit = () => { addCourse({ ...editingCourse.draft }); setEditingCourse(null); setExpandedCourse(null); };
         const inpStyle = { background: K.inp, border: `1px solid ${ac}40`, borderRadius: 4, color: K.t1, fontSize: 9, textAlign: "center", width: "100%", padding: "2px 0", boxSizing: "border-box" };
         return (
           <div style={{ position: "fixed", top: 0, bottom: 0, left: 0, right: 0, background: K.bg, zIndex: 200, display: "flex", flexDirection: "column", maxWidth: 480, margin: "0 auto" }}>
@@ -4407,7 +4410,6 @@ export default function WBCApp() {
       const updated = existing
         ? prev.map(t => t.round_number === rnd ? { ...t, course_id: course.id } : t)
         : (course.id ? [...prev, trRow] : prev);
-      // Delay sort so assignment feels snappy; reorder happens after a brief pause
       setTimeout(() => setCourseList(cl => sortCoursesByRound(cl, updated)), 800);
       return updated;
     });
