@@ -1651,7 +1651,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
         );
       })()}
 
-      {/* Advancing toast - fixed at top */}
+      {/* Advancing toast */}
       {allScored && currentHole < 17 && navSource === "auto" && !editingCompleted && (
         <div style={{
           position: "fixed", top: 80, left: "50%", transform: "translateX(-50%)",
@@ -3126,9 +3126,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
           <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 480, height: "85vh", background: K.bg, borderRadius: "16px 16px 0 0", border: `1px solid ${K.bdr}`, display: "flex", flexDirection: "column", overflow: "hidden" }}>
             {/* Modal header */}
             <div style={{ padding: "14px 16px 10px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${K.bdr}` }}>
-              {notif
-                ? <span style={{ fontWeight: 600, fontSize: 13, color: K.acc }}>{notif}</span>
-                : <span style={{ fontWeight: 700, fontSize: 15, color: K.t1 }}>Tournament Settings</span>}
+              {notif ? <span style={{ fontWeight: 600, fontSize: 13, color: K.acc }}>{notif}</span> : <span style={{ fontWeight: 700, fontSize: 15, color: K.t1 }}>Tournament Settings</span>}
               <button onClick={() => setSettingsOpen(false)} style={{ background: "transparent", border: "none", color: K.t3, fontSize: 20, cursor: "pointer", lineHeight: 1 }}>✕</button>
             </div>
             {/* Settings sub-tabs */}
@@ -3183,12 +3181,19 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
               {settingsTab === "course" && (
                 <div>
                   <div style={{ background: K.card, borderRadius: 12, border: `1px solid ${K.bdr}`, overflow: "hidden" }}>
-                    <div style={{ padding: "10px 14px", display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 6, borderBottom: `1px solid ${K.bdr}` }}>
-                      {Array.from({ length: numRounds }, (_, ri) => ri + 1).every(r => tRounds.find(t => t.round_number === r && t.course_id)) && !searching && (
-                        <button onClick={() => setSettingsOpen(false)} style={{ padding: "4px 12px", borderRadius: 6, background: "transparent", border: `1px solid ${ac}`, color: ac, fontSize: 10, fontWeight: 700, cursor: "pointer" }}>✓ All Rounds Set</button>
-                      )}
-                      <button onClick={() => { setSearching(!searching); setCourseSearch(""); setSearchResults([]); }} style={{ padding: "3px 8px", borderRadius: 6, background: "transparent", border: `1px solid ${ac}50`, color: ac, fontSize: 10, fontWeight: 600, cursor: "pointer" }}>{searching ? "Close" : "+ Add"}</button>
-                    </div>
+                    {(() => {
+                      const assignedRoundNums = Array.from({ length: numRounds }, (_, ri) => ri + 1).filter(r => tRounds.find(t => t.round_number === r && t.course_id));
+                      const allSet = assignedRoundNums.length === numRounds;
+                      const unassigned = Array.from({ length: numRounds }, (_, ri) => ri + 1).filter(r => !tRounds.find(t => t.round_number === r && t.course_id));
+                      return (
+                        <div style={{ padding: "9px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${K.bdr}` }}>
+                          {allSet
+                            ? <span style={{ fontSize: 11, fontWeight: 700, color: K.acc }}>✓ All rounds assigned</span>
+                            : <span style={{ fontSize: 11, fontWeight: 600, color: K.warn }}>R{unassigned.join(", R")} unassigned</span>}
+                          <button onClick={() => { setSearching(!searching); setCourseSearch(""); setSearchResults([]); }} style={{ padding: "3px 8px", borderRadius: 6, background: "transparent", border: `1px solid ${ac}50`, color: ac, fontSize: 10, fontWeight: 600, cursor: "pointer" }}>{searching ? "Close" : "+ Add"}</button>
+                        </div>
+                      );
+                    })()}
                     {courses.map((c, i) => {
                       const assignedRounds = Array.from({ length: numRounds }, (_, ri) => ri + 1).filter(r => { const tr = tRounds.find(t => t.round_number === r); return tr && tr.course_id === c.id; });
                       return (
@@ -4444,7 +4449,6 @@ export default function WBCApp() {
         for (const row of rows) await sb.upsert("tee_assignments", row, "id");
       }
     }
-    notify(course.id ? `Round ${rnd}: ${course.name}` : `Round ${rnd} unassigned`);
   };
 
   const addCourse = async (course) => {
