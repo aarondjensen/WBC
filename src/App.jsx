@@ -687,7 +687,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
           const allPriorRounds = [1, 2, 3, 4];
           const statW = 34;
           const priorW = 22;
-          const gridCols = `32px ${playerColW} ${statW}px ${statW}px 1fr${allPriorRounds.map(() => ` ${priorW}px`).join("")}`;
+          const gridCols = `24px ${playerColW} ${statW}px ${statW}px 1fr${allPriorRounds.map(() => ` ${priorW}px`).join("")}`;
           const gridStyle = { display: "grid", gridTemplateColumns: gridCols, alignItems: "center" };
           return (
             <>
@@ -4713,12 +4713,66 @@ export default function WBCApp() {
             </div>
             )}
           </div>
+
+          {/* Live Leaderboard guest access */}
+          <div style={{ marginTop: 24, borderTop: `1px solid ${K.bdr}30`, paddingTop: 20 }}>
+            <button
+              onClick={() => setUser({ id: "guest", name: "Guest", isDirector: false, isGuest: true })}
+              style={{
+                width: "100%", padding: "13px 0", borderRadius: 12,
+                background: "transparent",
+                border: `1px solid ${K.acc}40`,
+                color: K.acc, fontSize: 14, fontWeight: 700, cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                letterSpacing: "0.02em",
+                transition: "all 0.15s",
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = K.acc + "12"; e.currentTarget.style.borderColor = K.acc + "80"; }}
+              onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.borderColor = K.acc + "40"; }}
+            >
+              <svg width="16" height="16" viewBox="0 0 200 300" fill={K.acc}>
+                <path d="M62,14 L138,14 C140,14 142,15 142,17 L140,88 C138,102 126,114 112,120 L88,120 C74,114 62,102 60,88 L58,17 C58,15 60,14 62,14Z"/>
+                <rect x="92" y="128" width="16" height="18" rx="2"/>
+                <rect x="74" y="144" width="52" height="8" rx="2"/>
+                <rect x="60" y="152" width="80" height="60" rx="2"/>
+                <rect x="50" y="210" width="100" height="10" rx="2"/>
+              </svg>
+              Live Leaderboard
+            </button>
+          </div>
         </div>
       </div>
     );
   }
 
   // ── MAIN ──
+
+  // Guest mode: view-only leaderboard
+  if (user.isGuest) {
+    return (
+      <div style={{ minHeight: "var(--app-height, 100dvh)", background: "#030810", display: "flex", justifyContent: "center", overflow: "hidden" }}>
+      <div style={{ height: "var(--app-height, 100dvh)", display: "flex", flexDirection: "column", background: K.bg, fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", color: K.t1, width: "100%", maxWidth: 480, position: "relative", boxShadow: "0 0 80px rgba(0,0,0,0.8)", flexShrink: 0, overflow: "hidden" }}>
+        <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+        {/* Header */}
+        <div style={{ padding: "10px 20px", paddingTop: "max(10px, calc(env(safe-area-inset-top, 0px) + 10px))", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${K.bdr}`, background: "rgba(14,24,41,0.95)", flexShrink: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <img src={WBC_LOGO} alt="WBC" style={{ height: 32 }} />
+            <div>
+              <div style={{ fontWeight: 800, fontSize: 15, color: K.t1 }}>WBC 2026</div>
+              <div style={{ fontSize: 11, color: K.t3 }}>Gaylord, MI · Aug 26–29</div>
+            </div>
+          </div>
+          <button onClick={() => setUser(null)} style={{ background: "transparent", border: `1px solid ${K.bdr}`, borderRadius: 8, color: K.t3, fontSize: 12, fontWeight: 600, padding: "5px 12px", cursor: "pointer" }}>Exit</button>
+        </div>
+        {/* Leaderboard only */}
+        <div style={{ padding: "14px 20px 0 20px", flex: 1, overflowY: "hidden", overflowX: "hidden", display: "flex", flexDirection: "column", minHeight: 0, marginBottom: 8 }}>
+          <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} teeData={teeData} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} />
+        </div>
+      </div>
+      </div>
+    );
+  }
+
   const navItems = [
     { key: "groups", label: "Pairings", icon: "pairings" },
     { key: "scoring", label: "Scoring", icon: "score" },
@@ -4780,7 +4834,7 @@ export default function WBCApp() {
       </div>
       )}
 
-      <div style={{ padding: (view === "leaderboard" || view === "admin") ? "14px 20px 0 20px" : "14px 20px", paddingBottom: (view === "leaderboard" || view === "admin") ? "0" : "14px", flex: 1, overflowY: (view === "leaderboard" || view === "admin") ? "hidden" : "auto", overflowX: "hidden", display: (view === "leaderboard" || view === "admin") ? "flex" : "block", flexDirection: "column", minHeight: 0, marginBottom: view === "leaderboard" ? "28px" : 0 }}>
+      <div style={{ padding: (view === "leaderboard" || view === "admin") ? "14px 20px 0 20px" : "14px 20px", paddingBottom: (view === "leaderboard" || view === "admin") ? "0" : "14px", flex: 1, overflowY: (view === "leaderboard" || view === "admin") ? "hidden" : "auto", overflowX: "hidden", display: (view === "leaderboard" || view === "admin") ? "flex" : "block", flexDirection: "column", minHeight: 0 }}>
         {view === "leaderboard" && <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} teeData={teeData} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} />}
         <div style={{ display: view === "scoring" ? "block" : "none", paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
           <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeData={teeData} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onNavigate={setView} onGoToAdminCourses={() => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); }} markPlayerWD={markPlayerWD} />
