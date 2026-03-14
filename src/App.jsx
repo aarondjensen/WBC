@@ -1754,7 +1754,6 @@ function SkinsCtpView({ players, round, tRounds, courses, holeData, ctpData, onS
 
   if (!course) return (
     <div>
-      <h2 style={{ fontFamily: "'Montserrat', sans-serif", fontSize: 22, margin: "0 0 14px", fontWeight: 800 }}>Skins & CTP</h2>
       <div style={{ background: K.card, borderRadius: 14, border: `1px dashed ${K.warn}40`, padding: 32, textAlign: "center", color: K.warn }}>No course set for Round {round}</div>
     </div>
   );
@@ -1946,7 +1945,6 @@ function SkinsCtpView({ players, round, tRounds, courses, holeData, ctpData, onS
 
   return (
     <div>
-      <h2 style={{ fontFamily: "'Montserrat', sans-serif", fontSize: 22, margin: "0 0 14px", fontWeight: 800 }}>Skins & CTP</h2>
       <div style={{ display: "flex", gap: 4, marginBottom: 12 }}>
         {[["skins","💰 Skins"],["ctp","🎯 Closest to Pin"]].map(([k,l]) => (
           <button key={k} onClick={() => setTab(k)} style={{ flex: 1, padding: "10px 0", borderRadius: 10, fontSize: 13, fontWeight: tab === k ? 700 : 500, background: tab === k ? K.accGlow : K.card, color: tab === k ? K.acc : K.t2, border: `1px solid ${tab === k ? K.acc : K.bdr}`, cursor: "pointer" }}>{l}</button>
@@ -4642,7 +4640,7 @@ export default function WBCApp() {
 
   if (!user) {
     return (
-      <div style={{ minHeight: "var(--app-height, 100dvh)", background: `radial-gradient(ellipse at 20% 50%, #0d1f3c 0%, ${K.bg} 70%)`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", padding: 20 }}>
+      <div style={{ minHeight: "100vh", background: `radial-gradient(ellipse at 20% 50%, #0d1f3c 0%, ${K.bg} 70%)`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", padding: 20 }}>
         <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
       <style>{`:root { --sab: env(safe-area-inset-bottom, 0px); }`}</style>
       <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
