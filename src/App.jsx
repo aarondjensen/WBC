@@ -1651,7 +1651,6 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
         );
       })()}
 
-      {/* Advancing toast */}
       {allScored && currentHole < 17 && navSource === "auto" && !editingCompleted && (
         <div style={{
           position: "fixed", top: 80, left: "50%", transform: "translateX(-50%)",
@@ -3810,29 +3809,25 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
       {/* Course edit modal */}
       {editingCourse && (() => {
         const d = editingCourse.draft;
-        const inpStyle = { background: K.inp, border: `1px solid ${ac}40`, borderRadius: 4, color: K.t1, fontSize: 9, textAlign: "center", width: "100%", padding: "2px 0", boxSizing: "border-box" };
+        const inpStyle = { background: K.inp, border: `1px solid ${ac}40`, borderRadius: 4, color: K.t1, fontSize: 9, textAlign: "center", width: "100%", padding: "2px 0", boxSizing: "border-box", inputMode: "decimal" };
         const saveEdit = () => { addCourse({ ...editingCourse.draft }); setEditingCourse(null); };
         return (
           <div style={{ position: "fixed", top: 0, bottom: 0, left: 0, right: 0, background: "#00000090", zIndex: 200, display: "flex", alignItems: "flex-end", justifyContent: "center" }} onClick={() => setEditingCourse(null)}>
             <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 480, height: "92vh", background: K.bg, borderRadius: "16px 16px 0 0", border: `1px solid ${K.bdr}`, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+              {/* Header — always visible */}
               <div style={{ padding: "14px 16px 10px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${K.bdr}`, flexShrink: 0 }}>
                 <button onClick={() => setEditingCourse(null)} style={{ background: "transparent", border: `1px solid ${K.bdr}`, borderRadius: 8, color: K.t2, fontSize: 13, fontWeight: 600, padding: "6px 14px", cursor: "pointer" }}>Cancel</button>
                 <span style={{ fontWeight: 700, fontSize: 14, color: K.t1 }}>Edit Course</span>
                 <button onClick={saveEdit} style={{ background: ac, border: "none", borderRadius: 8, color: K.bg, fontSize: 13, fontWeight: 700, padding: "6px 18px", cursor: "pointer" }}>Save</button>
               </div>
+              {/* Scrollable content */}
               <div style={{ flex: 1, overflowY: "auto", padding: "16px 16px 32px" }}>
-                <div style={{ marginBottom: 14 }}>
+                {/* Course Name only — no top-level rating/slope, those are tee-specific */}
+                <div style={{ marginBottom: 16 }}>
                   <div style={{ fontSize: 10, color: K.t3, fontWeight: 600, textTransform: "uppercase", marginBottom: 4 }}>Course Name</div>
                   <input value={d.name || ""} onChange={e => setEditingCourse(prev => ({ ...prev, draft: { ...prev.draft, name: e.target.value } }))} style={{ width: "100%", padding: "9px 10px", background: K.inp, border: `1px solid ${ac}40`, borderRadius: 8, color: K.t1, fontSize: 14, boxSizing: "border-box" }} />
                 </div>
-                <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
-                  {["rating","slope"].map(field => (
-                    <div key={field} style={{ flex: 1 }}>
-                      <div style={{ fontSize: 10, color: K.t3, fontWeight: 600, textTransform: "uppercase", marginBottom: 4 }}>{field}</div>
-                      <input value={d[field]||""} onChange={e => setEditingCourse(prev => ({ ...prev, draft: { ...prev.draft, [field]: e.target.value } }))} style={{ width: "100%", padding: "9px 10px", background: K.inp, border: `1px solid ${ac}40`, borderRadius: 8, color: K.t1, fontSize: 14, boxSizing: "border-box" }} />
-                    </div>
-                  ))}
-                </div>
+                {/* Tee boxes — sorted by slope descending */}
                 {[...(d.tee_boxes||[])].sort((a,b) => (parseFloat(b.slope)||0)-(parseFloat(a.slope)||0)).map((tb, tbi) => {
                   const sortedTbs = [...(d.tee_boxes||[])].sort((a,b) => (parseFloat(b.slope)||0)-(parseFloat(a.slope)||0));
                   const origIdx = d.tee_boxes.indexOf(sortedTbs[tbi]);
@@ -3850,13 +3845,18 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                         {["rating","slope","par"].map(f => (
                           <div key={f} style={{ flex: 1 }}>
                             <div style={{ fontSize: 9, color: K.t3, textTransform: "uppercase", marginBottom: 3 }}>{f}</div>
-                            <input value={tb[f]||""} onChange={e => setEditingCourse(prev => { const tbs = [...prev.draft.tee_boxes]; tbs[origIdx] = {...tbs[origIdx],[f]:e.target.value}; return {...prev,draft:{...prev.draft,tee_boxes:tbs}}; })} style={{ width: "100%", padding: "7px 6px", background: K.inp, border: `1px solid ${ac}30`, borderRadius: 6, color: K.t1, fontSize: 13, textAlign: "center", boxSizing: "border-box" }} />
+                            <input
+                              inputMode="decimal"
+                              value={tb[f]||""}
+                              onChange={e => setEditingCourse(prev => { const tbs = [...prev.draft.tee_boxes]; tbs[origIdx] = {...tbs[origIdx],[f]:e.target.value}; return {...prev,draft:{...prev.draft,tee_boxes:tbs}}; })}
+                              style={{ width: "100%", padding: "7px 6px", background: K.inp, border: `1px solid ${ac}30`, borderRadius: 6, color: K.t1, fontSize: 13, textAlign: "center", boxSizing: "border-box" }} />
                           </div>
                         ))}
                       </div>
                     </div>
                   );
                 })}
+                {/* Hole Par / HCP grids */}
                 {[["Front", 0, 9], ["Back", 9, 9]].map(([label, start, count]) => {
                   const pars = (d.hole_pars||[]).slice(start, start+count);
                   const hcps = (d.hole_handicaps||[]).slice(start, start+count);
@@ -3871,14 +3871,14 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                       <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 32px`, gap: 2, background: K.inp, borderRadius: 6, padding: "2px 0", marginBottom: 2 }}>
                         <div style={{ color: K.t3, fontWeight: 600, padding: "3px 2px", fontSize: 9 }}>Par</div>
                         {Array.from({length:count},(_,i) => (
-                          <input key={i} value={pars[i]??""} onChange={e => setEditingCourse(prev => { const hp=[...(prev.draft.hole_pars||[])]; hp[start+i]=parseInt(e.target.value)||0; return {...prev,draft:{...prev.draft,hole_pars:hp}}; })} style={inpStyle} />
+                          <input key={i} inputMode="numeric" value={pars[i]??""} onChange={e => setEditingCourse(prev => { const hp=[...(prev.draft.hole_pars||[])]; hp[start+i]=parseInt(e.target.value)||0; return {...prev,draft:{...prev.draft,hole_pars:hp}}; })} style={{ background: K.inp, border: `1px solid ${ac}40`, borderRadius: 4, color: K.t1, fontSize: 9, textAlign: "center", width: "100%", padding: "2px 0", boxSizing: "border-box" }} />
                         ))}
                         <div style={{ textAlign:"center", color:ac, fontWeight:800, padding:"3px 0", fontSize:10 }}>{pars.reduce((a,b)=>a+(+b||0),0)}</div>
                       </div>
                       <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 32px`, gap: 2 }}>
                         <div style={{ color: K.t3, fontWeight: 600, padding: "2px 2px", fontSize: 9 }}>HCP</div>
                         {Array.from({length:count},(_,i) => (
-                          <input key={i} value={hcps[i]??""} onChange={e => setEditingCourse(prev => { const hh=[...(prev.draft.hole_handicaps||[])]; hh[start+i]=parseInt(e.target.value)||0; return {...prev,draft:{...prev.draft,hole_handicaps:hh}}; })} style={{...inpStyle, color:K.t3}} />
+                          <input key={i} inputMode="numeric" value={hcps[i]??""} onChange={e => setEditingCourse(prev => { const hh=[...(prev.draft.hole_handicaps||[])]; hh[start+i]=parseInt(e.target.value)||0; return {...prev,draft:{...prev.draft,hole_handicaps:hh}}; })} style={{ background: K.inp, border: `1px solid ${ac}40`, borderRadius: 4, color: K.t3, fontSize: 9, textAlign: "center", width: "100%", padding: "2px 0", boxSizing: "border-box" }} />
                         ))}
                         <div />
                       </div>
