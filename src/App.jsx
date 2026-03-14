@@ -2441,7 +2441,7 @@ function TeeAssigner({ activePlayers, numRounds, tRounds, courses, teeData, setT
               color: isModified ? K.bg : isSaved ? "#22c55e" : K.bg,
               fontSize: 12, fontWeight: 700, cursor: isSaved && !isModified ? "default" : "pointer",
               display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-              transition: "all 0.2s",
+              transition: "background 0.25s ease, color 0.25s ease, border-color 0.25s ease",
             }}>
               {isModified ? "⚠ Tee Changes — Confirm Again" : isSaved ? "✓ Tee Selections Confirmed" : "Confirm Tee Selections"}
             </button>
@@ -2462,6 +2462,7 @@ function TeeAssigner({ activePlayers, numRounds, tRounds, courses, teeData, setT
                 <div key={p.id} style={{
                   padding: "5px 12px", display: "flex", justifyContent: "space-between", alignItems: "center",
                   borderBottom: i < activePlayers.length - 1 ? `1px solid ${K.bdr}10` : "none",
+                  transition: "background 0.2s ease",
                 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
                     <span style={{ fontWeight: 600, fontSize: 12 }}>{p.name}</span>
@@ -2481,11 +2482,14 @@ function TeeAssigner({ activePlayers, numRounds, tRounds, courses, teeData, setT
                         <button key={tee.name} onClick={() => assign(p.id, tee.name)} style={{
                           width: 34, padding: "4px 3px 3px", borderRadius: 6, cursor: "pointer",
                           display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
-                          background: isActive ? K.acc + "18" : K.inp,
-                          border: isActive ? `1px solid ${K.acc}` : `1px solid ${K.bdr}`,
+                          background: isActive ? K.acc + "22" : K.inp,
+                          border: isActive ? `1.5px solid ${K.acc}` : `1px solid ${K.bdr}`,
+                          transform: isActive ? "scale(1.08)" : "scale(1)",
+                          transition: "background 0.18s ease, border-color 0.18s ease, transform 0.18s ease",
+                          willChange: "transform",
                         }}>
                           <TeeColorSwatch color={tee.color} name={tee.name} size={14} style={{ borderRadius: 3 }} />
-                          <span style={{ fontSize: 7, fontWeight: 700, color: isActive ? K.acc : K.t3, lineHeight: 1 }}>{tee.name.split("/")[0].substring(0,5)}</span>
+                          <span style={{ fontSize: 7, fontWeight: 700, color: isActive ? K.acc : K.t3, lineHeight: 1, transition: "color 0.18s ease" }}>{tee.name.split("/")[0].substring(0,5)}</span>
                         </button>
                       );
                     })}
@@ -3084,7 +3088,6 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
           const teesSet = teesSaved[editRound] && !teesModified[editRound] && activePlayers.every(p => ((teeData[editRound] || {})[p.id]));
           const groupsDone = _rg.length > 0 && _rg.flat().length === activePlayers.length;
           const teeTimesDone = _rg.length > 0 && _rg.every((_, gi) => _rt[gi] && _rt[gi].trim() !== "");
-          // Only show cross-tab reminders — suppress items for the tab the user is currently on
           if (!teesSet && tab !== "tees") items.push({ text: "Tee assignments incomplete", action: "Go to Tees", onClick: () => setTab("tees") });
           if (!groupsDone && tab !== "pairings") items.push({ text: "Pairings not set", action: "Go to Pairings", onClick: () => setTab("pairings") });
           if (!teeTimesDone && tab !== "pairings") items.push({ text: "Tee times missing", action: "Go to Pairings", onClick: () => setTab("pairings") });
