@@ -3311,8 +3311,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                                     </div>
                                   );
                                 })}
-                              </div>
-                              <button onClick={() => { setExpandedCourse(null); setEditingCourse(null); }} style={{ display: "block", width: "100%", marginTop: 14, padding: "11px 0", borderRadius: 10, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t2, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>Done</button>
+                              <button onClick={() => { setExpandedCourse(null); setEditingCourse(null); }} style={{ display: "block", width: "100%", marginTop: 14, padding: "11px 0", borderRadius: 10, background: "transparent", border: "1px solid #ffffff20", color: "#8899aa", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>Done</button>
                             </div>
                             );
                           })()}
