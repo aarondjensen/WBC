@@ -3013,7 +3013,6 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
         const _isFinal = finalizedRounds[editRound];
         const _finalizePending = Object.entries(pairingsData || {}).some(([rnd, groups]) => {
           if (!groups.length) return false;
-          // Show finalize only when ALL groups in the round have all 18 scores entered
           return groups.every(grp => {
             const gk = `${rnd}_${grp.slice().sort().join(",")}`;
             if (finalizedRounds[gk] || finalizedRounds[parseInt(rnd)]) return false;
@@ -3038,41 +3037,19 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
           )}
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
             <div style={{ position: "relative", display: "flex", flex: 1, background: K.card, borderRadius: 10, border: `1px solid ${K.bdr}`, padding: 3, gap: 0 }}>
-              <div style={{
-                position: "absolute", top: 3, bottom: 3,
-                left: tab === "tees" ? 3 : "calc(50% + 1.5px)",
-                width: "calc(50% - 4.5px)",
-                background: acGlow, borderRadius: 8,
-                border: `1px solid ${ac}50`,
-                transition: "left 0.2s ease",
-                pointerEvents: "none",
-              }} />
+              <div style={{ position: "absolute", top: 3, bottom: 3, left: tab === "tees" ? 3 : "calc(50% + 1.5px)", width: "calc(50% - 4.5px)", background: acGlow, borderRadius: 8, border: `1px solid ${ac}50`, transition: "left 0.2s ease", pointerEvents: "none" }} />
               {[["tees","Tees"],["pairings","Pairings"]].map(([k,l]) => {
                 const isActive = tab === k;
                 const isDone = !_isFinal && subDone[k];
                 return (
-                  <button key={k} onClick={() => setTab(k)} style={{
-                    flex: 1, padding: "8px 6px", borderRadius: 8, fontSize: 12,
-                    fontWeight: isActive ? 700 : 500,
-                    background: "transparent",
-                    color: isActive ? ac : K.t2,
-                    border: "none", cursor: "pointer", position: "relative", zIndex: 1,
-                    display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
-                  }}>
+                  <button key={k} onClick={() => setTab(k)} style={{ flex: 1, padding: "8px 6px", borderRadius: 8, fontSize: 12, fontWeight: isActive ? 700 : 500, background: "transparent", color: isActive ? ac : K.t2, border: "none", cursor: "pointer", position: "relative", zIndex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
                     <span>{l}</span>
-                    {!_isFinal && <span style={{
-                      width: 6, height: 6, borderRadius: "50%", flexShrink: 0,
-                      background: isDone ? "#22c55e" : "transparent",
-                      border: `1.5px solid ${isDone ? "#22c55e" : K.t3 + "60"}`,
-                    }} />}
+                    {!_isFinal && <span style={{ width: 6, height: 6, borderRadius: "50%", flexShrink: 0, background: isDone ? "#22c55e" : "transparent", border: `1.5px solid ${isDone ? "#22c55e" : K.t3 + "60"}` }} />}
                   </button>
                 );
               })}
             </div>
-            <button onClick={() => setSettingsOpen(true)} title="Tournament Settings" style={{
-              width: 38, height: 38, borderRadius: 10, background: K.card, border: `1px solid ${K.bdr}`,
-              color: K.t3, fontSize: 16, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-            }}>⚙️</button>
+            <button onClick={() => setSettingsOpen(true)} title="Tournament Settings" style={{ width: 38, height: 38, borderRadius: 10, background: K.card, border: `1px solid ${K.bdr}`, color: K.t3, fontSize: 16, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>⚙️</button>
           </div>
         </>);
       })()}
@@ -3125,7 +3102,6 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
             <div style={{ display: "flex", gap: 4, padding: "10px 16px 0" }}>
               {[["course","Courses"],["players","Players"]].map(([k,l]) => {
                 const isActive = settingsTab === k;
-                const count = k === "course" ? courses.length : activePlayers.length;
                 return (
                   <button key={k} onClick={() => setSettingsTab(k)} style={{
                     flex: 1, padding: "8px 0", borderRadius: 8, fontSize: 12, fontWeight: isActive ? 700 : 500,
@@ -3133,7 +3109,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                     color: isActive ? K.tourn : K.t2,
                     border: `1px solid ${isActive ? K.tourn + "40" : K.bdr}`,
                     cursor: "pointer",
-                  }}>{l} <span style={{ opacity: 0.7, fontWeight: 400 }}>({count})</span></button>
+                  }}>{l} <span style={{ opacity: 0.7, fontWeight: 400 }}>({k === "course" ? courses.length : activePlayers.length})</span></button>
                 );
               })}
             </div>
@@ -3173,18 +3149,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
               {settingsTab === "course" && (
                 <div>
                   <div style={{ background: K.card, borderRadius: 12, border: `1px solid ${K.bdr}`, overflow: "hidden" }}>
-                    {(() => {
-                      const allSet = Array.from({ length: numRounds }, (_, ri) => ri + 1).every(r => tRounds.find(t => t.round_number === r && t.course_id));
-                      const unassigned = Array.from({ length: numRounds }, (_, ri) => ri + 1).filter(r => !tRounds.find(t => t.round_number === r && t.course_id));
-                      return (
-                        <div style={{ padding: "9px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${K.bdr}` }}>
-                          {allSet
-                            ? <span style={{ fontSize: 11, fontWeight: 700, color: K.acc }}>✓ All rounds assigned</span>
-                            : <span style={{ fontSize: 11, fontWeight: 600, color: K.warn }}>R{unassigned.join(", R")} unassigned</span>}
-                          <button onClick={() => { setSearching(!searching); setCourseSearch(""); setSearchResults([]); }} style={{ padding: "3px 8px", borderRadius: 6, background: "transparent", border: `1px solid ${ac}50`, color: ac, fontSize: 10, fontWeight: 600, cursor: "pointer" }}>{searching ? "Close" : "+ Add"}</button>
-                        </div>
-                      );
-                    })()}
+                    {(() => { const allSet = Array.from({ length: numRounds }, (_, ri) => ri + 1).every(r => tRounds.find(t => t.round_number === r && t.course_id)); const unassigned = Array.from({ length: numRounds }, (_, ri) => ri + 1).filter(r => !tRounds.find(t => t.round_number === r && t.course_id)); return (<div style={{ padding: "9px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${K.bdr}` }}>{allSet ? <span style={{ fontSize: 11, fontWeight: 700, color: K.acc }}>✓ All rounds assigned</span> : <span style={{ fontSize: 11, fontWeight: 600, color: K.warn }}>R{unassigned.join(", R")} unassigned</span>}<button onClick={() => { setSearching(!searching); setCourseSearch(""); setSearchResults([]); }} style={{ padding: "3px 8px", borderRadius: 6, background: "transparent", border: `1px solid ${ac}50`, color: ac, fontSize: 10, fontWeight: 600, cursor: "pointer" }}>{searching ? "Close" : "+ Add"}</button></div>); })()}
                     {courses.map((c, i) => {
                       const assignedRounds = Array.from({ length: numRounds }, (_, ri) => ri + 1).filter(r => { const tr = tRounds.find(t => t.round_number === r); return tr && tr.course_id === c.id; });
                       return (
@@ -3796,7 +3761,6 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
         </div>
       )}
 
-      {/* Course edit modal */}
       {editingCourse && (() => {
         const d = editingCourse.draft;
         const saveEdit = () => { addCourse({ ...editingCourse.draft }); setEditingCourse(null); setExpandedCourse(null); };
@@ -3849,16 +3813,12 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                     </div>
                     <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 32px`, gap: 2, background: K.inp, borderRadius: 6, padding: "2px 0", marginBottom: 2 }}>
                       <div style={{ color: K.t3, fontWeight: 600, padding: "3px 2px", fontSize: 9 }}>Par</div>
-                      {Array.from({length:count},(_,i) => (
-                        <input key={i} inputMode="numeric" value={pars[i]??""} onChange={e => setEditingCourse(prev => { const hp=[...(prev.draft.hole_pars||[])]; hp[start+i]=parseInt(e.target.value)||0; return {...prev,draft:{...prev.draft,hole_pars:hp}}; })} style={inpStyle} />
-                      ))}
+                      {Array.from({length:count},(_,i) => (<input key={i} inputMode="numeric" value={pars[i]??""} onChange={e => setEditingCourse(prev => { const hp=[...(prev.draft.hole_pars||[])]; hp[start+i]=parseInt(e.target.value)||0; return {...prev,draft:{...prev.draft,hole_pars:hp}}; })} style={inpStyle} />))}
                       <div style={{ textAlign:"center", color:ac, fontWeight:800, padding:"3px 0", fontSize:10 }}>{pars.reduce((a,b)=>a+(+b||0),0)}</div>
                     </div>
                     <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 32px`, gap: 2 }}>
                       <div style={{ color: K.t3, fontWeight: 600, padding: "2px 2px", fontSize: 9 }}>HCP</div>
-                      {Array.from({length:count},(_,i) => (
-                        <input key={i} inputMode="numeric" value={hcps[i]??""} onChange={e => setEditingCourse(prev => { const hh=[...(prev.draft.hole_handicaps||[])]; hh[start+i]=parseInt(e.target.value)||0; return {...prev,draft:{...prev.draft,hole_handicaps:hh}}; })} style={{...inpStyle, color:K.t3}} />
-                      ))}
+                      {Array.from({length:count},(_,i) => (<input key={i} inputMode="numeric" value={hcps[i]??""} onChange={e => setEditingCourse(prev => { const hh=[...(prev.draft.hole_handicaps||[])]; hh[start+i]=parseInt(e.target.value)||0; return {...prev,draft:{...prev.draft,hole_handicaps:hh}}; })} style={{...inpStyle, color:K.t3}} />))}
                       <div />
                     </div>
                   </div>
@@ -3869,7 +3829,6 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
         );
       })()}
 
-      {/* confirmCourse — centered modal */}
       {confirmCourse && (confirmCourse.round || confirmCourse.delete) && (
         <div style={{ position: "fixed", top: 0, bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.6)", zIndex: 500, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }} onClick={() => setConfirmCourse(null)}>
           <div onClick={e => e.stopPropagation()} style={{ background: K.card, borderRadius: 14, padding: "20px 20px 16px", width: "100%", maxWidth: 360, boxShadow: "0 16px 48px rgba(0,0,0,0.6)" }}>
@@ -4312,8 +4271,8 @@ export default function WBCApp() {
           const netToPar = ch >= 0
             ? gross - parForHoles - strokesForPlayedHoles
             : gross - parForHoles + strokesForPlayedHoles;
-          if (!p.isWD) { roundsPlayed++; totalNetToPar += netToPar; totalThru += thru; }
-          rds.push({ netToPar, thru, wd: p.isWD && r >= round });
+          roundsPlayed++; totalNetToPar += netToPar; totalThru += thru;
+          rds.push({ netToPar, thru, wd: isWDRound });
         } else { rds.push({ netToPar: null, thru: 0, wd: false }); }
       }
       return { ...p, totalNetToPar, roundsPlayed, totalThru, rds };
@@ -4342,34 +4301,28 @@ export default function WBCApp() {
 
   // Mark player as WD: set status, fill all unfilled holes in current and future rounds with sentinel 99
   const markPlayerWD = async (pid) => {
-    // Fill remaining holes with 99 and persist each
+    // Only fill remaining holes in the CURRENT round with 99.
+    // Future rounds are left blank — player may still play them.
+    // The WD status on the leaderboard is permanent once set.
+    const tr = tRounds.find(t => t.round_number === round);
+    const key = `${pid}_${round}`;
+    const existing = holeData[key] || {};
     const updates = [];
-    for (let r = round; r <= 4; r++) {
-      const tr = tRounds.find(t => t.round_number === r);
-      const key = `${pid}_${r}`;
-      const existing = holeData[key] || {};
-      for (let h = 0; h < 18; h++) {
-        if (!(existing[h] > 0)) {
-          updates.push(holeDataToRow(pid, r, h, 99, tr?.course_id));
-        }
+    for (let h = 0; h < 18; h++) {
+      if (!(existing[h] > 0)) {
+        updates.push(holeDataToRow(pid, round, h, 99, tr?.course_id));
       }
     }
     setHoleData(prev => {
-      const updated = { ...prev };
-      for (let r = round; r <= 4; r++) {
-        const key = `${pid}_${r}`;
-        const existing = updated[key] || {};
-        const filled = { ...existing };
-        for (let h = 0; h < 18; h++) { if (!(filled[h] > 0)) filled[h] = 99; }
-        updated[key] = filled;
-      }
-      return updated;
+      const existing = prev[key] || {};
+      const filled = { ...existing };
+      for (let h = 0; h < 18; h++) { if (!(filled[h] > 0)) filled[h] = 99; }
+      return { ...prev, [key]: filled };
     });
-    // Update player status in Supabase
+    // Mark WD status — this permanently shows WD on leaderboard
     const tp = tPlayers.find(t => t.player_id === pid);
     if (tp) await sb.upsert("tournament_players", { ...tp, status: "WD" }, "id");
     setTPlayers(prev => prev.map(tp => tp.player_id === pid ? { ...tp, status: "WD" } : tp));
-    // Persist WD hole scores
     for (const row of updates) await sb.upsert("hole_scores", row, "id");
     notify(`Player withdrawn from tournament`);
   };
@@ -4739,7 +4692,6 @@ export default function WBCApp() {
     );
   }
 
-  // ── GUEST MODE: view-only leaderboard ──
   if (user.isGuest) {
     return (
       <div style={{ minHeight: "var(--app-height, 100dvh)", background: "#030810", display: "flex", justifyContent: "center", overflow: "hidden" }}>
