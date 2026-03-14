@@ -3251,7 +3251,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                                   ))}
                                   <div style={{ marginLeft: "auto", display: "flex", gap: 4, alignItems: "center" }}>
                                     {!isEditing
-                                      ? <button onClick={startEdit} style={{ padding: "6px 14px", borderRadius: 8, background: "transparent", border: `1px solid ${ac}60`, color: ac, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>✏️ Edit</button>
+                                      ? <button onClick={startEdit} style={{ padding: "6px 14px", borderRadius: 8, background: "transparent", border: `1px solid ${ac}60`, color: ac, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Edit</button>
                                       : <>
                                           <button onClick={saveEdit} style={{ padding: "6px 14px", borderRadius: 8, background: ac, border: "none", color: K.bg, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Save</button>
                                           <button onClick={() => setEditingCourse(null)} style={{ padding: "6px 14px", borderRadius: 8, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t3, fontSize: 12, cursor: "pointer" }}>Cancel</button>
@@ -3310,7 +3310,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                                     </div>
                                   );
                                 })}
-                              <button onClick={() => { setExpandedCourse(null); setEditingCourse(null); }} style={{ display: "block", width: "100%", marginTop: 14, padding: "11px 0", borderRadius: 10, background: "transparent", border: "1px solid #ffffff20", color: "#8899aa", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>Done</button>
+                              <button onClick={() => { setExpandedCourse(null); setEditingCourse(null); }} style={{ display: "block", width: "100%", marginTop: 14, padding: "12px 0", borderRadius: 10, background: ac, border: "none", color: K.bg, fontSize: 14, fontWeight: 700, cursor: "pointer", letterSpacing: "0.02em" }}>Done</button>
                             </div>
                             );
                           })()}
