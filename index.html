@@ -19,10 +19,28 @@
       function setAppHeight() {
         document.documentElement.style.setProperty('--app-height', window.innerHeight + 'px');
       }
+
+      // Set immediately on load
       setAppHeight();
+
+      // In standalone PWA mode on iOS, the layout settles after a short delay
+      if (navigator.standalone) {
+        setTimeout(setAppHeight, 100);
+        setTimeout(setAppHeight, 300);
+        setTimeout(setAppHeight, 600);
+      }
+
       window.addEventListener('resize', setAppHeight);
       window.addEventListener('orientationchange', function() {
         setTimeout(setAppHeight, 200);
+        setTimeout(setAppHeight, 500);
+      });
+
+      // Also re-measure when the page becomes visible (e.g. switching back to the app)
+      document.addEventListener('visibilitychange', function() {
+        if (document.visibilityState === 'visible') {
+          setTimeout(setAppHeight, 100);
+        }
       });
     </script>
   </head>
