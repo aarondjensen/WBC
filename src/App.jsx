@@ -3020,7 +3020,6 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
         );
         const subDone = { tees: _teeDone, pairings: _pairingsDone };
         return (<>
-          {/* Finalize banner — bright yellow, between round pills and tab toggle */}
           {_finalizePending && (
             <button onClick={() => setShowFinalizeModal(true)} style={{
               display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
@@ -3032,7 +3031,6 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
               Round ready to finalize — tap to close out
             </button>
           )}
-          {/* Toggle row with settings icon */}
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
             <div style={{ position: "relative", display: "flex", flex: 1, background: K.card, borderRadius: 10, border: `1px solid ${K.bdr}`, padding: 3, gap: 0 }}>
               <div style={{
@@ -3066,7 +3064,6 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                 );
               })}
             </div>
-            {/* Settings icon — next to toggle */}
             <button onClick={() => setSettingsOpen(true)} title="Tournament Settings" style={{
               width: 38, height: 38, borderRadius: 10, background: K.card, border: `1px solid ${K.bdr}`,
               color: K.t3, fontSize: 16, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
@@ -3087,9 +3084,10 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
           const teesSet = teesSaved[editRound] && !teesModified[editRound] && activePlayers.every(p => ((teeData[editRound] || {})[p.id]));
           const groupsDone = _rg.length > 0 && _rg.flat().length === activePlayers.length;
           const teeTimesDone = _rg.length > 0 && _rg.every((_, gi) => _rt[gi] && _rt[gi].trim() !== "");
-          if (!teesSet) items.push({ text: "Tee assignments incomplete", action: "Go to Tees", onClick: () => setTab("tees") });
-          if (!groupsDone) items.push({ text: "Pairings not set", action: "Go to Pairings", onClick: () => setTab("pairings") });
-          if (!teeTimesDone) items.push({ text: "Tee times missing", action: "Go to Pairings", onClick: () => setTab("pairings") });
+          // Only show cross-tab reminders — suppress items for the tab the user is currently on
+          if (!teesSet && tab !== "tees") items.push({ text: "Tee assignments incomplete", action: "Go to Tees", onClick: () => setTab("tees") });
+          if (!groupsDone && tab !== "pairings") items.push({ text: "Pairings not set", action: "Go to Pairings", onClick: () => setTab("pairings") });
+          if (!teeTimesDone && tab !== "pairings") items.push({ text: "Tee times missing", action: "Go to Pairings", onClick: () => setTab("pairings") });
         }
         if (items.length === 0) return null;
         return (
