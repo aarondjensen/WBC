@@ -2624,7 +2624,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
   const [tab, setTab] = useState("tees");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [showFinalizeModal, setShowFinalizeModal] = useState(false);
-  const [settingsTab, setSettingsTab] = useState("players");
+  const [settingsTab, setSettingsTab] = useState("course");
   // Apply external open requests (e.g. from scoring tab)
   useEffect(() => {
     if (externalSettingsOpen) {
@@ -3074,18 +3074,18 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                 );
               })}
             </div>
-            {/* Finalize button — opens modal */}
-            <button onClick={() => setShowFinalizeModal(true)} style={{
-              padding: "8px 12px", borderRadius: 10, fontSize: 12, fontWeight: 700,
-              background: _finalizePending ? ac : K.card,
-              border: `1px solid ${_finalizePending ? ac : K.bdr}`,
-              color: _finalizePending ? K.bg : K.t2,
-              cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0,
-              display: "flex", alignItems: "center", gap: 5,
-            }}>
-              {_finalizePending && <span style={{ width: 6, height: 6, borderRadius: "50%", background: K.bg, flexShrink: 0 }} />}
-              Finalize
-            </button>
+            {/* Finalize toast banner — shown when rounds are ready to finalize */}
+            {_finalizePending && (
+              <button onClick={() => setShowFinalizeModal(true)} style={{
+                padding: "8px 14px", borderRadius: 10, fontSize: 12, fontWeight: 700,
+                background: ac, border: "none", color: K.bg,
+                cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0,
+                display: "flex", alignItems: "center", gap: 6,
+              }}>
+                <span style={{ width: 6, height: 6, borderRadius: "50%", background: K.bg, flexShrink: 0 }} />
+                Finalize
+              </button>
+            )}
           </div>
         );
       })()}
@@ -3136,7 +3136,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
             </div>
             {/* Settings sub-tabs */}
             <div style={{ display: "flex", gap: 4, padding: "10px 16px 0" }}>
-              {[["players","Players"],["course","Courses"]].map(([k,l]) => {
+              {[["course","Courses"],["players","Players"]].map(([k,l]) => {
                 const isActive = settingsTab === k;
                 return (
                   <button key={k} onClick={() => setSettingsTab(k)} style={{
@@ -3233,7 +3233,6 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                             };
                             return (
                               <div style={{ padding: "0 14px 12px", background: ac + "04" }}>
-                                {/* Course name edit */}
                                 {isEditing && (
                                   <div style={{ marginBottom: 8, marginTop: 4 }}>
                                     <span style={{ fontSize: 9, color: K.t3, textTransform: "uppercase", fontWeight: 600 }}>Course Name</span>
