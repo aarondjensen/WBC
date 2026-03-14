@@ -671,7 +671,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
           </div>
         </div>
       </div>
-      <div ref={containerRef} style={{ background: "transparent", borderRadius: 12, border: `1px solid ${K.bdr}`, overflow: expanded ? "visible" : "hidden", display: "flex", flexDirection: "column", flex: expanded ? "none" : 1, minHeight: 0 }}>
+      <div ref={containerRef} style={{ background: "transparent", borderRadius: 12, border: `1px solid ${K.bdr}`, overflow: "auto", display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
         {/* Build dynamic grid: #, Player, Total, Thru, Rd, [8px gap], prior rounds */}
         {(() => {
           const allPriorRounds = [1, 2, 3, 4];
@@ -690,7 +690,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
                 {allPriorRounds.map(r => <span key={r} style={{ textAlign: "center" }}>R{r}</span>)}
               </div>
               {lb.length === 0 && <div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: 12 }}>No scores yet — be the first!</div>}
-              <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden" }}>
+              <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden", flexShrink: 0 }}>
               {(() => {
                 // Pre-compute tied positions
                 const posMap = {};
@@ -788,11 +788,10 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
                   </div>
                 );
               });
-              // Find the expanded player for scorecard rendering outside the rows flex container
-              const expandedPlayer = expanded ? lb.find(p => p.id === expanded) : null;
-                return <>{rows}{expandedPlayer && (
+              const expandedP = expanded ? lb.find(p => p.id === expanded) : null;
+                return <>{rows}{expandedP && (
                   <div style={{ borderTop: `1px solid ${K.bdr}30`, background: K.bg + "80", flexShrink: 0 }}>
-                    {renderScorecard(expandedPlayer)}
+                    {renderScorecard(expandedP)}
                   </div>
                 )}</>;
               })()}
