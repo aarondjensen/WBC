@@ -610,7 +610,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
   };
 
   return (
-    <div style={{ position: "relative", height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
+    <div style={{ position: "relative", minHeight: "100%", display: "flex", flexDirection: "column" }}>
       {/* Giant trophy silhouette behind entire leaderboard — fixed so it never shifts */}
       <img src={WBC_TROPHY_SILHOUETTE} alt="" style={{
         position: "fixed", top: "50%", left: "50%",
@@ -623,7 +623,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
         zIndex: 0,
         objectFit: "contain",
       }} />
-      <div style={{ position: "relative", zIndex: 1, flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+      <div style={{ position: "relative", zIndex: 1, flex: 1, display: "flex", flexDirection: "column" }}>
       {/* Title inline with stacked pills */}
       <div style={{ display: "flex", alignItems: "center", marginBottom: 10, gap: 8 }}>
         {/* Left pill — Net/Gross */}
@@ -671,7 +671,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
           </div>
         </div>
       </div>
-      <div ref={containerRef} style={{ background: "transparent", borderRadius: 12, border: `1px solid ${K.bdr}`, overflow: "auto", display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+      <div ref={containerRef} style={{ background: "transparent", borderRadius: 12, border: `1px solid ${K.bdr}`, overflow: "hidden", display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
         {/* Build dynamic grid: #, Player, Total, Thru, Rd, [8px gap], prior rounds */}
         {(() => {
           const allPriorRounds = [1, 2, 3, 4];
@@ -789,11 +789,11 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
                 );
               });
               const expandedP = expanded ? lb.find(p => p.id === expanded) : null;
-                return <>{rows}{expandedP && (
-                  <div style={{ borderTop: `1px solid ${K.bdr}30`, background: K.bg + "80", flexShrink: 0 }}>
-                    {renderScorecard(expandedP)}
-                  </div>
-                )}</>;
+              return <>{rows}{expandedP && (
+                <div style={{ borderTop: `1px solid ${K.bdr}30`, background: K.bg + "80", flexShrink: 0 }}>
+                  {renderScorecard(expandedP)}
+                </div>
+              )}</>;
               })()}
               </div>
             </>
@@ -4670,7 +4670,7 @@ export default function WBCApp() {
       </div>
       )}
 
-      <div style={{ padding: (view === "leaderboard" || view === "admin") ? "14px 20px 0 20px" : "14px 20px", paddingBottom: (view === "leaderboard" || view === "admin") ? "0" : "14px", flex: 1, overflowY: (view === "leaderboard" || view === "admin") ? "hidden" : "auto", overflowX: "hidden", overflowY: "auto", display: (view === "leaderboard" || view === "admin") ? "flex" : "block", flexDirection: "column", minHeight: 0, marginBottom: view === "leaderboard" ? "28px" : 0 }}>
+      <div style={{ padding: (view === "leaderboard" || view === "admin") ? "14px 20px 0 20px" : "14px 20px", paddingBottom: (view === "leaderboard" || view === "admin") ? "0" : "14px", flex: 1, overflowY: "auto", overflowX: "hidden", display: (view === "leaderboard" || view === "admin") ? "flex" : "block", flexDirection: "column", minHeight: 0 }}>
         {view === "leaderboard" && <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} teeData={teeData} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} />}
         <div style={{ display: view === "scoring" ? "block" : "none", paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
           <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeData={teeData} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onNavigate={setView} onGoToAdminCourses={() => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); }} markPlayerWD={markPlayerWD} />
