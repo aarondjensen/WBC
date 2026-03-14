@@ -3228,6 +3228,17 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                             };
                             return (
                               <div style={{ padding: "0 14px 12px", background: ac + "04" }}>
+                                {/* Course name edit */}
+                                {isEditing && (
+                                  <div style={{ marginBottom: 8, marginTop: 4 }}>
+                                    <span style={{ fontSize: 9, color: K.t3, textTransform: "uppercase", fontWeight: 600 }}>Course Name</span>
+                                    <input
+                                      value={d.name || ""}
+                                      onChange={e => setEditingCourse(prev => ({ ...prev, draft: { ...prev.draft, name: e.target.value } }))}
+                                      style={{ display: "block", width: "100%", marginTop: 3, padding: "5px 8px", background: K.inp, border: `1px solid ${ac}40`, borderRadius: 6, color: K.t1, fontSize: 12, boxSizing: "border-box" }}
+                                    />
+                                  </div>
+                                )}
                                 {/* Rating / Slope row */}
                                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, marginTop: 4 }}>
                                   {["rating","slope"].map(field => (
