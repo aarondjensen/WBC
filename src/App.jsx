@@ -3183,9 +3183,9 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                   <div style={{ background: K.card, borderRadius: 12, border: `1px solid ${K.bdr}`, overflow: "hidden" }}>
                     <div style={{ padding: "10px 14px", display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 6, borderBottom: `1px solid ${K.bdr}` }}>
                       {Array.from({ length: numRounds }, (_, ri) => ri + 1).every(r => tRounds.find(t => t.round_number === r && t.course_id)) && !searching && (
-                        <button onClick={() => setSettingsOpen(false)} style={{ padding: "4px 12px", borderRadius: 6, background: ac, border: "none", color: K.bg, fontSize: 10, fontWeight: 700, cursor: "pointer" }}>✓ All Rounds Set</button>
+                        <button onClick={() => setSettingsOpen(false)} style={{ padding: "4px 12px", borderRadius: 6, background: "transparent", border: `1px solid ${ac}`, color: ac, fontSize: 10, fontWeight: 700, cursor: "pointer" }}>✓ All Rounds Set</button>
                       )}
-                      <button onClick={() => { setSearching(!searching); setCourseSearch(""); setSearchResults([]); }} style={{ padding: "3px 8px", borderRadius: 6, background: "transparent", border: `1px solid ${ac}50`, color: ac, fontSize: 10, fontWeight: 600, cursor: "pointer" }}>{searching ? "Done" : "+ Add"}</button>
+                      <button onClick={() => { setSearching(!searching); setCourseSearch(""); setSearchResults([]); }} style={{ padding: "3px 8px", borderRadius: 6, background: "transparent", border: `1px solid ${ac}50`, color: ac, fontSize: 10, fontWeight: 600, cursor: "pointer" }}>{searching ? "Close" : "+ Add"}</button>
                     </div>
                     {courses.map((c, i) => {
                       const assignedRounds = Array.from({ length: numRounds }, (_, ri) => ri + 1).filter(r => { const tr = tRounds.find(t => t.round_number === r); return tr && tr.course_id === c.id; });
@@ -3231,7 +3231,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                             };
                             return (
                               <div style={{ padding: "0 14px 12px", background: ac + "04" }}>
-                                {/* Tee boxes row + Edit button aligned to the right */}
+                                {/* Tee boxes + Edit button side by side */}
                                 <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginTop: 6, marginBottom: 6 }}>
                                   <div style={{ flex: 1 }}>
                                     {(d.tee_boxes||[]).map((tb, tbi) => (
@@ -3304,10 +3304,10 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                                     </div>
                                   );
                                 })}
-                              <button onClick={() => { setExpandedCourse(null); setEditingCourse(null); }} style={{ display: "block", width: "100%", marginTop: 14, padding: "12px 0", borderRadius: 10, background: ac, border: "none", color: K.bg, fontSize: 14, fontWeight: 700, cursor: "pointer", letterSpacing: "0.02em" }}>Done</button>
+                              <button onClick={() => { setExpandedCourse(null); setEditingCourse(null); }} style={{ display: "block", width: "100%", marginTop: 14, padding: "11px 0", borderRadius: 10, background: K.inp, border: `1px solid ${K.bdr}`, color: K.t2, fontSize: 13, fontWeight: 600, cursor: "pointer", letterSpacing: "0.02em" }}>Close</button>
                             </div>
                             );
-                          })()}
+                          })()
                         </div>
                       );
                     })}
