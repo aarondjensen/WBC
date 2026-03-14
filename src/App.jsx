@@ -1667,13 +1667,11 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
           position: "fixed", top: 80, left: "50%", transform: "translateX(-50%)",
           background: K.acc, color: K.bg, padding: "12px 48px", borderRadius: 12,
           fontSize: 13, fontWeight: 700, zIndex: 1000, whiteSpace: "nowrap", minWidth: 280, textAlign: "center",
-          boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
-          animation: "toastDown 0.3s ease",
+          boxShadow: "0 8px 32px rgba(0,0,0,0.4)", animation: "toastDown 0.3s ease",
         }}>
           ✓ Hole {currentHole + 1} saved — advancing...
         </div>
       )}
-
       {/* Finalize banner - fixed at top when all 18 complete */}
       {allRoundComplete && !isGroupFinalized && !showFinalize && (
         <div style={{
@@ -1681,8 +1679,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
           display: "flex", alignItems: "center", gap: 12,
           background: K.acc, color: K.bg, padding: "12px 20px", borderRadius: 12,
           fontSize: 13, fontWeight: 700, zIndex: 1000, minWidth: 280, maxWidth: "calc(100vw - 40px)",
-          boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
-          animation: "toastDown 0.3s ease",
+          boxShadow: "0 8px 32px rgba(0,0,0,0.4)", animation: "toastDown 0.3s ease",
         }}>
           <span style={{ flex: 1 }}>🏆 Round complete!</span>
           <button onClick={() => setShowFinalize(true)} style={{
@@ -3250,11 +3247,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                                 {isEditing && (
                                   <div style={{ marginBottom: 8, marginTop: 4 }}>
                                     <span style={{ fontSize: 9, color: K.t3, textTransform: "uppercase", fontWeight: 600 }}>Course Name</span>
-                                    <input
-                                      value={d.name || ""}
-                                      onChange={e => setEditingCourse(prev => ({ ...prev, draft: { ...prev.draft, name: e.target.value } }))}
-                                      style={{ display: "block", width: "100%", marginTop: 3, padding: "5px 8px", background: K.inp, border: `1px solid ${ac}40`, borderRadius: 6, color: K.t1, fontSize: 12, boxSizing: "border-box" }}
-                                    />
+                                    <input value={d.name || ""} onChange={e => setEditingCourse(prev => ({ ...prev, draft: { ...prev.draft, name: e.target.value } }))} style={{ display: "block", width: "100%", marginTop: 3, padding: "5px 8px", background: K.inp, border: `1px solid ${ac}40`, borderRadius: 6, color: K.t1, fontSize: 12, boxSizing: "border-box" }} />
                                   </div>
                                 )}
                                 {/* Rating / Slope row */}
@@ -3329,10 +3322,8 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                                   );
                                 })}
                               </div>
-                              <button
-                                onClick={() => { setExpandedCourse(null); setEditingCourse(null); }}
-                                style={{ display: "block", width: "100%", marginTop: 14, padding: "11px 0", borderRadius: 10, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t2, fontSize: 14, fontWeight: 700, cursor: "pointer" }}
-                              >Done</button>
+                              <button onClick={() => { setExpandedCourse(null); setEditingCourse(null); }} style={{ display: "block", width: "100%", marginTop: 14, padding: "11px 0", borderRadius: 10, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t2, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>Done</button>
+                            </div>
                             );
                           })()}
                         </div>
@@ -4754,12 +4745,10 @@ export default function WBCApp() {
             const btnBorder = roundIsActive ? `1px solid ${K.acc}40` : `1px solid ${K.bdr}`;
             return (
               <div style={{ marginTop: 24, borderTop: `1px solid ${K.bdr}30`, paddingTop: 20 }}>
-                <button
-                  onClick={() => setUser({ id: "guest", name: "Guest", isDirector: false, isGuest: true })}
+                <button onClick={() => setUser({ id: "guest", name: "Guest", isDirector: false, isGuest: true })}
                   style={{ width: "100%", padding: "13px 0", borderRadius: 12, background: "transparent", border: btnBorder, color: btnColor, fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, letterSpacing: "0.02em", transition: "all 0.15s" }}
                   onMouseEnter={e => { e.currentTarget.style.background = btnColor + "12"; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
-                >
+                  onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}>
                   {roundIsActive && <span style={{ width: 7, height: 7, borderRadius: "50%", background: K.acc, display: "inline-block", boxShadow: `0 0 6px ${K.acc}` }} />}
                   <svg width="15" height="15" viewBox="0 0 200 300" fill={btnColor}>
                     <path d="M62,14 L138,14 C140,14 142,15 142,17 L140,88 C138,102 126,114 112,120 L88,120 C74,114 62,102 60,88 L58,17 C58,15 60,14 62,14Z"/>
