@@ -1,5 +1,3 @@
-import { initializeApp } from "firebase/app";
-import { getFirestore, collection, doc, setDoc, getDocs, query, where, writeBatch, onSnapshot, deleteDoc } from "firebase/firestore";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 const WBC_LOGO = "/wbc-icon-512.png";
@@ -27,73 +25,215 @@ const TROPHY_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 260
 
 const TROPHY_SVG_URL = `data:image/svg+xml;utf8,${encodeURIComponent(TROPHY_SVG)}`;
 
-// Player registry — populated from Firestore on mount, used as a name lookup cache
-let DEMO_PLAYERS = [];
+// Demo data simulating what's in Supabase
+// Player registry — loaded from Supabase players table on mount
+let DEMO_PLAYERS = [
+  { id: "aaron_j", name: "Aaron J" }, { id: "bob_b", name: "Bob B" },
+  { id: "brian_k", name: "Brian K" }, { id: "eric_o", name: "Eric O" },
+  { id: "joe_s", name: "Joe S" }, { id: "john_c", name: "John C" },
+  { id: "matt_v", name: "Matt V" }, { id: "scott_r", name: "Scott R" },
+  { id: "jeff_b", name: "Jeff B" }, { id: "ray_h", name: "Ray H" },
+  { id: "russ_w", name: "Russ W" }, { id: "steve_v", name: "Steve V" },
+];
+
+const DEMO_TP = [
+  { id: "tp1", tournament_id: "wbc_2026", player_id: "aaron_j", handicap_index: 15.2, status: "active" },
+  { id: "tp2", tournament_id: "wbc_2026", player_id: "bob_b", handicap_index: 12.8, status: "active" },
+  { id: "tp3", tournament_id: "wbc_2026", player_id: "brian_k", handicap_index: 18.4, status: "active" },
+  { id: "tp4", tournament_id: "wbc_2026", player_id: "eric_o", handicap_index: 9.1, status: "active" },
+  { id: "tp5", tournament_id: "wbc_2026", player_id: "joe_s", handicap_index: 22.5, status: "active" },
+  { id: "tp6", tournament_id: "wbc_2026", player_id: "john_c", handicap_index: 14.0, status: "active" },
+  { id: "tp7", tournament_id: "wbc_2026", player_id: "matt_v", handicap_index: 16.7, status: "active" },
+  { id: "tp8", tournament_id: "wbc_2026", player_id: "scott_r", handicap_index: 11.3, status: "active" },
+  { id: "tp9", tournament_id: "wbc_2026", player_id: "jeff_b", handicap_index: 20.1, status: "active" },
+  { id: "tp10", tournament_id: "wbc_2026", player_id: "ray_h", handicap_index: 17.6, status: "active" },
+  { id: "tp11", tournament_id: "wbc_2026", player_id: "russ_w", handicap_index: 13.5, status: "active" },
+  { id: "tp12", tournament_id: "wbc_2026", player_id: "steve_v", handicap_index: 19.8, status: "active" },
+];
+
+// ── Real Gaylord, MI course data (scorecard data from official Treetops PDFs) ──
+
+// Treetops – Jones Masterpiece (RTJ Sr., 1987) — par 71
+// Scorecard source: official Treetops PDF, Blue tees
+const DEMO_COURSE = {
+  id: "demo_course_1",
+  name: "Treetops – Masterpiece",
+  rating: 71.7, slope: 137, par: 71,
+  city: "Gaylord", state: "MI",
+  hole_pars:      [5,3,4,3,5,3,4,4,4, 5,4,4,3,4,4,3,4,5],
+  hole_handicaps: [13,17,1,11,3,15,5,7,9, 4,6,2,12,14,16,18,8,10],
+  tee_boxes: [
+    { name: "Black",  color: "#2c2c2c", slope: 147, rating: 74.8, par: 71, yardage: 7068 },
+    { name: "Blue",   color: "#2d8fd4", slope: 137, rating: 71.7, par: 71, yardage: 6435 },
+    { name: "White",  color: "#e8e8e8", slope: 132, rating: 69.4, par: 71, yardage: 5921 },
+    { name: "Gold",   color: "#d4a843", slope: 127, rating: 67.1, par: 71, yardage: 5421 },
+    { name: "Red",    color: "#c0392b", slope: 120, rating: 63.8, par: 71, yardage: 4862 },
+  ],
+};
+
+// Treetops – Smith Signature (Rick Smith, 1993) — par 70
+// Scorecard source: official Treetops PDF, Blue tees
+const DEMO_COURSE2 = {
+  id: "demo_course_2",
+  name: "Treetops – Signature",
+  rating: 71.0, slope: 139, par: 70,
+  city: "Gaylord", state: "MI",
+  hole_pars:      [4,3,4,3,4,5,4,3,4, 5,3,4,4,4,5,4,3,4],
+  hole_handicaps: [7,17,3,15,1,5,9,13,11, 4,14,10,2,8,6,18,16,12],
+  tee_boxes: [
+    { name: "Black",  color: "#2c2c2c", slope: 140, rating: 72.9, par: 70, yardage: 6653 },
+    { name: "Blue",   color: "#2d8fd4", slope: 139, rating: 71.0, par: 70, yardage: 6271 },
+    { name: "White",  color: "#e8e8e8", slope: 135, rating: 69.2, par: 70, yardage: 5843 },
+    { name: "Gold",   color: "#d4a843", slope: 131, rating: 66.8, par: 70, yardage: 5387 },
+    { name: "Red",    color: "#c0392b", slope: 131, rating: 67.9, par: 70, yardage: 4626 },
+  ],
+};
+
+// Treetops – Smith Tradition (Rick Smith, 1997) — par 70
+// Scorecard source: official Treetops PDF, Black tees
+const DEMO_COURSE3 = {
+  id: "demo_course_3",
+  name: "Treetops – Tradition",
+  rating: 70.0, slope: 130, par: 70,
+  city: "Gaylord", state: "MI",
+  hole_pars:      [4,4,5,4,4,3,4,4,3, 5,4,3,4,4,3,4,3,5],
+  hole_handicaps: [9,3,7,5,1,13,11,17,15, 8,2,14,18,6,10,4,16,12],
+  tee_boxes: [
+    { name: "Black",  color: "#2c2c2c", slope: 130, rating: 70.0, par: 70, yardage: 6354 },
+    { name: "Blue",   color: "#2d8fd4", slope: 126, rating: 69.4, par: 70, yardage: 6173 },
+    { name: "White",  color: "#e8e8e8", slope: 118, rating: 67.8, par: 70, yardage: 5508 },
+    { name: "Gold",   color: "#d4a843", slope: 115, rating: 66.4, par: 70, yardage: 5248 },
+    { name: "Red",    color: "#c0392b", slope: 111, rating: 63.1, par: 70, yardage: 4791 },
+  ],
+};
+
+// Treetops – Fazio Premier (Tom Fazio, 1992) — par 72
+// Tee data from BlueGolf/USGA database; hole layout from Treetops materials
+// Par sequence: typical Fazio Premier layout per known front/back par totals (36/36)
+const DEMO_COURSE4 = {
+  id: "demo_course_4",
+  name: "Treetops – Premier",
+  rating: 71.0, slope: 132, par: 72,
+  city: "Gaylord", state: "MI",
+  hole_pars:      [4,4,5,4,3,5,4,3,4, 5,3,4,4,5,4,3,4,4],
+  hole_handicaps: [3,11,7,15,17,1,9,13,5, 2,16,8,4,12,6,18,14,10],
+  tee_boxes: [
+    { name: "Black",  color: "#2c2c2c", slope: 142, rating: 73.3, par: 72, yardage: 6701 },
+    { name: "Blue",   color: "#2d8fd4", slope: 132, rating: 71.0, par: 72, yardage: 6282 },
+    { name: "White",  color: "#e8e8e8", slope: 126, rating: 68.8, par: 72, yardage: 5854 },
+    { name: "Gold",   color: "#d4a843", slope: 117, rating: 65.6, par: 72, yardage: 5290 },
+    { name: "Red",    color: "#c0392b", slope: 113, rating: 64.5, par: 72, yardage: 4870 },
+  ],
+};
+
+const DEMO_COURSE5 = {
+  id: "american_dunes",
+  name: "American Dunes",
+  city: "Grand Haven", state: "MI",
+  par: 72, rating: 73.0, slope: 142, yardage: 6701,
+  hole_pars:      [4,5,4,3,4,5,3,4,4, 4,4,3,5,4,3,4,4,5],
+  hole_handicaps: [5,17,3,11,15,1,7,13,9, 12,10,8,18,16,2,14,6,4],
+  tee_boxes: [
+    { name: "Jet",     color: "#2c2c2c", slope: 148, rating: 75.4, par: 72, yardage: 7213 },
+    { name: "Valor",   color: "#2d8fd4", slope: 142, rating: 73.0, par: 72, yardage: 6701 },
+    { name: "Freedom", color: "#e8e8e8", slope: 133, rating: 70.3, par: 72, yardage: 6131 },
+    { name: "Honor",   color: "#d4a843", slope: 126, rating: 67.8, par: 72, yardage: 5573 },
+    { name: "Bear",    color: "#c0392b", slope: 116, rating: 63.9, par: 72, yardage: 4772 },
+  ],
+};
+
+const ALL_DEMO_COURSES = [DEMO_COURSE, DEMO_COURSE2, DEMO_COURSE3, DEMO_COURSE4, DEMO_COURSE5];
 
 const TOURNAMENT = { id: "wbc_2026", name: "WBC 2026", year: 2026, num_rounds: 4, status: "active" };
-// ── Firebase / Firestore configuration ──
-const FIREBASE_CONFIG = {
-  apiKey: "AIzaSyBcS6KphgfN15xwfCcmLXx3YMIMUeYuhfc",
-  authDomain: "wannabecup-c5aab.firebaseapp.com",
-  projectId: "wannabecup-c5aab",
-  storageBucket: "wannabecup-c5aab.firebasestorage.app",
-  messagingSenderId: "281900029443",
-  appId: "1:281900029443:web:68da433d8ec5a16b74a036",
+
+// ── Pre-populated Round 1 scores (Treetops Masterpiece, par 71, White tees) ──
+const DEMO_PAIRINGS = {
+  1: [
+    ["aaron_j", "bob_b", "brian_k", "eric_o"],
+    ["jeff_b", "joe_s", "john_c", "matt_v"],
+    ["ray_h", "russ_w", "scott_r", "steve_v"],
+  ],
 };
+const DEMO_TEE_TIMES = { 1: ["8:00 AM", "8:08 AM", "8:16 AM"] };
+const DEMO_TEE_ASSIGNMENTS = {
+  1: {
+    aaron_j: "White", bob_b: "White", brian_k: "Gold", eric_o: "Blue",
+    jeff_b: "Gold", joe_s: "Gold", john_c: "White", matt_v: "White",
+    ray_h: "White", russ_w: "White", scott_r: "Blue", steve_v: "Gold",
+  },
+};
+// Realistic 18-hole scores per player on Treetops Masterpiece (par 71, White tees)
+// Scores reflect a mid-handicap group — bogey golf with a few pars and doubles mixed in
+const DEMO_HOLE_DATA = {
+  "aaron_j_1":  {0:5,1:6,2:3,3:5,4:4,5:3,6:6,7:5,8:4, 9:5,10:3,11:5,12:6,13:4,14:3,15:5,16:5,17:6},   // 86
+  "bob_b_1":    {0:4,1:5,2:3,3:4,4:5,5:3,6:5,7:4,8:5, 9:4,10:3,11:4,12:6,13:4,14:4,15:4,16:5,17:5},   // 79
+  "brian_k_1":  {0:5,1:6,2:4,3:5,4:5,5:4,6:6,7:5,8:5, 9:5,10:4,11:5,12:6,13:5,14:4,15:5,16:5,17:6},   // 93
+  "eric_o_1":   {0:4,1:5,2:3,3:4,4:4,5:3,6:5,7:4,8:4, 9:4,10:3,11:4,12:5,13:4,14:3,15:4,16:4,17:5},   // 76
+  "jeff_b_1":   {0:5,1:6,2:4,3:5,4:5,5:4,6:6,7:5,8:5, 9:4,10:4,11:5,12:6,13:5,14:3,15:5,16:5,17:6},   // 91
+  "joe_s_1":    {0:6,1:6,2:4,3:5,4:5,5:4,6:7,7:5,8:5, 9:5,10:4,11:5,12:7,13:5,14:4,15:5,16:5,17:6},   // 96
+  "john_c_1":   {0:4,1:5,2:3,3:5,4:4,5:3,6:6,7:4,8:5, 9:4,10:3,11:5,12:5,13:4,14:3,15:4,16:5,17:5},   // 82
+  "matt_v_1":   {0:5,1:6,2:3,3:5,4:5,5:3,6:6,7:5,8:4, 9:5,10:4,11:4,12:6,13:5,14:4,15:5,16:5,17:6},   // 89
+  "ray_h_1":    {0:5,1:6,2:4,3:5,4:4,5:4,6:6,7:5,8:5, 9:5,10:3,11:5,12:6,13:5,14:3,15:5,16:4,17:6},   // 90
+  "russ_w_1":   {0:4,1:5,2:3,3:4,4:5,5:3,6:5,7:5,8:4, 9:4,10:3,11:4,12:6,13:4,14:4,15:4,16:5,17:5},   // 81
+  "scott_r_1":  {0:4,1:5,2:3,3:4,4:4,5:3,6:5,7:4,8:4, 9:4,10:3,11:4,12:5,13:5,14:3,15:4,16:4,17:5},   // 78
+  "steve_v_1":  {0:5,1:7,2:4,3:5,4:5,5:4,6:6,7:5,8:5, 9:5,10:4,11:5,12:7,13:5,14:4,15:5,16:5,17:6},   // 95
+};
+
+// ── Supabase client ──
+const SUPABASE_URL = "https://eslskkeienudxxmwafag.supabase.co";
+const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVzbHNra2VpZW51ZHh4bXdhZmFnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIyMzgwMDQsImV4cCI6MjA4NzgxNDAwNH0.ZELe_lRNmJdJaAsUAwhPXpX8OgtdtAUwbetiiZH7qZw";
 const TOURNAMENT_ID = "wbc_2026";
 
-const _app = initializeApp(FIREBASE_CONFIG);
-const _db  = getFirestore(_app);
-
-// ── db: Firestore data layer ──
-const db = {
-  _q: (col, filters = []) => {
-    const ref = collection(_db, col);
-    return filters.length ? query(ref, ...filters.map(f => where(f.field, f.op, f.value))) : ref;
+const sb = {
+  url: SUPABASE_URL,
+  key: SUPABASE_ANON,
+  fetch: async (path, opts = {}) => {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+      ...opts,
+      headers: {
+        "apikey": SUPABASE_ANON,
+        "Authorization": `Bearer ${SUPABASE_ANON}`,
+        "Content-Type": "application/json",
+        "Prefer": opts.prefer || "return=representation",
+        ...(opts.headers || {}),
+      },
+    });
+    if (!res.ok) { const err = await res.text(); console.error("SB error:", err); return null; }
+    const txt = await res.text();
+    return txt ? JSON.parse(txt) : null;
   },
-  get: async (col, filters = []) => {
-    try {
-      const snap = await getDocs(db._q(col, filters));
-      return snap.docs.map(d => d.data());
-    } catch(e) { console.error("db.get error:", col, e); return null; }
-  },
-  upsert: async (col, data) => {
-    if (!data.id) { console.error("db.upsert: missing id", col, data); return null; }
-    try {
-      await setDoc(doc(_db, col, String(data.id)), data, { merge: true });
-      return data;
-    } catch(e) { console.error("db.upsert error:", col, e); return null; }
-  },
-  delete: async (col, filters = []) => {
-    try {
-      const snap = await getDocs(db._q(col, filters));
-      if (snap.empty) return true;
-      const docs = snap.docs;
-      for (let i = 0; i < docs.length; i += 490) {
-        const batch = writeBatch(_db);
-        docs.slice(i, i + 490).forEach(d => batch.delete(d.ref));
-        await batch.commit();
-      }
-      return true;
-    } catch(e) { console.error("db.delete error:", col, e); return null; }
-  },
-  deleteDoc: async (col, id) => {
-    try { await deleteDoc(doc(_db, col, String(id))); return true; }
-    catch(e) { console.error("db.deleteDoc error:", col, e); return null; }
-  },
-  subscribe: (col, filters = [], callback) => {
-    try {
-      return onSnapshot(
-        db._q(col, filters),
-        snap => callback(snap.docs.map(d => d.data()), snap.docChanges()),
-        err => console.error("db.subscribe error:", col, err)
-      );
-    } catch(e) { console.error("db.subscribe setup error:", col, e); return () => {}; }
+  get: (table, query = "") => sb.fetch(`${table}?${query}`),
+  upsert: (table, data, onConflict) => sb.fetch(`${table}`, {
+    method: "POST",
+    prefer: "resolution=merge-duplicates,return=representation",
+    headers: onConflict ? { "Prefer": `resolution=merge-duplicates,return=representation` } : {},
+    body: JSON.stringify(data),
+  }),
+  delete: (table, query) => sb.fetch(`${table}?${query}`, { method: "DELETE", prefer: "return=representation" }),
+  // Real-time subscription via websocket
+  subscribe: (table, filter, callback) => {
+    const wsUrl = SUPABASE_URL.replace("https://", "wss://") + "/realtime/v1/websocket?apikey=" + SUPABASE_ANON + "&vsn=1.0.0";
+    let ws, heartbeat;
+    const connect = () => {
+      ws = new WebSocket(wsUrl);
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ topic: "realtime:*", event: "phx_join", payload: { config: { broadcast: { self: false }, presence: { key: "" }, postgres_changes: [{ event: "*", schema: "public", table }] } }, ref: "1" }));
+        heartbeat = setInterval(() => ws.readyState === 1 && ws.send(JSON.stringify({ topic: "phoenix", event: "heartbeat", payload: {}, ref: "hb" })), 25000);
+      };
+      ws.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          if (msg.event === "postgres_changes" && msg.payload?.data) callback(msg.payload.data);
+        } catch(err) {}
+      };
+      ws.onclose = () => { clearInterval(heartbeat); setTimeout(connect, 3000); };
+    };
+    connect();
+    return () => { clearInterval(heartbeat); ws?.close(); };
   },
 };
 
-
-// Helper: convert Firestore hole_scores docs → holeData format { "pid_round": { holeIdx: score } }
+// Helper: convert Supabase hole_scores rows → holeData format { "pid_round": { holeIdx: score } }
 const extractRound = (roundScoreId) => {
   const m = roundScoreId?.match(/_r(\d+)_/);
   return m ? parseInt(m[1]) : 1;
@@ -107,7 +247,7 @@ const rowsToHoleData = (rows) => {
   });
   return hd;
 };
-// Convert holeData entry to a Firestore document
+// Convert holeData entry to Supabase row
 const holeDataToRow = (pid, rnd, holeIdx, score, courseId) => ({
   id: `hs_2026_r${rnd}_${pid}_h${holeIdx + 1}`,
   round_score_id: `rs_2026_r${rnd}_${pid}`,
@@ -2279,13 +2419,13 @@ function TeeAssigner({ activePlayers, numRounds, tRounds, courses, teeData, setT
             <div style={{ marginBottom: 8 }}>
               <div style={{ fontSize: 10, fontWeight: 600, color: K.t3, textTransform: "uppercase", marginBottom: 4 }}>Set all players to:</div>
               <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
-                {tees.map(tee => (
+                {[...tees].sort((a, b) => (parseFloat(b.slope) || 0) - (parseFloat(a.slope) || 0)).map(tee => (
                   <button key={tee.name} onClick={() => setAll(tee.name)} style={{
                     flex: 1, minWidth: 60, padding: "8px 6px", borderRadius: 8, cursor: "pointer", textAlign: "center",
                     background: K.inp, border: `1px solid ${K.bdr}`, color: K.t1,
                     display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
                   }}>
-                    <TeeColorSwatch color={tee.color} name={tee.name} size={18} style={{ borderRadius: 4 }} />
+                    <TeeColorSwatch color={resolveTeeColor(tee, 0)} name={tee.name} size={18} style={{ borderRadius: 4 }} />
                     <span style={{ fontSize: 10, fontWeight: 700 }}>{tee.name}</span>
                     <div style={{ fontSize: 8, color: K.t3, lineHeight: 1.2 }}>{tee.slope}/{tee.rating}{tee.yardage ? <><br/>{tee.yardage.toLocaleString()}</> : ""}</div>
                   </button>
@@ -2337,7 +2477,7 @@ function TeeAssigner({ activePlayers, numRounds, tRounds, courses, teeData, setT
                     </span>
                   </div>
                   <div style={{ display: "flex", gap: 2 }}>
-                    {tees.map(tee => {
+                    {[...tees].sort((a, b) => (parseFloat(b.slope) || 0) - (parseFloat(a.slope) || 0)).map(tee => {
                       const isActive = currentTee === tee.name;
                       return (
                         <button key={tee.name} onClick={() => assign(p.id, tee.name)} style={{
@@ -2349,7 +2489,7 @@ function TeeAssigner({ activePlayers, numRounds, tRounds, courses, teeData, setT
                           transition: "background 0.18s ease, border-color 0.18s ease, transform 0.18s ease",
                           willChange: "transform",
                         }}>
-                          <TeeColorSwatch color={tee.color} name={tee.name} size={14} style={{ borderRadius: 3 }} />
+                          <TeeColorSwatch color={resolveTeeColor(tee, 0)} name={tee.name} size={14} style={{ borderRadius: 3 }} />
                           <span style={{ fontSize: 7, fontWeight: 700, color: isActive ? K.acc : K.t3, lineHeight: 1, transition: "color 0.18s ease" }}>{tee.name.split("/")[0].substring(0,5)}</span>
                         </button>
                       );
@@ -2665,22 +2805,15 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
           });
         };
 
-        // 1. Firestore FIRST — local WBC history takes priority
+        // 1. Supabase FIRST — local WBC history takes priority
         let sbCourseNames = new Set();
         try {
-          const qLower = q.toLowerCase();
-          const rows = await db.get("courses");
+          const qEnc = encodeURIComponent(`*${q}*`);
+          const rows = await sb.get("courses", `or=(name.ilike.${qEnc},city.ilike.${qEnc})&order=name&limit=40`);
           if (rows?.length) {
-            const filtered = rows.filter(r => {
-              const nameMatch = (r.name || "").toLowerCase().includes(qLower);
-              const cityMatch = (r.city || "").toLowerCase().includes(qLower);
-              const stateOk = stateFilter ? stateMatches(r.state, stateFilter) : true;
-              return (nameMatch || cityMatch) && stateOk;
-            }).slice(0, 40);
-            const courseIds = filtered.map(r => r.id).filter(Boolean);
-            const tbRows = courseIds.length
-              ? await db.get("tee_boxes", [{ field: "course_id", op: "in", value: courseIds }])
-              : [];
+            const filtered = stateFilter ? rows.filter(r => stateMatches(r.state, stateFilter)) : rows;
+            const ids = filtered.map(r => r.id).join(",");
+            const tbRows = ids ? await sb.get("tee_boxes", `course_id=in.(${ids})`) : [];
             const sbCourses = filtered.map((c) => ({
               ...c, hole_pars: c.hole_pars || [], hole_handicaps: c.hole_handicaps || [],
               _source: "WBC History",
@@ -2695,7 +2828,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
               sbCourseNames.add(sbC.name.toLowerCase());
             }
           }
-        } catch(e) { console.log("[Firestore] failed:", e); }
+        } catch(e) { console.log("[Supabase] failed:", e); }
 
         // 2. RapidAPI — only for courses NOT already in local DB
         let apiResults = [];
@@ -2709,7 +2842,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
           }
         } catch(e) { console.log("[RapidAPI] failed:", e); }
 
-        // 3. GolfCourseAPI — fill gaps not covered by Firestore or RapidAPI
+        // 3. GolfCourseAPI — fill gaps not covered by Supabase or RapidAPI
         try {
           const r2 = await fetch(`/api/courses?search=${encodeURIComponent(q)}${stateParam}`);
           if (r2.ok) {
@@ -3351,7 +3484,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                                 {/* Action buttons */}
                                 <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
                                   <button onClick={() => {
-                                    // Use local data — open preview with Firestore course
+                                    // Use local data — open preview with Supabase course
                                     setLocalDbPrompt(null);
                                     setCoursePreview({ ...sbCourse, _source: "WBC History" });
                                   }} style={{ flex: 1, padding: "12px 0", borderRadius: 10, background: ac, border: "none", color: "#0a1628", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
@@ -3645,14 +3778,14 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
         <PairingsEditor activePlayers={activePlayers} numRounds={numRounds} pairingsData={pairingsData} setPairings={setPairings} tRounds={tRounds} courses={courses} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
               setTeeTimesData(prev => {
                 const next = typeof updater === "function" ? updater(prev) : updater;
-                // Fire-and-forget: update tee times on pairings rows in Firestore
+                // Fire-and-forget: update tee times on pairings rows in Supabase
                 Object.keys(next).forEach(async rnd => {
                   const groups = pairingsData[rnd] || [];
                   groups.forEach(async (grp, gi) => {
                     const teeTime = (next[rnd] || [])[gi] || null;
                     grp.forEach(async pid => {
                       const row = { id: `pair_2026_r${rnd}_g${gi+1}_${pid}`, tournament_id: TOURNAMENT_ID, round_number: parseInt(rnd), group_number: gi+1, player_id: pid, tee_time: teeTime };
-                      await db.upsert("pairings", row);
+                      await sb.upsert("pairings", row, "id");
                     });
                   });
                 });
@@ -3803,7 +3936,9 @@ export default function WBCApp() {
   }, []);
 
   const [tPlayers, setTPlayers] = useState([]);
-  const [tRounds, setTRounds] = useState([]);
+  const [tRounds, setTRounds] = useState([
+    { id: "tr1", tournament_id: "wbc_2026", round_number: 1, course_id: "demo_course_1" },
+  ]);
   const [courseList, setCourseList] = useState([]);
   const [holeData, setHoleData] = useState({});
   const [ctpData, setCtpData] = useState({});
@@ -3827,60 +3962,67 @@ export default function WBCApp() {
   const [storageLoaded, setStorageLoaded] = useState(false);
   const [syncing, setSyncing] = useState(false);
 
-  // ── Load all data from Firestore on mount ──
+  // ── Load all WBC 2026 data from Supabase on mount ──
   useEffect(() => {
     (async () => {
       try {
         setSyncing(true);
 
-        const playerRows = await db.get("players");
+        // Load player registry (names) from players table
+        const playerRows = await sb.get("players", "order=name");
         if (playerRows?.length) {
-          DEMO_PLAYERS = playerRows.map(r => ({ id: r.id, name: r.name }))
-            .sort((a, b) => a.name.localeCompare(b.name));
+          DEMO_PLAYERS = playerRows.map(r => ({ id: r.id, name: r.name }));
         }
 
-        const tpRows = await db.get("tournament_players", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
+        // Load tournament players
+        const tpRows = await sb.get("tournament_players", `tournament_id=eq.${TOURNAMENT_ID}&order=player_id`);
         if (tpRows?.length) {
           setTPlayers(tpRows.map(r => ({ id: r.id, tournament_id: r.tournament_id, player_id: r.player_id, handicap_index: parseFloat(r.handicap_index) || 0, status: r.status || "active" })));
         } else if (playerRows?.length) {
+          // No tournament_players yet — seed from players table with HI=0
           const seeded = playerRows.map(r => ({ id: `tp_2026_${r.id}`, tournament_id: TOURNAMENT_ID, player_id: r.id, handicap_index: 0, status: "active" }));
           setTPlayers(seeded);
-          for (const tp of seeded) await db.upsert("tournament_players", tp);
+          for (const tp of seeded) await sb.upsert("tournament_players", tp, "id");
         }
 
-        const trRows = await db.get("tournament_rounds", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
-        const sortedTRounds = (trRows || []).sort((a, b) => a.round_number - b.round_number);
-        if (sortedTRounds.length) setTRounds(sortedTRounds.map(r => ({ id: r.id, tournament_id: r.tournament_id, round_number: r.round_number, course_id: r.course_id })));
+        // Load tournament rounds
+        const trRows = await sb.get("tournament_rounds", `tournament_id=eq.${TOURNAMENT_ID}&order=round_number`);
+        if (trRows?.length) setTRounds(trRows.map(r => ({ id: r.id, tournament_id: r.tournament_id, round_number: r.round_number, course_id: r.course_id })));
 
-        const courseIds = sortedTRounds.map(r => r.course_id).filter(Boolean);
+        // Load courses used by this tournament
+        const courseIds = (trRows || []).map(r => r.course_id).filter(Boolean);
         if (courseIds.length) {
-          const cRows = await db.get("courses", [{ field: "id", op: "in", value: courseIds }]);
+          const cRows = await sb.get("courses", `id=in.(${courseIds.join(",")})`);
           if (cRows?.length) {
-            const tbRows = await db.get("tee_boxes", [{ field: "course_id", op: "in", value: courseIds }]);
+            // Also load tee boxes for each course
+            const tbRows = await sb.get("tee_boxes", `course_id=in.(${courseIds.join(",")})`);
             const coursesWithTees = cRows.map(c => ({
               ...c,
               hole_pars: c.hole_pars || [],
               hole_handicaps: c.hole_handicaps || [],
               tee_boxes: (tbRows || []).filter(t => t.course_id === c.id).map(t => ({ name: t.name, color: t.color, rating: parseFloat(t.rating), slope: t.slope, par: t.par, yardage: t.yardage })),
             }));
-            setCourseList(prev => sortCoursesByRound(coursesWithTees, sortedTRounds));
+            setCourseList(prev => sortCoursesByRound(coursesWithTees, tRounds));
           }
         }
 
-        const hsRows = await db.get("hole_scores", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
+        // Load hole scores
+        const hsRows = await sb.get("hole_scores", `tournament_id=eq.${TOURNAMENT_ID}`);
         if (hsRows?.length) setHoleData(rowsToHoleData(hsRows));
 
-        const pairRows = await db.get("pairings", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
+        // Load pairings
+        const pairRows = await sb.get("pairings", `tournament_id=eq.${TOURNAMENT_ID}&order=round_number,group_number,player_id`);
         if (pairRows?.length) {
-          const sorted = pairRows.sort((a, b) => a.round_number - b.round_number || a.group_number - b.group_number || (a.player_id || "").localeCompare(b.player_id || ""));
-          setPairingsData(rowsToPairings(sorted));
-          setTeeTimesData(rowsToTeeTimes(sorted));
+          setPairingsData(rowsToPairings(pairRows));
+          setTeeTimesData(rowsToTeeTimes(pairRows));
         }
 
-        const teeRows = await db.get("tee_assignments", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
+        // Load tee assignments
+        const teeRows = await sb.get("tee_assignments", `tournament_id=eq.${TOURNAMENT_ID}`);
         if (teeRows?.length) setTeeData(rowsToTeeData(teeRows));
 
-        const stateRows = await db.get("tournament_state", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
+        // Load tournament state (finalized rounds, passwords)
+        const stateRows = await sb.get("tournament_state", `tournament_id=eq.${TOURNAMENT_ID}`);
         if (stateRows?.length) {
           const s = stateRows[0];
           if (s.finalized_rounds) setFinalizedRounds(s.finalized_rounds);
@@ -3892,73 +4034,81 @@ export default function WBCApp() {
       finally { setSyncing(false); setStorageLoaded(true); }
     })();
 
-    // ── Real-time subscriptions via Firestore onSnapshot ──
+    // ── Real-time subscriptions ──
     const unsubs = [];
 
-    unsubs.push(db.subscribe("hole_scores", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs, changes) => {
+    // Hole scores — most critical, update immediately
+    unsubs.push(sb.subscribe("hole_scores", null, (data) => {
+      const { new: row, eventType } = data;
+      if (!row || row.tournament_id !== TOURNAMENT_ID) return;
       setSyncing(true);
       setHoleData(prev => {
-        const next = { ...prev };
-        (changes || []).forEach(change => {
-          if (change.type === "removed") return;
-          const row = change.doc.data();
-          const rnd = row.round_number || extractRound(row.round_score_id);
-          const key = `${row.player_id}_${rnd}`;
-          next[key] = { ...(next[key] || {}), [row.hole_number - 1]: row.score };
-        });
-        return next;
+        const rnd = row.round_number || extractRound(row.round_score_id);
+        const key = `${row.player_id}_${rnd}`;
+        return { ...prev, [key]: { ...(prev[key] || {}), [row.hole_number - 1]: row.score } };
       });
       setTimeout(() => setSyncing(false), 600);
     }));
 
-    unsubs.push(db.subscribe("pairings", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
-      const sorted = docs.sort((a, b) => a.round_number - b.round_number || a.group_number - b.group_number || (a.player_id || "").localeCompare(b.player_id || ""));
-      setPairingsData(rowsToPairings(sorted));
-      setTeeTimesData(rowsToTeeTimes(sorted));
+    // Pairings
+    unsubs.push(sb.subscribe("pairings", null, async (data) => {
+      const rows = await sb.get("pairings", `tournament_id=eq.${TOURNAMENT_ID}&order=round_number,group_number,player_id`);
+      if (rows) { setPairingsData(rowsToPairings(rows)); setTeeTimesData(rowsToTeeTimes(rows)); }
     }));
 
-    unsubs.push(db.subscribe("tee_assignments", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
-      setTeeData(rowsToTeeData(docs));
-    }));
-
-    unsubs.push(db.subscribe("tournament_state", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
-      if (docs?.length) {
-        if (docs[0].finalized_rounds) setFinalizedRounds(docs[0].finalized_rounds);
-        if (docs[0].passwords) setPasswords(docs[0].passwords);
-        if (docs[0].tees_saved) setTeesSaved(docs[0].tees_saved);
+    // Tee assignments
+    unsubs.push(sb.subscribe("tee_assignments", null, async (data) => {
+      const record = data?.record || data?.new;
+      if (record?.player_id && record?.round_number != null && record?.tee_name) {
+        setTeeData(prev => ({ ...prev, [record.round_number]: { ...(prev[record.round_number] || {}), [record.player_id]: record.tee_name } }));
+      } else {
+        const rows = await sb.get("tee_assignments", `tournament_id=eq.${TOURNAMENT_ID}`);
+        if (rows) setTeeData(rowsToTeeData(rows));
       }
     }));
 
-    unsubs.push(db.subscribe("tournament_players", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
-      setTPlayers(docs.map(r => ({ id: r.id, tournament_id: r.tournament_id, player_id: r.player_id, handicap_index: parseFloat(r.handicap_index) || 0, status: r.status || "active" })));
+    // Tournament state (finalized rounds)
+    unsubs.push(sb.subscribe("tournament_state", null, async (data) => {
+      const rows = await sb.get("tournament_state", `tournament_id=eq.${TOURNAMENT_ID}`);
+      if (rows?.length) {
+        if (rows[0].finalized_rounds) setFinalizedRounds(rows[0].finalized_rounds);
+        if (rows[0].passwords) setPasswords(rows[0].passwords);
+        if (rows[0].tees_saved) setTeesSaved(rows[0].tees_saved);
+      }
+    }));
+
+    // Tournament players
+    unsubs.push(sb.subscribe("tournament_players", null, async (data) => {
+      const rows = await sb.get("tournament_players", `tournament_id=eq.${TOURNAMENT_ID}`);
+      if (rows) setTPlayers(rows.map(r => ({ id: r.id, tournament_id: r.tournament_id, player_id: r.player_id, handicap_index: parseFloat(r.handicap_index) || 0, status: r.status || "active" })));
     }));
 
     return () => unsubs.forEach(u => u && u());
   }, []);
 
-  // Save tournament state to Firestore
+  // Save tournament state (finalized rounds + passwords) to Supabase
   const saveTournamentState = async (finalized, pwds, savedTees) => {
     const tsSaved = savedTees !== undefined ? savedTees : teesSaved;
-    await db.upsert("tournament_state", {
+    await sb.upsert("tournament_state", {
       id: `ts_${TOURNAMENT_ID}`,
       tournament_id: TOURNAMENT_ID,
       finalized_rounds: finalized,
       passwords: pwds,
       tees_saved: tsSaved,
       updated_at: new Date().toISOString(),
-    });
+    }, "tournament_id");
   };
 
 
   const startFresh = async () => {
     // Clear scores, rounds, pairings, tees — keep tournament_players (roster + HIs)
     try {
-      await db.delete("hole_scores", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
-      await db.delete("pairings", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
-      await db.delete("tee_assignments", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
-      await db.delete("tournament_rounds", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
-      await db.delete("tournament_state", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
-      await db.delete("skins", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
+      await sb.delete("hole_scores", `tournament_id=eq.${TOURNAMENT_ID}`);
+      await sb.delete("pairings", `tournament_id=eq.${TOURNAMENT_ID}`);
+      await sb.delete("tee_assignments", `tournament_id=eq.${TOURNAMENT_ID}`);
+      await sb.delete("tournament_rounds", `tournament_id=eq.${TOURNAMENT_ID}`);
+      await sb.delete("tournament_state", `tournament_id=eq.${TOURNAMENT_ID}`);
+      await sb.delete("skins", `tournament_round_id=like.tr_2026%`);
     } catch(e) { console.error("Start fresh clear failed:", e); }
     // Keep tPlayers (roster + HIs) and passwords intact — clear everything else
     setTRounds([]);
@@ -4065,10 +4215,10 @@ export default function WBCApp() {
       const key = `${pid}_${rnd}`;
       return { ...prev, [key]: { ...(prev[key] || {}), [holeIdx]: score } };
     });
-    // Persist to Firestore
+    // Persist to Supabase
     const tr = tRounds.find(t => t.round_number === rnd);
     const row = holeDataToRow(pid, rnd, holeIdx, score, tr?.course_id);
-    await db.upsert("hole_scores", row);
+    await sb.upsert("hole_scores", row, "id");
   };
 
   // Mark player as WD: set status, fill all unfilled holes in current and future rounds with sentinel 99
@@ -4087,9 +4237,9 @@ export default function WBCApp() {
       return { ...prev, [key]: filled };
     });
     const tp = tPlayers.find(t => t.player_id === pid);
-    if (tp) await db.upsert("tournament_players", { ...tp, status: "WD" }, "id");
+    if (tp) await sb.upsert("tournament_players", { ...tp, status: "WD" }, "id");
     setTPlayers(prev => prev.map(tp => tp.player_id === pid ? { ...tp, status: "WD" } : tp));
-    for (const row of updates) await db.upsert("hole_scores", row);
+    for (const row of updates) await sb.upsert("hole_scores", row, "id");
     notify(`Player withdrawn from tournament`);
   };
 
@@ -4105,9 +4255,9 @@ export default function WBCApp() {
   const setCourseForRound = async (rnd, course) => {
     if (course.id) {
       setCourseList(prev => prev.find(c => c.id === course.id) ? prev : [...prev, course]);
-      // Upsert course to Firestore
+      // Upsert course to Supabase
       const { tee_boxes, ...courseData } = course;
-      await db.upsert("courses", courseData);
+      await sb.upsert("courses", courseData, "id");
       // Upsert tee boxes
       if (tee_boxes?.length) {
         for (const tb of tee_boxes) {
@@ -4120,7 +4270,7 @@ export default function WBCApp() {
             par: tbData2.par, yardage: tbData2.yardage || 0,
           };
           if (Array.isArray(hy2) && hy2.some(y => y > 0)) tbPayload2.hole_yards = hy2;
-          await db.upsert("tee_boxes", tbPayload2);
+          await sb.upsert("tee_boxes", tbPayload2, "id");
         }
       }
     }
@@ -4133,9 +4283,9 @@ export default function WBCApp() {
       setTimeout(() => setCourseList(cl => sortCoursesByRound(cl, updated)), 800);
       return updated;
     });
-    // Only upsert to Firestore if assigning a real course
+    // Only upsert to Supabase if assigning a real course — skip if unassigning (course_id null violates NOT NULL)
     if (course.id) {
-      await db.upsert("tournament_rounds", trRow);
+      await sb.upsert("tournament_rounds", trRow, "id");
     }
     // Auto-assign default tee
     if (course.id && course.tee_boxes?.length) {
@@ -4145,7 +4295,7 @@ export default function WBCApp() {
         activePlayers.forEach(p => { bulk[p.id] = defaultTee.name; });
         setTeeData(prev => ({ ...prev, [rnd]: bulk }));
         const rows = activePlayers.map(p => ({ id: `ta_2026_r${rnd}_${p.id}`, tournament_id: TOURNAMENT_ID, round_number: rnd, player_id: p.id, tee_name: defaultTee.name }));
-        for (const row of rows) await db.upsert("tee_assignments", row);
+        for (const row of rows) await sb.upsert("tee_assignments", row, "id");
       }
     }
   };
@@ -4153,7 +4303,7 @@ export default function WBCApp() {
   const addCourse = async (course) => {
     if (course._delete) {
       // Remove from tournament's active course list (local state only)
-      // Do NOT delete from Firestore — courses collection is a permanent library
+      // Do NOT delete from Supabase — courses table is a permanent library
       setCourseList(prev => prev.filter(c => c.id !== course.id));
       notify("Course removed from tournament");
       return;
@@ -4161,13 +4311,13 @@ export default function WBCApp() {
     // Strip all internal UI flags and tee_boxes before saving course row
     const { tee_boxes, _incompleteData, _apiVersion, _sbVersion, _gcVersion,
             _sbHasReal, _apiHasReal, _rapidHasReal, _gcHasReal, _source, _freshFetch, ...rawCourseData } = course;
-    // Ensure course has a stable id
+    // Ensure course has a stable id (not a temporary rapid_/gc_ prefixed one if Supabase has it)
     const courseId = rawCourseData.id || `course_${Date.now()}`;
     const courseData = { ...rawCourseData, id: courseId };
     // Save course FIRST and wait for it before saving tee boxes (foreign key requirement)
     const now = new Date().toISOString();
     const savedBy = typeof currentUser !== "undefined" ? currentUser?.name || "Unknown" : "Unknown";
-    await db.upsert("courses", { ...courseData, updated_at: now, updated_by: savedBy }, "id");
+    await sb.upsert("courses", { ...courseData, updated_at: now, updated_by: savedBy }, "id");
     if (tee_boxes?.length) {
       let tbErrors = 0;
       for (const tb of tee_boxes) {
@@ -4186,7 +4336,7 @@ export default function WBCApp() {
           tbPayload.hole_yards = tb.hole_yards;
         }
         try {
-          await db.upsert("tee_boxes", tbPayload);
+          await sb.upsert("tee_boxes", tbPayload, "id");
         } catch(tbErr) {
           console.error("Tee box save failed:", tbErr, tbPayload);
           tbErrors++;
@@ -4208,10 +4358,10 @@ export default function WBCApp() {
   const addPlayerToTournament = async (name, hi) => {
     const id = name.toLowerCase().replace(/\s+/g, "_");
     if (!DEMO_PLAYERS.find(p => p.id === id)) DEMO_PLAYERS.push({ id, name });
-    await db.upsert("players", { id, name }, "id").catch(() => {});
+    await sb.upsert("players", { id, name }, "id").catch(() => {});
     const newTp = { id: `tp_2026_${id}`, tournament_id: TOURNAMENT_ID, player_id: id, handicap_index: hi, status: "active" };
     setTPlayers(prev => [...prev, newTp]);
-    await db.upsert("tournament_players", newTp);
+    await sb.upsert("tournament_players", newTp, "id");
     const newPw = { ...passwords, [id]: "wbc2026" };
     setPasswords(newPw);
     // Seed default tee assignments
@@ -4229,7 +4379,7 @@ export default function WBCApp() {
         teeUpdates.forEach(u => { updated[u.round_number] = { ...(updated[u.round_number] || {}), [id]: u.tee_name }; });
         return updated;
       });
-      for (const row of teeUpdates) await db.upsert("tee_assignments", row);
+      for (const row of teeUpdates) await sb.upsert("tee_assignments", row, "id");
     }
     await saveTournamentState(finalizedRounds, newPw);
     notify(`${name} added`);
@@ -4238,7 +4388,7 @@ export default function WBCApp() {
   const updateHI = async (pid, newHI) => {
     setTPlayers(prev => prev.map(tp => tp.player_id === pid ? { ...tp, handicap_index: newHI } : tp));
     const tp = tPlayers.find(t => t.player_id === pid);
-    if (tp) await db.upsert("tournament_players", { ...tp, handicap_index: newHI }, "id");
+    if (tp) await sb.upsert("tournament_players", { ...tp, handicap_index: newHI }, "id");
     notify("Handicap updated");
   };
 
@@ -4247,14 +4397,14 @@ export default function WBCApp() {
     if (p) p.name = newName;
     else DEMO_PLAYERS.push({ id: pid, name: newName });
     setTPlayers(prev => [...prev]); // trigger re-render
-    await db.upsert("players", { id: pid, name: newName }, "id").catch(() => {});
+    await sb.upsert("players", { id: pid, name: newName }, "id").catch(() => {});
     notify("Name updated");
   };
 
   const removePlayer = async (pid) => {
     const tp = tPlayers.find(t => t.player_id === pid);
     setTPlayers(prev => prev.filter(tp => tp.player_id !== pid));
-    if (tp) await db.deleteDoc("tournament_players", tp.id);
+    if (tp) await sb.delete("tournament_players", `id=eq.${tp.id}`);
     // Remove from pairings
     setPairingsData(prev => {
       const updated = {};
@@ -4263,7 +4413,7 @@ export default function WBCApp() {
       });
       return updated;
     });
-    await db.delete("pairings", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }, { field: "player_id", op: "==", value: pid }]);
+    await sb.delete("pairings", `tournament_id=eq.${TOURNAMENT_ID}&player_id=eq.${pid}`);
     notify("Player removed");
   };
 
@@ -4295,7 +4445,7 @@ export default function WBCApp() {
     // Store CTP as a skin type in the skins table
     const tr = tRounds.find(t => t.round_number === rnd);
     if (tr) {
-      await db.upsert("skins", { id: `ctp_2026_r${rnd}_h${hole}`, tournament_round_id: tr.id, hole_number: hole, player_id: pid, skin_type: "ctp" }, "id");
+      await sb.upsert("skins", { id: `ctp_2026_r${rnd}_h${hole}`, tournament_round_id: tr.id, hole_number: hole, player_id: pid, skin_type: "ctp" }, "id");
     }
     notify(`CTP Hole ${hole} set`);
   };
@@ -4306,26 +4456,26 @@ export default function WBCApp() {
     if (existing === incoming) return;
     setPairingsData(prev => ({ ...prev, [rnd]: groups }));
     // Delete old pairings for this round and reinsert
-    await db.delete("pairings", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }, { field: "round_number", op: "==", value: rnd }]);
+    await sb.delete("pairings", `tournament_id=eq.${TOURNAMENT_ID}&round_number=eq.${rnd}`);
     const rows = [];
     groups.forEach((grp, gi) => {
       grp.forEach(pid => {
         rows.push({ id: `pair_2026_r${rnd}_g${gi+1}_${pid}`, tournament_id: TOURNAMENT_ID, round_number: rnd, group_number: gi + 1, player_id: pid, tee_time: (teeTimesData[rnd] || [])[gi] || null });
       });
     });
-    for (const row of rows) await db.upsert("pairings", row);
+    for (const row of rows) await sb.upsert("pairings", row, "id");
     notify(`Round ${rnd} pairings saved`);
   };
 
   const setTee = async (rnd, pid, teeName) => {
     setTeeData(prev => ({ ...prev, [rnd]: { ...(prev[rnd] || {}), [pid]: teeName } }));
-    await db.upsert("tee_assignments", { id: `ta_2026_r${rnd}_${pid}`, tournament_id: TOURNAMENT_ID, round_number: rnd, player_id: pid, tee_name: teeName }, "id");
+    await sb.upsert("tee_assignments", { id: `ta_2026_r${rnd}_${pid}`, tournament_id: TOURNAMENT_ID, round_number: rnd, player_id: pid, tee_name: teeName }, "id");
   };
 
   const setTeeBulk = async (rnd, assignments) => {
     setTeeData(prev => ({ ...prev, [rnd]: { ...(prev[rnd] || {}), ...assignments } }));
     const rows = Object.entries(assignments).map(([pid, teeName]) => ({ id: `ta_2026_r${rnd}_${pid}`, tournament_id: TOURNAMENT_ID, round_number: rnd, player_id: pid, tee_name: teeName }));
-    for (const row of rows) await db.upsert("tee_assignments", row);
+    for (const row of rows) await sb.upsert("tee_assignments", row, "id");
   };
 
   // ── LOGIN ──
@@ -4422,14 +4572,6 @@ export default function WBCApp() {
                     animation: "pulse 1.5s ease-in-out infinite", opacity: 0.5 }} />
                 ))}
               </div>
-            ) : activePlayers.length === 0 ? (
-            <div style={{ textAlign: "center", padding: "24px 0" }}>
-              <p style={{ color: K.t3, fontSize: 13, marginBottom: 16 }}>No players added yet.</p>
-              <button onClick={() => setUser({ id: "aaron_j", name: "Aaron J", isDirector: true })}
-                style={{ background: K.acc, border: "none", borderRadius: 10, padding: "13px 28px", cursor: "pointer", color: "#fff", fontSize: 14, fontWeight: 700 }}>
-                Login as Director
-              </button>
-            </div>
             ) : (
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
               {activePlayers.map(p => {
@@ -4540,14 +4682,14 @@ export default function WBCApp() {
         {view === "admin" && (user.isDirector ? <AdminView players={DEMO_PLAYERS} activePlayers={activePlayers} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
               setTeeTimesData(prev => {
                 const next = typeof updater === "function" ? updater(prev) : updater;
-                // Fire-and-forget: update tee times on pairings rows in Firestore
+                // Fire-and-forget: update tee times on pairings rows in Supabase
                 Object.keys(next).forEach(async rnd => {
                   const groups = pairingsData[rnd] || [];
                   groups.forEach(async (grp, gi) => {
                     const teeTime = (next[rnd] || [])[gi] || null;
                     grp.forEach(async pid => {
                       const row = { id: `pair_2026_r${rnd}_g${gi+1}_${pid}`, tournament_id: TOURNAMENT_ID, round_number: parseInt(rnd), group_number: gi+1, player_id: pid, tee_time: teeTime };
-                      await db.upsert("pairings", row);
+                      await sb.upsert("pairings", row, "id");
                     });
                   });
                 });
