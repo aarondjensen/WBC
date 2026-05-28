@@ -785,6 +785,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
   const [transitionDir, setTransitionDir] = useState(1); // 1 = forward (→), -1 = backward (←)
   const [showFinalize, setShowFinalize] = useState(false);
   const [wdConfirm, setWdConfirm] = useState(null);
+  const [showFullCard, setShowFullCard] = useState(false);
 
 
   const tr = tRounds.find(t => t.round_number === round);
@@ -1092,24 +1093,19 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
   const isGroupFinalized = _groupKey && (finalizedRounds[_groupKey] || finalizedRounds[round]);
   if (isGroupFinalized) return (
     <div style={{ padding: "24px 16px", display: "flex", flexDirection: "column", gap: 16 }}>
-      {/* Director: back to group picker */}
-      {user.isDirector && presetGroups.length > 1 && (
-        <button onClick={() => { setGroup(null); setManualOverride(true); }} style={{
-          background: "transparent", border: "none", color: K.acc, fontSize: 12,
-          fontWeight: 600, cursor: "pointer", padding: "0 0 4px 0", display: "flex", alignItems: "center", gap: 4,
-        }}>← All Groups</button>
-      )}
-      {/* Round banner */}
-      {(() => {
-        const tr = tRounds.find(t => t.round_number === round);
-        const c = tr ? courses.find(cx => cx.id === tr.course_id) : null;
-        return (
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "7px 12px", background: K.accGlow, borderRadius: 10, border: `1px solid ${K.acc}30` }}>
-            <span style={{ fontSize: 11, fontWeight: 700, color: K.acc }}>Round {round}</span>
-            {c && <><span style={{ color: K.acc, opacity: 0.4 }}>·</span><span style={{ fontSize: 11, color: K.t2, fontWeight: 500 }}>{c.name}</span></>}
-          </div>
-        );
-      })()}
+      {/* Compact header: All Groups (director only) · course */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        {user.isDirector && presetGroups.length > 1 && (
+          <button onClick={() => { setGroup(null); setManualOverride(true); }} style={{
+            flexShrink: 0, background: "transparent", border: "none", color: K.acc, fontSize: 12,
+            fontWeight: 600, cursor: "pointer", padding: 0, display: "flex", alignItems: "center", gap: 3,
+          }}>← All Groups</button>
+        )}
+        <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, flex: 1 }}>
+          <span style={{ fontSize: 11, fontWeight: 800, color: K.acc, flexShrink: 0 }}>R{round}</span>
+          {course && <span style={{ fontSize: 12, color: K.t2, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{course.name}</span>}
+        </div>
+      </div>
       {/* Submitted notice */}
       <div style={{ background: K.acc + "10", border: `1px solid ${K.acc}30`, borderRadius: 14, padding: "24px 20px", textAlign: "center" }}>
         <div style={{ fontSize: 36, marginBottom: 12 }}>🏆</div>
@@ -1167,24 +1163,23 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
 
   return (
     <div>
-      {/* Director: back to group picker */}
-      {user.isDirector && presetGroups.length > 1 && (
-        <button onClick={() => { setGroup(null); setManualOverride(true); }} style={{
-          background: "transparent", border: "none", color: K.acc, fontSize: 12,
-          fontWeight: 600, cursor: "pointer", padding: "0 0 10px 0", display: "flex", alignItems: "center", gap: 4,
-        }}>← All Groups</button>
-      )}
-      {/* Round banner */}
-      {(() => {
-        const tr = tRounds.find(t => t.round_number === round);
-        const course = tr ? courses.find(c => c.id === tr.course_id) : null;
-        return (
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "7px 12px", marginBottom: 8, background: K.accGlow, borderRadius: 10, border: `1px solid ${K.acc}30` }}>
-            <span style={{ fontSize: 11, fontWeight: 700, color: K.acc }}>Round {round}</span>
-            {course && <><span style={{ color: K.acc, opacity: 0.4 }}>·</span><span style={{ fontSize: 11, color: K.t2, fontWeight: 500 }}>{course.name}</span></>}
-          </div>
-        );
-      })()}
+      {/* Compact header: All Groups (director only) · course · Full Scorecard */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+        {user.isDirector && presetGroups.length > 1 && (
+          <button onClick={() => { setGroup(null); setManualOverride(true); }} style={{
+            flexShrink: 0, background: "transparent", border: "none", color: K.acc, fontSize: 12,
+            fontWeight: 600, cursor: "pointer", padding: 0, display: "flex", alignItems: "center", gap: 3,
+          }}>← All Groups</button>
+        )}
+        <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, flex: 1 }}>
+          <span style={{ fontSize: 11, fontWeight: 800, color: K.acc, flexShrink: 0 }}>R{round}</span>
+          {course && <span style={{ fontSize: 12, color: K.t2, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{course.name}</span>}
+        </div>
+        <button onClick={() => setShowFullCard(true)} style={{
+          flexShrink: 0, background: K.card, border: `1px solid ${K.bdr}`, color: K.t2,
+          fontSize: 11, fontWeight: 700, borderRadius: 8, padding: "5px 10px", cursor: "pointer", whiteSpace: "nowrap",
+        }}>Full Scorecard</button>
+      </div>
       {/* Hole navigator - Front 9 / Back 9 */}
       <div style={{ marginBottom: 8 }}>
         {[0, 9].map(start => (
@@ -1369,7 +1364,10 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
                   <span style={{ fontSize: 11, color: K.acc, fontWeight: 700 }}>{ch}</span>
                   {strokes > 0 && <span style={{ color: K.acc, fontSize: 11, letterSpacing: "-1px" }}>{"●".repeat(strokes)}</span>}
                 </div>
-                {running.thru > 0 && <span style={{ fontSize: 10, color: K.t3 }}>Thru {running.thru}: <span style={{ color: running.netToPar < 0 ? "#ef4444" : running.netToPar > 0 ? K.t2 : "#94a3b8", fontWeight: 700 }}>{fmtPar(running.netToPar)}</span></span>}
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  {running.thru > 0 && <span style={{ fontSize: 10, color: K.t3 }}>Thru {running.thru}: <span style={{ color: running.netToPar < 0 ? "#ef4444" : running.netToPar > 0 ? K.t2 : "#94a3b8", fontWeight: 700 }}>{fmtPar(running.netToPar)}</span></span>}
+                  <button onClick={() => setWdConfirm(p.id)} title="Withdraw player" style={{ fontSize: 9, fontWeight: 700, color: K.t3, background: "transparent", border: `1px solid ${K.bdr}`, borderRadius: 6, padding: "2px 7px", cursor: "pointer", letterSpacing: 0.5, flexShrink: 0 }}>WD</button>
+                </div>
               </div>
 
               {/* Tee picker - expandable */}
@@ -1399,34 +1397,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
               )}
 
               {/* Score buttons — par-relative control (ported from league) */}
-              <div style={{ display: "flex", gap: 4, alignItems: "flex-start" }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <ScoreButtonRow score={score} par={par} onPick={(val) => { onSaveHole(p.id, round, currentHole, val); setExpandedScores(null); }} />
-                </div>
-                <button onClick={() => setExpandedScores(expandedScores === p.id ? null : p.id)} style={{
-                  width: 30, height: 44, borderRadius: 8, border: `1px solid ${K.bdr}`,
-                  background: K.inp, color: K.t3, fontWeight: 700, fontSize: 13, cursor: "pointer", flexShrink: 0, alignSelf: "flex-start",
-                }}>⋯</button>
-              </div>
-              {expandedScores === p.id && (
-                <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 6, paddingTop: 6, borderTop: `1px solid ${K.bdr}40` }}>
-                  <span style={{ fontSize: 10, color: K.t3, fontWeight: 600 }}>Manual</span>
-                  <input type="number" inputMode="numeric" pattern="[0-9]*" autoFocus
-                    defaultValue="" placeholder="#"
-                    onKeyDown={e => { if (e.key === "Enter") { const v = parseInt(e.target.value); if (v > 0 && v <= 20) { onSaveHole(p.id, round, currentHole, v); setExpandedScores(null); } } }}
-                    onBlur={e => { const v = parseInt(e.target.value); if (v > 0 && v <= 20) { onSaveHole(p.id, round, currentHole, v); } setExpandedScores(null); }}
-                    style={{ width: 48, padding: "6px 4px", borderRadius: 6, border: `2px solid ${K.acc}`, background: K.inp, color: K.t1, fontSize: 15, fontWeight: 800, textAlign: "center" }} />
-                  <div style={{ flex: 1 }} />
-                  <button onClick={e => { e.stopPropagation(); setExpandedScores(null); setWdConfirm(p.id); }} style={{
-                    padding: "6px 10px", borderRadius: 6, border: "1px solid #ef444460",
-                    background: "transparent", color: K.danger, fontSize: 11, fontWeight: 700, cursor: "pointer",
-                  }}>WD Player</button>
-                  <button onClick={() => setExpandedScores(null)} style={{
-                    padding: "6px 6px", borderRadius: 4, border: "none",
-                    background: "transparent", color: K.t3, fontSize: 12, cursor: "pointer",
-                  }}>✕</button>
-                </div>
-              )}
+              <ScoreButtonRow score={score} par={par} onPick={(val) => { onSaveHole(p.id, round, currentHole, val); }} />
             </div>
           );
         })}
@@ -1488,6 +1459,93 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
           );
         })()}
       </div>
+
+      {/* Full Scorecard popout — group, all 18 holes, stroke dots + birdie/bogey rings */}
+      {showFullCard && (
+        <div onClick={() => setShowFullCard(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.82)", zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center", padding: 12 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: K.bg, border: `1px solid ${K.bdr}`, borderRadius: 16, width: "100%", maxWidth: 460, maxHeight: "calc(var(--app-height, 100dvh) - 90px)", overflowY: "auto", padding: 14 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12, gap: 8 }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 15, fontWeight: 800, color: K.t1 }}>Full Scorecard</div>
+                <div style={{ fontSize: 11, color: K.t3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{course ? course.name : ""} · Round {round}</div>
+              </div>
+              <button onClick={() => setShowFullCard(false)} style={{ flexShrink: 0, width: 30, height: 30, borderRadius: 8, border: `1px solid ${K.bdr}`, background: K.inp, color: K.t2, fontSize: 14, cursor: "pointer" }}>✕</button>
+            </div>
+
+            {[0, 9].map(start => {
+              const holes = Array.from({ length: 9 }, (_, i) => start + i);
+              const isFront = start === 0;
+              const parTot = holes.reduce((a, h) => a + (holePars[h] || 0), 0);
+              const par18 = holePars.slice(0, 18).reduce((a, p) => a + (p || 0), 0);
+              const gridCols = isFront ? "54px repeat(9, minmax(0,1fr)) 30px" : "54px repeat(9, minmax(0,1fr)) 28px 32px";
+              const cb = { display: "flex", alignItems: "center", justifyContent: "center", height: 28 };
+              return (
+                <div key={start} style={{ marginBottom: 12 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: gridCols, gap: 2 }}>
+                    {/* HOLE */}
+                    <div key="hl" style={{ ...cb, justifyContent: "flex-start", fontSize: 9, fontWeight: 700, color: K.t3 }}>HOLE</div>
+                    {holes.map(h => <div key={"h" + h} style={{ ...cb, fontSize: 11, fontWeight: 700, color: K.t3 }}>{h + 1}</div>)}
+                    <div key="ho" style={{ ...cb, fontSize: 9, fontWeight: 800, color: K.acc }}>{isFront ? "OUT" : "IN"}</div>
+                    {!isFront && <div key="ht" style={{ ...cb, fontSize: 9, fontWeight: 800, color: K.acc }}>TOT</div>}
+                    {/* PAR */}
+                    <div key="pl" style={{ ...cb, justifyContent: "flex-start", fontSize: 9, fontWeight: 600, color: K.t3 }}>Par</div>
+                    {holes.map(h => <div key={"p" + h} style={{ ...cb, fontSize: 11, fontWeight: 600, color: K.t2 }}>{holePars[h] || "-"}</div>)}
+                    <div key="po" style={{ ...cb, fontSize: 11, fontWeight: 700, color: K.t2 }}>{parTot || "-"}</div>
+                    {!isFront && <div key="pt" style={{ ...cb, fontSize: 11, fontWeight: 700, color: K.t2 }}>{par18 || "-"}</div>}
+                    {/* SI */}
+                    <div key="sl" style={{ ...cb, justifyContent: "flex-start", fontSize: 9, fontWeight: 600, color: K.t3 }}>SI</div>
+                    {holes.map(h => <div key={"s" + h} style={{ ...cb, fontSize: 9, color: K.t3 }}>{holeHcps[h] || "-"}</div>)}
+                    <div key="so" style={cb} />
+                    {!isFront && <div key="st" style={cb} />}
+                    {/* players */}
+                    {groupPlayers.map(p => {
+                      const scMap = holeData[`${p.id}_${round}`] || {};
+                      const sum9 = holes.reduce((a, h) => { const v = scMap[h]; return a + ((v > 0 && v < 90) ? v : 0); }, 0);
+                      const sum18 = Array.from({ length: 18 }, (_, h) => h).reduce((a, h) => { const v = scMap[h]; return a + ((v > 0 && v < 90) ? v : 0); }, 0);
+                      const cells = [
+                        <div key={p.id + "-n"} style={{ ...cb, justifyContent: "flex-start", overflow: "hidden" }}>
+                          <span style={{ fontSize: 10, fontWeight: 700, color: K.t1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name.split(" ")[0]}</span>
+                        </div>,
+                        ...holes.map(h => {
+                          const v = scMap[h];
+                          const has = v > 0 && v < 90;
+                          const wd = v >= 90;
+                          const ph = holePars[h] || 4;
+                          const sd = has ? v - ph : null;
+                          const st = getStrokes(p, h);
+                          const shaped = sd != null && sd !== 0;
+                          const dbl = sd != null && (sd <= -2 || sd >= 2);
+                          const clr = sd == null ? K.t3 : sd < 0 ? "#ef4444" : sd > 0 ? "#3b82f6" : K.t1;
+                          const radius = sd != null && sd < 0 ? "50%" : 4;
+                          return (
+                            <div key={p.id + "-" + h} style={{ ...cb, position: "relative", fontSize: 11, fontWeight: 700, color: clr }}>
+                              {shaped && <div style={{ position: "absolute", width: 20, height: 20, borderRadius: radius, border: `1.5px solid ${clr}`, left: "50%", top: "50%", transform: "translate(-50%,-50%)" }} />}
+                              {dbl && <div style={{ position: "absolute", width: 24, height: 24, borderRadius: radius, border: `1px solid ${clr}`, left: "50%", top: "50%", transform: "translate(-50%,-50%)" }} />}
+                              {st > 0 && <div style={{ position: "absolute", top: 1, right: 3, display: "flex", gap: 1 }}>{Array.from({ length: Math.min(st, 2) }).map((_, di) => <div key={di} style={{ width: 3, height: 3, borderRadius: "50%", background: K.acc }} />)}</div>}
+                              <span style={{ position: "relative", zIndex: 1 }}>{has ? v : (wd ? "—" : "")}</span>
+                            </div>
+                          );
+                        }),
+                        <div key={p.id + "-o"} style={{ ...cb, fontSize: 11, fontWeight: 800, color: K.t1 }}>{sum9 || ""}</div>,
+                        ...(isFront ? [] : [<div key={p.id + "-t"} style={{ ...cb, fontSize: 11, fontWeight: 800, color: K.acc }}>{sum18 || ""}</div>]),
+                      ];
+                      return cells;
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+
+            <div style={{ display: "flex", alignItems: "center", gap: 12, justifyContent: "center", margin: "2px 0 10px", fontSize: 9, color: K.t3 }}>
+              <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 11, height: 11, borderRadius: "50%", border: "1.5px solid #ef4444", display: "inline-block" }} /> Birdie</span>
+              <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 10, height: 10, borderRadius: 2, border: "1.5px solid #3b82f6", display: "inline-block" }} /> Bogey+</span>
+              <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 4, height: 4, borderRadius: "50%", background: K.acc, display: "inline-block" }} /> Stroke</span>
+            </div>
+
+            <button onClick={() => setShowFullCard(false)} style={{ display: "block", width: "100%", padding: 10, background: K.inp, border: `1px solid ${K.bdr}`, borderRadius: 10, color: K.t2, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Close</button>
+          </div>
+        </div>
+      )}
 
       {/* WD confirmation modal */}
       {wdConfirm && (
