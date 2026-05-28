@@ -1466,7 +1466,6 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
           <div onClick={e => e.stopPropagation()} style={{ background: K.bg, border: `1px solid ${K.bdr}`, borderRadius: 16, width: "100%", maxWidth: 460, maxHeight: "calc(var(--app-height, 100dvh) - 90px)", overflowY: "auto", padding: 14 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12, gap: 8 }}>
               <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 15, fontWeight: 800, color: K.t1 }}>Full Scorecard</div>
                 <div style={{ fontSize: 11, color: K.t3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{course ? course.name : ""} · Round {round}</div>
               </div>
               <button onClick={() => setShowFullCard(false)} style={{ flexShrink: 0, width: 30, height: 30, borderRadius: 8, border: `1px solid ${K.bdr}`, background: K.inp, color: K.t2, fontSize: 14, cursor: "pointer" }}>✕</button>
@@ -1478,7 +1477,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
               const parTot = holes.reduce((a, h) => a + (holePars[h] || 0), 0);
               const par18 = holePars.slice(0, 18).reduce((a, p) => a + (p || 0), 0);
               const gridCols = isFront ? "54px repeat(9, minmax(0,1fr)) 30px" : "54px repeat(9, minmax(0,1fr)) 28px 32px";
-              const cb = { display: "flex", alignItems: "center", justifyContent: "center", height: 28 };
+              const cb = { display: "flex", alignItems: "center", justifyContent: "center", height: 32 };
               return (
                 <div key={start} style={{ marginBottom: 12 }}>
                   <div style={{ display: "grid", gridTemplateColumns: gridCols, gap: 2 }}>
@@ -1493,7 +1492,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
                     <div key="po" style={{ ...cb, fontSize: 11, fontWeight: 700, color: K.t2 }}>{parTot || "-"}</div>
                     {!isFront && <div key="pt" style={{ ...cb, fontSize: 11, fontWeight: 700, color: K.t2 }}>{par18 || "-"}</div>}
                     {/* SI */}
-                    <div key="sl" style={{ ...cb, justifyContent: "flex-start", fontSize: 9, fontWeight: 600, color: K.t3 }}>SI</div>
+                    <div key="sl" style={{ ...cb, justifyContent: "flex-start", fontSize: 9, fontWeight: 600, color: K.t3 }}>Handicap</div>
                     {holes.map(h => <div key={"s" + h} style={{ ...cb, fontSize: 9, color: K.t3 }}>{holeHcps[h] || "-"}</div>)}
                     <div key="so" style={cb} />
                     {!isFront && <div key="st" style={cb} />}
@@ -1518,10 +1517,10 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
                           const clr = sd == null ? K.t3 : sd < 0 ? "#ef4444" : sd > 0 ? "#3b82f6" : K.t1;
                           const radius = sd != null && sd < 0 ? "50%" : 4;
                           return (
-                            <div key={p.id + "-" + h} style={{ ...cb, position: "relative", fontSize: 11, fontWeight: 700, color: clr }}>
+                            <div key={p.id + "-" + h} style={{ ...cb, position: "relative", fontSize: 11, fontWeight: 700, color: K.t1 }}>
                               {shaped && <div style={{ position: "absolute", width: 20, height: 20, borderRadius: radius, border: `1.5px solid ${clr}`, left: "50%", top: "50%", transform: "translate(-50%,-50%)" }} />}
                               {dbl && <div style={{ position: "absolute", width: 24, height: 24, borderRadius: radius, border: `1px solid ${clr}`, left: "50%", top: "50%", transform: "translate(-50%,-50%)" }} />}
-                              {st > 0 && <div style={{ position: "absolute", top: 1, right: 3, display: "flex", gap: 1 }}>{Array.from({ length: Math.min(st, 2) }).map((_, di) => <div key={di} style={{ width: 3, height: 3, borderRadius: "50%", background: K.acc }} />)}</div>}
+                              {st > 0 && <div style={{ position: "absolute", top: 1, left: "50%", transform: "translateX(-50%)", display: "flex", gap: 2 }}>{Array.from({ length: Math.min(st, 2) }).map((_, di) => <div key={di} style={{ width: 3, height: 3, borderRadius: "50%", background: K.acc }} />)}</div>}
                               <span style={{ position: "relative", zIndex: 1 }}>{has ? v : (wd ? "—" : "")}</span>
                             </div>
                           );
