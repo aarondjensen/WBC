@@ -3860,7 +3860,17 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
 
 // ── MAIN APP ──
 export default function WBCApp() {
-  const [user, setUser] = useState(null);
+  // Session persistence: restore the logged-in user on relaunch so players
+  // log in once per device (also needed so push can target the right person).
+  const [user, setUser] = useState(() => {
+    try { const s = localStorage.getItem("wbc_user"); return s ? JSON.parse(s) : null; } catch { return null; }
+  });
+  useEffect(() => {
+    try {
+      if (user && !user.isGuest) localStorage.setItem("wbc_user", JSON.stringify(user));
+      else localStorage.removeItem("wbc_user");
+    } catch {}
+  }, [user]);
   const [view, setView] = useState("leaderboard");
   const [round, setRound] = useState(1);
   const [notif, setNotif] = useState(null);
@@ -4510,6 +4520,46 @@ export default function WBCApp() {
           </div>
         )}
 
+        {/* PIN entry — shown after a player tile is tapped */}
+        {loginPrompt && !loginAnim && (
+          <div style={{
+            position: "fixed", top: 0, bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 480, zIndex: 998,
+            background: `radial-gradient(ellipse at 50% 50%, #0d1f3c 0%, ${K.bg} 70%)`,
+            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24,
+          }}>
+            <div style={{ width: "100%", maxWidth: 320, textAlign: "center", animation: "loginPulse 0.35s ease forwards" }}>
+              <div style={{
+                width: 64, height: 64, margin: "0 auto 14px", borderRadius: "50%", background: K.acc + "18",
+                border: `2px solid ${K.acc}60`, display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 22, fontWeight: 800, color: K.acc,
+              }}>{loginPrompt.name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()}</div>
+              <div style={{ fontSize: 20, fontWeight: 800, color: K.t1 }}>{loginPrompt.name}</div>
+              <div style={{ fontSize: 12, color: K.t3, margin: "4px 0 20px" }}>Enter your PIN to continue</div>
+              <input
+                type="password" inputMode="text" autoFocus value={loginPin}
+                onChange={e => { setLoginPin(e.target.value); if (loginError) setLoginError(false); }}
+                onKeyDown={e => { if (e.key === "Enter") tryLogin(); }}
+                placeholder="••••••"
+                style={{
+                  width: "100%", padding: "14px 16px", borderRadius: 12, textAlign: "center",
+                  background: K.inp, border: `2px solid ${loginError ? K.danger : K.bdr}`,
+                  color: K.t1, fontSize: 18, fontWeight: 700, letterSpacing: "0.15em", outline: "none",
+                  animation: loginError ? "shake 0.4s" : "none", boxSizing: "border-box",
+                }} />
+              {loginError && <div style={{ color: K.danger, fontSize: 12, fontWeight: 600, marginTop: 8 }}>Incorrect PIN — try again</div>}
+              <button onClick={tryLogin} disabled={!loginPin} style={{
+                width: "100%", marginTop: 16, padding: "13px 0", borderRadius: 12, border: "none",
+                background: loginPin ? K.acc : K.card, color: loginPin ? "#fff" : K.t3,
+                fontSize: 15, fontWeight: 800, cursor: loginPin ? "pointer" : "default",
+              }}>Login</button>
+              <button onClick={() => { setLoginPrompt(null); setLoginPin(""); setLoginError(false); }} style={{
+                width: "100%", marginTop: 10, padding: "8px 0", background: "transparent", border: "none",
+                color: K.t3, fontSize: 12, fontWeight: 600, cursor: "pointer",
+              }}>← Back</button>
+            </div>
+          </div>
+        )}
+
         <div style={{ width: "100%", maxWidth: 420, textAlign: "center" }}>
           <div style={{ width: 80, height: 100, margin: "0 auto 20px", display: "flex", alignItems: "center", justifyContent: "center" }}>
             <img src={WBC_LOGO} alt="WBC" style={{ height: 90, filter: "drop-shadow(0 4px 16px rgba(34,211,167,0.3))" }} />
@@ -4539,7 +4589,7 @@ export default function WBCApp() {
               {activePlayers.map(p => {
                 const isDirector = p.id === "aaron_j" || p.id === "scott_r";
                 return (
-                  <button key={p.id} onClick={() => setLoginAnim({ id: p.id, name: p.name, isDirector })}
+                  <button key={p.id} onClick={() => { setLoginPin(""); setLoginError(false); setLoginPrompt({ id: p.id, name: p.name, isDirector }); }}
                     style={{ background: K.card, border: `1px solid ${K.bdr}`, borderRadius: 10, padding: "12px 6px", cursor: "pointer", color: K.t1, fontSize: 13, fontWeight: 600, textAlign: "center", transition: "all 0.15s" }}
                     onMouseEnter={e => { e.currentTarget.style.borderColor = K.acc; e.currentTarget.style.background = K.hover; }}
                     onMouseLeave={e => { e.currentTarget.style.borderColor = K.bdr; e.currentTarget.style.background = K.card; }}>
