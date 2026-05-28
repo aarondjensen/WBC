@@ -5,10 +5,16 @@
     <link rel="icon" type="image/png" href="/wbc-trophy.png" />
     <link rel="apple-touch-icon" href="/wbc-icon-192.png" />
     <link rel="manifest" href="/manifest.json" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <!-- Single, consistent viewport policy (no viewport-fit=cover). This matches
+         the in-app JS that manages the viewport, so iOS does NOT flip cover ->
+         no-cover after first paint. Letting iOS own the safe areas is what keeps
+         the header from being clipped or over-padded. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
     <meta name="theme-color" content="#080f1e" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <!-- Opaque dark status bar (white text), content sits BELOW it. With no
+         viewport-fit=cover this avoids the under-status-bar overlay entirely. -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
     <meta name="apple-mobile-web-app-title" content="WBC 2026" />
     <title>WBC 2026</title>
     <style>

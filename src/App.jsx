@@ -4612,7 +4612,6 @@ export default function WBCApp() {
   if (!user) {
     return (
       <div style={{ minHeight: "var(--app-height, 100dvh)", background: `radial-gradient(ellipse at 20% 50%, #0d1f3c 0%, ${K.bg} 70%)`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", padding: 20 }}>
-        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
       <style>{`:root { --sab: env(safe-area-inset-bottom, 0px); }`}</style>
       <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
         <style>{`
@@ -4764,7 +4763,6 @@ export default function WBCApp() {
   return (
     <div style={{ minHeight: "var(--app-height, 100dvh)", background: "#030810", display: "flex", justifyContent: "center", overflow: "hidden" }}>
     <div style={{ height: "var(--app-height, 100dvh)", display: "flex", flexDirection: "column", background: K.bg, fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", color: K.t1, width: "100%", maxWidth: 480, position: "relative", boxShadow: "0 0 80px rgba(0,0,0,0.8)", flexShrink: 0, overflow: "hidden" }}>
-      <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
       <style>{`:root { --sab: env(safe-area-inset-bottom, 0px); }`}</style>
       <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
 
