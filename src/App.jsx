@@ -51,7 +51,7 @@ const _db  = getFirestore(_app);
 // ── Push notifications (FCM) ──
 // SETUP: paste your Web Push VAPID public key here.
 // Firebase Console → Project Settings → Cloud Messaging → Web Push certificates → Generate key pair.
-const VAPID_KEY = "BF3PLSs3kpCVHbhnbuBo1gSYeLKhYYwEgICUo07xRpuQP8LyxqkLkSV969ZcIptb1ZSY81h8738lblo9N2goNGo";
+const VAPID_KEY = "PASTE_YOUR_VAPID_KEY_HERE";
 
 // Register this device for push and store its token against the player id.
 // Must be called from a user gesture (iOS requires a tap to prompt). Returns
@@ -3903,6 +3903,30 @@ export default function WBCApp() {
       else localStorage.removeItem("wbc_user");
     } catch {}
   }, [user]);
+
+  // iOS standalone height fix, enforced from React. --app-height = window.innerHeight
+  // (which excludes the home-indicator area that 100dvh wrongly includes). This
+  // mirrors index.html but also runs after React mounts — critical now that a
+  // persisted login mounts the constrained main view on first paint, before iOS
+  // has settled the standalone viewport. Without it, the view can lock to a wrong
+  // height (fat top gap + clipped bottom nav).
+  useEffect(() => {
+    const setAppHeight = () => {
+      try { document.documentElement.style.setProperty("--app-height", window.innerHeight + "px"); } catch {}
+    };
+    setAppHeight();
+    const timers = [setTimeout(setAppHeight, 100), setTimeout(setAppHeight, 300), setTimeout(setAppHeight, 600)];
+    const onVis = () => { if (document.visibilityState === "visible") setTimeout(setAppHeight, 100); };
+    window.addEventListener("resize", setAppHeight);
+    window.addEventListener("orientationchange", setAppHeight);
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      timers.forEach(clearTimeout);
+      window.removeEventListener("resize", setAppHeight);
+      window.removeEventListener("orientationchange", setAppHeight);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, []);
   const [view, setView] = useState("leaderboard");
   const [round, setRound] = useState(1);
   const [notif, setNotif] = useState(null);
