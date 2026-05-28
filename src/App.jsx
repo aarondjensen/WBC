@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import { initializeApp } from "firebase/app";
 import { getFirestore, collection, doc, setDoc, getDocs, query, where, writeBatch, onSnapshot, deleteDoc } from "firebase/firestore";
+import { getMessaging, getToken, onMessage, isSupported as isMessagingSupported } from "firebase/messaging";
 const WBC_LOGO = "/wbc-icon-512.png";
 const WBC_TROPHY_LOGO = "/wbc-trophy.png";
 const WBC_FAVICON = "/wbc-icon-192.png";
@@ -46,6 +47,37 @@ const TOURNAMENT_ID = "wbc_2026";
 
 const _app = initializeApp(FIREBASE_CONFIG);
 const _db  = getFirestore(_app);
+
+// ── Push notifications (FCM) ──
+// SETUP: paste your Web Push VAPID public key here.
+// Firebase Console → Project Settings → Cloud Messaging → Web Push certificates → Generate key pair.
+const VAPID_KEY = "BF3PLSs3kpCVHbhnbuBo1gSYeLKhYYwEgICUo07xRpuQP8LyxqkLkSV969ZcIptb1ZSY81h8738lblo9N2goNGo";
+
+// Register this device for push and store its token against the player id.
+// Must be called from a user gesture (iOS requires a tap to prompt). Returns
+// "granted" | "denied" | "unsupported".
+async function registerPushForPlayer(playerId) {
+  try {
+    if (!playerId) return "unsupported";
+    const supported = await isMessagingSupported().catch(() => false);
+    if (!supported || !("serviceWorker" in navigator) || !("Notification" in window)) return "unsupported";
+    const perm = await Notification.requestPermission();
+    if (perm !== "granted") return perm; // "denied" or "default"
+    const reg = await navigator.serviceWorker.register("/firebase-messaging-sw.js");
+    const messaging = getMessaging(_app);
+    const token = await getToken(messaging, { vapidKey: VAPID_KEY, serviceWorkerRegistration: reg });
+    if (token) {
+      // doc id = token → re-registering the same device is idempotent.
+      await db.upsert("wbc_notifications_tokens", {
+        id: token, tournament_id: TOURNAMENT_ID, playerId, token, lastSeenAt: Date.now(),
+      });
+    }
+    return "granted";
+  } catch (e) {
+    console.warn("[push] register failed", e);
+    return "error";
+  }
+}
 
 // ── db: Firestore data layer ──
 const db = {
@@ -1118,7 +1150,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
     tapBigAction();
     const sName = user?.name || "Scorer";
     const nonSigners = presentGroupPids.filter(pid => pid !== meId);
-    onSignScorecard(groupKey, meId, sName, nonSigners);
+    onSignScorecard(groupKey, meId, sName, presentGroupPids, round);
     setShowFinalize(false);
     notify(nonSigners.length === 0 ? "Scorecard signed ✓" : "Scorecard signed — awaiting attestation");
   };
@@ -3993,7 +4025,6 @@ export default function WBCApp() {
         if (stateRows?.length) {
           const s = stateRows[0];
           if (s.finalized_rounds) setFinalizedRounds(s.finalized_rounds);
-          if (s.scorecard_sigs) setScorecardSigs(s.scorecard_sigs);
           if (s.passwords) setPasswords(s.passwords);
           if (s.tees_saved) setTeesSaved(s.tees_saved);
         }
@@ -4034,10 +4065,21 @@ export default function WBCApp() {
     unsubs.push(db.subscribe("tournament_state", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
       if (docs?.length) {
         if (docs[0].finalized_rounds) setFinalizedRounds(docs[0].finalized_rounds);
-        setScorecardSigs(docs[0].scorecard_sigs || {});
         if (docs[0].passwords) setPasswords(docs[0].passwords);
         if (docs[0].tees_saved) setTeesSaved(docs[0].tees_saved);
       }
+    }));
+
+    // Sign/attest lives in its own collection (one doc per group) so the
+    // onScorecardSigned Cloud Function gets a clean per-group CREATE trigger.
+    // Rebuild the in-memory map the UI reads from these docs.
+    unsubs.push(db.subscribe("wbc_scorecard_sigs", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
+      const m = {};
+      docs.forEach(d => {
+        const k = d.groupKey || d.id;
+        m[k] = { signedBy: d.signedBy, signedByName: d.signedByName, attestedBy: d.attestedBy || [], present: d.present || [] };
+      });
+      setScorecardSigs(m);
     }));
 
     unsubs.push(db.subscribe("tournament_players", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
@@ -4048,14 +4090,12 @@ export default function WBCApp() {
   }, []);
 
   // Save tournament state to Firestore
-  const saveTournamentState = async (finalized, pwds, savedTees, sigs) => {
+  const saveTournamentState = async (finalized, pwds, savedTees) => {
     const tsSaved = savedTees !== undefined ? savedTees : teesSaved;
-    const tsSigs = sigs !== undefined ? sigs : scorecardSigs;
     await db.upsert("tournament_state", {
       id: `ts_${TOURNAMENT_ID}`,
       tournament_id: TOURNAMENT_ID,
       finalized_rounds: finalized,
-      scorecard_sigs: tsSigs,
       passwords: pwds,
       tees_saved: tsSaved,
       updated_at: new Date().toISOString(),
@@ -4072,6 +4112,8 @@ export default function WBCApp() {
       await db.delete("tournament_rounds", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
       await db.delete("tournament_state", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
       await db.delete("skins", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
+      await db.delete("wbc_scorecard_sigs", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
+      await db.delete("wbc_rounds_state", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
     } catch(e) { console.error("Start fresh clear failed:", e); }
     // Keep tPlayers (roster + HIs) and passwords intact — clear everything else
     setTRounds([]);
@@ -4084,11 +4126,75 @@ export default function WBCApp() {
     setFinalizedRounds({});
     setScorecardSigs({});
     setRound(1);
-    await saveTournamentState({}, passwords, undefined, {});
+    await saveTournamentState({}, passwords);
     notify("Scorecards cleared — player roster preserved");
   };
 
   const notify = m => { setNotif(m); setTimeout(() => setNotif(null), 2500); };
+
+  // ── Push notifications (client) ──
+  const [notifPerm, setNotifPerm] = useState(() => (typeof Notification !== "undefined" ? Notification.permission : "denied"));
+
+  // Foreground push → in-app banner (SW handles background).
+  useEffect(() => {
+    if (!user || user.isGuest) return;
+    let unsub;
+    (async () => {
+      try {
+        const supported = await isMessagingSupported().catch(() => false);
+        if (!supported) return;
+        const messaging = getMessaging(_app);
+        unsub = onMessage(messaging, (payload) => {
+          const d = payload.data || {};
+          const msg = d.title ? (d.body ? `${d.title} — ${d.body}` : d.title) : d.body;
+          if (msg) notify(msg);
+        });
+      } catch {}
+    })();
+    return () => { if (unsub) unsub(); };
+  }, [user]);
+
+  // Keep this device's token fresh + mapped to the logged-in player when
+  // permission is already granted (so a re-login re-registers silently).
+  useEffect(() => {
+    if (!user || user.isGuest) return;
+    if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+    registerPushForPlayer(user.id);
+  }, [user]);
+
+  // App badge = scorecards this player still owes an attestation on. This is
+  // the source of truth that reconciles the SW's optimistic badge increments.
+  useEffect(() => {
+    if (!user || user.isGuest) return;
+    let count = 0;
+    Object.values(scorecardSigs || {}).forEach(s => {
+      if ((s.present || []).includes(user.id) && s.signedBy !== user.id && !(s.attestedBy || []).includes(user.id)) count++;
+    });
+    try {
+      if (navigator.setAppBadge) { count > 0 ? navigator.setAppBadge(count) : (navigator.clearAppBadge && navigator.clearAppBadge()); }
+      navigator.serviceWorker?.controller?.postMessage({ type: "SET_BADGE", count });
+    } catch {}
+  }, [scorecardSigs, user]);
+
+  // Deep-link: a notification tap lands on /#scoring or /#leaderboard.
+  useEffect(() => {
+    const applyHash = () => {
+      const h = (window.location.hash || "").replace("#", "");
+      const map = { scoring: "scoring", leaderboard: "leaderboard", board: "leaderboard", pairings: "groups", groups: "groups", betting: "skins", skins: "skins", admin: "admin" };
+      if (map[h]) setView(map[h]);
+    };
+    applyHash();
+    window.addEventListener("hashchange", applyHash);
+    return () => window.removeEventListener("hashchange", applyHash);
+  }, []);
+
+  const enableNotifications = async () => {
+    const res = await registerPushForPlayer(user?.id);
+    setNotifPerm(typeof Notification !== "undefined" ? Notification.permission : "denied");
+    if (res === "granted") notify("Notifications enabled ✓");
+    else if (res === "denied") notify("Notifications blocked — enable them in your device settings");
+    else if (res === "unsupported") notify("Notifications aren't supported here — add the app to your home screen first");
+  };
 
   const activePlayers = useMemo(() => {
     return tPlayers.filter(tp => tp.status !== "WD").map(tp => {
@@ -4655,6 +4761,9 @@ export default function WBCApp() {
               {syncing && <div style={{ position: "absolute", inset: 0, borderRadius: "50%", background: K.acc, animation: "syncPing 0.8s ease-out" }} />}
             </div>
           </div>
+          {notifPerm !== "granted" && !user.isGuest && (
+            <button onClick={enableNotifications} title="Enable notifications" style={{ background: "transparent", border: `1px solid ${K.acc}60`, color: K.acc, padding: "4px 9px", borderRadius: 8, fontSize: 14, cursor: "pointer", lineHeight: 1 }}>🔔</button>
+          )}
           <button onClick={() => setUser(null)} style={{ background: "transparent", border: `1px solid ${K.bdr}`, color: K.t3, padding: "4px 10px", borderRadius: 8, fontSize: 10, cursor: "pointer", textAlign: "center", lineHeight: 1.3 }}>
             Logout<br/><span style={{ fontSize: 9, color: K.t2, fontWeight: 600 }}>{user.name}</span>
           </button>
@@ -4687,7 +4796,7 @@ export default function WBCApp() {
       <div style={{ padding: (view === "leaderboard" || view === "admin") ? "14px 20px 0 20px" : "14px 20px", paddingBottom: (view === "leaderboard" || view === "admin") ? "0" : "14px", flex: 1, overflowY: "auto", overflowX: "hidden", display: (view === "leaderboard" || view === "admin") ? "flex" : "block", flexDirection: "column", minHeight: 0, paddingBottom: view === "leaderboard" ? "28px" : 0 }}>
         {view === "leaderboard" && <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} teeData={teeData} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} />}
         <div style={{ display: view === "scoring" ? "block" : "none", paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
-          <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeData={teeData} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={async (key, signerPid, signerName, nonSigners) => { const autoFinal = (nonSigners || []).length === 0; const ns = { ...scorecardSigs, [key]: { signedBy: signerPid, signedByName: signerName, attestedBy: [], signedAt: new Date().toISOString() } }; const nf = autoFinal ? { ...finalizedRounds, [key]: true } : finalizedRounds; setScorecardSigs(ns); if (autoFinal) setFinalizedRounds(nf); await saveTournamentState(nf, passwords, undefined, ns); }} onAttestScorecard={async (key, attesterPid, nonSigners) => { const cur = scorecardSigs[key]; if (!cur) return; const attestedBy = [...new Set([...(cur.attestedBy || []), attesterPid])]; const ns = { ...scorecardSigs, [key]: { ...cur, attestedBy } }; const allDone = (nonSigners || []).every(pid => attestedBy.includes(pid)); const nf = allDone ? { ...finalizedRounds, [key]: true } : finalizedRounds; setScorecardSigs(ns); if (allDone) setFinalizedRounds(nf); await saveTournamentState(nf, passwords, undefined, ns); }} onUnsignScorecard={async key => { const ns = { ...scorecardSigs }; delete ns[key]; const nf = { ...finalizedRounds }; delete nf[key]; setScorecardSigs(ns); setFinalizedRounds(nf); await saveTournamentState(nf, passwords, undefined, ns); }} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; const ns = { ...scorecardSigs }; delete ns[key]; setFinalizedRounds(nf); setScorecardSigs(ns); await saveTournamentState(nf, passwords, undefined, ns); }} onNavigate={setView} onGoToAdminCourses={() => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); }} markPlayerWD={markPlayerWD} />
+          <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeData={teeData} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={async (key, signerPid, signerName, present, rnd) => { const nonSigners = (present || []).filter(pid => pid !== signerPid); const autoFinal = nonSigners.length === 0; setScorecardSigs(prev => ({ ...prev, [key]: { signedBy: signerPid, signedByName: signerName, attestedBy: [], present: present || [] } })); await db.upsert("wbc_scorecard_sigs", { id: key, tournament_id: TOURNAMENT_ID, groupKey: key, round: rnd, signedBy: signerPid, signedByName: signerName, present: present || [], attestedBy: [], signedAt: new Date().toISOString() }); if (autoFinal) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); } }} onAttestScorecard={async (key, attesterPid, nonSigners) => { const cur = scorecardSigs[key]; if (!cur) return; const attestedBy = [...new Set([...(cur.attestedBy || []), attesterPid])]; setScorecardSigs(prev => ({ ...prev, [key]: { ...prev[key], attestedBy } })); await db.upsert("wbc_scorecard_sigs", { id: key, attestedBy }); const allDone = (nonSigners || []).every(pid => attestedBy.includes(pid)); if (allDone) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); } }} onUnsignScorecard={async key => { setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", key); if (finalizedRounds[key]) { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); } }} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", key); await saveTournamentState(nf, passwords); }} onNavigate={setView} onGoToAdminCourses={() => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); }} markPlayerWD={markPlayerWD} />
         </div>
         {view === "skins" && <SkinsCtpView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} teeData={teeData} getPlayerTee={getPlayerTee} />}
         {view === "groups" && <GroupsView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} pairingsData={pairingsData} teeTimesData={teeTimesData} teeData={teeData} getPlayerTee={getPlayerTee} user={user} />}
@@ -4707,7 +4816,7 @@ export default function WBCApp() {
                 });
                 return next;
               });
-            }} passwords={passwords} setPasswords={async pw => { setPasswords(pw); await saveTournamentState(finalizedRounds, pw); }} holeData={holeData} finalizedRounds={finalizedRounds} onFinalizeRound={async rnd => { const nf = { ...finalizedRounds, [rnd]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); if (rnd < 4) setRound(rnd + 1); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} notify={notify} notif={notif} getPlayerTee={getPlayerTee} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); }} currentUser={user} teesSaved={teesSaved} onTeesSave={async r => { const next = { ...teesSaved, [r]: true }; setTeesSaved(next); setTeesModified(prev => ({ ...prev, [r]: false })); await saveTournamentState(finalizedRounds, passwords, next); }} teesModified={teesModified} setTeesModified={setTeesModified} /> : (
+            }} passwords={passwords} setPasswords={async pw => { setPasswords(pw); await saveTournamentState(finalizedRounds, pw); }} holeData={holeData} finalizedRounds={finalizedRounds} onFinalizeRound={async rnd => { const nf = { ...finalizedRounds, [rnd]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${rnd}`, tournament_id: TOURNAMENT_ID, round: rnd, finalized: true }); if (rnd < 4) setRound(rnd + 1); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); if (/^\d+$/.test(String(key))) { await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${key}`, tournament_id: TOURNAMENT_ID, round: Number(key), finalized: false }); } else { setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", key); } }} notify={notify} notif={notif} getPlayerTee={getPlayerTee} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); }} currentUser={user} teesSaved={teesSaved} onTeesSave={async r => { const next = { ...teesSaved, [r]: true }; setTeesSaved(next); setTeesModified(prev => ({ ...prev, [r]: false })); await saveTournamentState(finalizedRounds, passwords, next); }} teesModified={teesModified} setTeesModified={setTeesModified} /> : (
           <div style={{ textAlign: "center", padding: "40px 20px" }}>
             <div style={{ fontSize: 40, marginBottom: 12 }}>🔒</div>
             <div style={{ fontSize: 16, fontWeight: 700, color: K.t1, marginBottom: 6 }}>Directors Only</div>
