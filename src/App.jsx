@@ -671,9 +671,75 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
 
 // ── NINE CARD ──
 
+// ═══════════════════════════════════════════════════════════════
+//  Haptic feedback helpers (ported from MnQ league Scoring)
+// ═══════════════════════════════════════════════════════════════
+// navigator.vibrate is supported on Android + recent iOS PWAs; no-ops elsewhere.
+//   • tapScore     — single 10ms blip for entering a hole score
+//   • tapNudge     — 8ms blip for the +/− nudge buttons (lighter)
+//   • tapBigAction — three-pulse pattern for big moments (sign, attest)
+function tapScore()     { if (typeof navigator !== "undefined" && navigator.vibrate) try { navigator.vibrate(10); } catch {} }
+function tapNudge()     { if (typeof navigator !== "undefined" && navigator.vibrate) try { navigator.vibrate(8); } catch {} }
+function tapBigAction() { if (typeof navigator !== "undefined" && navigator.vibrate) try { navigator.vibrate([20, 40, 20]); } catch {} }
+
+// Labels sit beneath the 5 par-relative buttons [par-1, par, par+1, par+2, par+3].
+const SCORE_LABELS = ["Birdie", "Par", "Bogey", "Double", "Triple"];
+
+// ═══════════════════════════════════════════════════════════════
+//  ScoreButtonRow — par-relative score control (ported from league)
+// ═══════════════════════════════════════════════════════════════
+// 5 par-relative buttons that recenter around par, flanked by −/+ nudge
+// buttons. Birdie/Par/Bogey/Double/Triple labels render beneath. Tapping the
+// selected score again clears it (onPick(0)). 44px touch targets per Apple HIG.
+function ScoreButtonRow({ score, par, onPick }) {
+  const defaultBtns = [par - 1, par, par + 1, par + 2, par + 3];
+  const maxBtn = defaultBtns[defaultBtns.length - 1];
+  const minBtn = defaultBtns[0];
+  let btns = defaultBtns;
+  if (score > maxBtn) {
+    const shift = score - maxBtn;
+    btns = defaultBtns.map(b => b + shift);
+  } else if (score > 0 && score < minBtn) {
+    const shift = minBtn - score;
+    btns = defaultBtns.map(b => b - shift);
+  }
+  // Reference-equal only when recenter didn't fire — labels would mislabel a
+  // shifted window (e.g. an ace on a par 3), so we hide them but keep the
+  // 12px slot so row height stays constant.
+  const showLabels = btns === defaultBtns;
+  const boxSize = 32;
+  const handleNudge = (val) => { tapNudge(); onPick(Math.max(1, val)); };
+  return (
+    <div style={{ display: "flex", gap: 4, alignItems: "flex-start" }}>
+      <button onClick={() => handleNudge((score || par) - 1)} style={{ width: 36, height: 44, borderRadius: 8, background: K.inp, border: "none", color: K.t3, fontSize: 14, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>−</button>
+      {btns.map((btn, idx) => {
+        const isCur = btn === score; const sd = btn - par;
+        const isPar = btn === par;
+        const showParAnchor = isPar && !isCur;
+        const ringClr = sd < 0 ? K.danger : K.bg;
+        return (
+          <div key={btn} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, minWidth: 0 }}>
+            <button onClick={() => { tapScore(); onPick(isCur ? 0 : btn); }} style={{ width: "100%", height: 44, borderRadius: 8, cursor: "pointer", fontSize: 15, fontWeight: 800, border: "none", background: isCur ? K.acc : K.inp, color: isCur ? K.bg : K.t2, position: "relative", transition: "all .15s", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              {/* Selected-state rings: circles under par, squares over par */}
+              {isCur && sd !== 0 && <div style={{ position: "absolute", width: boxSize, height: boxSize, left: "50%", top: "50%", transform: "translate(-50%, -50%)" }}><div style={{ position: "absolute", inset: 0, borderRadius: sd < 0 ? "50%" : 3, border: `1.5px solid ${ringClr}` }} />{Math.abs(sd) >= 2 && <div style={{ position: "absolute", inset: 3, borderRadius: sd < 0 ? "50%" : 2, border: `1px solid ${ringClr}` }} />}</div>}
+              {/* Resting-state faint outlines on non-par, non-selected buttons */}
+              {!isCur && sd !== 0 && <div style={{ position: "absolute", width: boxSize, height: boxSize, left: "50%", top: "50%", transform: "translate(-50%, -50%)", opacity: 0.15 }}><div style={{ position: "absolute", inset: 0, borderRadius: sd < 0 ? "50%" : 3, border: `1.25px solid ${sd < 0 ? K.danger : K.t2}` }} />{Math.abs(sd) >= 2 && <div style={{ position: "absolute", inset: 3, borderRadius: sd < 0 ? "50%" : 2, border: `1px solid ${sd < 0 ? K.danger : K.t2}` }} />}</div>}
+              <span style={{ position: "relative", zIndex: 1 }}>{btn}</span>
+            </button>
+            <div style={{ fontSize: 9, color: showParAnchor ? K.t2 : K.t3, fontWeight: showParAnchor ? 700 : 600, letterSpacing: 0.4, lineHeight: 1, height: 12 }}>
+              {showLabels ? SCORE_LABELS[idx] : ""}
+            </div>
+          </div>
+        );
+      })}
+      <button onClick={() => handleNudge((score || par) + 1)} style={{ width: 36, height: 44, borderRadius: 8, background: K.inp, border: "none", color: K.t3, fontSize: 14, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>+</button>
+    </div>
+  );
+}
+
 // ── ON-COURSE SCORING (replaces old ScoringView) ──
 // Flow: Group Setup → Hole-by-hole for entire group → auto-advance
-function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPlayers, onSaveHole, notify, pairingsData, teeData, setTee, getPlayerTee, finalizedRounds, onFinalizeRound, onUnfinalizeRound, onNavigate, onGoToAdminCourses, markPlayerWD }) {
+function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPlayers, onSaveHole, notify, pairingsData, teeData, setTee, getPlayerTee, finalizedRounds, scorecardSigs, onSignScorecard, onAttestScorecard, onUnsignScorecard, onFinalizeRound, onUnfinalizeRound, onNavigate, onGoToAdminCourses, markPlayerWD }) {
   const [group, setGroup] = useState(null);
   const [currentHole, setCurrentHole] = useState(0);
   const [manualOverride, setManualOverride] = useState(false);
@@ -808,7 +874,8 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
     if (!group) return;
     const groupKey = `${round}_${group.slice().sort().join(",")}`;
     const isFinalized = finalizedRounds[groupKey] || finalizedRounds[round];
-    if (allRoundComplete && !isFinalized && !shownFinalizeRef.current) {
+    const isSignedNow = !!(scorecardSigs || {})[groupKey];
+    if (allRoundComplete && !isFinalized && !isSignedNow && !shownFinalizeRef.current) {
       shownFinalizeRef.current = true;
       setCurrentHole(17);
       setNavSourceSynced("manual");
@@ -1014,9 +1081,9 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
       {/* Submitted notice */}
       <div style={{ background: K.acc + "10", border: `1px solid ${K.acc}30`, borderRadius: 14, padding: "24px 20px", textAlign: "center" }}>
         <div style={{ fontSize: 36, marginBottom: 12 }}>🏆</div>
-        <div style={{ fontSize: 15, fontWeight: 800, color: K.acc, marginBottom: 6 }}>Scorecard Submitted</div>
+        <div style={{ fontSize: 15, fontWeight: 800, color: K.acc, marginBottom: 6 }}>Scorecard Final</div>
         <div style={{ fontSize: 12, color: K.t3, lineHeight: 1.6, marginBottom: user.isDirector ? 16 : 0 }}>
-          Your round has been submitted and is waiting on the tournament director to finalize.
+          This group's round is signed, attested, and locked.
         </div>
         {user.isDirector && (
           <button onClick={() => { onUnfinalizeRound(_groupKey); notify("Round unfinalized — scores unlocked"); }} style={{
@@ -1028,6 +1095,43 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
       </div>
     </div>
   );
+
+  // ── SIGN / ATTESTATION STATE (two-phase scorecard, ported from league) ──
+  // A signed-but-not-attested group renders in the main view (not the
+  // finalized early-return). `finalizedRounds[groupKey]` still means FINAL
+  // and triggers the early return above, so all existing lock checks stay
+  // intact. `scorecardSigs[groupKey]` carries the in-between signed state.
+  const groupKey = _groupKey;
+  const isWDpid = (pid) => { const tp = tPlayers.find(t => t.player_id === pid); return tp?.status === "WD"; };
+  const presentGroupPids = group ? group.filter(pid => !isWDpid(pid)) : [];
+  const sig = groupKey ? (scorecardSigs || {})[groupKey] : null;
+  const isSigned = !!sig;
+  const signerPid = sig?.signedBy || null;
+  const signerName = sig?.signedByName || null;
+  const attestedPids = sig?.attestedBy || [];
+  const presentNonSigners = presentGroupPids.filter(pid => pid !== signerPid);
+  const allAttested = isSigned && presentNonSigners.every(pid => attestedPids.includes(pid));
+  const meId = user?.id;
+
+  const handleSign = () => {
+    if (!groupKey) return;
+    tapBigAction();
+    const sName = user?.name || "Scorer";
+    const nonSigners = presentGroupPids.filter(pid => pid !== meId);
+    onSignScorecard(groupKey, meId, sName, nonSigners);
+    setShowFinalize(false);
+    notify(nonSigners.length === 0 ? "Scorecard signed ✓" : "Scorecard signed — awaiting attestation");
+  };
+  const handleAttest = (pid) => {
+    if (!groupKey || !sig) return;
+    tapBigAction();
+    onAttestScorecard(groupKey, pid, presentNonSigners);
+  };
+  const handleUnsign = () => {
+    if (!groupKey) return;
+    onUnsignScorecard(groupKey);
+    notify("Scorecard unsigned — scores unlocked");
+  };
 
   return (
     <div>
@@ -1113,7 +1217,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
       </div>
 
       {/* Completed hole confirmation overlay */}
-      {navSource === "manual" && isHoleComplete(currentHole) && !editingCompleted && (<>
+      {!isSigned && navSource === "manual" && isHoleComplete(currentHole) && !editingCompleted && (<>
         <div style={{
           background: "#fbbf2410", border: `1px solid #fbbf2440`, borderRadius: 12,
           padding: 12, marginBottom: 8,
@@ -1203,8 +1307,16 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
         </div>
       )}
 
+      {/* Signed notice — score entry is locked once the card is signed (unsign to edit) */}
+      {isSigned && (
+        <div style={{ background: K.acc + "10", border: `1px solid ${K.acc}30`, borderRadius: 10, padding: "12px 14px", textAlign: "center", marginBottom: 8 }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: K.acc, marginBottom: 2 }}>✍️ Scorecard Signed</div>
+          <div style={{ fontSize: 11, color: K.t3 }}>Scores are locked while attestation is pending. Unsign below to edit.</div>
+        </div>
+      )}
+
       {/* Player score cards */}
-      {!(navSource === "manual" && isHoleComplete(currentHole) && !editingCompleted) && (
+      {!isSigned && !(navSource === "manual" && isHoleComplete(currentHole) && !editingCompleted) && (
       <div style={{ display: "flex", flexDirection: "column", gap: 6, paddingBottom: 8 }}>
         {groupPlayers.map(p => {
           const score = getScore(p.id);
@@ -1254,69 +1366,35 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
                 </div>
               )}
 
-              {/* Score buttons */}
-              {(() => {
-                const baseScores = [2,3,4,5,6,7,8];
-                let displayScores = [...baseScores];
-                // If score is 1 (ace), replace the lowest button
-                if (score === 1) displayScores[0] = 1;
-                // If score > 8, replace the highest button
-                if (score > 8) displayScores[displayScores.length - 1] = score;
-                return (
-                  <div style={{ display: "flex", gap: 3 }}>
-                    {displayScores.map(s => {
-                      const isCur = s === score;
-                      const sd = s - par;
-                      const clr = sd < 0 ? "#ef4444" : sd === 0 ? "#94a3b8" : "#3b82f6";
-                      const sz = 32;
-                      return (
-                        <button key={s} onClick={() => { onSaveHole(p.id, round, currentHole, s); setExpandedScores(null); }} style={{
-                          flex: 1, height: 38, cursor: "pointer",
-                          fontWeight: 800, fontSize: 15, textAlign: "center",
-                          background: isCur ? "#94a3b8" : "#94a3b80a",
-                          color: isCur ? K.bg : "#94a3b8",
-                          border: "none", borderRadius: 8,
-                          position: "relative",
-                          display: "flex", alignItems: "center", justifyContent: "center",
-                        }}>
-                          {isCur && sd !== 0 && (
-                            <div style={{ position: "absolute", width: sz, height: sz, left: "50%", top: "50%", transform: "translate(-50%, -50%)" }}>
-                              <div style={{ position: "absolute", inset: 0, borderRadius: sd < 0 ? "50%" : 3, border: `1.5px solid ${clr}` }} />
-                              {(sd <= -2 || sd >= 2) && <div style={{ position: "absolute", inset: 3, borderRadius: sd < 0 ? "50%" : 2, border: `1px solid ${clr}` }} />}
-                            </div>
-                          )}
-                          <span style={{ position: "relative", zIndex: 1 }}>{s}</span>
-                        </button>
-                      );
-                    })}
-                    {expandedScores !== p.id ? (
-                      <button onClick={() => setExpandedScores(p.id)} style={{
-                        flex: "0 0 32px", padding: "8px 0", borderRadius: 8, border: `1px solid ${K.bdr}`,
-                        background: K.inp, color: K.t3, fontWeight: 700, fontSize: 12, cursor: "pointer", textAlign: "center",
-                      }}>···</button>
-                    ) : (
-                      <div style={{ flex: "0 0 80px", display: "flex", gap: 2 }}>
-                        <input type="number" inputMode="numeric" pattern="[0-9]*" autoFocus
-                          defaultValue="" placeholder="#"
-                          onKeyDown={e => { if (e.key === "Enter") { const v = parseInt(e.target.value); if (v > 0 && v <= 20) { onSaveHole(p.id, round, currentHole, v); setExpandedScores(null); } } }}
-                          onBlur={e => { const v = parseInt(e.target.value); if (v > 0 && v <= 20) { onSaveHole(p.id, round, currentHole, v); } setExpandedScores(null); }}
-                          style={{
-                            width: 34, padding: "4px 2px", borderRadius: 6, border: `2px solid ${K.acc}`,
-                            background: K.inp, color: K.t1, fontSize: 15, fontWeight: 800, textAlign: "center",
-                          }} />
-                        <button onClick={e => { e.stopPropagation(); setExpandedScores(null); setWdConfirm(p.id); }} style={{
-                          padding: "4px 5px", borderRadius: 6, border: "1px solid #ef444460",
-                          background: "transparent", color: K.danger, fontSize: 9, fontWeight: 700, cursor: "pointer",
-                        }}>WD</button>
-                        <button onClick={() => setExpandedScores(null)} style={{
-                          padding: "0 3px", borderRadius: 4, border: "none",
-                          background: "transparent", color: K.t3, fontSize: 10, cursor: "pointer",
-                        }}>✕</button>
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
+              {/* Score buttons — par-relative control (ported from league) */}
+              <div style={{ display: "flex", gap: 4, alignItems: "flex-start" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <ScoreButtonRow score={score} par={par} onPick={(val) => { onSaveHole(p.id, round, currentHole, val); setExpandedScores(null); }} />
+                </div>
+                <button onClick={() => setExpandedScores(expandedScores === p.id ? null : p.id)} style={{
+                  width: 30, height: 44, borderRadius: 8, border: `1px solid ${K.bdr}`,
+                  background: K.inp, color: K.t3, fontWeight: 700, fontSize: 13, cursor: "pointer", flexShrink: 0, alignSelf: "flex-start",
+                }}>⋯</button>
+              </div>
+              {expandedScores === p.id && (
+                <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 6, paddingTop: 6, borderTop: `1px solid ${K.bdr}40` }}>
+                  <span style={{ fontSize: 10, color: K.t3, fontWeight: 600 }}>Manual</span>
+                  <input type="number" inputMode="numeric" pattern="[0-9]*" autoFocus
+                    defaultValue="" placeholder="#"
+                    onKeyDown={e => { if (e.key === "Enter") { const v = parseInt(e.target.value); if (v > 0 && v <= 20) { onSaveHole(p.id, round, currentHole, v); setExpandedScores(null); } } }}
+                    onBlur={e => { const v = parseInt(e.target.value); if (v > 0 && v <= 20) { onSaveHole(p.id, round, currentHole, v); } setExpandedScores(null); }}
+                    style={{ width: 48, padding: "6px 4px", borderRadius: 6, border: `2px solid ${K.acc}`, background: K.inp, color: K.t1, fontSize: 15, fontWeight: 800, textAlign: "center" }} />
+                  <div style={{ flex: 1 }} />
+                  <button onClick={e => { e.stopPropagation(); setExpandedScores(null); setWdConfirm(p.id); }} style={{
+                    padding: "6px 10px", borderRadius: 6, border: "1px solid #ef444460",
+                    background: "transparent", color: K.danger, fontSize: 11, fontWeight: 700, cursor: "pointer",
+                  }}>WD Player</button>
+                  <button onClick={() => setExpandedScores(null)} style={{
+                    padding: "6px 6px", borderRadius: 4, border: "none",
+                    background: "transparent", color: K.t3, fontSize: 12, cursor: "pointer",
+                  }}>✕</button>
+                </div>
+              )}
             </div>
           );
         })}
@@ -1325,40 +1403,56 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
 
       </div>{/* end animated hole content */}
 
-      {/* Footer */}
-      <div style={{ marginTop: 8, display: "flex", gap: 6 }}>
-        {(() => {
-          const groupKey = `${round}_${group.slice().sort().join(",")}`;
-          const isGroupFinalized = finalizedRounds[groupKey] || finalizedRounds[round];
-          if (isGroupFinalized) return (
-            <div style={{ flex: 1, background: K.acc + "10", border: `1px solid ${K.acc}30`, borderRadius: 10, padding: "10px 14px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
-                <span style={{ fontSize: 14 }}>🏆</span>
-                <span style={{ fontSize: 12, fontWeight: 800, color: K.acc }}>Group Finalized</span>
-              </div>
-              <div style={{ fontSize: 10, color: K.t3, lineHeight: 1.5, marginBottom: 8 }}>
-                Scores are locked. The tournament director will advance the tournament to the next round.
-              </div>
-              {user.isDirector && onUnfinalizeRound && (
-                <button onClick={() => { onUnfinalizeRound(groupKey); notify("Round unfinalized — scores unlocked"); }} style={{
-                  width: "100%", padding: "7px 0", borderRadius: 8,
-                  background: "transparent", border: `1px solid ${K.bdr}`,
-                  color: K.t3, fontSize: 11, fontWeight: 600, cursor: "pointer",
-                }}>↩ Unfinalize to Edit Scores</button>
-              )}
+      {/* Footer — two-phase: Sign Scorecard → per-player Attest → FINAL */}
+      <div style={{ marginTop: 8 }}>
+        {isSigned ? (
+          <div style={{ background: K.card, border: `1px solid ${K.acc}40`, borderRadius: 12, padding: "14px 16px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+              <span style={{ fontSize: 14 }}>✍️</span>
+              <span style={{ fontSize: 13, fontWeight: 800, color: K.acc }}>Scorecard Signed</span>
             </div>
-          );
+            <div style={{ fontSize: 11, color: K.t3, lineHeight: 1.5, marginBottom: 10 }}>
+              Signed by {signerName || "Scorer"}. {presentNonSigners.length === 0
+                ? "No other players to attest — finalizing."
+                : "Each player taps their name to attest their scores are correct."}
+            </div>
+            {presentNonSigners.length > 0 && (<>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+                {presentNonSigners.map(pid => {
+                  const pl = players.find(pp => pp.id === pid);
+                  const done = attestedPids.includes(pid);
+                  return (
+                    <button key={pid} disabled={done} onClick={() => handleAttest(pid)} style={{
+                      fontSize: 12, fontWeight: 700, padding: "8px 12px", borderRadius: 8,
+                      background: done ? K.acc + "18" : K.inp,
+                      border: `1.5px solid ${done ? K.acc + "60" : K.bdr}`,
+                      color: done ? K.acc : K.t1, cursor: done ? "default" : "pointer",
+                    }}>{done ? "✓ " : ""}{pl ? pl.name : pid}</button>
+                  );
+                })}
+              </div>
+              <div style={{ textAlign: "center", fontSize: 11, color: allAttested ? K.acc : K.warn, fontWeight: 700, marginBottom: 10 }}>
+                {attestedPids.filter(pid => presentNonSigners.includes(pid)).length} of {presentNonSigners.length} attested{allAttested ? " — finalizing…" : ""}
+              </div>
+            </>)}
+            <button onClick={handleUnsign} style={{
+              width: "100%", padding: "8px 0", borderRadius: 8,
+              background: "transparent", border: `1px solid ${K.bdr}`,
+              color: K.t3, fontSize: 11, fontWeight: 600, cursor: "pointer",
+            }}>↩ Unsign & edit scores</button>
+          </div>
+        ) : (() => {
           const hole18Done = groupPlayers.every(p => ((holeData[`${p.id}_${round}`] || {})[17] > 0));
           if (!hole18Done) return null;
           const allComplete = groupPlayers.every(p => { for (let h = 0; h < 18; h++) { if (!((holeData[`${p.id}_${round}`] || {})[h] > 0)) return false; } return true; });
           return (
             <button onClick={() => setShowFinalize(true)} style={{
-              flex: 1, padding: "8px 0", borderRadius: 8,
+              width: "100%", padding: "12px 0", borderRadius: 10,
               background: allComplete ? K.acc : K.card,
               border: allComplete ? "none" : `1px solid ${K.bdr}`,
               color: allComplete ? K.bg : K.t2,
-              fontSize: 11, fontWeight: 700, cursor: "pointer",
-            }}>✓ Finalize Group</button>
+              fontSize: 14, fontWeight: 800, cursor: "pointer",
+            }}>✍️ Sign Scorecard</button>
           );
         })()}
       </div>
@@ -1406,7 +1500,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
           <div style={{ position: "fixed", top: 0, bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.75)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 12 }}>
             <div style={{ background: K.card, borderRadius: 16, padding: 16, maxWidth: 400, width: "100%", maxHeight: "90vh", overflow: "auto" }}>
               <div style={{ textAlign: "center", marginBottom: 10 }}>
-                <div style={{ fontSize: 15, fontWeight: 800, color: K.t1 }}>Finalize Group — Round {round}</div>
+                <div style={{ fontSize: 15, fontWeight: 800, color: K.t1 }}>Sign Scorecard — Round {round}</div>
                 {course && <div style={{ fontSize: 11, color: K.acc, fontWeight: 600, marginTop: 2 }}>{course.name}</div>}
               </div>
               {finalizeMissing.length > 0 && (
@@ -1505,10 +1599,10 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
                   flex: 1, padding: "10px 0", borderRadius: 10, background: K.inp, border: `1px solid ${K.bdr}`,
                   color: K.t2, fontSize: 12, fontWeight: 600, cursor: "pointer",
                 }}>✏️ Edit Scores</button>
-                <button onClick={() => { const gk = `${round}_${group.slice().sort().join(",")}`; onFinalizeRound(gk); setShowFinalize(false); notify("Group finalized! 🏆"); onNavigate("leaderboard"); }} style={{
+                <button onClick={handleSign} style={{
                   flex: 1, padding: "10px 0", borderRadius: 10, background: finalizeMissing.length > 0 ? K.warn : K.acc, border: "none",
                   color: K.bg, fontSize: 12, fontWeight: 700, cursor: "pointer",
-                }}>{finalizeMissing.length > 0 ? "Finalize Anyway" : "✓ Confirm & Finalize"}</button>
+                }}>{finalizeMissing.length > 0 ? "Sign Anyway" : "✍️ Sign Scorecard"}</button>
               </div>
             </div>
           </div>
@@ -1520,10 +1614,10 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
           ✓ Hole {currentHole + 1} saved — advancing...
         </div>
       )}
-      {allRoundComplete && !isGroupFinalized && !showFinalize && (
+      {allRoundComplete && !isGroupFinalized && !isSigned && !showFinalize && (
         <div style={{ position: "fixed", top: 80, left: "50%", transform: "translateX(-50%)", display: "flex", alignItems: "center", gap: 12, background: K.acc, color: K.bg, padding: "12px 20px", borderRadius: 12, fontSize: 13, fontWeight: 700, zIndex: 1000, minWidth: 280, maxWidth: "calc(100vw - 40px)", boxShadow: "0 8px 32px rgba(0,0,0,0.4)", animation: "toastDown 0.3s ease" }}>
           <span style={{ flex: 1 }}>🏆 Round complete!</span>
-          <button onClick={() => setShowFinalize(true)} style={{ background: K.bg, color: K.acc, border: "none", borderRadius: 8, padding: "6px 16px", fontSize: 12, fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap" }}>Finalize Group</button>
+          <button onClick={() => setShowFinalize(true)} style={{ background: K.bg, color: K.acc, border: "none", borderRadius: 8, padding: "6px 16px", fontSize: 12, fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap" }}>Sign Scorecard</button>
         </div>
       )}
     </div>
@@ -3815,6 +3909,9 @@ export default function WBCApp() {
   const [teesModified, setTeesModified] = useState({});
   const [teeTimesData, setTeeTimesData] = useState({});
   const [finalizedRounds, setFinalizedRounds] = useState({});
+  // Two-phase scorecard signing/attestation state, keyed by groupKey.
+  // { [groupKey]: { signedBy, signedByName, attestedBy: [pids], signedAt } }
+  const [scorecardSigs, setScorecardSigs] = useState({});
   // Auto-advance round when finalization changes
   useEffect(() => {
     setRound(r => {
@@ -3886,6 +3983,7 @@ export default function WBCApp() {
         if (stateRows?.length) {
           const s = stateRows[0];
           if (s.finalized_rounds) setFinalizedRounds(s.finalized_rounds);
+          if (s.scorecard_sigs) setScorecardSigs(s.scorecard_sigs);
           if (s.passwords) setPasswords(s.passwords);
           if (s.tees_saved) setTeesSaved(s.tees_saved);
         }
@@ -3926,6 +4024,7 @@ export default function WBCApp() {
     unsubs.push(db.subscribe("tournament_state", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
       if (docs?.length) {
         if (docs[0].finalized_rounds) setFinalizedRounds(docs[0].finalized_rounds);
+        setScorecardSigs(docs[0].scorecard_sigs || {});
         if (docs[0].passwords) setPasswords(docs[0].passwords);
         if (docs[0].tees_saved) setTeesSaved(docs[0].tees_saved);
       }
@@ -3939,12 +4038,14 @@ export default function WBCApp() {
   }, []);
 
   // Save tournament state to Firestore
-  const saveTournamentState = async (finalized, pwds, savedTees) => {
+  const saveTournamentState = async (finalized, pwds, savedTees, sigs) => {
     const tsSaved = savedTees !== undefined ? savedTees : teesSaved;
+    const tsSigs = sigs !== undefined ? sigs : scorecardSigs;
     await db.upsert("tournament_state", {
       id: `ts_${TOURNAMENT_ID}`,
       tournament_id: TOURNAMENT_ID,
       finalized_rounds: finalized,
+      scorecard_sigs: tsSigs,
       passwords: pwds,
       tees_saved: tsSaved,
       updated_at: new Date().toISOString(),
@@ -3971,8 +4072,9 @@ export default function WBCApp() {
     setTeeData({});
     setTeeTimesData({});
     setFinalizedRounds({});
+    setScorecardSigs({});
     setRound(1);
-    await saveTournamentState({}, passwords);
+    await saveTournamentState({}, passwords, undefined, {});
     notify("Scorecards cleared — player roster preserved");
   };
 
@@ -4535,7 +4637,7 @@ export default function WBCApp() {
       <div style={{ padding: (view === "leaderboard" || view === "admin") ? "14px 20px 0 20px" : "14px 20px", paddingBottom: (view === "leaderboard" || view === "admin") ? "0" : "14px", flex: 1, overflowY: "auto", overflowX: "hidden", display: (view === "leaderboard" || view === "admin") ? "flex" : "block", flexDirection: "column", minHeight: 0, paddingBottom: view === "leaderboard" ? "28px" : 0 }}>
         {view === "leaderboard" && <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} teeData={teeData} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} />}
         <div style={{ display: view === "scoring" ? "block" : "none", paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
-          <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeData={teeData} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onNavigate={setView} onGoToAdminCourses={() => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); }} markPlayerWD={markPlayerWD} />
+          <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeData={teeData} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={async (key, signerPid, signerName, nonSigners) => { const autoFinal = (nonSigners || []).length === 0; const ns = { ...scorecardSigs, [key]: { signedBy: signerPid, signedByName: signerName, attestedBy: [], signedAt: new Date().toISOString() } }; const nf = autoFinal ? { ...finalizedRounds, [key]: true } : finalizedRounds; setScorecardSigs(ns); if (autoFinal) setFinalizedRounds(nf); await saveTournamentState(nf, passwords, undefined, ns); }} onAttestScorecard={async (key, attesterPid, nonSigners) => { const cur = scorecardSigs[key]; if (!cur) return; const attestedBy = [...new Set([...(cur.attestedBy || []), attesterPid])]; const ns = { ...scorecardSigs, [key]: { ...cur, attestedBy } }; const allDone = (nonSigners || []).every(pid => attestedBy.includes(pid)); const nf = allDone ? { ...finalizedRounds, [key]: true } : finalizedRounds; setScorecardSigs(ns); if (allDone) setFinalizedRounds(nf); await saveTournamentState(nf, passwords, undefined, ns); }} onUnsignScorecard={async key => { const ns = { ...scorecardSigs }; delete ns[key]; const nf = { ...finalizedRounds }; delete nf[key]; setScorecardSigs(ns); setFinalizedRounds(nf); await saveTournamentState(nf, passwords, undefined, ns); }} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; const ns = { ...scorecardSigs }; delete ns[key]; setFinalizedRounds(nf); setScorecardSigs(ns); await saveTournamentState(nf, passwords, undefined, ns); }} onNavigate={setView} onGoToAdminCourses={() => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); }} markPlayerWD={markPlayerWD} />
         </div>
         {view === "skins" && <SkinsCtpView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} teeData={teeData} getPlayerTee={getPlayerTee} />}
         {view === "groups" && <GroupsView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} pairingsData={pairingsData} teeTimesData={teeTimesData} teeData={teeData} getPlayerTee={getPlayerTee} user={user} />}
