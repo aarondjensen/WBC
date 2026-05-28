@@ -49,9 +49,9 @@ const _app = initializeApp(FIREBASE_CONFIG);
 const _db  = getFirestore(_app);
 
 // ── Push notifications (FCM) ──
-// SETUP: paste your Web Push VAPID public key here.
-// Firebase Console → Project Settings → Cloud Messaging → Web Push certificates → Generate key pair.
-const VAPID_KEY = "PASTE_YOUR_VAPID_KEY_HERE";
+// Web Push VAPID PUBLIC key (not a secret — ships in the client bundle).
+// Firebase Console → Project Settings → Cloud Messaging → Web Push certificates.
+const VAPID_KEY = "BF3PLSs3kpCVHbhnbuBo1gSYeLKhYYwEgICUo07xRpuQP8LyxqkLkSV969ZcIptb1ZSY81h8738lblo9N2goNGo";
 
 // Register this device for push and store its token against the player id.
 // Must be called from a user gesture (iOS requires a tap to prompt). Returns
