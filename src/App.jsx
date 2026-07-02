@@ -769,9 +769,32 @@ function ScoreButtonRow({ score, par, onPick }) {
   );
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  Popup — shared modal chrome (backdrop + centered card)
+// ═══════════════════════════════════════════════════════════════
+// Reusable modal used by Full Scorecard, WD confirm, Finalize, and CTP.
+// Backdrop dismisses by default; opt out with dismissOnBackdrop={false}
+// for destructive/blocking modals. Card height caps at (--app-height - 90px)
+// so long content scrolls without pushing the modal off-screen on iOS PWA.
+function Popup({ children, onClose, maxWidth = 420, background, borderColor, padding = 14, dismissOnBackdrop = true, zIndex = 300, overlayPadding = 12 }) {
+  return (
+    <div
+      onClick={dismissOnBackdrop ? onClose : undefined}
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.82)", zIndex, display: "flex", alignItems: "center", justifyContent: "center", padding: overlayPadding }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{ background: background || K.bg, border: `1px solid ${borderColor || K.bdr}`, borderRadius: 16, width: "100%", maxWidth, maxHeight: "calc(var(--app-height, 100dvh) - 90px)", overflowY: "auto", padding }}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
 // ── ON-COURSE SCORING (replaces old ScoringView) ──
 // Flow: Group Setup → Hole-by-hole for entire group → auto-advance
-function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPlayers, onSaveHole, notify, pairingsData, teeData, setTee, getPlayerTee, finalizedRounds, scorecardSigs, onSignScorecard, onAttestScorecard, onUnsignScorecard, onFinalizeRound, onUnfinalizeRound, onNavigate, onGoToAdminCourses, markPlayerWD }) {
+function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPlayers, onSaveHole, notify, pairingsData, teeData, setTee, getPlayerTee, finalizedRounds, scorecardSigs, onSignScorecard, onAttestScorecard, onUnsignScorecard, onFinalizeRound, onUnfinalizeRound, onNavigate, onGoToAdminCourses, markPlayerWD, ctpData, onSetCtp }) {
   const [group, setGroup] = useState(null);
   const [currentHole, setCurrentHole] = useState(0);
   const [manualOverride, setManualOverride] = useState(false);
@@ -786,6 +809,11 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
   const [showFinalize, setShowFinalize] = useState(false);
   const [wdConfirm, setWdConfirm] = useState(null);
   const [showFullCard, setShowFullCard] = useState(false);
+  // CTP inline prompt (par-3s only). ctpDismissedKeys: Set of "round_hole" the
+  // user has chosen to skip; keeps us from re-nagging on hole revisit within
+  // the same session. showCtpForHole is 0-indexed hole currently being asked.
+  const [showCtpForHole, setShowCtpForHole] = useState(null);
+  const [ctpDismissedKeys, setCtpDismissedKeys] = useState(() => new Set());
 
 
   const tr = tRounds.find(t => t.round_number === round);
@@ -917,8 +945,30 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
     if (!allRoundComplete) shownFinalizeRef.current = false;
   }, [allRoundComplete, JSON.stringify(group), round]);
 
-  // Auto-advance after short delay when all scored (only on fresh scoring, not editing)
+  // Prompt for CTP when a par-3 completes (unless already recorded or dismissed
+  // for this round+hole). Blocks the auto-advance below until the user picks a
+  // winner or dismisses. Only prompts during fresh scoring — not while editing
+  // an already-completed hole — since the round-level admin view is the right
+  // place to correct a stale CTP.
   useEffect(() => {
+    if (!group || isGroupFinalized) return;
+    if (editingCompleted) return;
+    if (par !== 3) return;
+    if (!allScored) return;
+    const holeNum = currentHole + 1;
+    const key = `${round}_${holeNum}`;
+    const alreadySet = ((ctpData || {})[round] || {})[holeNum];
+    if (alreadySet) return;
+    if (ctpDismissedKeys.has(key)) return;
+    if (showCtpForHole === currentHole) return;
+    setShowCtpForHole(currentHole);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allScored, par, currentHole, round, ctpData, editingCompleted]);
+
+  // Auto-advance after short delay when all scored (only on fresh scoring, not editing).
+  // Suppressed while the CTP popup is open so the user isn't fighting the animation.
+  useEffect(() => {
+    if (showCtpForHole === currentHole) return;
     if (allScored && currentHole < 17 && navSourceRef.current === "auto" && !editingCompleted && !allRoundComplete) {
       const timer = setTimeout(() => {
         setTransitionDir(1);
@@ -944,7 +994,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
       }, 1500);
       return () => clearTimeout(timer);
     }
-  }, [allScored, currentHole, editingCompleted]);
+  }, [allScored, currentHole, editingCompleted, showCtpForHole]);
 
   const getCH = (p) => {
     if (!course) return 0;
@@ -1462,8 +1512,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
 
       {/* Full Scorecard popout — group, all 18 holes, stroke dots + birdie/bogey rings */}
       {showFullCard && (
-        <div onClick={() => setShowFullCard(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.82)", zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center", padding: 12 }}>
-          <div onClick={e => e.stopPropagation()} style={{ background: K.bg, border: `1px solid ${K.bdr}`, borderRadius: 16, width: "100%", maxWidth: 460, maxHeight: "calc(var(--app-height, 100dvh) - 90px)", overflowY: "auto", padding: 14 }}>
+        <Popup onClose={() => setShowFullCard(false)} maxWidth={460}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12, gap: 8 }}>
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontSize: 11, color: K.t3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{course ? course.name : ""} · Round {round}</div>
@@ -1542,14 +1591,59 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
             </div>
 
             <button onClick={() => setShowFullCard(false)} style={{ display: "block", width: "100%", padding: 10, background: K.inp, border: `1px solid ${K.bdr}`, borderRadius: 10, color: K.t2, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Close</button>
-          </div>
-        </div>
+        </Popup>
       )}
+
+      {/* CTP popup — asks who was Closest to Pin when a par-3 completes.
+          Blocks auto-advance until user picks a winner or dismisses. Explicit
+          buttons only — no backdrop dismiss (we want a real answer). */}
+      {showCtpForHole !== null && (() => {
+        const holeNum = showCtpForHole + 1;
+        const key = `${round}_${holeNum}`;
+        const closeAndAdvance = () => setShowCtpForHole(null);
+        const pick = async (pid) => {
+          tapBigAction();
+          try { await onSetCtp?.(round, holeNum, pid); } catch {}
+          closeAndAdvance();
+        };
+        const dismiss = () => {
+          tapNudge();
+          setCtpDismissedKeys(prev => { const next = new Set(prev); next.add(key); return next; });
+          closeAndAdvance();
+        };
+        return (
+          <Popup onClose={dismiss} maxWidth={360} dismissOnBackdrop={false} background={K.card} borderColor={K.acc + "40"} padding={0} zIndex={350}>
+            <div style={{ background: K.acc + "15", borderBottom: `1px solid ${K.acc}30`, padding: "14px 20px", textAlign: "center" }}>
+              <div style={{ fontSize: 24, marginBottom: 4 }}>🎯</div>
+              <div style={{ fontSize: 14, fontWeight: 800, color: K.acc, letterSpacing: 0.3 }}>Closest to Pin</div>
+              <div style={{ fontSize: 11, color: K.t3, marginTop: 2 }}>Hole {holeNum} · Par 3</div>
+            </div>
+            <div style={{ padding: "14px 16px" }}>
+              <div style={{ fontSize: 11, color: K.t3, textAlign: "center", marginBottom: 10 }}>Who was closest?</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
+                {presentGroupPids.map(pid => {
+                  const pl = players.find(p => p.id === pid);
+                  if (!pl) return null;
+                  return (
+                    <button key={pid} onClick={() => pick(pid)} style={{
+                      padding: "12px 14px", borderRadius: 10, background: K.inp, border: `1px solid ${K.bdr}`,
+                      color: K.t1, fontSize: 14, fontWeight: 700, cursor: "pointer", textAlign: "left",
+                    }}>{pl.name}</button>
+                  );
+                })}
+              </div>
+              <button onClick={dismiss} style={{
+                width: "100%", padding: "10px 0", borderRadius: 10, background: "transparent",
+                border: `1px solid ${K.bdr}`, color: K.t3, fontSize: 12, fontWeight: 600, cursor: "pointer",
+              }}>None of us — skip</button>
+            </div>
+          </Popup>
+        );
+      })()}
 
       {/* WD confirmation modal */}
       {wdConfirm && (
-          <div style={{ position: "fixed", top: 0, bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.8)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
-            <div style={{ background: K.card, borderRadius: 16, border: `1px solid ${K.danger}60`, width: "100%", maxWidth: 340, overflow: "hidden" }}>
+        <Popup onClose={() => setWdConfirm(null)} maxWidth={340} dismissOnBackdrop={false} background={K.card} borderColor={K.danger + "60"} padding={0} overlayPadding={24} zIndex={400}>
               <div style={{ background: K.danger + "15", borderBottom: `1px solid ${K.danger}30`, padding: "16px 20px", textAlign: "center" }}>
                 <div style={{ fontSize: 28, marginBottom: 6 }}>⛳</div>
                 <div style={{ fontSize: 15, fontWeight: 800, color: K.danger }}>Withdraw Player</div>
@@ -1572,8 +1666,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
                   color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer",
                 }}>Confirm WD</button>
               </div>
-            </div>
-          </div>
+        </Popup>
       )}
 
       {/* Finalize confirmation modal with mini scorecards */}
@@ -1586,8 +1679,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
           if (missingHoles.length > 0) finalizeMissing.push({ name: p.name, holes: missingHoles });
         });
         return (
-          <div style={{ position: "fixed", top: 0, bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.75)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 12 }}>
-            <div style={{ background: K.card, borderRadius: 16, padding: 16, maxWidth: 400, width: "100%", maxHeight: "90vh", overflow: "auto" }}>
+          <Popup onClose={() => setShowFinalize(false)} maxWidth={400} background={K.card} zIndex={1000}>
               <div style={{ textAlign: "center", marginBottom: 10 }}>
                 <div style={{ fontSize: 15, fontWeight: 800, color: K.t1 }}>Sign Scorecard — Round {round}</div>
                 {course && <div style={{ fontSize: 11, color: K.acc, fontWeight: 600, marginTop: 2 }}>{course.name}</div>}
@@ -1693,8 +1785,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
                   color: K.bg, fontSize: 12, fontWeight: 700, cursor: "pointer",
                 }}>{finalizeMissing.length > 0 ? "Sign Anyway" : "✍️ Sign Scorecard"}</button>
               </div>
-            </div>
-          </div>
+          </Popup>
         );
       })()}
 
@@ -4035,6 +4126,34 @@ export default function WBCApp() {
   // Two-phase scorecard signing/attestation state, keyed by groupKey.
   // { [groupKey]: { signedBy, signedByName, attestedBy: [pids], signedAt } }
   const [scorecardSigs, setScorecardSigs] = useState({});
+  // Just-signed / just-attested flash guard. When we optimistically write a
+  // sig locally, we also stash it here with an expiry. The subscription
+  // callback overlays these onto the docs-derived map, so a stale Firestore
+  // snapshot arriving between our write and its echo can't clear the entry
+  // and cause the UI to flash back to "unsigned" for a frame. Cleared
+  // automatically once the doc round-trip confirms the same state.
+  const pendingSigsRef = useRef(new Map()); // groupKey -> { sig, expiresAt }
+  const mergePendingSigs = (fromDocs) => {
+    const m = { ...fromDocs };
+    const now = Date.now();
+    pendingSigsRef.current.forEach((entry, k) => {
+      if (entry.expiresAt < now) { pendingSigsRef.current.delete(k); return; }
+      const echoed = m[k];
+      if (!echoed) { m[k] = entry.sig; return; }
+      // Sig doc present. Merge attest arrays (union), keep other fields
+      // from the echoed doc since it's the authoritative signer state.
+      const optimisticAttest = entry.sig.attestedBy || [];
+      const echoedAttest = echoed.attestedBy || [];
+      const hasAll = optimisticAttest.every(pid => echoedAttest.includes(pid));
+      if (hasAll) {
+        // Fully echoed — drop the pending entry.
+        pendingSigsRef.current.delete(k);
+      } else {
+        m[k] = { ...echoed, attestedBy: [...new Set([...echoedAttest, ...optimisticAttest])] };
+      }
+    });
+    return m;
+  };
   // Auto-advance round when finalization changes
   useEffect(() => {
     setRound(r => {
@@ -4153,14 +4272,15 @@ export default function WBCApp() {
 
     // Sign/attest lives in its own collection (one doc per group) so the
     // onScorecardSigned Cloud Function gets a clean per-group CREATE trigger.
-    // Rebuild the in-memory map the UI reads from these docs.
+    // Rebuild the in-memory map the UI reads from these docs, then overlay
+    // any optimistic entries that haven't been echoed back yet (flash guard).
     unsubs.push(db.subscribe("wbc_scorecard_sigs", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
-      const m = {};
+      const fromDocs = {};
       docs.forEach(d => {
         const k = d.groupKey || d.id;
-        m[k] = { signedBy: d.signedBy, signedByName: d.signedByName, attestedBy: d.attestedBy || [], present: d.present || [] };
+        fromDocs[k] = { signedBy: d.signedBy, signedByName: d.signedByName, attestedBy: d.attestedBy || [], present: d.present || [] };
       });
-      setScorecardSigs(m);
+      setScorecardSigs(mergePendingSigs(fromDocs));
     }));
 
     unsubs.push(db.subscribe("tournament_players", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
@@ -4875,7 +4995,7 @@ export default function WBCApp() {
       <div style={{ padding: (view === "leaderboard" || view === "admin") ? "14px 20px 0 20px" : "14px 20px", paddingBottom: (view === "leaderboard" || view === "admin") ? "0" : "14px", flex: 1, overflowY: "auto", overflowX: "hidden", display: (view === "leaderboard" || view === "admin") ? "flex" : "block", flexDirection: "column", minHeight: 0, paddingBottom: view === "leaderboard" ? "28px" : 0 }}>
         {view === "leaderboard" && <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} teeData={teeData} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} />}
         <div style={{ display: view === "scoring" ? "block" : "none", paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
-          <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeData={teeData} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={async (key, signerPid, signerName, present, rnd) => { const nonSigners = (present || []).filter(pid => pid !== signerPid); const autoFinal = nonSigners.length === 0; setScorecardSigs(prev => ({ ...prev, [key]: { signedBy: signerPid, signedByName: signerName, attestedBy: [], present: present || [] } })); await db.upsert("wbc_scorecard_sigs", { id: key, tournament_id: TOURNAMENT_ID, groupKey: key, round: rnd, signedBy: signerPid, signedByName: signerName, present: present || [], attestedBy: [], signedAt: new Date().toISOString() }); if (autoFinal) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); } }} onAttestScorecard={async (key, attesterPid, nonSigners) => { const cur = scorecardSigs[key]; if (!cur) return; const attestedBy = [...new Set([...(cur.attestedBy || []), attesterPid])]; setScorecardSigs(prev => ({ ...prev, [key]: { ...prev[key], attestedBy } })); await db.upsert("wbc_scorecard_sigs", { id: key, attestedBy }); const allDone = (nonSigners || []).every(pid => attestedBy.includes(pid)); if (allDone) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); } }} onUnsignScorecard={async key => { setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", key); if (finalizedRounds[key]) { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); } }} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", key); await saveTournamentState(nf, passwords); }} onNavigate={setView} onGoToAdminCourses={() => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); }} markPlayerWD={markPlayerWD} />
+          <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeData={teeData} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={async (key, signerPid, signerName, present, rnd) => { const nonSigners = (present || []).filter(pid => pid !== signerPid); const autoFinal = nonSigners.length === 0; const optimistic = { signedBy: signerPid, signedByName: signerName, attestedBy: [], present: present || [] }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: optimistic })); await db.upsert("wbc_scorecard_sigs", { id: key, tournament_id: TOURNAMENT_ID, groupKey: key, round: rnd, signedBy: signerPid, signedByName: signerName, present: present || [], attestedBy: [], signedAt: new Date().toISOString() }); if (autoFinal) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); } }} onAttestScorecard={async (key, attesterPid, nonSigners) => { const cur = scorecardSigs[key]; if (!cur) return; const attestedBy = [...new Set([...(cur.attestedBy || []), attesterPid])]; const optimistic = { ...cur, attestedBy }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: { ...prev[key], attestedBy } })); await db.upsert("wbc_scorecard_sigs", { id: key, attestedBy }); const allDone = (nonSigners || []).every(pid => attestedBy.includes(pid)); if (allDone) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); } }} onUnsignScorecard={async key => { pendingSigsRef.current.delete(key); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", key); if (finalizedRounds[key]) { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); } }} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); pendingSigsRef.current.delete(key); await db.deleteDoc("wbc_scorecard_sigs", key); await saveTournamentState(nf, passwords); }} onNavigate={setView} onGoToAdminCourses={() => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); }} markPlayerWD={markPlayerWD} ctpData={ctpData} onSetCtp={onSetCtp} />
         </div>
         {view === "skins" && <SkinsCtpView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} teeData={teeData} getPlayerTee={getPlayerTee} />}
         {view === "groups" && <GroupsView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} pairingsData={pairingsData} teeTimesData={teeTimesData} teeData={teeData} getPlayerTee={getPlayerTee} user={user} />}
