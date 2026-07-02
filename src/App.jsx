@@ -44,6 +44,7 @@ const FIREBASE_CONFIG = {
   appId: "1:281900029443:web:68da433d8ec5a16b74a036",
 };
 const TOURNAMENT_ID = "wbc_2026";
+const DEFAULT_PW = "wbc2026"; // default player login password
 
 const _app = initializeApp(FIREBASE_CONFIG);
 const _db  = getFirestore(_app);
@@ -2642,46 +2643,6 @@ function TeeAssigner({ activePlayers, numRounds, tRounds, courses, teeData, setT
   );
 }
 
-function PasswordRow({ player, password, onSave, isLast, ac }) {
-  const [editing, setEditing] = useState(false);
-  const [pw, setPw] = useState(password);
-  const [show, setShow] = useState(false);
-  const c = ac || K.acc;
-
-  const save = () => {
-    if (pw.trim()) onSave(player.id, pw.trim());
-    setEditing(false);
-  };
-
-  return (
-    <div style={{ padding: "8px 14px", display: "flex", alignItems: "center", borderBottom: !isLast ? `1px solid ${K.bdr}10` : "none" }}>
-      <span style={{ flex: 1, fontWeight: 600, fontSize: 13 }}>{player.name}</span>
-      {editing ? (
-        <>
-          <div style={{ width: 120, display: "flex", justifyContent: "center" }}>
-            <input value={pw} onChange={e => setPw(e.target.value)} autoFocus
-              onKeyDown={e => { if (e.key === "Enter") save(); }}
-              style={{ width: 110, padding: "5px 8px", background: K.inp, border: `1px solid ${c}40`, borderRadius: 6, color: K.t1, fontSize: 12, textAlign: "center", fontWeight: 600 }} />
-          </div>
-          <div style={{ width: 40, display: "flex", justifyContent: "center" }}>
-            <button onClick={save} style={{ padding: "4px 8px", background: c, color: K.bg, border: "none", borderRadius: 5, fontWeight: 700, cursor: "pointer", fontSize: 10 }}>✓</button>
-          </div>
-        </>
-      ) : (
-        <>
-          <div style={{ width: 120, display: "flex", justifyContent: "center", alignItems: "center", gap: 4 }}>
-            <span style={{ fontSize: 12, color: K.t2, fontWeight: 500, fontFamily: "monospace" }}>{show ? password : "••••••"}</span>
-            <button onClick={() => setShow(!show)} style={{ background: "transparent", border: "none", color: K.t3, fontSize: 9, cursor: "pointer", padding: "0 2px" }}>{show ? "hide" : "show"}</button>
-          </div>
-          <div style={{ width: 40, display: "flex", justifyContent: "center" }}>
-            <button onClick={() => { setEditing(true); setPw(password); }} style={{ background: "transparent", border: "none", color: K.t3, fontSize: 10, cursor: "pointer" }}>Edit</button>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
 function PlayerRow({ player, onUpdateHI, onUpdateName, onRemove, onSavePassword, password, isLast, ac }) {
   const [editing, setEditing] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -2735,17 +2696,17 @@ function PlayerRow({ player, onUpdateHI, onUpdateName, onRemove, onSavePassword,
       <span style={{ flex: "0 0 40%", fontWeight: 600, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{player.name}</span>
       <span style={{ flex: "0 0 15%", textAlign: "center", fontSize: 12, color: K.t2 }}>{player.handicap_index}</span>
       <div style={{ flex: "0 0 30%", display: "flex", alignItems: "center", justifyContent: "center", gap: 3 }}>
-        <span style={{ fontSize: 11, color: K.t2, fontFamily: "monospace" }}>{showPw ? (password || "wbc2026") : "••••••"}</span>
+        <span style={{ fontSize: 11, color: K.t2, fontFamily: "monospace" }}>{showPw ? (password || DEFAULT_PW) : "••••••"}</span>
         <button onClick={() => setShowPw(!showPw)} style={{ background: "transparent", border: "none", color: K.t3, fontSize: 9, cursor: "pointer", padding: "0 1px" }}>{showPw ? "hide" : "show"}</button>
       </div>
       <div style={{ flex: "0 0 15%", display: "flex", justifyContent: "flex-end" }}>
-        <button onClick={() => { setEditing(true); setHi(String(player.handicap_index)); setName(player.name); setPw(password || "wbc2026"); }} style={{ padding: "3px 10px", borderRadius: 6, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t3, fontSize: 10, fontWeight: 600, cursor: "pointer" }}>Edit</button>
+        <button onClick={() => { setEditing(true); setHi(String(player.handicap_index)); setName(player.name); setPw(password || DEFAULT_PW); }} style={{ padding: "3px 10px", borderRadius: 6, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t3, fontSize: 10, fontWeight: 600, cursor: "pointer" }}>Edit</button>
       </div>
     </div>
   );
 }
 
-function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, passwords, setPasswords, holeData, finalizedRounds, onFinalizeRound, onUnfinalizeRound, notify, notif, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, onExternalSettingsHandled, currentUser, teesSaved, onTeesSave, teesModified, setTeesModified }) {
+function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, passwords, setPasswords, holeData, finalizedRounds, onFinalizeRound, onUnfinalizeRound, notify, notif, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, onExternalSettingsHandled, currentUser, teesSaved, onTeesSave, teesModified, onTeesModify, setTeesModified }) {
   const [tab, setTab] = useState("tees");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [showFinalizeModal, setShowFinalizeModal] = useState(false);
@@ -2758,7 +2719,6 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
       if (onExternalSettingsHandled) onExternalSettingsHandled();
     }
   }, [externalSettingsOpen]);
-  const [selectedRound, setSelectedRound] = useState(1);
   const [newName, setNewName] = useState("");
   const [newHI, setNewHI] = useState("");
   const [adding, setAdding] = useState(false);
@@ -2773,7 +2733,6 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
   const [manualCourse, setManualCourse] = useState(null); // null | draft object when manually adding
   const [coursePreview, setCoursePreview] = useState(null); // course to preview before confirming add
   const [localDbPrompt, setLocalDbPrompt] = useState(null); // { sbCourse, query } — prompt user to use local or fetch fresh
-  const [confirmRound, setConfirmRound] = useState(null);
   const [editRound, setEditRound] = useState(() => { for (let r = 1; r <= 4; r++) { if (!finalizedRounds[r]) return r; } return 4; });
   // Keep editRound pointing at the active round when finalization state changes
   useEffect(() => {
@@ -2837,8 +2796,6 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
     }
   }, []);
 
-  // Keep legacy mode/tab refs for any code that still uses them
-  const mode = "round";
   const ac = K.acc;
   const acGlow = K.accGlow;
 
@@ -3027,6 +2984,30 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
   };
   const numRounds = tournament?.num_rounds || 4;
 
+  // ── Single source of truth for round setup completion ──
+  // Every place that shows "is this round ready?" (round cards, sub-tab dots,
+  // the needs-setup banner) derives from this one function so the definition
+  // of "done" lives in exactly one spot.
+  const getRoundStatus = (r) => {
+    const tr = tRounds.find(t => t.round_number === r);
+    const course = tr ? courses.find(c => c.id === tr.course_id) : null;
+    const hasCourse = !!course;
+    const groups = (pairingsData || {})[r] || [];
+    const teeTimes = (teeTimesData[r] || []);
+    const hasPlayers = activePlayers.length > 0;
+    const allTees = hasPlayers && activePlayers.every(p => ((teeData[r] || {})[p.id]));
+    const groupsDone = groups.length > 0 && groups.flat().length === activePlayers.length;
+    const teeTimesDone = groups.length > 0 && groups.every((_, gi) => teeTimes[gi] && teeTimes[gi].trim() !== "");
+    const teesDone = hasCourse && !!teesSaved[r] && !teesModified[r] && allTees;
+    const pairingsDone = hasCourse && groupsDone && teeTimesDone;
+    return {
+      round: r, course, hasCourse, allTees, groupsDone, teeTimesDone,
+      teesDone, pairingsDone,
+      allDone: hasCourse && teesDone && pairingsDone,
+      finalized: !!finalizedRounds[r],
+    };
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
 
@@ -3096,19 +3077,11 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
       {/* Round cards + gear */}
       <div style={{ display: "flex", gap: 4, marginBottom: 10, alignItems: "center" }}>
         {Array.from({ length: numRounds }, (_, i) => i + 1).map(r => {
-          const isFinal = finalizedRounds[r];
-          const tr = tRounds.find(t => t.round_number === r);
-          const course = tr ? courses.find(c => c.id === tr.course_id) : null;
-          const roundGroups = (pairingsData || {})[r] || [];
-          const allAssigned = roundGroups.length > 0 && roundGroups.flat().length === activePlayers.length;
-          const roundTeeTimes = (teeTimesData[r] || []);
-          const allTeeTimes = roundGroups.length > 0 && roundGroups.every((_, gi) => roundTeeTimes[gi] && roundTeeTimes[gi].trim() !== "");
-          const allTees = activePlayers.length > 0 && activePlayers.every(p => ((teeData[r] || {})[p.id]));
+          const st = getRoundStatus(r);
+          const isFinal = st.finalized;
           const isActive = editRound === r;
-          const hasCourse = !!course;
-          const allDone = hasCourse && allAssigned && allTeeTimes && allTees;
-          const teesDone = hasCourse && teesSaved[r] && !teesModified[r] && allTees;
-          const pairingsDone = hasCourse && allAssigned && allTeeTimes;
+          const teesDone = st.teesDone;
+          const pairingsDone = st.pairingsDone;
           return (
             <button key={r} onClick={() => { setEditRound(r); setTab("tees"); }} style={{
               flex: 1, padding: "7px 4px 6px", borderRadius: 10, cursor: "pointer",
@@ -3146,16 +3119,10 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
         })}
       </div>
 
-      {/* Sub-tabs: Tees / Pairings for selected round */}
+      {/* Sub-tabs: Course / Tees / Pairings for selected round */}
       {(() => {
-        const _rg = (pairingsData || {})[editRound] || [];
-        const _rt = (teeTimesData[editRound] || []);
-        const _hasCourse = !!tRounds.find(t => t.round_number === editRound && courses.find(c => c.id === t.course_id));
-        const _teeDone = _hasCourse && teesSaved[editRound] && !teesModified[editRound] && activePlayers.length > 0 && activePlayers.every(p => ((teeData[editRound] || {})[p.id]));
-        const _groupsDone = _rg.length > 0 && _rg.flat().length === activePlayers.length;
-        const _teeTimesDone = _rg.length > 0 && _rg.every((_, gi) => _rt[gi] && _rt[gi].trim() !== "");
-        const _pairingsDone = _hasCourse && _groupsDone && _teeTimesDone;
-        const _isFinal = finalizedRounds[editRound];
+        const st = getRoundStatus(editRound);
+        const _isFinal = st.finalized;
         const _finalizePending = Object.entries(pairingsData || {}).some(([rnd, groups]) => {
           if (!groups.length) return false;
           return groups.every(grp => {
@@ -3167,7 +3134,10 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
             });
           });
         });
-        const subDone = { tees: _teeDone, pairings: _pairingsDone };
+        const subTabs = [["course","Course"],["tees","Tees"],["pairings","Pairings"]];
+        const subDone = { course: st.hasCourse, tees: st.teesDone, pairings: st.pairingsDone };
+        const activeIdx = Math.max(0, subTabs.findIndex(([k]) => k === tab));
+        const N = subTabs.length;
         return (<>
           {_finalizePending && (
             <button onClick={() => setShowFinalizeModal(true)} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", padding: "10px 14px", borderRadius: 10, marginBottom: 10, background: "#fbbf24", border: "none", color: "#1a1100", fontSize: 13, fontWeight: 800, cursor: "pointer", letterSpacing: "0.01em" }}>
@@ -3176,8 +3146,8 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
           )}
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
             <div style={{ position: "relative", display: "flex", flex: 1, background: K.card, borderRadius: 10, border: `1px solid ${K.bdr}`, padding: 3, gap: 0 }}>
-              <div style={{ position: "absolute", top: 3, bottom: 3, left: tab === "tees" ? 3 : "calc(50% + 1.5px)", width: "calc(50% - 4.5px)", background: acGlow, borderRadius: 8, border: `1px solid ${ac}50`, transition: "left 0.2s ease", pointerEvents: "none" }} />
-              {[["tees","Tees"],["pairings","Pairings"]].map(([k,l]) => { const isActive = tab === k; const isDone = !_isFinal && subDone[k]; return (<button key={k} onClick={() => setTab(k)} style={{ flex: 1, padding: "8px 6px", borderRadius: 8, fontSize: 12, fontWeight: isActive ? 700 : 500, background: "transparent", color: isActive ? ac : K.t2, border: "none", cursor: "pointer", position: "relative", zIndex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}><span>{l}</span>{!_isFinal && <span style={{ width: 6, height: 6, borderRadius: "50%", flexShrink: 0, background: isDone ? "#22c55e" : "transparent", border: `1.5px solid ${isDone ? "#22c55e" : K.t3 + "60"}` }} />}</button>); })}
+              <div style={{ position: "absolute", top: 3, bottom: 3, left: `calc(3px + ${activeIdx} * (100% - 6px) / ${N})`, width: `calc((100% - 6px) / ${N})`, background: acGlow, borderRadius: 8, border: `1px solid ${ac}50`, transition: "left 0.2s ease", pointerEvents: "none" }} />
+              {subTabs.map(([k,l]) => { const isActive = tab === k; const isDone = !_isFinal && subDone[k]; return (<button key={k} onClick={() => setTab(k)} style={{ flex: 1, padding: "8px 6px", borderRadius: 8, fontSize: 12, fontWeight: isActive ? 700 : 500, background: "transparent", color: isActive ? ac : K.t2, border: "none", cursor: "pointer", position: "relative", zIndex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}><span>{l}</span>{!_isFinal && <span style={{ width: 6, height: 6, borderRadius: "50%", flexShrink: 0, background: isDone ? "#22c55e" : "transparent", border: `1.5px solid ${isDone ? "#22c55e" : K.t3 + "60"}` }} />}</button>); })}
             </div>
             <button onClick={() => setSettingsOpen(true)} title="Tournament Settings" style={{ width: 38, height: 38, borderRadius: 10, background: K.card, border: `1px solid ${K.bdr}`, color: K.t3, fontSize: 16, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>⚙️</button>
           </div>
@@ -3186,19 +3156,13 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
 
       {/* Warning banner for incomplete round setup */}
       {!finalizedRounds[editRound] && (() => {
-        const _tr = tRounds.find(t => t.round_number === editRound);
-        const _course = _tr ? courses.find(c => c.id === _tr.course_id) : null;
-        const _rg = (pairingsData || {})[editRound] || [];
-        const _rt = (teeTimesData[editRound] || []);
+        const st = getRoundStatus(editRound);
         const items = [];
-        if (!_course) items.push({ text: "No course assigned", action: "Set course", onClick: () => { setSettingsOpen(true); setSettingsTab("course"); } });
+        if (!st.hasCourse) items.push({ text: "No course assigned", action: "Set course", onClick: () => setTab("course") });
         else {
-          const teesSet = teesSaved[editRound] && !teesModified[editRound] && activePlayers.every(p => ((teeData[editRound] || {})[p.id]));
-          const groupsDone = _rg.length > 0 && _rg.flat().length === activePlayers.length;
-          const teeTimesDone = _rg.length > 0 && _rg.every((_, gi) => _rt[gi] && _rt[gi].trim() !== "");
-          if (!teesSet && tab !== "tees") items.push({ text: "Tee assignments incomplete", action: "Go to Tees", onClick: () => setTab("tees") });
-          if (!groupsDone && tab !== "pairings") items.push({ text: "Pairings not set", action: "Go to Pairings", onClick: () => setTab("pairings") });
-          if (!teeTimesDone && tab !== "pairings") items.push({ text: "Tee times missing", action: "Go to Pairings", onClick: () => setTab("pairings") });
+          if (!st.teesDone && tab !== "tees") items.push({ text: "Tee assignments incomplete", action: "Go to Tees", onClick: () => setTab("tees") });
+          if (!st.groupsDone && tab !== "pairings") items.push({ text: "Pairings not set", action: "Go to Pairings", onClick: () => setTab("pairings") });
+          if (!st.teeTimesDone && tab !== "pairings") items.push({ text: "Tee times missing", action: "Go to Pairings", onClick: () => setTab("pairings") });
         }
         if (items.length === 0) return null;
         return (
@@ -3271,7 +3235,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                         </div>
                       </div>
                     )}
-                    {[...activePlayers].sort((a,b) => a.name.localeCompare(b.name)).map((p, i) => <PlayerRow key={p.id} player={p} password={passwords[p.id] || "wbc2026"} onUpdateHI={updateHI} onUpdateName={updateName} onRemove={removePlayer} onSavePassword={(pid, pw) => setPasswords(prev => ({ ...prev, [pid]: pw }))} isLast={i === activePlayers.length - 1} ac={ac} />)}
+                    {[...activePlayers].sort((a,b) => a.name.localeCompare(b.name)).map((p, i) => <PlayerRow key={p.id} player={p} password={passwords[p.id] || DEFAULT_PW} onUpdateHI={updateHI} onUpdateName={updateName} onRemove={removePlayer} onSavePassword={(pid, pw) => setPasswords(prev => ({ ...prev, [pid]: pw }))} isLast={i === activePlayers.length - 1} ac={ac} />)}
                   </div>
                 </div>
               )}
@@ -3880,7 +3844,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
 
               {/* Reset options */}
               <div style={{ marginTop: 16, paddingTop: 12, borderTop: `1px solid ${K.bdr}30`, display: "flex", flexDirection: "column", gap: 8 }}>
-                <button onClick={() => { if (confirm("Clear all scores, rounds, pairings and tee assignments? Player roster and handicaps will be preserved. This cannot be undone.")) { startFresh(); setSettingsOpen(false); } }} style={{
+                <button onClick={() => { if (confirm("Clear all scores, course assignments, pairings, tee assignments, skins and scorecard signatures?\n\nPreserved: player roster, handicap indexes, and login passwords.\n\nThis cannot be undone.")) { startFresh(); setSettingsOpen(false); } }} style={{
                   width: "100%", padding: "10px 0", borderRadius: 8,
                   background: K.danger + "15", border: `1px solid ${K.danger}60`,
                   color: K.danger, fontSize: 12, fontWeight: 700, cursor: "pointer",
@@ -3917,6 +3881,88 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
         </div>
       )}
       {/* Round operation tabs */}
+      {tab === "course" && (() => {
+        const st = getRoundStatus(editRound);
+        const assigned = st.course;
+        const locked = st.finalized;
+        return (
+          <div>
+            {locked && (
+              <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", background: K.bdr + "15", borderRadius: 8, marginBottom: 10, border: `1px solid ${K.bdr}30` }}>
+                <span style={{ fontSize: 12 }}>🔒</span>
+                <span style={{ fontSize: 11, color: K.t3, fontWeight: 600 }}>Round {editRound} is finalized — view only</span>
+              </div>
+            )}
+            {/* Assigned course summary */}
+            {assigned ? (
+              <div style={{ background: K.card, borderRadius: 12, border: `1px solid ${K.acc}40`, padding: "12px 14px", marginBottom: 12 }}>
+                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 9, fontWeight: 700, color: K.acc, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 }}>Round {editRound} Course</div>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: K.t1 }}>{assigned.name}</div>
+                    <div style={{ fontSize: 11, color: K.t3 }}>{assigned.city}{assigned.city && assigned.state ? ", " : ""}{assigned.state}</div>
+                  </div>
+                  {!locked && (
+                    <button onClick={() => setCourseForRound(editRound, { id: null, name: "" })} style={{ background: "transparent", border: `1px solid ${K.bdr}`, borderRadius: 8, color: K.t3, fontSize: 10, fontWeight: 600, cursor: "pointer", padding: "5px 10px", flexShrink: 0 }}>Unassign</button>
+                  )}
+                </div>
+                {(assigned.tee_boxes || []).length > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10, paddingTop: 10, borderTop: `1px solid ${K.bdr}30` }}>
+                    {[...(assigned.tee_boxes || [])].sort((a,b) => (parseFloat(b.slope)||0)-(parseFloat(a.slope)||0)).map((tb, ti) => (
+                      <div key={ti} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 9 }}>
+                        <TeeColorSwatch color={tb.color} name={tb.name} size={10} />
+                        <span style={{ color: K.t2, fontWeight: 600 }}>{tb.name}</span>
+                        <span style={{ color: K.t3 }}>{tb.slope}/{tb.rating}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div style={{ background: K.card, borderRadius: 12, border: `1px dashed ${K.warn}50`, padding: "18px 14px", marginBottom: 12, textAlign: "center" }}>
+                <div style={{ fontSize: 22, marginBottom: 4 }}>⛳️</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: K.t1, marginBottom: 2 }}>No course assigned to Round {editRound}</div>
+                <div style={{ fontSize: 11, color: K.t3 }}>{courses.length > 0 ? "Pick one from your library below." : "Add a course to get started."}</div>
+              </div>
+            )}
+
+            {/* Library picker */}
+            {!locked && (
+              <div style={{ background: K.card, borderRadius: 12, border: `1px solid ${K.bdr}`, overflow: "hidden" }}>
+                <div style={{ padding: "9px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${K.bdr}` }}>
+                  <span style={{ fontSize: 10, fontWeight: 600, color: K.t3, textTransform: "uppercase", letterSpacing: "0.04em" }}>Course Library ({courses.length})</span>
+                  <button onClick={() => { setSettingsOpen(true); setSettingsTab("course"); setSearching(true); }} style={{ padding: "3px 8px", borderRadius: 6, background: "transparent", border: `1px solid ${ac}50`, color: ac, fontSize: 10, fontWeight: 600, cursor: "pointer" }}>+ Add / manage</button>
+                </div>
+                {courses.length === 0 ? (
+                  <div style={{ padding: 16, textAlign: "center", color: K.t3, fontSize: 11 }}>No courses yet — tap “Add / manage” to search 35,000+ courses.</div>
+                ) : (
+                  courses.map((c, i) => {
+                    const isAssigned = assigned && assigned.id === c.id;
+                    const otherRounds = Array.from({ length: numRounds }, (_, ri) => ri + 1).filter(r => r !== editRound && tRounds.find(t => t.round_number === r && t.course_id === c.id));
+                    return (
+                      <button key={c.id} onClick={() => { if (!isAssigned) setCourseForRound(editRound, c); }} style={{
+                        width: "100%", textAlign: "left", cursor: isAssigned ? "default" : "pointer",
+                        padding: "10px 14px", display: "flex", alignItems: "center", gap: 10,
+                        background: isAssigned ? ac + "12" : "transparent",
+                        border: "none", borderBottom: i < courses.length - 1 ? `1px solid ${K.bdr}10` : "none",
+                      }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: K.t1 }}>{c.name}</div>
+                          <div style={{ fontSize: 10, color: K.t3 }}>{c.city}{c.city && c.state ? ", " : ""}{c.state}{otherRounds.length > 0 ? ` · also R${otherRounds.join(", R")}` : ""}</div>
+                        </div>
+                        {isAssigned
+                          ? <span style={{ fontSize: 10, fontWeight: 700, color: ac, flexShrink: 0 }}>✓ Round {editRound}</span>
+                          : <span style={{ fontSize: 11, fontWeight: 700, color: K.t3, border: `1px solid ${K.bdr}`, borderRadius: 6, padding: "3px 9px", flexShrink: 0 }}>Assign</span>}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
       {tab === "pairings" && (
         <PairingsEditor activePlayers={activePlayers} numRounds={numRounds} pairingsData={pairingsData} setPairings={setPairings} tRounds={tRounds} courses={courses} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
               setTeeTimesData(prev => {
@@ -3939,7 +3985,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
 
       {tab === "tees" && (
         <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
-        <TeeAssigner activePlayers={activePlayers} numRounds={numRounds} tRounds={tRounds} courses={courses} teeData={teeData} setTeeBulk={setTeeBulk} finalizedRounds={finalizedRounds} editRound={editRound} setEditRound={r => { setEditRound(r); setTab("tees"); }} onOpenCourseSettings={() => { setSettingsOpen(true); setSettingsTab("course"); }} teesSaved={teesSaved} onTeesSave={onTeesSave} teesModified={teesModified} onTeesModify={r => setTeesModified(prev => ({ ...prev, [r]: true }))} />
+        <TeeAssigner activePlayers={activePlayers} numRounds={numRounds} tRounds={tRounds} courses={courses} teeData={teeData} setTeeBulk={setTeeBulk} finalizedRounds={finalizedRounds} editRound={editRound} setEditRound={r => { setEditRound(r); setTab("tees"); }} onOpenCourseSettings={() => { setSettingsOpen(true); setSettingsTab("course"); }} teesSaved={teesSaved} onTeesSave={onTeesSave} teesModified={teesModified} onTeesModify={onTeesModify} />
         </div>
       )}
 
@@ -4227,6 +4273,7 @@ export default function WBCApp() {
           if (s.finalized_rounds) setFinalizedRounds(s.finalized_rounds);
           if (s.passwords) setPasswords(s.passwords);
           if (s.tees_saved) setTeesSaved(s.tees_saved);
+          if (s.tees_modified) setTeesModified(s.tees_modified);
         }
 
       } catch(e) { console.error("Load failed:", e); }
@@ -4267,6 +4314,7 @@ export default function WBCApp() {
         if (docs[0].finalized_rounds) setFinalizedRounds(docs[0].finalized_rounds);
         if (docs[0].passwords) setPasswords(docs[0].passwords);
         if (docs[0].tees_saved) setTeesSaved(docs[0].tees_saved);
+        if (docs[0].tees_modified) setTeesModified(docs[0].tees_modified);
       }
     }));
 
@@ -4291,14 +4339,16 @@ export default function WBCApp() {
   }, []);
 
   // Save tournament state to Firestore
-  const saveTournamentState = async (finalized, pwds, savedTees) => {
+  const saveTournamentState = async (finalized, pwds, savedTees, modTees) => {
     const tsSaved = savedTees !== undefined ? savedTees : teesSaved;
+    const tsMod = modTees !== undefined ? modTees : teesModified;
     await db.upsert("tournament_state", {
       id: `ts_${TOURNAMENT_ID}`,
       tournament_id: TOURNAMENT_ID,
       finalized_rounds: finalized,
       passwords: pwds,
       tees_saved: tsSaved,
+      tees_modified: tsMod,
       updated_at: new Date().toISOString(),
     });
   };
@@ -4324,10 +4374,12 @@ export default function WBCApp() {
     setPairingsData({});
     setTeeData({});
     setTeeTimesData({});
+    setTeesSaved({});
+    setTeesModified({});
     setFinalizedRounds({});
     setScorecardSigs({});
     setRound(1);
-    await saveTournamentState({}, passwords);
+    await saveTournamentState({}, passwords, {}, {});
     notify("Scorecards cleared — player roster preserved");
   };
 
@@ -4633,7 +4685,7 @@ export default function WBCApp() {
     const newTp = { id: `tp_2026_${id}`, tournament_id: TOURNAMENT_ID, player_id: id, handicap_index: hi, status: "active" };
     setTPlayers(prev => [...prev, newTp]);
     await db.upsert("tournament_players", newTp);
-    const newPw = { ...passwords, [id]: "wbc2026" };
+    const newPw = { ...passwords, [id]: DEFAULT_PW };
     setPasswords(newPw);
     // Seed default tee assignments
     const teeUpdates = [];
@@ -4756,7 +4808,7 @@ export default function WBCApp() {
   const [loginError, setLoginError] = useState(false);
 
   const tryLogin = () => {
-    const playerPw = passwords[loginPrompt.id] || "wbc2026";
+    const playerPw = passwords[loginPrompt.id] || DEFAULT_PW;
     if (loginPin.toLowerCase() === playerPw.toLowerCase()) {
       setLoginPrompt(null);
       setLoginPin("");
@@ -5015,7 +5067,7 @@ export default function WBCApp() {
                 });
                 return next;
               });
-            }} passwords={passwords} setPasswords={async pw => { setPasswords(pw); await saveTournamentState(finalizedRounds, pw); }} holeData={holeData} finalizedRounds={finalizedRounds} onFinalizeRound={async rnd => { const nf = { ...finalizedRounds, [rnd]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${rnd}`, tournament_id: TOURNAMENT_ID, round: rnd, finalized: true }); if (rnd < 4) setRound(rnd + 1); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); if (/^\d+$/.test(String(key))) { await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${key}`, tournament_id: TOURNAMENT_ID, round: Number(key), finalized: false }); } else { setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", key); } }} notify={notify} notif={notif} getPlayerTee={getPlayerTee} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); }} currentUser={user} teesSaved={teesSaved} onTeesSave={async r => { const next = { ...teesSaved, [r]: true }; setTeesSaved(next); setTeesModified(prev => ({ ...prev, [r]: false })); await saveTournamentState(finalizedRounds, passwords, next); }} teesModified={teesModified} setTeesModified={setTeesModified} /> : (
+            }} passwords={passwords} setPasswords={async pw => { setPasswords(pw); await saveTournamentState(finalizedRounds, pw); }} holeData={holeData} finalizedRounds={finalizedRounds} onFinalizeRound={async rnd => { const nf = { ...finalizedRounds, [rnd]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${rnd}`, tournament_id: TOURNAMENT_ID, round: rnd, finalized: true }); if (rnd < 4) setRound(rnd + 1); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); if (/^\d+$/.test(String(key))) { await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${key}`, tournament_id: TOURNAMENT_ID, round: Number(key), finalized: false }); } else { setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", key); } }} notify={notify} notif={notif} getPlayerTee={getPlayerTee} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); }} currentUser={user} teesSaved={teesSaved} onTeesSave={async r => { const next = { ...teesSaved, [r]: true }; const nextMod = { ...teesModified, [r]: false }; setTeesSaved(next); setTeesModified(nextMod); await saveTournamentState(finalizedRounds, passwords, next, nextMod); }} teesModified={teesModified} onTeesModify={async r => { const nextMod = { ...teesModified, [r]: true }; setTeesModified(nextMod); await saveTournamentState(finalizedRounds, passwords, teesSaved, nextMod); }} setTeesModified={setTeesModified} /> : (
           <div style={{ textAlign: "center", padding: "40px 20px" }}>
             <div style={{ fontSize: 40, marginBottom: 12 }}>🔒</div>
             <div style={{ fontSize: 16, fontWeight: 700, color: K.t1, marginBottom: 6 }}>Directors Only</div>
