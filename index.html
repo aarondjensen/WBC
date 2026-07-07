@@ -23,7 +23,14 @@
     </style>
     <script>
       function setAppHeight() {
-        document.documentElement.style.setProperty('--app-height', window.innerHeight + 'px');
+        // GUARD: on iOS PWA cold-reopen/resume, window.innerHeight is briefly 0
+        // (or an unstable tiny value) during the launch transition. Writing that
+        // into --app-height collapses the fixed-height app container to a blank
+        // dark screen (the "flash then dark" bug). Ignore any non-sane value and
+        // keep the last good one (or the CSS 100dvh fallback). Mirrors App.jsx.
+        var h = window.innerHeight;
+        if (!(h > 100)) return;
+        document.documentElement.style.setProperty('--app-height', h + 'px');
       }
 
       // Set immediately on load

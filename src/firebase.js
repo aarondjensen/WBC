@@ -38,25 +38,37 @@ import {
   deleteUser,
 } from "firebase/auth";
 
+// ─── Feature flag ──────────────────────────────────────────────────────────
+// Master switch for the whole Google/Apple sign-in feature. Keep FALSE until
+// the Phase 1 console work below is done. It gates THREE things that would
+// otherwise run for every user on every cold start even though sign-in is off:
+//   • authDomain (custom vs default) — see FIREBASE_CONFIG below
+//   • the popup/redirect resolver on initializeAuth
+//   • consumeRedirectResult() + the onAuthStateChanged subscription (App.jsx)
+// Running the redirect/iframe machinery pointed at a custom authDomain is
+// fragile in installed iOS PWAs and is pure overhead while the feature is dark,
+// so nothing auth-related activates until this is TRUE. App.jsx imports this so
+// the login screen and this module agree.
+export const AUTH_PROVIDERS_ENABLED = false;
+
 // ─── Config ──────────────────────────────────────────────────────────────
-// MNQ lesson: authDomain points at our OWN production domain (not the
-// default wannabecup-c5aab.firebaseapp.com) so the signInWithRedirect flow
-// stays first-party. iOS storage partitioning breaks the cross-origin
-// redirect round-trip inside the installed PWA; serving the auth handler
-// from our own origin fixes it. Vercel reverse-proxies /__/auth/* and
-// /__/firebase/* to wannabecup-c5aab.firebaseapp.com (see vercel.json).
+// authDomain: while providers are OFF we use the DEFAULT firebaseapp.com
+// domain — identical to the app's long-standing behavior, and it keeps the
+// auth layer off the Vercel-proxied /__/auth/* path entirely. Only when
+// AUTH_PROVIDERS_ENABLED flips TRUE do we switch to our own domain, which is
+// what makes signInWithRedirect first-party and survive iOS storage
+// partitioning in the installed PWA (MNQ lesson).
 //
-// CONSOLE PREREQUISITES before enabling the Google provider (Phase 1):
-//   1. Firebase Console → Auth → Settings → Authorized domains:
-//      add wannabecup.com
-//   2. Google Cloud Console → APIs & Services → Credentials → the OAuth 2.0
-//      Web client Firebase auto-created → Authorized redirect URIs:
-//      add https://wannabecup.com/__/auth/handler
-// Until Google/Apple providers are enabled, this value is inert — the
-// current password login and all Firestore/FCM traffic ignore authDomain.
+// CONSOLE PREREQUISITES to satisfy BEFORE flipping AUTH_PROVIDERS_ENABLED:
+//   1. Firebase Console → Auth → Sign-in method → enable Google (+ Apple)
+//   2. Auth → Settings → Authorized domains → add wannabecup.com
+//   3. Google Cloud → Credentials → OAuth Web client → Authorized redirect
+//      URIs → add https://wannabecup.com/__/auth/handler
+//   4. Ensure vercel.json's /__/auth/* + /__/firebase/* rewrites are deployed
+// Firestore and FCM never use authDomain, so this switch is invisible to them.
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyBcS6KphgfN15xwfCcmLXx3YMIMUeYuhfc",
-  authDomain: "wannabecup.com",
+  authDomain: AUTH_PROVIDERS_ENABLED ? "wannabecup.com" : "wannabecup-c5aab.firebaseapp.com",
   projectId: "wannabecup-c5aab",
   storageBucket: "wannabecup-c5aab.firebasestorage.app",
   messagingSenderId: "281900029443",
@@ -130,7 +142,14 @@ let _authInstance;
 try {
   _authInstance = initializeAuth(_app, {
     persistence: [indexedDBLocalPersistence, browserLocalPersistence],
-    ...(isNativePlatform() ? {} : { popupRedirectResolver: browserPopupRedirectResolver }),
+    // Resolver is attached ONLY when providers are enabled AND we're on web.
+    // It's what activates the popup/redirect + auth-iframe machinery; wiring it
+    // while sign-in is disabled would spin that machinery up on every cold
+    // start for no reason (and it's iOS-PWA-fragile against a custom
+    // authDomain). Omitted on native always (see the WKWebView note above).
+    ...(AUTH_PROVIDERS_ENABLED && !isNativePlatform()
+      ? { popupRedirectResolver: browserPopupRedirectResolver }
+      : {}),
   });
 } catch (e) {
   // No IndexedDB AND no localStorage — effectively never outside hard-locked

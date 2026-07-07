@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
-import { _app, _db, _auth, onAuthStateChanged, doGoogleSignIn, doAppleSignIn, doSignOut, consumeRedirectResult, USERS_COLLECTION, NATIVE_APPLE_ENABLED, isNativePlatform } from "./firebase";
+import { _app, _db, _auth, onAuthStateChanged, doGoogleSignIn, doAppleSignIn, doSignOut, consumeRedirectResult, USERS_COLLECTION, NATIVE_APPLE_ENABLED, isNativePlatform, AUTH_PROVIDERS_ENABLED } from "./firebase";
 import { collection, doc, setDoc, getDocs, query, where, writeBatch, onSnapshot, deleteDoc } from "firebase/firestore";
 import { getMessaging, getToken, onMessage, isSupported as isMessagingSupported } from "firebase/messaging";
 const WBC_LOGO = "/wbc-icon-512.png";
@@ -52,18 +52,11 @@ const DIRECTOR_IDS = ["aaron_j", "scott_r"];
 const isDirectorId = (id) => DIRECTOR_IDS.includes(id);
 
 // ── Google/Apple sign-in feature flags ──
-// AUTH_PROVIDERS_ENABLED gates the entire "Sign in with Google/Apple" section
-// on the login screen. Keep FALSE until Phase 1 console work is done:
-//   1. Firebase Console → Auth → Sign-in method → enable Google (and Apple)
-//   2. Auth → Settings → Authorized domains → add wannabecup.com
-//   3. Google Cloud → Credentials → OAuth Web client → Authorized redirect
-//      URIs → add https://wannabecup.com/__/auth/handler
-// Shipping this FALSE means a build in App Store / Play review can never
-// surface a provider button that errors on tap before the backend is ready —
-// same philosophy as firebase.js's NATIVE_APPLE_ENABLED. Flip to TRUE in the
-// same deploy that follows the console setup. The PIN login is unaffected and
-// remains available throughout the transition.
-const AUTH_PROVIDERS_ENABLED = false;
+// AUTH_PROVIDERS_ENABLED is defined in src/firebase.js (single source of truth,
+// since it also controls authDomain + the auth resolver there) and imported
+// above. It gates the "Sign in with Google/Apple" section on the login screen
+// and the auth subscription effect. Keep it FALSE until the Phase 1 console
+// work documented in firebase.js is done; the PIN login is unaffected.
 
 // Aaron's decision for the trusted 12-player group: a manual "pick your name"
 // claim links immediately, with no director-approval step. Flip to TRUE later
@@ -4244,7 +4237,18 @@ export default function WBCApp() {
   // height (fat top gap + clipped bottom nav).
   useEffect(() => {
     const setAppHeight = () => {
-      try { document.documentElement.style.setProperty("--app-height", window.innerHeight + "px"); } catch {}
+      try {
+        // GUARD: on iOS PWA cold-reopen/resume, window.innerHeight is briefly 0
+        // (or an unstable tiny value) during the launch transition. Writing that
+        // into --app-height collapses the fixed-height, overflow:hidden app
+        // container to nothing — the "flash then dark blank screen" bug. Ignore
+        // any non-sane measurement and keep the last good value (or the CSS
+        // 100dvh fallback) so the view can never collapse. 100px floor is safe:
+        // no real device viewport is shorter. Must mirror index.html.
+        const h = window.innerHeight;
+        if (!(h > 100)) return;
+        document.documentElement.style.setProperty("--app-height", h + "px");
+      } catch {}
     };
     setAppHeight();
     const timers = [setTimeout(setAppHeight, 100), setTimeout(setAppHeight, 300), setTimeout(setAppHeight, 600)];
@@ -4644,8 +4648,11 @@ export default function WBCApp() {
   }, [claimEmails]);
 
   // Subscribe to Firebase Auth. Also completes any pending redirect sign-in
-  // (installed-PWA path) that resolves on cold start.
+  // (installed-PWA path) that resolves on cold start. Entirely skipped while
+  // providers are disabled — no redirect/iframe machinery runs on cold start
+  // until the feature is live.
   useEffect(() => {
+    if (!AUTH_PROVIDERS_ENABLED) return;
     consumeRedirectResult().catch(e => setAuthMsg(e?.message || "Sign-in failed."));
     const unsub = onAuthStateChanged(_auth, u => setFbUser(u));
     return unsub;
