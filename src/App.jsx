@@ -4373,10 +4373,19 @@ export default function WBCApp() {
         }
 
         // Existing uid→player_id claims (wbc_users). Doc id is the uid.
-        const userRows = await db.get(USERS_COLLECTION);
-        if (userRows?.length) {
-          setClaims(Object.fromEntries(userRows.map(r => [r.uid || r.id, r.player_id]).filter(([u, pid]) => u && pid)));
-        }
+        // DEFERRED (non-blocking): this feeds only the claim flow, which is
+        // inert while AUTH_PROVIDERS_ENABLED is false. It used to sit here as an
+        // awaited call BETWEEN players and the tournament data below, delaying
+        // rounds/courses/scores by a full round-trip on every cold start (and
+        // longer if wbc_users reads are denied by rules). On a reopen — where
+        // the leaderboard mounts at t=0 with no login screen to buy load time —
+        // that widened the empty-data window for no benefit. Fire-and-forget so
+        // it can never gate the render-critical tournament payload.
+        db.get(USERS_COLLECTION).then(userRows => {
+          if (userRows?.length) {
+            setClaims(Object.fromEntries(userRows.map(r => [r.uid || r.id, r.player_id]).filter(([u, pid]) => u && pid)));
+          }
+        }).catch(e => console.warn("[claims] wbc_users load skipped:", e?.message || e));
 
         const tpRows = await db.get("tournament_players", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
         if (tpRows?.length) {

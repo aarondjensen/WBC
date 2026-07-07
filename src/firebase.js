@@ -138,24 +138,36 @@ const loadNativeAuthPlugin = async () => {
 // the app sits on its loading state forever with no error. Native sign-in
 // arrives via the Capacitor plugin instead, so the web resolver is never
 // needed there.
-let _authInstance;
-try {
-  _authInstance = initializeAuth(_app, {
-    persistence: [indexedDBLocalPersistence, browserLocalPersistence],
-    // Resolver is attached ONLY when providers are enabled AND we're on web.
-    // It's what activates the popup/redirect + auth-iframe machinery; wiring it
-    // while sign-in is disabled would spin that machinery up on every cold
-    // start for no reason (and it's iOS-PWA-fragile against a custom
-    // authDomain). Omitted on native always (see the WKWebView note above).
-    ...(AUTH_PROVIDERS_ENABLED && !isNativePlatform()
-      ? { popupRedirectResolver: browserPopupRedirectResolver }
-      : {}),
-  });
-} catch (e) {
-  // No IndexedDB AND no localStorage — effectively never outside hard-locked
-  // private modes. Fall back to plain getAuth so the app still loads.
-  console.error("initializeAuth failed; falling back to getAuth:", e?.message || e);
-  _authInstance = getAuth(_app);
+// GATE THE WHOLE THING behind AUTH_PROVIDERS_ENABLED.
+//
+// This is the important part: initializeAuth() — even with NO resolver — opens
+// an IndexedDB connection (firebaseLocalStorageDb) synchronously at module
+// eval to hydrate persisted auth state. IndexedDB in an iOS *standalone PWA*
+// is fragile on a cold reopen (the DB can be briefly locked/unavailable during
+// the launch transition), and firing that open on every single cold start —
+// for a sign-in feature that is currently OFF — buys us nothing but risk. The
+// long-working single-file build never touched Auth at all; this restores that
+// property while providers are disabled. When we flip AUTH_PROVIDERS_ENABLED
+// on (Phase 1 console work done), initializeAuth runs exactly as before, with
+// the web resolver attached. Nothing references _auth while disabled: the
+// onAuthStateChanged listener is gated in App.jsx and every sign-in helper
+// below now short-circuits on a null _auth.
+let _authInstance = null;
+if (AUTH_PROVIDERS_ENABLED) {
+  try {
+    _authInstance = initializeAuth(_app, {
+      persistence: [indexedDBLocalPersistence, browserLocalPersistence],
+      // Resolver on web only; omitted on native (see the WKWebView note above).
+      ...(!isNativePlatform()
+        ? { popupRedirectResolver: browserPopupRedirectResolver }
+        : {}),
+    });
+  } catch (e) {
+    // No IndexedDB AND no localStorage — effectively never outside hard-locked
+    // private modes. Fall back to plain getAuth so the app still loads.
+    console.error("initializeAuth failed; falling back to getAuth:", e?.message || e);
+    _authInstance = getAuth(_app);
+  }
 }
 export const _auth = _authInstance;
 
@@ -211,7 +223,7 @@ const mapAuthError = (e) => {
 };
 
 const requireCurrentUser = () => {
-  const user = _auth.currentUser;
+  const user = _auth?.currentUser;
   if (!user) {
     const err = new Error("You need to be signed in first.");
     err.code = "auth/no-current-user";
@@ -241,6 +253,7 @@ const isStandalonePWA = () =>
   window.navigator.standalone === true;
 
 export const doGoogleSignIn = async () => {
+  if (!_auth) throw new Error("Sign-in is not enabled yet.");
   try {
     if (isNativePlatform()) {
       const FirebaseAuthentication = await loadNativeAuthPlugin();
@@ -265,6 +278,7 @@ export const doGoogleSignIn = async () => {
 // pending signInWithRedirect round-trip. Returns the UserCredential or null
 // if there was no pending redirect.
 export const consumeRedirectResult = async () => {
+  if (!_auth) return null; // auth disabled → no pending redirect to consume
   try {
     return await getRedirectResult(_auth);
   } catch (e) {
@@ -280,6 +294,7 @@ export const consumeRedirectResult = async () => {
 // embeds the SHA-256 of the raw nonce in the ID token and Firebase re-hashes
 // rawNonce to verify it; omitting it yields auth/invalid-credential.
 export const doAppleSignIn = async () => {
+  if (!_auth) throw new Error("Sign-in is not enabled yet.");
   try {
     if (isNativePlatform()) {
       const FirebaseAuthentication = await loadNativeAuthPlugin();
@@ -350,6 +365,7 @@ export const linkAppleAccount = async () => {
 // plugin isn't installed — failures are swallowed so they can never block
 // the JS SDK signOut.
 export const doSignOut = async () => {
+  if (!_auth) return; // auth disabled → nothing to sign out of
   if (isNativePlatform()) {
     try {
       const FirebaseAuthentication = await loadNativeAuthPlugin();
