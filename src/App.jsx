@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
-import { initializeApp } from "firebase/app";
-import { getFirestore, collection, doc, setDoc, getDocs, query, where, writeBatch, onSnapshot, deleteDoc } from "firebase/firestore";
+import { _app, _db } from "./firebase";
+import { collection, doc, setDoc, getDocs, query, where, writeBatch, onSnapshot, deleteDoc } from "firebase/firestore";
 import { getMessaging, getToken, onMessage, isSupported as isMessagingSupported } from "firebase/messaging";
 const WBC_LOGO = "/wbc-icon-512.png";
 const WBC_TROPHY_LOGO = "/wbc-trophy.png";
@@ -39,19 +39,11 @@ const NUM_ROUNDS = TOURNAMENT.num_rounds || 4;
 
 // ── Firebase initialized above ──
 // ── Firebase / Firestore configuration ──
-const FIREBASE_CONFIG = {
-  apiKey: "AIzaSyBcS6KphgfN15xwfCcmLXx3YMIMUeYuhfc",
-  authDomain: "wannabecup-c5aab.firebaseapp.com",
-  projectId: "wannabecup-c5aab",
-  storageBucket: "wannabecup-c5aab.firebasestorage.app",
-  messagingSenderId: "281900029443",
-  appId: "1:281900029443:web:68da433d8ec5a16b74a036",
-};
+// Firebase config + app/db initialization live in src/firebase.js (the
+// extracted auth module — single source of truth for all Firebase infra).
+// _app and _db are imported at the top of this file.
 const TOURNAMENT_ID = "wbc_2026";
 const DEFAULT_PW = "wbc2026"; // default player login password
-
-const _app = initializeApp(FIREBASE_CONFIG);
-const _db  = getFirestore(_app);
 
 // ── Push notifications (FCM) ──
 // Web Push VAPID PUBLIC key (not a secret — ships in the client bundle).
