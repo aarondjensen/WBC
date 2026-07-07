@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
-import { _app, _db } from "./firebase";
+import { _app, _db, _auth, onAuthStateChanged, doGoogleSignIn, doAppleSignIn, doSignOut, consumeRedirectResult, USERS_COLLECTION, NATIVE_APPLE_ENABLED, isNativePlatform } from "./firebase";
 import { collection, doc, setDoc, getDocs, query, where, writeBatch, onSnapshot, deleteDoc } from "firebase/firestore";
 import { getMessaging, getToken, onMessage, isSupported as isMessagingSupported } from "firebase/messaging";
 const WBC_LOGO = "/wbc-icon-512.png";
@@ -44,6 +44,32 @@ const NUM_ROUNDS = TOURNAMENT.num_rounds || 4;
 // _app and _db are imported at the top of this file.
 const TOURNAMENT_ID = "wbc_2026";
 const DEFAULT_PW = "wbc2026"; // default player login password
+
+// Tournament directors — the two player_ids that get admin access. Single
+// source of truth so the login screen, claim resolution, and admin gating
+// all agree.
+const DIRECTOR_IDS = ["aaron_j", "scott_r"];
+const isDirectorId = (id) => DIRECTOR_IDS.includes(id);
+
+// ── Google/Apple sign-in feature flags ──
+// AUTH_PROVIDERS_ENABLED gates the entire "Sign in with Google/Apple" section
+// on the login screen. Keep FALSE until Phase 1 console work is done:
+//   1. Firebase Console → Auth → Sign-in method → enable Google (and Apple)
+//   2. Auth → Settings → Authorized domains → add wannabecup.com
+//   3. Google Cloud → Credentials → OAuth Web client → Authorized redirect
+//      URIs → add https://wannabecup.com/__/auth/handler
+// Shipping this FALSE means a build in App Store / Play review can never
+// surface a provider button that errors on tap before the backend is ready —
+// same philosophy as firebase.js's NATIVE_APPLE_ENABLED. Flip to TRUE in the
+// same deploy that follows the console setup. The PIN login is unaffected and
+// remains available throughout the transition.
+const AUTH_PROVIDERS_ENABLED = false;
+
+// Aaron's decision for the trusted 12-player group: a manual "pick your name"
+// claim links immediately, with no director-approval step. Flip to TRUE later
+// to require approval before a manual claim resolves (that path is not built
+// yet — it would write a pending record instead of claiming outright).
+const CLAIM_REQUIRES_APPROVAL = false;
 
 // ── Push notifications (FCM) ──
 // Web Push VAPID PUBLIC key (not a secret — ships in the client bundle).
@@ -4130,6 +4156,59 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
 
 
 
+// ── CLAIM SCREEN ──
+// Shown after a Google/Apple sign-in when the authenticated Firebase user is
+// not yet mapped to a WBC player (no wbc_users doc, and no unique claim_email
+// match). The signed-in person picks their own name from the unclaimed
+// profiles; picking writes the uid→player_id claim and logs them in. The
+// player_id is the permanent career identity linking to 16 years of history,
+// so this is the moment a real person is bound to that identity.
+function ClaimScreen({ fbUser, candidates, onClaim, onCancel, busyId }) {
+  const email = fbUser?.email || "";
+  const displayName = fbUser?.displayName || "";
+  return (
+    <div style={{ minHeight: "var(--app-height, 100dvh)", background: `radial-gradient(ellipse at 20% 50%, #0d1f3c 0%, ${K.bg} 70%)`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", padding: 20 }}>
+      <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+      <div style={{ width: "100%", maxWidth: 420, textAlign: "center" }}>
+        <img src={WBC_LOGO} alt="WBC" style={{ height: 64, margin: "0 auto 16px", display: "block", filter: "drop-shadow(0 4px 16px rgba(34,211,167,0.3))" }} />
+        <h1 style={{ fontSize: 24, color: K.t1, margin: "0 0 6px", fontWeight: 800, letterSpacing: "-0.02em" }}>Claim your profile</h1>
+        <p style={{ color: K.t2, fontSize: 13, margin: "0 0 4px", lineHeight: 1.5 }}>
+          Signed in{displayName ? ` as ${displayName}` : ""}{email ? ` · ${email}` : ""}.
+        </p>
+        <p style={{ color: K.t3, fontSize: 12, margin: "0 0 22px", lineHeight: 1.5 }}>Tap your name to link this sign-in to your WBC history.</p>
+
+        {candidates.length === 0 ? (
+          <div style={{ background: K.card, border: `1px dashed ${K.warn}50`, borderRadius: 12, padding: 24 }}>
+            <p style={{ color: K.t2, fontSize: 13, margin: 0, lineHeight: 1.6 }}>
+              Every player profile has already been claimed. If one of them is you, ask a tournament director to free it up in Firebase, then sign in again.
+            </p>
+          </div>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            {candidates.map((p) => {
+              const busy = busyId === p.id;
+              const initials = p.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase();
+              return (
+                <button key={p.id} onClick={() => !busyId && onClaim(p)} disabled={!!busyId}
+                  style={{ display: "flex", alignItems: "center", gap: 10, background: K.card, border: `1px solid ${busy ? K.acc : K.bdr}`, borderRadius: 12, padding: "12px 12px", cursor: busyId ? "default" : "pointer", color: K.t1, textAlign: "left", opacity: busyId && !busy ? 0.5 : 1, transition: "all 0.15s" }}
+                  onMouseEnter={(e) => { if (!busyId) { e.currentTarget.style.borderColor = K.acc; e.currentTarget.style.background = K.hover; } }}
+                  onMouseLeave={(e) => { if (!busyId) { e.currentTarget.style.borderColor = K.bdr; e.currentTarget.style.background = K.card; } }}>
+                  <span style={{ width: 34, height: 34, flexShrink: 0, borderRadius: "50%", background: K.acc + "18", border: `1px solid ${K.acc}50`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, color: K.acc }}>{initials}</span>
+                  <span style={{ fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{busy ? "Linking…" : p.name}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        <button onClick={onCancel} disabled={!!busyId} style={{ marginTop: 22, background: "transparent", border: "none", color: K.t3, fontSize: 12, fontWeight: 600, cursor: busyId ? "default" : "pointer", opacity: busyId ? 0.5 : 1 }}>
+          ← Not now, sign out
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── MAIN APP ──
 export default function WBCApp() {
   // Session persistence: restore the logged-in user on relaunch so players
@@ -4143,6 +4222,19 @@ export default function WBCApp() {
       else localStorage.removeItem("wbc_user");
     } catch {}
   }, [user]);
+
+  // ── Google/Apple auth + prebuild-and-claim state ──
+  // claims: uid → player_id (mirror of the wbc_users collection). Its VALUES
+  // are the source of truth for which player profiles are already claimed —
+  // no redundant `claimed` flag is stored on the player record.
+  const [claims, setClaims] = useState({});
+  // claimEmails: player_id → lowercased claim_email (from the players doc),
+  // used for the primary email-prematch claim path.
+  const [claimEmails, setClaimEmails] = useState({});
+  const [fbUser, setFbUser] = useState(null);        // current Firebase Auth user
+  const [claimState, setClaimState] = useState(null); // null | { status: "needs-claim", candidates }
+  const [claimBusyId, setClaimBusyId] = useState(null);
+  const [authMsg, setAuthMsg] = useState("");        // provider sign-in error, shown on login screen
 
   // iOS standalone height fix, enforced from React. --app-height = window.innerHeight
   // (which excludes the home-indicator area that 100dvh wrongly includes). This
@@ -4270,6 +4362,16 @@ export default function WBCApp() {
         if (playerRows?.length) {
           DEMO_PLAYERS = playerRows.map(r => ({ id: r.id, name: r.name }))
             .sort((a, b) => a.name.localeCompare(b.name));
+          // claim_email map (primary claim path). Optional per player.
+          const emails = {};
+          playerRows.forEach(r => { if (r.claim_email) emails[r.id] = String(r.claim_email).toLowerCase(); });
+          setClaimEmails(emails);
+        }
+
+        // Existing uid→player_id claims (wbc_users). Doc id is the uid.
+        const userRows = await db.get(USERS_COLLECTION);
+        if (userRows?.length) {
+          setClaims(Object.fromEntries(userRows.map(r => [r.uid || r.id, r.player_id]).filter(([u, pid]) => u && pid)));
         }
 
         const tpRows = await db.get("tournament_players", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
@@ -4509,6 +4611,96 @@ export default function WBCApp() {
       return p ? { ...p, handicap_index: parseFloat(tp.handicap_index) || 0, tp_id: tp.id, isWD: tp.status === "WD" } : null;
     }).filter(Boolean).sort((a,b) => a.name.localeCompare(b.name));
   }, [tPlayers]);
+
+  // ── Claim flow ──
+  // Set of player_ids already bound to a Firebase uid (single source of truth
+  // is the claims map's values).
+  const claimedPlayerIds = useMemo(() => new Set(Object.values(claims)), [claims]);
+
+  // Write the uid→player_id claim and log the person in. Optimistic: local
+  // state updates immediately so the UI advances, then the Firestore writes
+  // follow. `method` records how the claim was resolved ("email" | "manual").
+  const claimProfile = useCallback(async (fb, player, method) => {
+    if (!fb || !player) return;
+    const email = (fb.email || "").toLowerCase();
+    const rec = {
+      id: fb.uid, uid: fb.uid, tournament_id: TOURNAMENT_ID,
+      player_id: player.id, email, displayName: fb.displayName || player.name,
+      providers: (fb.providerData || []).map(p => p.providerId),
+      method, claimedAt: Date.now(),
+    };
+    setClaims(prev => ({ ...prev, [fb.uid]: player.id }));
+    setClaimBusyId(null);
+    setClaimState(null);
+    setUser({ id: player.id, name: player.name, isDirector: isDirectorId(player.id) });
+    await db.upsert(USERS_COLLECTION, rec).catch(e => console.warn("[claim] wbc_users write failed", e));
+    // Stamp claim_email onto the registry doc so the primary email-prematch
+    // path works on future re-claims and directors can see who holds a profile.
+    // Skipped for Apple "Hide My Email" relay addresses (no @privaterelay).
+    if (email && !email.endsWith("privaterelay.appleid.com") && claimEmails[player.id] !== email) {
+      setClaimEmails(prev => ({ ...prev, [player.id]: email }));
+      await db.upsert("players", { id: player.id, claim_email: email }, "id").catch(() => {});
+    }
+  }, [claimEmails]);
+
+  // Subscribe to Firebase Auth. Also completes any pending redirect sign-in
+  // (installed-PWA path) that resolves on cold start.
+  useEffect(() => {
+    consumeRedirectResult().catch(e => setAuthMsg(e?.message || "Sign-in failed."));
+    const unsub = onAuthStateChanged(_auth, u => setFbUser(u));
+    return unsub;
+  }, []);
+
+  // Resolve a signed-in Firebase user to a WBC player: already-claimed fast
+  // path → unique email prematch → manual pick. Waits until the registry and
+  // existing claims have loaded so it never mis-decides "unclaimed".
+  useEffect(() => {
+    if (!fbUser) { setClaimState(null); return; }
+    if (!storageLoaded) return;
+
+    // 1. Already claimed → log straight in (idempotent; guarded against loops).
+    const claimedPid = claims[fbUser.uid];
+    if (claimedPid) {
+      const p = DEMO_PLAYERS.find(pl => pl.id === claimedPid);
+      if (p) {
+        setClaimState(null);
+        if (user?.id !== p.id) setUser({ id: p.id, name: p.name, isDirector: isDirectorId(p.id) });
+        return;
+      }
+      // Claimed to a player_id no longer in the registry — fall through to re-claim.
+    }
+
+    // 2. Unique email prematch (primary path).
+    const email = (fbUser.email || "").toLowerCase();
+    const unclaimed = activePlayers.filter(p => !claimedPlayerIds.has(p.id));
+    if (email) {
+      const matches = unclaimed.filter(p => claimEmails[p.id] && claimEmails[p.id] === email);
+      if (matches.length === 1) { claimProfile(fbUser, matches[0], "email"); return; }
+    }
+
+    // 3. Manual "pick your name" fallback (immediate link per CLAIM_REQUIRES_APPROVAL=false).
+    setClaimState({ status: "needs-claim", candidates: unclaimed });
+  }, [fbUser, claims, claimedPlayerIds, claimEmails, storageLoaded, activePlayers, user, claimProfile]);
+
+  // Provider sign-in handlers for the login screen.
+  const handleGoogleSignIn = useCallback(async () => {
+    setAuthMsg("");
+    try { await doGoogleSignIn(); } catch (e) { setAuthMsg(e?.message || "Google sign-in failed."); }
+  }, []);
+  const handleAppleSignIn = useCallback(async () => {
+    setAuthMsg("");
+    try { await doAppleSignIn(); } catch (e) { setAuthMsg(e?.message || "Apple sign-in failed."); }
+  }, []);
+
+  // Unified logout: clear the Firebase session too, or the auth listener would
+  // immediately re-resolve and log the person back in. Safe no-op for PIN-only
+  // and guest users (no Firebase session to clear).
+  const handleLogout = useCallback(async () => {
+    setClaimState(null);
+    setClaimBusyId(null);
+    try { await doSignOut(); } catch { /* non-fatal */ }
+    setUser(null);
+  }, []);
 
   const currentTR = tRounds.find(r => r.round_number === round);
   const currentCourse = currentTR ? courseList.find(c => c.id === currentTR.course_id) : null;
@@ -4884,6 +5076,20 @@ export default function WBCApp() {
     return false;
   }, [activePlayers, holeData, finalizedRounds, tRounds]);
 
+  // A signed-in Firebase user with no resolved player takes precedence over the
+  // login screen so they can pick their profile even before any app `user` is set.
+  if (claimState?.status === "needs-claim") {
+    return (
+      <ClaimScreen
+        fbUser={fbUser}
+        candidates={claimState.candidates}
+        busyId={claimBusyId}
+        onClaim={(p) => { setClaimBusyId(p.id); claimProfile(fbUser, p, "manual"); }}
+        onCancel={handleLogout}
+      />
+    );
+  }
+
   if (!user) {
     return (
       <div style={{ minHeight: "var(--app-height, 100dvh)", background: `radial-gradient(ellipse at 20% 50%, #0d1f3c 0%, ${K.bg} 70%)`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", padding: 20 }}>
@@ -5004,6 +5210,26 @@ export default function WBCApp() {
             </div>
             )}
           </div>
+          {AUTH_PROVIDERS_ENABLED && (
+            <div style={{ marginTop: 22 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "0 0 14px" }}>
+                <div style={{ flex: 1, height: 1, background: `${K.bdr}` }} />
+                <span style={{ color: K.t3, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600 }}>or</span>
+                <div style={{ flex: 1, height: 1, background: `${K.bdr}` }} />
+              </div>
+              <button onClick={handleGoogleSignIn} style={{ width: "100%", padding: "12px 0", borderRadius: 12, background: "#fff", border: "none", color: "#1f1f1f", fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
+                <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+                Sign in with Google
+              </button>
+              {(!isNativePlatform() || NATIVE_APPLE_ENABLED) && (
+                <button onClick={handleAppleSignIn} style={{ width: "100%", marginTop: 10, padding: "12px 0", borderRadius: 12, background: "#000", border: "none", color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
+                  <svg width="16" height="18" viewBox="0 0 384 512" aria-hidden="true" fill="#fff"><path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z"/></svg>
+                  Sign in with Apple
+                </button>
+              )}
+              {authMsg && <div style={{ color: K.danger, fontSize: 12, fontWeight: 600, marginTop: 10 }}>{authMsg}</div>}
+            </div>
+          )}
           {(() => { const roundIsActive = Object.keys(holeData).some(key => { const parts = key.split("_"); const rnd = parseInt(parts[parts.length - 1]); return !finalizedRounds[rnd] && Object.keys(holeData[key] || {}).length > 0; }); const btnColor = roundIsActive ? K.acc : K.t2; const btnBorder = roundIsActive ? `1px solid ${K.acc}40` : `1px solid ${K.bdr}`; return (<div style={{ marginTop: 24, borderTop: `1px solid ${K.bdr}30`, paddingTop: 20 }}><button onClick={() => setUser({ id: "guest", name: "Guest", isDirector: false, isGuest: true })} style={{ width: "100%", padding: "13px 0", borderRadius: 12, background: "transparent", border: btnBorder, color: btnColor, fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, letterSpacing: "0.02em" }} onMouseEnter={e => { e.currentTarget.style.background = btnColor + "12"; }} onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}>{roundIsActive && <span style={{ width: 7, height: 7, borderRadius: "50%", background: K.acc, display: "inline-block", boxShadow: `0 0 6px ${K.acc}` }} />}<img src="/wbc-trophy.png" alt="" style={{ height: 18, width: "auto", objectFit: "contain", filter: roundIsActive ? "none" : "brightness(0) invert(0.6)" }} />Live Leaderboard</button></div>); })()}
         </div>
       </div>
@@ -5016,7 +5242,7 @@ export default function WBCApp() {
         <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
         <div style={{ padding: "10px 20px", paddingTop: "max(10px, calc(env(safe-area-inset-top, 0px) + 10px))", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${K.bdr}`, background: "rgba(14,24,41,0.95)", flexShrink: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}><img src={WBC_LOGO} alt="WBC" style={{ height: 32 }} /><div><div style={{ fontWeight: 800, fontSize: 15, color: K.t1 }}>WBC 2026</div><div style={{ fontSize: 11, color: K.t3 }}>Gaylord, MI · Aug 26–29</div></div></div>
-          <button onClick={() => setUser(null)} style={{ background: "transparent", border: `1px solid ${K.bdr}`, borderRadius: 8, color: K.t3, fontSize: 12, fontWeight: 600, padding: "5px 12px", cursor: "pointer" }}>Exit</button>
+          <button onClick={handleLogout} style={{ background: "transparent", border: `1px solid ${K.bdr}`, borderRadius: 8, color: K.t3, fontSize: 12, fontWeight: 600, padding: "5px 12px", cursor: "pointer" }}>Exit</button>
         </div>
         <div style={{ padding: "14px 20px 0 20px", flex: 1, overflowY: "hidden", overflowX: "hidden", display: "flex", flexDirection: "column", minHeight: 0, marginBottom: 8 }}>
           <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} teeData={teeData} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} />
@@ -5061,7 +5287,7 @@ export default function WBCApp() {
           {notifPerm !== "granted" && !user.isGuest && (
             <button onClick={enableNotifications} title="Enable notifications" style={{ background: "transparent", border: `1px solid ${K.acc}60`, color: K.acc, padding: "4px 9px", borderRadius: 8, fontSize: 14, cursor: "pointer", lineHeight: 1 }}>🔔</button>
           )}
-          <button onClick={() => setUser(null)} style={{ background: "transparent", border: `1px solid ${K.bdr}`, color: K.t3, padding: "4px 10px", borderRadius: 8, fontSize: 10, cursor: "pointer", textAlign: "center", lineHeight: 1.3 }}>
+          <button onClick={handleLogout} style={{ background: "transparent", border: `1px solid ${K.bdr}`, color: K.t3, padding: "4px 10px", borderRadius: 8, fontSize: 10, cursor: "pointer", textAlign: "center", lineHeight: 1.3 }}>
             Logout<br/><span style={{ fontSize: 9, color: K.t2, fontWeight: 600 }}>{user.name}</span>
           </button>
         </div>
