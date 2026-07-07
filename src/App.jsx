@@ -895,6 +895,19 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
 
   const allScored = group ? groupPlayers.every(p => getScore(p.id) > 0) : false;
 
+  // Group-finalized state. HOISTED here (originally declared ~200 lines below,
+  // just above the render's early returns). The effects further down close over
+  // isGroupFinalized; on a cold reopen this component mounts with course/group
+  // still null and the render takes an early `return` BEFORE the old declaration
+  // ran — leaving isGroupFinalized in the temporal dead zone. React then fires
+  // the already-registered passive effect, which touches it and throws
+  // "Cannot access ... before initialization", unmounting the whole app to a
+  // dark screen (the reopen "flash then dark" bug). Declaring it up here — before
+  // any effect or early return — guarantees it's always initialized when those
+  // closures run. Depends only on group/round/finalizedRounds, all available now.
+  const _groupKey = group ? `${round}_${group.slice().sort().join(",")}` : null;
+  const isGroupFinalized = _groupKey && (finalizedRounds[_groupKey] || finalizedRounds[round]);
+
   const isHoleComplete = (holeIdx) => {
     if (!group) return false;
     return groupPlayers.every(p => {
@@ -1155,8 +1168,8 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
   }
 
   // ── FINALIZED EARLY RETURN ──
-  const _groupKey = group ? `${round}_${group.slice().sort().join(",")}` : null;
-  const isGroupFinalized = _groupKey && (finalizedRounds[_groupKey] || finalizedRounds[round]);
+  // (_groupKey / isGroupFinalized are hoisted to the top of the component so the
+  // effects above can safely close over them — see the note there.)
   if (isGroupFinalized) return (
     <div style={{ padding: "24px 16px", display: "flex", flexDirection: "column", gap: 16 }}>
       {/* Compact header: All Groups (director only) · course */}
