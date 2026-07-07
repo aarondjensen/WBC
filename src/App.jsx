@@ -32,6 +32,10 @@ const TROPHY_SVG_URL = `data:image/svg+xml;utf8,${encodeURIComponent(TROPHY_SVG)
 let DEMO_PLAYERS = [];
 
 const TOURNAMENT = { id: "wbc_2026", name: "WBC 2026", year: 2026, num_rounds: 4, status: "active" };
+// Single source of truth for tournament length. Change TOURNAMENT.num_rounds above
+// to run a shorter/longer tournament — every round loop, leaderboard column, and
+// finalization check derives from this constant instead of a hardcoded 4.
+const NUM_ROUNDS = TOURNAMENT.num_rounds || 4;
 
 // ── Firebase initialized above ──
 // ── Firebase / Firestore configuration ──
@@ -386,7 +390,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
     const hi = parseFloat(tp?.handicap_index) || 0;
     // Find rounds with scores
     const availRounds = [];
-    for (let r = 1; r <= 4; r++) {
+    for (let r = 1; r <= NUM_ROUNDS; r++) {
       const tr = tRounds.find(t => t.round_number === r);
       if (!tr) continue;
       const course = courses.find(c => c.id === tr.course_id);
@@ -571,7 +575,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
       <div ref={containerRef} style={{ background: "transparent", borderRadius: 12, border: `1px solid ${K.bdr}`, overflow: "hidden", display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
         {/* Build dynamic grid: #, Player, Total, Thru, Rd, [8px gap], prior rounds */}
         {(() => {
-          const allPriorRounds = [1, 2, 3, 4];
+          const allPriorRounds = Array.from({ length: NUM_ROUNDS }, (_, i) => i + 1);
           const statW = 34;
           const priorW = 22;
           const gridCols = `32px ${playerColW} ${statW}px ${statW}px 1fr${allPriorRounds.map(() => ` ${priorW}px`).join("")}`;
@@ -609,7 +613,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
                 const displayTotal = showGross
                   ? (() => {
                       let g = 0;
-                      for (let r = 1; r <= 4; r++) {
+                      for (let r = 1; r <= NUM_ROUNDS; r++) {
                         const scores = holeData[`${p.id}_${r}`] || {};
                         Object.values(scores).forEach(s => { g += s; });
                       }
@@ -620,7 +624,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
                     : (() => {
                         // Net total strokes across all rounds
                         let netTotal = 0; let hasAny = false;
-                        for (let r = 1; r <= 4; r++) {
+                        for (let r = 1; r <= NUM_ROUNDS; r++) {
                           const prRd = p.rds[r - 1];
                           if (prRd && !prRd.wd && prRd.netToPar != null) {
                             const tr2 = tRounds.find(t => t.round_number === r);
@@ -1892,7 +1896,7 @@ function SkinsCtpView({ players, round, tRounds, courses, holeData, ctpData, onS
   // No-carryover GROSS skins across all rounds: each hole = 1 skin, ties = no skin
   const calcAllSkins = () => {
     const allResults = [];
-    for (let r = 1; r <= 4; r++) {
+    for (let r = 1; r <= NUM_ROUNDS; r++) {
       const tr = tRounds.find(t => t.round_number === r);
       if (!tr) continue;
       const rCourse = courses.find(c => c.id === tr.course_id);
@@ -1929,7 +1933,7 @@ function SkinsCtpView({ players, round, tRounds, courses, holeData, ctpData, onS
     const p = players.find(pl => pl.id === playerId);
     if (!p) return null;
     const rows = [];
-    for (let r = 1; r <= 4; r++) {
+    for (let r = 1; r <= NUM_ROUNDS; r++) {
       const tr2 = tRounds.find(t => t.round_number === r);
       if (!tr2) continue;
       const rCourse = courses.find(c => c.id === tr2.course_id);
@@ -2711,6 +2715,30 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [showFinalizeModal, setShowFinalizeModal] = useState(false);
   const [settingsTab, setSettingsTab] = useState("course");
+  // ── Handicap-edit guard ──
+  // Handicap indexes are LOCKED-IN for the tournament by design (unlike a rolling
+  // league handicap). Because getLeaderboard reads the CURRENT handicap_index for
+  // every round, editing an HI after play has started retroactively recalculates
+  // that player's net scores for ALL rounds — including finalized ones — and can
+  // reshuffle the leaderboard. Finalization locks score entry, not this input.
+  // So: once the tournament has started (any real hole score exists, or any round
+  // is finalized), an HI edit must pass through an explicit warning confirmation.
+  const tournamentStarted = useMemo(() =>
+    Object.values(finalizedRounds || {}).some(Boolean) ||
+    Object.values(holeData || {}).some(scores =>
+      Object.values(scores || {}).some(s => s > 0 && s !== 99)
+    ),
+  [holeData, finalizedRounds]);
+  const [hiWarn, setHiWarn] = useState(null); // { pid, name, oldHI, newHI }
+  const guardedUpdateHI = (pid, newHI) => {
+    if (tournamentStarted) {
+      const tp = tPlayers.find(t => t.player_id === pid);
+      const p = players.find(pl => pl.id === pid);
+      setHiWarn({ pid, name: p?.name || "Player", oldHI: parseFloat(tp?.handicap_index) || 0, newHI });
+    } else {
+      updateHI(pid, newHI);
+    }
+  };
   // Apply external open requests (e.g. from scoring tab)
   useEffect(() => {
     if (externalSettingsOpen) {
@@ -2733,13 +2761,13 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
   const [manualCourse, setManualCourse] = useState(null); // null | draft object when manually adding
   const [coursePreview, setCoursePreview] = useState(null); // course to preview before confirming add
   const [localDbPrompt, setLocalDbPrompt] = useState(null); // { sbCourse, query } — prompt user to use local or fetch fresh
-  const [editRound, setEditRound] = useState(() => { for (let r = 1; r <= 4; r++) { if (!finalizedRounds[r]) return r; } return 4; });
+  const [editRound, setEditRound] = useState(() => { for (let r = 1; r <= NUM_ROUNDS; r++) { if (!finalizedRounds[r]) return r; } return NUM_ROUNDS; });
   // Keep editRound pointing at the active round when finalization state changes
   useEffect(() => {
     setEditRound(r => {
       if (!finalizedRounds[r]) return r;
-      for (let i = 1; i <= 4; i++) { if (!finalizedRounds[i]) return i; }
-      return 4;
+      for (let i = 1; i <= NUM_ROUNDS; i++) { if (!finalizedRounds[i]) return i; }
+      return NUM_ROUNDS;
     });
   }, [JSON.stringify(finalizedRounds)]);
   const [finalizeModal, setFinalizeModal] = useState(null); // { round, scores[], missing[] }
@@ -2775,7 +2803,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
   };
 
   useEffect(() => {
-    for (let r = 1; r <= (tournament?.num_rounds || 4); r++) {
+    for (let r = 1; r <= (tournament?.num_rounds || NUM_ROUNDS); r++) {
       if (finalizedRounds[r]) continue;
       // Check if all groups for this round have been finalized by scoring groups
       const roundGroups = (pairingsData || {})[r] || [];
@@ -2982,7 +3010,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
     addCourse(c);
     setSearching(false);
   };
-  const numRounds = tournament?.num_rounds || 4;
+  const numRounds = tournament?.num_rounds || NUM_ROUNDS;
 
   // ── Single source of truth for round setup completion ──
   // Every place that shows "is this round ready?" (round cards, sub-tab dots,
@@ -3072,6 +3100,32 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
             </div>
           </div>
         </div>
+      )}
+
+      {/* HI-change warning — tournament in progress */}
+      {hiWarn && (
+        <Popup onClose={() => setHiWarn(null)} maxWidth={360} borderColor={K.warn + "50"} padding={0} dismissOnBackdrop={false}>
+          <div style={{ padding: "14px 16px", borderBottom: `1px solid ${K.bdr}`, display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 16 }}>⚠️</span>
+            <span style={{ fontSize: 14, fontWeight: 800, color: K.warn }}>Tournament In Progress</span>
+          </div>
+          <div style={{ padding: "14px 16px", fontSize: 12, color: K.t2, lineHeight: 1.6 }}>
+            Handicaps are locked in for the tournament. Changing <strong style={{ color: K.t1 }}>{hiWarn.name}</strong>'s
+            index from <strong style={{ color: K.t1 }}>{hiWarn.oldHI}</strong> to <strong style={{ color: K.t1 }}>{hiWarn.newHI}</strong> will
+            retroactively recalculate their net scores for <strong style={{ color: K.t1 }}>all rounds — including finalized rounds</strong> —
+            and may change leaderboard positions.
+          </div>
+          <div style={{ display: "flex", gap: 8, padding: 12, borderTop: `1px solid ${K.bdr}` }}>
+            <button onClick={() => setHiWarn(null)} style={{
+              flex: 1, padding: "10px 0", borderRadius: 10, background: K.inp, border: `1px solid ${K.bdr}`,
+              color: K.t2, fontSize: 12, fontWeight: 600, cursor: "pointer",
+            }}>Cancel</button>
+            <button onClick={() => { updateHI(hiWarn.pid, hiWarn.newHI); setHiWarn(null); }} style={{
+              flex: 1, padding: "10px 0", borderRadius: 10, background: K.warn, border: "none",
+              color: K.bg, fontSize: 12, fontWeight: 700, cursor: "pointer",
+            }}>Update Anyway</button>
+          </div>
+        </Popup>
       )}
 
       {/* Round cards + gear */}
@@ -3235,7 +3289,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                         </div>
                       </div>
                     )}
-                    {[...activePlayers].sort((a,b) => a.name.localeCompare(b.name)).map((p, i) => <PlayerRow key={p.id} player={p} password={passwords[p.id] || DEFAULT_PW} onUpdateHI={updateHI} onUpdateName={updateName} onRemove={removePlayer} onSavePassword={(pid, pw) => setPasswords(prev => ({ ...prev, [pid]: pw }))} isLast={i === activePlayers.length - 1} ac={ac} />)}
+                    {[...activePlayers].sort((a,b) => a.name.localeCompare(b.name)).map((p, i) => <PlayerRow key={p.id} player={p} password={passwords[p.id] || DEFAULT_PW} onUpdateHI={guardedUpdateHI} onUpdateName={updateName} onRemove={removePlayer} onSavePassword={(pid, pw) => setPasswords(prev => ({ ...prev, [pid]: pw }))} isLast={i === activePlayers.length - 1} ac={ac} />)}
                   </div>
                 </div>
               )}
@@ -4001,7 +4055,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
             <div style={{ fontSize: 11, color: K.t3, marginBottom: 2 }}>
               Finalize a group once all 18 holes are entered and scores are confirmed. Finalized scores are locked on the leaderboard.
             </div>
-          {[1,2,3,4].map(rnd => {
+          {Array.from({ length: NUM_ROUNDS }, (_, i) => i + 1).map(rnd => {
             const rndGroups = (pairingsData || {})[rnd] || [];
             const tr = tRounds.find(t => t.round_number === rnd);
             const courseName = tr ? (courses.find(c => c.id === tr.course_id)?.name || "No course") : "No course";
@@ -4204,8 +4258,8 @@ export default function WBCApp() {
   useEffect(() => {
     setRound(r => {
       if (!finalizedRounds[r]) return r;
-      for (let i = 1; i <= 4; i++) { if (!finalizedRounds[i]) return i; }
-      return 4;
+      for (let i = 1; i <= NUM_ROUNDS; i++) { if (!finalizedRounds[i]) return i; }
+      return NUM_ROUNDS;
     });
   }, [JSON.stringify(finalizedRounds)]);
   const [adminSettingsOpen, setAdminSettingsOpen] = useState(false);
@@ -4482,7 +4536,7 @@ export default function WBCApp() {
     return allPlayers.map(p => {
       let totalNetToPar = 0, roundsPlayed = 0, totalThru = 0;
       const rds = [];
-      for (let r = 1; r <= 4; r++) {
+      for (let r = 1; r <= NUM_ROUNDS; r++) {
         const tr = tRounds.find(t => t.round_number === r);
         if (!tr) { rds.push({ netToPar: null, thru: 0, wd: false }); continue; }
         const course = courseList.find(c => c.id === tr.course_id);
@@ -4743,7 +4797,7 @@ export default function WBCApp() {
   // Compute gross skin wins for scorecard highlighting: { "round_holeIdx": playerId }
   const skinWins = useMemo(() => {
     const wins = {};
-    for (let r = 1; r <= 4; r++) {
+    for (let r = 1; r <= NUM_ROUNDS; r++) {
       const tr = tRounds.find(t => t.round_number === r);
       if (!tr) continue;
       const rCourse = courseList.find(c => c.id === tr.course_id);
@@ -4822,7 +4876,7 @@ export default function WBCApp() {
 
   // Check if any round needs admin finalization
   const adminActionNeeded = useMemo(() => {
-    for (let r = 1; r <= 4; r++) {
+    for (let r = 1; r <= NUM_ROUNDS; r++) {
       if (finalizedRounds[r]) continue;
       const tr = tRounds.find(t => t.round_number === r);
       if (!tr) continue;
@@ -5023,7 +5077,7 @@ export default function WBCApp() {
 
       {view !== "admin" && view !== "scoring" && view !== "leaderboard" && (
       <div style={{ display: "flex", gap: 6, padding: "10px 20px", borderBottom: `1px solid ${K.bdr}` }}>
-        {[1,2,3,4].map(r => {
+        {Array.from({ length: NUM_ROUNDS }, (_, i) => i + 1).map(r => {
           const tr = tRounds.find(t => t.round_number === r);
           const c = tr ? courseList.find(cs => cs.id === tr.course_id) : null;
           return (
@@ -5095,10 +5149,10 @@ export default function WBCApp() {
               if (item.key === "scoring") {
                 // Find the correct active round: first after consecutive finalized rounds
                 let activeRound = 1;
-                for (let i = 1; i <= 4; i++) {
+                for (let i = 1; i <= NUM_ROUNDS; i++) {
                   if (finalizedRounds[i]) { activeRound = i + 1; } else { break; }
                 }
-                activeRound = Math.min(activeRound, 4);
+                activeRound = Math.min(activeRound, NUM_ROUNDS);
                 // Only call setRound if we actually need to change it — avoids
                 // triggering the group/hole reset chain unnecessarily
                 setRound(prev => prev === activeRound ? prev : activeRound);
