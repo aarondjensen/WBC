@@ -4571,6 +4571,18 @@ export default function WBCApp() {
     setDeleteStage("working");
     try {
       await deleteAccount(user?.id);
+      // Free the profile locally so it's immediately re-claimable. deleteAccount
+      // already removed the wbc_users doc server-side, but claimedPlayerIds is
+      // derived from the in-memory `claims` map (loaded once on mount), so we
+      // must drop any uid→player_id entry pointing at the deleted player here —
+      // otherwise the profile still looks claimed and won't show on the claim
+      // roster until a full app reload.
+      const freedPlayerId = user?.id;
+      if (freedPlayerId) {
+        setClaims(prev => Object.fromEntries(
+          Object.entries(prev).filter(([, pid]) => pid !== freedPlayerId)
+        ));
+      }
       // deleteAccount clears the native provider session; also clear the web
       // session + local state so we land cleanly on the login screen.
       try { await doSignOut(); } catch { /* non-fatal */ }
