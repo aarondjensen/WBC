@@ -36,6 +36,7 @@ import {
   onAuthStateChanged,
   signOut,
   deleteUser,
+  revokeAccessToken,
 } from "firebase/auth";
 
 // ─── Feature flag ──────────────────────────────────────────────────────────
@@ -57,7 +58,7 @@ export const AUTH_PROVIDERS_ENABLED = true;
 // provider can't be tapped. Sign in with Apple is required for the iOS App Store
 // (Guideline 4.8) since we offer Google, so this flips TRUE before that
 // submission — not before it's configured.
-export const APPLE_PROVIDER_ENABLED = true;
+export const APPLE_PROVIDER_ENABLED = false;
 
 // ─── Config ──────────────────────────────────────────────────────────────
 // authDomain: while providers are OFF we use the DEFAULT firebaseapp.com
@@ -191,6 +192,20 @@ export const _appleProvider = new OAuthProvider("apple.com");
 _appleProvider.addScope("email");
 _appleProvider.addScope("name");
 
+// Apple OAuth token, captured at sign-in / reauth. Firebase does NOT persist
+// the Apple token, but App Store Guideline 5.1.1(v) requires the app to REVOKE
+// it when an Apple user deletes their account (deleting the Firebase user alone
+// is not enough). We stash the most recent token here so deleteAccount() can
+// revoke it. If it's null at deletion time (e.g. the app was reloaded since
+// sign-in), deleteAccount reauthenticates to obtain a fresh one.
+let _appleAccessToken = null;
+const captureAppleToken = (result) => {
+  try {
+    const token = OAuthProvider.credentialFromResult(result)?.accessToken;
+    if (token) _appleAccessToken = token;
+  } catch { /* not an Apple result, or no token — ignore */ }
+};
+
 // Gate for rendering Apple sign-in/link buttons on NATIVE builds. Native
 // Apple auth THROWS unless the app is fully Apple-enabled:
 //   1. "apple.com" in plugins.FirebaseAuthentication.providers
@@ -286,7 +301,9 @@ export const doGoogleSignIn = async () => {
 export const consumeRedirectResult = async () => {
   if (!_auth) return null; // auth disabled → no pending redirect to consume
   try {
-    return await getRedirectResult(_auth);
+    const result = await getRedirectResult(_auth);
+    if (result) captureAppleToken(result); // no-op for non-Apple results
+    return result;
   } catch (e) {
     throw mapAuthError(e);
   }
@@ -307,6 +324,8 @@ export const doAppleSignIn = async () => {
       const result = await FirebaseAuthentication.signInWithApple();
       const idToken = result?.credential?.idToken;
       if (!idToken) throw new Error("Apple sign-in did not return an ID token.");
+      // Native plugin hands back the Apple access token directly.
+      if (result.credential?.accessToken) _appleAccessToken = result.credential.accessToken;
       const provider = new OAuthProvider("apple.com");
       const credential = provider.credential({ idToken, rawNonce: result.credential?.nonce });
       return await signInWithCredential(_auth, credential);
@@ -314,7 +333,9 @@ export const doAppleSignIn = async () => {
     if (isStandalonePWA()) {
       return await signInWithRedirect(_auth, _appleProvider);
     }
-    return await signInWithPopup(_auth, _appleProvider);
+    const result = await signInWithPopup(_auth, _appleProvider);
+    captureAppleToken(result);
+    return result;
   } catch (e) {
     throw mapAuthError(e);
   }
@@ -372,6 +393,7 @@ export const linkAppleAccount = async () => {
 // the JS SDK signOut.
 export const doSignOut = async () => {
   if (!_auth) return; // auth disabled → nothing to sign out of
+  _appleAccessToken = null;
   if (isNativePlatform()) {
     try {
       const FirebaseAuthentication = await loadNativeAuthPlugin();
@@ -406,12 +428,17 @@ const reauthenticateCurrentUser = async () => {
       const result = await FirebaseAuthentication.signInWithApple();
       const idToken = result?.credential?.idToken;
       if (!idToken) throw new Error("Apple did not return an ID token.");
+      if (result.credential?.accessToken) _appleAccessToken = result.credential.accessToken;
       const provider = new OAuthProvider("apple.com");
       return reauthenticateWithCredential(user, provider.credential({ idToken, rawNonce: result.credential?.nonce }));
     }
   } else {
     if (providers.includes("google.com")) return reauthenticateWithPopup(user, _googleProvider);
-    if (providers.includes("apple.com")) return reauthenticateWithPopup(user, _appleProvider);
+    if (providers.includes("apple.com")) {
+      const result = await reauthenticateWithPopup(user, _appleProvider);
+      captureAppleToken(result);
+      return result;
+    }
   }
 
   const e = new Error("For your security, please sign out and sign back in, then delete your account.");
@@ -458,6 +485,27 @@ export const deleteAccount = async (playerId) => {
       }
     } catch (e) {
       console.warn("deleteAccount: token sweep failed:", e?.message || e);
+    }
+  }
+
+  // 2c. App Store Guideline 5.1.1(v): for a Sign in with Apple user, the Apple
+  //     token must be REVOKED on deletion — deleting the Firebase user alone is
+  //     not enough and gets the app rejected. Firebase doesn't store the Apple
+  //     token, so we use the one captured at sign-in/reauth. If it's gone (the
+  //     app was reloaded since sign-in), reauthenticate to get a fresh one,
+  //     which also satisfies the recent-login requirement for deleteUser below.
+  const isAppleUser = (user.providerData || []).some((p) => p.providerId === "apple.com");
+  if (isAppleUser) {
+    if (!_appleAccessToken) {
+      try { await reauthenticateCurrentUser(); } catch (e) { throw mapAuthError(e); }
+    }
+    if (_appleAccessToken) {
+      try {
+        await revokeAccessToken(_auth, _appleAccessToken);
+      } catch (e) {
+        console.warn("deleteAccount: Apple token revoke failed:", e?.message || e);
+      }
+      _appleAccessToken = null;
     }
   }
 
