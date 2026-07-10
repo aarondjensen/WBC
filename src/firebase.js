@@ -225,10 +225,6 @@ export const NATIVE_APPLE_ENABLED = true;
 // is silently swallowed during debugging.
 const mapAuthError = (e) => {
   const code = e?.code || "";
-  // Diagnostic: surface the raw error (code + message) to the console — on
-  // native this shows in the Xcode log, which is otherwise the only place the
-  // underlying cause of a generic error like auth/argument-error appears.
-  console.error("[auth error]", code, "| msg:", e?.message || e, "| stack:", (e?.stack || "").slice(0, 300));
   const friendly = {
     "auth/provider-already-linked": "That sign-in method is already linked to your account.",
     "auth/credential-already-in-use":
@@ -280,17 +276,10 @@ export const doGoogleSignIn = async () => {
   if (!_auth) throw new Error("Sign-in is not enabled yet.");
   try {
     if (isNativePlatform()) {
-      console.log("[native-google] 1: entered native branch, loading plugin…");
-      console.log("[native-google] 2: plugin loaded, calling signInWithGoogle()…");
       const result = await FirebaseAuthentication.signInWithGoogle();
       const idToken = result?.credential?.idToken;
-      console.log("[native-google] 3: returned. idToken present:", !!idToken, "len:", idToken ? String(idToken).length : 0);
       if (!idToken) throw new Error("Google sign-in did not return an ID token.");
       const credential = GoogleAuthProvider.credential(idToken);
-      console.log("[native-google] credential:", credential ? "built" : "NULL",
-        "| _getIdTokenResponse:", typeof credential?._getIdTokenResponse,
-        "| providerId:", credential?.providerId,
-        "| authDomain:", _auth?.config?.authDomain);
       return await signInWithCredential(_auth, credential);
     }
     if (isStandalonePWA()) {
@@ -334,19 +323,13 @@ export const doAppleSignIn = async () => {
   if (!_auth) throw new Error("Sign-in is not enabled yet.");
   try {
     if (isNativePlatform()) {
-      console.log("[native-apple] 1: entered native branch, loading plugin…");
-      console.log("[native-apple] 2: plugin loaded, calling signInWithApple()…");
       const result = await FirebaseAuthentication.signInWithApple();
       const idToken = result?.credential?.idToken;
-      console.log("[native-apple] 3: returned. idToken present:", !!idToken, "| nonce present:", !!result?.credential?.nonce);
       if (!idToken) throw new Error("Apple sign-in did not return an ID token.");
       // Native plugin hands back the Apple access token directly.
       if (result.credential?.accessToken) _appleAccessToken = result.credential.accessToken;
       const provider = new OAuthProvider("apple.com");
       const credential = provider.credential({ idToken, rawNonce: result.credential?.nonce });
-      console.log("[native-apple] credential:", credential ? "built" : "NULL",
-        "| _getIdTokenResponse:", typeof credential?._getIdTokenResponse,
-        "| authDomain:", _auth?.config?.authDomain);
       return await signInWithCredential(_auth, credential);
     }
     if (isStandalonePWA()) {
