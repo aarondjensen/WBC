@@ -287,10 +287,12 @@ export const doGoogleSignIn = async () => {
   if (!_auth) throw new Error("Sign-in is not enabled yet.");
   try {
     if (isNativePlatform()) {
+      console.log("[native-google] 1: entered native branch, loading plugin…");
       const FirebaseAuthentication = await loadNativeAuthPlugin();
+      console.log("[native-google] 2: plugin loaded, calling signInWithGoogle()…");
       const result = await FirebaseAuthentication.signInWithGoogle();
       const idToken = result?.credential?.idToken;
-      console.log("[native-google] idToken present:", !!idToken, "len:", idToken ? String(idToken).length : 0);
+      console.log("[native-google] 3: returned. idToken present:", !!idToken, "len:", idToken ? String(idToken).length : 0);
       if (!idToken) throw new Error("Google sign-in did not return an ID token.");
       const credential = GoogleAuthProvider.credential(idToken);
       console.log("[native-google] credential:", credential ? "built" : "NULL",
@@ -340,10 +342,12 @@ export const doAppleSignIn = async () => {
   if (!_auth) throw new Error("Sign-in is not enabled yet.");
   try {
     if (isNativePlatform()) {
+      console.log("[native-apple] 1: entered native branch, loading plugin…");
       const FirebaseAuthentication = await loadNativeAuthPlugin();
+      console.log("[native-apple] 2: plugin loaded, calling signInWithApple()…");
       const result = await FirebaseAuthentication.signInWithApple();
       const idToken = result?.credential?.idToken;
-      console.log("[native-apple] idToken present:", !!idToken, "| nonce present:", !!result?.credential?.nonce);
+      console.log("[native-apple] 3: returned. idToken present:", !!idToken, "| nonce present:", !!result?.credential?.nonce);
       if (!idToken) throw new Error("Apple sign-in did not return an ID token.");
       // Native plugin hands back the Apple access token directly.
       if (result.credential?.accessToken) _appleAccessToken = result.credential.accessToken;
