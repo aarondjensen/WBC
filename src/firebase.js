@@ -57,7 +57,7 @@ export const AUTH_PROVIDERS_ENABLED = true;
 // provider can't be tapped. Sign in with Apple is required for the iOS App Store
 // (Guideline 4.8) since we offer Google, so this flips TRUE before that
 // submission — not before it's configured.
-export const APPLE_PROVIDER_ENABLED = false;
+export const APPLE_PROVIDER_ENABLED = true;
 
 // ─── Config ──────────────────────────────────────────────────────────────
 // authDomain: while providers are OFF we use the DEFAULT firebaseapp.com
