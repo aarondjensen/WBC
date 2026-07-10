@@ -108,27 +108,20 @@ export const isNativePlatform = () => {
   }
 };
 
-// ─── Native auth plugin loader ───────────────────────────────────────────
-// Single choke point for the Capacitor Firebase Auth plugin, so the swap to
-// the real package is a one-line change.
+// ─── Native auth plugin ──────────────────────────────────────────────────
+// The Capacitor Firebase Auth plugin (FirebaseAuthentication) is imported
+// statically at the top of this module and used DIRECTLY at each call site.
 //
-// TODO(capacitor): when the native shells land, run
-//   npm i @capacitor/core @capacitor-firebase/authentication
-// and replace this function body with:
-//   return (await import("@capacitor-firebase/authentication")).FirebaseAuthentication;
-// (A bare dynamic import today would fail Vite's build-time resolution,
-// which is why this throws instead. Every caller is native-gated, so this
-// path is unreachable in the browser/PWA builds.)
-// Returns the native Firebase Authentication plugin. Imported STATICALLY at the
-// top of this module (not via a dynamic import()) on purpose: a dynamic import
-// makes Vite split the plugin into a separate async chunk, and across that chunk
-// boundary Rollup can duplicate firebase/auth — producing two runtime copies of
-// the SDK. The credential we build here (OAuthProvider/GoogleAuthProvider) would
-// then come from a different copy than signInWithCredential, which fails with
-// "auth/argument-error" on native. A static import keeps one module graph → one
-// firebase/auth instance. On web the plugin is imported but never invoked
+// Do NOT wrap it in `await loadPlugin()` or otherwise `await` the plugin
+// OBJECT itself. FirebaseAuthentication is a Capacitor Proxy: awaiting it (or
+// returning it from an async function, which assimilates it as a thenable)
+// makes the runtime probe it for a `.then` method. The proxy answers every
+// property access as a native method call, so `.then` becomes a bogus native
+// call that never resolves — the await hangs forever with no error. Only
+// `await` the plugin's METHOD calls (e.g. FirebaseAuthentication.signInWithApple()),
+// which return real promises. On web the plugin is imported but never invoked
 // (every caller is isNativePlatform()-gated), so it's inert there.
-const loadNativeAuthPlugin = async () => FirebaseAuthentication;
+
 
 // ─── Auth persistence — explicit and durable (MNQ lesson) ────────────────
 // Bare getAuth() resolves persistence through a SILENT fallback chain
@@ -288,7 +281,6 @@ export const doGoogleSignIn = async () => {
   try {
     if (isNativePlatform()) {
       console.log("[native-google] 1: entered native branch, loading plugin…");
-      const FirebaseAuthentication = await loadNativeAuthPlugin();
       console.log("[native-google] 2: plugin loaded, calling signInWithGoogle()…");
       const result = await FirebaseAuthentication.signInWithGoogle();
       const idToken = result?.credential?.idToken;
@@ -343,7 +335,6 @@ export const doAppleSignIn = async () => {
   try {
     if (isNativePlatform()) {
       console.log("[native-apple] 1: entered native branch, loading plugin…");
-      const FirebaseAuthentication = await loadNativeAuthPlugin();
       console.log("[native-apple] 2: plugin loaded, calling signInWithApple()…");
       const result = await FirebaseAuthentication.signInWithApple();
       const idToken = result?.credential?.idToken;
@@ -382,7 +373,6 @@ export const linkGoogleAccount = async () => {
   const user = requireCurrentUser();
   try {
     if (isNativePlatform()) {
-      const FirebaseAuthentication = await loadNativeAuthPlugin();
       const result = await FirebaseAuthentication.signInWithGoogle();
       const idToken = result?.credential?.idToken;
       if (!idToken) throw new Error("Google did not return an ID token.");
@@ -398,7 +388,6 @@ export const linkAppleAccount = async () => {
   const user = requireCurrentUser();
   try {
     if (isNativePlatform()) {
-      const FirebaseAuthentication = await loadNativeAuthPlugin();
       const result = await FirebaseAuthentication.signInWithApple();
       const idToken = result?.credential?.idToken;
       if (!idToken) throw new Error("Apple did not return an ID token.");
@@ -424,7 +413,6 @@ export const doSignOut = async () => {
   _appleAccessToken = null;
   if (isNativePlatform()) {
     try {
-      const FirebaseAuthentication = await loadNativeAuthPlugin();
       await FirebaseAuthentication.signOut();
     } catch (e) {
       console.warn("native auth signOut skipped:", e?.message || e);
@@ -445,7 +433,6 @@ const reauthenticateCurrentUser = async () => {
   const providers = (user.providerData || []).map((p) => p.providerId);
 
   if (isNativePlatform()) {
-    const FirebaseAuthentication = await loadNativeAuthPlugin();
     if (providers.includes("google.com")) {
       const result = await FirebaseAuthentication.signInWithGoogle();
       const idToken = result?.credential?.idToken;
@@ -552,7 +539,6 @@ export const deleteAccount = async (playerId) => {
   // 4. Clear any native provider session so the next sign-in is clean.
   if (isNativePlatform()) {
     try {
-      const FirebaseAuthentication = await loadNativeAuthPlugin();
       await FirebaseAuthentication.signOut();
     } catch {
       /* non-fatal */
