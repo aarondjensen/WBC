@@ -58,7 +58,7 @@ export const AUTH_PROVIDERS_ENABLED = true;
 // provider can't be tapped. Sign in with Apple is required for the iOS App Store
 // (Guideline 4.8) since we offer Google, so this flips TRUE before that
 // submission — not before it's configured.
-export const APPLE_PROVIDER_ENABLED = false;
+export const APPLE_PROVIDER_ENABLED = true;
 
 // ─── Config ──────────────────────────────────────────────────────────────
 // authDomain: while providers are OFF we use the DEFAULT firebaseapp.com
@@ -119,9 +119,8 @@ export const isNativePlatform = () => {
 // which is why this throws instead. Every caller is native-gated, so this
 // path is unreachable in the browser/PWA builds.)
 const loadNativeAuthPlugin = async () => {
-  throw new Error(
-    "Native auth plugin not installed yet — this build predates the Capacitor shell. See TODO(capacitor) in src/firebase.js."
-  );
+  const { FirebaseAuthentication } = await import("@capacitor-firebase/authentication");
+  return FirebaseAuthentication;
 };
 
 // ─── Auth persistence — explicit and durable (MNQ lesson) ────────────────
@@ -218,7 +217,7 @@ const captureAppleToken = (result) => {
 // Apple button that errors on tap. Flip to TRUE in the same change that
 // ships the Apple-enabled native build. Web Apple sign-in (popup) is
 // unaffected by this flag.
-export const NATIVE_APPLE_ENABLED = false;
+export const NATIVE_APPLE_ENABLED = true;
 
 // ─── Error mapping ───────────────────────────────────────────────────────
 // Translate Firebase auth/link error codes into user-facing messages.

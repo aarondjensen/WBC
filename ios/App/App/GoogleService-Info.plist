@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CLIENT_ID</key>
+	<string>281900029443-h6fiklei6h681ssrl240mlq0o9lelqvv.apps.googleusercontent.com</string>
+	<key>REVERSED_CLIENT_ID</key>
+	<string>com.googleusercontent.apps.281900029443-h6fiklei6h681ssrl240mlq0o9lelqvv</string>
+	<key>API_KEY</key>
+	<string>AIzaSyBMrPknrM5ECYlhpzx4sCG8FGX3XvTvtjM</string>
+	<key>GCM_SENDER_ID</key>
+	<string>281900029443</string>
+	<key>PLIST_VERSION</key>
+	<string>1</string>
+	<key>BUNDLE_ID</key>
+	<string>com.wannabecup.app</string>
+	<key>PROJECT_ID</key>
+	<string>wannabecup-c5aab</string>
+	<key>STORAGE_BUCKET</key>
+	<string>wannabecup-c5aab.firebasestorage.app</string>
+	<key>IS_ADS_ENABLED</key>
+	<false></false>
+	<key>IS_ANALYTICS_ENABLED</key>
+	<false></false>
+	<key>IS_APPINVITE_ENABLED</key>
+	<true></true>
+	<key>IS_GCM_ENABLED</key>
+	<true></true>
+	<key>IS_SIGNIN_ENABLED</key>
+	<true></true>
+	<key>GOOGLE_APP_ID</key>
+	<string>1:281900029443:ios:77a6229804720faa74a036</string>
+</dict>
+</plist>
