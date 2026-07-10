@@ -49,7 +49,15 @@ import {
 // fragile in installed iOS PWAs and is pure overhead while the feature is dark,
 // so nothing auth-related activates until this is TRUE. App.jsx imports this so
 // the login screen and this module agree.
-export const AUTH_PROVIDERS_ENABLED = false;
+export const AUTH_PROVIDERS_ENABLED = true;
+
+// Separate gate for Apple sign-in specifically. Google can go live before Apple
+// is configured in the Firebase console (Apple provider + Service ID + key). We
+// keep the Apple button hidden on web until this is TRUE so a not-yet-working
+// provider can't be tapped. Sign in with Apple is required for the iOS App Store
+// (Guideline 4.8) since we offer Google, so this flips TRUE before that
+// submission — not before it's configured.
+export const APPLE_PROVIDER_ENABLED = false;
 
 // ─── Config ──────────────────────────────────────────────────────────────
 // authDomain: while providers are OFF we use the DEFAULT firebaseapp.com
