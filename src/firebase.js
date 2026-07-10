@@ -338,11 +338,15 @@ export const doAppleSignIn = async () => {
       const FirebaseAuthentication = await loadNativeAuthPlugin();
       const result = await FirebaseAuthentication.signInWithApple();
       const idToken = result?.credential?.idToken;
+      console.log("[native-apple] idToken present:", !!idToken, "| nonce present:", !!result?.credential?.nonce);
       if (!idToken) throw new Error("Apple sign-in did not return an ID token.");
       // Native plugin hands back the Apple access token directly.
       if (result.credential?.accessToken) _appleAccessToken = result.credential.accessToken;
       const provider = new OAuthProvider("apple.com");
       const credential = provider.credential({ idToken, rawNonce: result.credential?.nonce });
+      console.log("[native-apple] credential:", credential ? "built" : "NULL",
+        "| _getIdTokenResponse:", typeof credential?._getIdTokenResponse,
+        "| authDomain:", _auth?.config?.authDomain);
       return await signInWithCredential(_auth, credential);
     }
     if (isStandalonePWA()) {
