@@ -5223,57 +5223,55 @@ export default function WBCApp() {
           <h1 style={{ fontFamily: "'Montserrat', sans-serif", fontSize: 32, color: K.t1, margin: "0 0 4px", fontWeight: 800, letterSpacing: "-0.03em" }}>WBC 2026</h1>
           <p style={{ color: K.t2, fontSize: 14, margin: "0 0 32px" }}>Wannabes. For Life.</p>
 
-          <div>
-            <p style={{ color: K.t3, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600, margin: "0 0 8px" }}>Login</p>
-            {!storageLoaded ? (
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
-                {Array.from({length: 12}).map((_, i) => (
-                  <div key={i} style={{ background: K.card, border: `1px solid ${K.bdr}`, borderRadius: 10, padding: "12px 6px", height: 44,
-                    animation: "pulse 1.5s ease-in-out infinite", opacity: 0.5 }} />
-                ))}
-              </div>
-            ) : activePlayers.length === 0 ? (
-            <div style={{ textAlign: "center", padding: "24px 0" }}>
-              <p style={{ color: K.t3, fontSize: 13, marginBottom: 16 }}>No players added yet.</p>
-              <button onClick={() => setUser({ id: "aaron_j", name: "Aaron J", isDirector: true })}
-                style={{ background: K.acc, border: "none", borderRadius: 10, padding: "13px 28px", cursor: "pointer", color: "#fff", fontSize: 14, fontWeight: 700 }}>
-                Login as Director
-              </button>
-            </div>
-            ) : (
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
-              {activePlayers.map(p => {
-                const isDirector = p.id === "aaron_j" || p.id === "scott_r";
-                return (
-                  <button key={p.id} onClick={() => { setLoginPin(""); setLoginError(false); setLoginPrompt({ id: p.id, name: p.name, isDirector }); }}
-                    style={{ background: K.card, border: `1px solid ${K.bdr}`, borderRadius: 10, padding: "12px 6px", cursor: "pointer", color: K.t1, fontSize: 13, fontWeight: 600, textAlign: "center", transition: "all 0.15s" }}
-                    onMouseEnter={e => { e.currentTarget.style.borderColor = K.acc; e.currentTarget.style.background = K.hover; }}
-                    onMouseLeave={e => { e.currentTarget.style.borderColor = K.bdr; e.currentTarget.style.background = K.card; }}>
-                    {p.name}
-                  </button>
-                );
-              })}
-            </div>
-            )}
-          </div>
-          {AUTH_PROVIDERS_ENABLED && (
-            <div style={{ marginTop: 22 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "0 0 14px" }}>
-                <div style={{ flex: 1, height: 1, background: `${K.bdr}` }} />
-                <span style={{ color: K.t3, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600 }}>or</span>
-                <div style={{ flex: 1, height: 1, background: `${K.bdr}` }} />
-              </div>
-              <button onClick={handleGoogleSignIn} style={{ width: "100%", padding: "12px 0", borderRadius: 12, background: "#fff", border: "none", color: "#1f1f1f", fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
+          {AUTH_PROVIDERS_ENABLED ? (
+            <div>
+              <p style={{ color: K.t3, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600, margin: "0 0 12px" }}>Sign in</p>
+              <button onClick={handleGoogleSignIn} style={{ width: "100%", padding: "13px 0", borderRadius: 12, background: "#fff", border: "none", color: "#1f1f1f", fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
                 <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
                 Sign in with Google
               </button>
               {APPLE_PROVIDER_ENABLED && (!isNativePlatform() || NATIVE_APPLE_ENABLED) && (
-                <button onClick={handleAppleSignIn} style={{ width: "100%", marginTop: 10, padding: "12px 0", borderRadius: 12, background: "#000", border: "none", color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
+                <button onClick={handleAppleSignIn} style={{ width: "100%", marginTop: 10, padding: "13px 0", borderRadius: 12, background: "#000", border: "none", color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
                   <svg width="16" height="18" viewBox="0 0 384 512" aria-hidden="true" fill="#fff"><path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z"/></svg>
                   Sign in with Apple
                 </button>
               )}
               {authMsg && <div style={{ color: K.danger, fontSize: 12, fontWeight: 600, marginTop: 10 }}>{authMsg}</div>}
+              <p style={{ color: K.t3, fontSize: 11, margin: "14px 0 0", lineHeight: 1.5 }}>First time? Sign in, then pick your name from the roster.</p>
+            </div>
+          ) : (
+            <div>
+              <p style={{ color: K.t3, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600, margin: "0 0 8px" }}>Login</p>
+              {!storageLoaded ? (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+                  {Array.from({length: 12}).map((_, i) => (
+                    <div key={i} style={{ background: K.card, border: `1px solid ${K.bdr}`, borderRadius: 10, padding: "12px 6px", height: 44,
+                      animation: "pulse 1.5s ease-in-out infinite", opacity: 0.5 }} />
+                  ))}
+                </div>
+              ) : activePlayers.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "24px 0" }}>
+                <p style={{ color: K.t3, fontSize: 13, marginBottom: 16 }}>No players added yet.</p>
+                <button onClick={() => setUser({ id: "aaron_j", name: "Aaron J", isDirector: true })}
+                  style={{ background: K.acc, border: "none", borderRadius: 10, padding: "13px 28px", cursor: "pointer", color: "#fff", fontSize: 14, fontWeight: 700 }}>
+                  Login as Director
+                </button>
+              </div>
+              ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+                {activePlayers.map(p => {
+                  const isDirector = p.id === "aaron_j" || p.id === "scott_r";
+                  return (
+                    <button key={p.id} onClick={() => { setLoginPin(""); setLoginError(false); setLoginPrompt({ id: p.id, name: p.name, isDirector }); }}
+                      style={{ background: K.card, border: `1px solid ${K.bdr}`, borderRadius: 10, padding: "12px 6px", cursor: "pointer", color: K.t1, fontSize: 13, fontWeight: 600, textAlign: "center", transition: "all 0.15s" }}
+                      onMouseEnter={e => { e.currentTarget.style.borderColor = K.acc; e.currentTarget.style.background = K.hover; }}
+                      onMouseLeave={e => { e.currentTarget.style.borderColor = K.bdr; e.currentTarget.style.background = K.card; }}>
+                      {p.name}
+                    </button>
+                  );
+                })}
+              </div>
+              )}
             </div>
           )}
           {(() => { const roundIsActive = Object.keys(holeData).some(key => { const parts = key.split("_"); const rnd = parseInt(parts[parts.length - 1]); return !finalizedRounds[rnd] && Object.keys(holeData[key] || {}).length > 0; }); const btnColor = roundIsActive ? K.acc : K.t2; const btnBorder = roundIsActive ? `1px solid ${K.acc}40` : `1px solid ${K.bdr}`; return (<div style={{ marginTop: 24, borderTop: `1px solid ${K.bdr}30`, paddingTop: 20 }}><button onClick={() => setUser({ id: "guest", name: "Guest", isDirector: false, isGuest: true })} style={{ width: "100%", padding: "13px 0", borderRadius: 12, background: "transparent", border: btnBorder, color: btnColor, fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, letterSpacing: "0.02em" }} onMouseEnter={e => { e.currentTarget.style.background = btnColor + "12"; }} onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}>{roundIsActive && <span style={{ width: 7, height: 7, borderRadius: "50%", background: K.acc, display: "inline-block", boxShadow: `0 0 6px ${K.acc}` }} />}<img src="/wbc-trophy.png" alt="" style={{ height: 18, width: "auto", objectFit: "contain", filter: roundIsActive ? "none" : "brightness(0) invert(0.6)" }} />Live Leaderboard</button></div>); })()}
