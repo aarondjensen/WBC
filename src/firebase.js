@@ -496,23 +496,31 @@ export const deleteAccount = async (playerId) => {
     }
   }
 
-  // 2c. App Store Guideline 5.1.1(v): a Sign in with Apple user's token must be
-  //     REVOKED on deletion — deleting the Firebase user alone is not enough and
-  //     gets the app rejected. We ALWAYS reauthenticate Apple users here, which
-  //     (a) yields a FRESH Apple token/authorization code to revoke (the code
-  //     expires in ~5 min, so anything from the original sign-in is useless) and
-  //     (b) satisfies the recent-login requirement for deleteUser below. On
-  //     native the reauth surfaces an authorization code; on web, an access
-  //     token — revokeAccessToken accepts either.
+  // 2c. App Store Guideline 5.1.1(v): revoke the Sign in with Apple token on
+  //     deletion. Use the authorization code captured at SIGN-IN — it's single-
+  //     use and expires in ~5 min, but deletion happens in the same session, so
+  //     it's fresh. We deliberately do NOT re-authenticate to refresh it: on iOS
+  //     a second Sign in with Apple request right after the first fails with
+  //     AuthorizationError 1001 (AKAuthenticationError -7003), which would break
+  //     deletion entirely. Revocation is best-effort — if it fails we still
+  //     proceed with deletion (the account removal is the hard requirement).
   const isAppleUser = (user.providerData || []).some((p) => p.providerId === "apple.com");
   if (isAppleUser) {
-    try { await reauthenticateCurrentUser(); } catch (e) { throw mapAuthError(e); }
     const appleToken = _appleAuthorizationCode || _appleAccessToken;
+    console.log("[apple-revoke] token present:", !!appleToken, "| native:", isNativePlatform());
     if (appleToken) {
       try {
-        await revokeAccessToken(_auth, appleToken);
+        if (isNativePlatform()) {
+          // Native: the Apple flow yields an authorization CODE. The JS SDK's
+          // revokeAccessToken does not accept it, but the plugin routes to iOS's
+          // Auth.auth().revokeToken(withAuthorizationCode:), which does.
+          await FirebaseAuthentication.revokeAccessToken({ token: appleToken });
+        } else {
+          await revokeAccessToken(_auth, appleToken);
+        }
+        console.log("[apple-revoke] revoke call completed OK");
       } catch (e) {
-        console.warn("deleteAccount: Apple token revoke failed:", e?.message || e);
+        console.warn("[apple-revoke] failed:", e?.message || e);
       }
     }
     _appleAuthorizationCode = null;
