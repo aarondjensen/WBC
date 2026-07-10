@@ -191,13 +191,18 @@ export const _appleProvider = new OAuthProvider("apple.com");
 _appleProvider.addScope("email");
 _appleProvider.addScope("name");
 
-// Apple OAuth token, captured at sign-in / reauth. Firebase does NOT persist
-// the Apple token, but App Store Guideline 5.1.1(v) requires the app to REVOKE
-// it when an Apple user deletes their account (deleting the Firebase user alone
-// is not enough). We stash the most recent token here so deleteAccount() can
-// revoke it. If it's null at deletion time (e.g. the app was reloaded since
-// sign-in), deleteAccount reauthenticates to obtain a fresh one.
+// Apple OAuth token/code, captured at sign-in / reauth. Firebase does NOT
+// persist the Apple token, but App Store Guideline 5.1.1(v) requires the app to
+// REVOKE it when an Apple user deletes their account (deleting the Firebase user
+// alone is not enough). Two shapes depending on platform:
+//   • WEB   → OAuthProvider.credentialFromResult(result).accessToken
+//   • NATIVE→ result.credential.authorizationCode (the Capacitor plugin surfaces
+//             an authorization CODE, not an access token; Firebase's
+//             revokeAccessToken accepts it and exchanges it server-side).
+// The authorization code is single-use and expires in ~5 minutes, so it MUST be
+// obtained fresh via re-authentication at deletion time — deleteAccount does that.
 let _appleAccessToken = null;
+let _appleAuthorizationCode = null;
 const captureAppleToken = (result) => {
   try {
     const token = OAuthProvider.credentialFromResult(result)?.accessToken;
@@ -326,8 +331,10 @@ export const doAppleSignIn = async () => {
       const result = await FirebaseAuthentication.signInWithApple();
       const idToken = result?.credential?.idToken;
       if (!idToken) throw new Error("Apple sign-in did not return an ID token.");
-      // Native plugin hands back the Apple access token directly.
+      // Native plugin surfaces an authorization CODE (no access token). Stash it
+      // for revocation; note it expires quickly, so deleteAccount refreshes it.
       if (result.credential?.accessToken) _appleAccessToken = result.credential.accessToken;
+      if (result.credential?.authorizationCode) _appleAuthorizationCode = result.credential.authorizationCode;
       const provider = new OAuthProvider("apple.com");
       const credential = provider.credential({ idToken, rawNonce: result.credential?.nonce });
       return await signInWithCredential(_auth, credential);
@@ -394,6 +401,7 @@ export const linkAppleAccount = async () => {
 export const doSignOut = async () => {
   if (!_auth) return; // auth disabled → nothing to sign out of
   _appleAccessToken = null;
+  _appleAuthorizationCode = null;
   if (isNativePlatform()) {
     try {
       await FirebaseAuthentication.signOut();
@@ -427,6 +435,8 @@ const reauthenticateCurrentUser = async () => {
       const idToken = result?.credential?.idToken;
       if (!idToken) throw new Error("Apple did not return an ID token.");
       if (result.credential?.accessToken) _appleAccessToken = result.credential.accessToken;
+      // Fresh authorization code for revocation (this reauth is what deleteAccount relies on).
+      if (result.credential?.authorizationCode) _appleAuthorizationCode = result.credential.authorizationCode;
       const provider = new OAuthProvider("apple.com");
       return reauthenticateWithCredential(user, provider.credential({ idToken, rawNonce: result.credential?.nonce }));
     }
@@ -486,25 +496,27 @@ export const deleteAccount = async (playerId) => {
     }
   }
 
-  // 2c. App Store Guideline 5.1.1(v): for a Sign in with Apple user, the Apple
-  //     token must be REVOKED on deletion — deleting the Firebase user alone is
-  //     not enough and gets the app rejected. Firebase doesn't store the Apple
-  //     token, so we use the one captured at sign-in/reauth. If it's gone (the
-  //     app was reloaded since sign-in), reauthenticate to get a fresh one,
-  //     which also satisfies the recent-login requirement for deleteUser below.
+  // 2c. App Store Guideline 5.1.1(v): a Sign in with Apple user's token must be
+  //     REVOKED on deletion — deleting the Firebase user alone is not enough and
+  //     gets the app rejected. We ALWAYS reauthenticate Apple users here, which
+  //     (a) yields a FRESH Apple token/authorization code to revoke (the code
+  //     expires in ~5 min, so anything from the original sign-in is useless) and
+  //     (b) satisfies the recent-login requirement for deleteUser below. On
+  //     native the reauth surfaces an authorization code; on web, an access
+  //     token — revokeAccessToken accepts either.
   const isAppleUser = (user.providerData || []).some((p) => p.providerId === "apple.com");
   if (isAppleUser) {
-    if (!_appleAccessToken) {
-      try { await reauthenticateCurrentUser(); } catch (e) { throw mapAuthError(e); }
-    }
-    if (_appleAccessToken) {
+    try { await reauthenticateCurrentUser(); } catch (e) { throw mapAuthError(e); }
+    const appleToken = _appleAuthorizationCode || _appleAccessToken;
+    if (appleToken) {
       try {
-        await revokeAccessToken(_auth, _appleAccessToken);
+        await revokeAccessToken(_auth, appleToken);
       } catch (e) {
         console.warn("deleteAccount: Apple token revoke failed:", e?.message || e);
       }
-      _appleAccessToken = null;
     }
+    _appleAuthorizationCode = null;
+    _appleAccessToken = null;
   }
 
   // 3. Delete the Firebase Auth user; reauth + retry once if required.
