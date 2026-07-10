@@ -16,6 +16,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { initializeApp } from "firebase/app";
+import { FirebaseAuthentication } from "@capacitor-firebase/authentication";
 import { getFirestore, doc, deleteDoc, collection, query, where, getDocs, writeBatch } from "firebase/firestore";
 import {
   getAuth,
@@ -118,10 +119,16 @@ export const isNativePlatform = () => {
 // (A bare dynamic import today would fail Vite's build-time resolution,
 // which is why this throws instead. Every caller is native-gated, so this
 // path is unreachable in the browser/PWA builds.)
-const loadNativeAuthPlugin = async () => {
-  const { FirebaseAuthentication } = await import("@capacitor-firebase/authentication");
-  return FirebaseAuthentication;
-};
+// Returns the native Firebase Authentication plugin. Imported STATICALLY at the
+// top of this module (not via a dynamic import()) on purpose: a dynamic import
+// makes Vite split the plugin into a separate async chunk, and across that chunk
+// boundary Rollup can duplicate firebase/auth — producing two runtime copies of
+// the SDK. The credential we build here (OAuthProvider/GoogleAuthProvider) would
+// then come from a different copy than signInWithCredential, which fails with
+// "auth/argument-error" on native. A static import keeps one module graph → one
+// firebase/auth instance. On web the plugin is imported but never invoked
+// (every caller is isNativePlatform()-gated), so it's inert there.
+const loadNativeAuthPlugin = async () => FirebaseAuthentication;
 
 // ─── Auth persistence — explicit and durable (MNQ lesson) ────────────────
 // Bare getAuth() resolves persistence through a SILENT fallback chain
@@ -225,6 +232,10 @@ export const NATIVE_APPLE_ENABLED = true;
 // is silently swallowed during debugging.
 const mapAuthError = (e) => {
   const code = e?.code || "";
+  // Diagnostic: surface the raw error (code + message) to the console — on
+  // native this shows in the Xcode log, which is otherwise the only place the
+  // underlying cause of a generic error like auth/argument-error appears.
+  console.error("[auth error]", code, "| msg:", e?.message || e, "| stack:", (e?.stack || "").slice(0, 300));
   const friendly = {
     "auth/provider-already-linked": "That sign-in method is already linked to your account.",
     "auth/credential-already-in-use":
@@ -279,8 +290,13 @@ export const doGoogleSignIn = async () => {
       const FirebaseAuthentication = await loadNativeAuthPlugin();
       const result = await FirebaseAuthentication.signInWithGoogle();
       const idToken = result?.credential?.idToken;
+      console.log("[native-google] idToken present:", !!idToken, "len:", idToken ? String(idToken).length : 0);
       if (!idToken) throw new Error("Google sign-in did not return an ID token.");
       const credential = GoogleAuthProvider.credential(idToken);
+      console.log("[native-google] credential:", credential ? "built" : "NULL",
+        "| _getIdTokenResponse:", typeof credential?._getIdTokenResponse,
+        "| providerId:", credential?.providerId,
+        "| authDomain:", _auth?.config?.authDomain);
       return await signInWithCredential(_auth, credential);
     }
     if (isStandalonePWA()) {
