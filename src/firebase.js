@@ -16,7 +16,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { initializeApp } from "firebase/app";
-import { getFirestore, doc, deleteDoc, collection, query, where, getDocs, writeBatch } from "firebase/firestore";
+import { getFirestore, doc, deleteDoc, updateDoc, deleteField, collection, query, where, getDocs, writeBatch } from "firebase/firestore";
 import {
   getAuth,
   initializeAuth,
@@ -452,6 +452,20 @@ export const deleteAccount = async (playerId) => {
       }
     } catch (e) {
       console.warn("deleteAccount: token sweep failed:", e?.message || e);
+    }
+  }
+
+  // 2b. Strip the stored email (PII) off the player profile so deletion
+  //     actually removes the user's personal data. The player_id and its
+  //     historical scores remain as de-identified tournament records; the
+  //     email that linked a real person to that profile does not. Without
+  //     this, "delete my account" would leave the user's email in Firestore
+  //     and the privacy policy's deletion promise would be untrue.
+  if (playerId) {
+    try {
+      await updateDoc(doc(_db, "players", playerId), { claim_email: deleteField() });
+    } catch (e) {
+      console.warn("deleteAccount: claim_email clear failed:", e?.message || e);
     }
   }
 

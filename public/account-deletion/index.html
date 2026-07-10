@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="robots" content="index, follow" />
+  <title>Delete Your Account · Wannabe Cup</title>
+  <meta name="description" content="How to delete your Wannabe Cup (WBC) account and what data is removed or retained." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #080f1a; --card: #0e1829; --acc: #22d3a7; --accDim: #0d9b73;
+      --t1: #e8edf5; --t2: #8b9ec2; --t3: #526484; --bdr: #1a2b47; --danger: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: var(--bg); }
+    body {
+      font-family: 'Montserrat', system-ui, -apple-system, sans-serif;
+      color: var(--t1); line-height: 1.65; -webkit-font-smoothing: antialiased;
+      padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    }
+    .wrap { max-width: 720px; margin: 0 auto; padding: 40px 20px 80px; }
+    header { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+    header h1 { font-size: 26px; font-weight: 800; margin: 0; letter-spacing: -0.3px; }
+    .badge {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 40px; height: 40px; border-radius: 10px; flex-shrink: 0;
+      background: linear-gradient(135deg, var(--acc), var(--accDim)); color: var(--bg);
+      font-weight: 800; font-size: 15px;
+    }
+    .updated { color: var(--t3); font-size: 13px; margin: 0 0 32px; }
+    h2 { font-size: 17px; font-weight: 700; color: var(--t1); margin: 34px 0 10px; }
+    p, li { color: var(--t2); font-size: 15px; }
+    ol, ul { padding-left: 20px; }
+    li { margin-bottom: 8px; }
+    strong { color: var(--t1); font-weight: 600; }
+    a { color: var(--acc); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .card {
+      background: var(--card); border: 1px solid var(--bdr); border-radius: 14px;
+      padding: 18px 20px; margin: 18px 0;
+    }
+    .card h2 { margin-top: 0; }
+    .steps { counter-reset: step; list-style: none; padding: 0; margin: 16px 0; }
+    .steps li {
+      position: relative; padding: 4px 0 4px 44px; margin-bottom: 14px; color: var(--t2);
+    }
+    .steps li::before {
+      counter-increment: step; content: counter(step);
+      position: absolute; left: 0; top: 2px; width: 28px; height: 28px;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--card); border: 1px solid var(--acc); color: var(--acc);
+      border-radius: 50%; font-size: 13px; font-weight: 700;
+    }
+    .kept { border-left: 3px solid var(--acc); }
+    .removed { border-left: 3px solid var(--danger); }
+    .backlink {
+      display: inline-block; margin-top: 40px; padding: 10px 18px; border-radius: 10px;
+      border: 1px solid var(--bdr); color: var(--t2); font-size: 14px; font-weight: 600;
+    }
+    .foot { color: var(--t3); font-size: 12px; margin-top: 40px; }
+    .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    @media (max-width: 520px) { .cols { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="badge">WBC</div>
+      <h1>Delete Your Account</h1>
+    </header>
+    <p class="updated">Wannabe Cup (WBC) golf tournament app &middot; Last updated July 10, 2026</p>
+
+    <p>
+      You can delete your Wannabe Cup account and associated personal data at any time. This page
+      explains how, and exactly what is removed and what is retained.
+    </p>
+
+    <h2>Option 1 — Delete in the app (fastest)</h2>
+    <ol class="steps">
+      <li>Open the Wannabe Cup app and sign in.</li>
+      <li>Tap your <strong>name</strong> in the top-right corner to open the account menu.</li>
+      <li>Choose <strong>Delete account</strong>.</li>
+      <li>Confirm. Your account is removed immediately.</li>
+    </ol>
+
+    <h2>Option 2 — Request deletion by email</h2>
+    <p>
+      If you can't access the app, email
+      <a href="mailto:privacy@wannabecup.com?subject=Account%20deletion%20request">privacy@wannabecup.com</a>
+      from the address associated with your account, with the subject "Account deletion request."
+      We will verify your identity and complete the deletion within <strong>30 days</strong> (usually
+      much sooner).
+    </p>
+
+    <div class="card">
+      <h2>What happens to your data</h2>
+      <div class="cols">
+        <div>
+          <p style="color:var(--danger); font-weight:600; margin:0 0 8px;">Deleted</p>
+          <ul class="removed" style="margin:0; padding-left:16px;">
+            <li>Your Google / Apple login credential</li>
+            <li>Your stored email address</li>
+            <li>The link between your login and your player profile</li>
+            <li>Your push-notification device tokens</li>
+          </ul>
+        </div>
+        <div>
+          <p style="color:var(--acc); font-weight:600; margin:0 0 8px;">Retained</p>
+          <ul class="kept" style="margin:0; padding-left:16px;">
+            <li>Historical tournament scores and statistics, kept as part of the Wannabe Cup's multi-year record book</li>
+          </ul>
+        </div>
+      </div>
+      <p style="margin:16px 0 0;">
+        Retained scores are <strong>de-identified</strong>: they stay attached to an internal player
+        ID that is no longer connected to your email or login. See our
+        <a href="/privacy">Privacy Policy</a> for details.
+      </p>
+    </div>
+
+    <p>
+      Deletion is permanent. If you rejoin a future tournament, you would set up a new account.
+    </p>
+
+    <a class="backlink" href="/">&larr; Back to the app</a>
+
+    <p class="foot">&copy; 2026 Wannabe Cup</p>
+  </div>
+</body>
+</html>

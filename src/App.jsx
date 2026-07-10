@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
-import { _app, _db, _auth, onAuthStateChanged, doGoogleSignIn, doAppleSignIn, doSignOut, consumeRedirectResult, USERS_COLLECTION, NATIVE_APPLE_ENABLED, isNativePlatform, AUTH_PROVIDERS_ENABLED } from "./firebase";
+import { _app, _db, _auth, onAuthStateChanged, doGoogleSignIn, doAppleSignIn, doSignOut, consumeRedirectResult, deleteAccount, USERS_COLLECTION, NATIVE_APPLE_ENABLED, isNativePlatform, AUTH_PROVIDERS_ENABLED } from "./firebase";
 import { collection, doc, setDoc, getDocs, query, where, writeBatch, onSnapshot, deleteDoc } from "firebase/firestore";
 import { getMessaging, getToken, onMessage, isSupported as isMessagingSupported } from "firebase/messaging";
 const WBC_LOGO = "/wbc-icon-512.png";
@@ -730,14 +730,6 @@ function tapScore()     { if (typeof navigator !== "undefined" && navigator.vibr
 function tapNudge()     { if (typeof navigator !== "undefined" && navigator.vibrate) try { navigator.vibrate(8); } catch {} }
 function tapBigAction() { if (typeof navigator !== "undefined" && navigator.vibrate) try { navigator.vibrate([20, 40, 20]); } catch {} }
 
-// CTP values are backward-compatible: a bare playerId string (legacy) OR
-// { pid, distanceFt } (new, carries the tagged distance so later groups can
-// see the number to beat). These normalize either shape so every reader —
-// the on-course leader bar and the SkinsCtpView admin list — stays working
-// regardless of which shape a given hole was recorded in.
-const ctpPidOf  = (v) => (v && typeof v === "object" ? v.pid : v) || null;
-const ctpDistOf = (v) => (v && typeof v === "object" && v.distanceFt != null ? v.distanceFt : null);
-
 // Labels sit beneath the 5 par-relative buttons [par-1, par, par+1, par+2, par+3].
 const SCORE_LABELS = ["Birdie", "Par", "Bogey", "Double", "Triple"];
 
@@ -838,13 +830,6 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
   // the same session. showCtpForHole is 0-indexed hole currently being asked.
   const [showCtpForHole, setShowCtpForHole] = useState(null);
   const [ctpDismissedKeys, setCtpDismissedKeys] = useState(() => new Set());
-  const [ctpPickPid, setCtpPickPid] = useState("");   // selected winner in the CTP popup
-  const [ctpFeet, setCtpFeet] = useState(10);          // wheel-picker value, whole feet
-  // Session guard so a scorer isn't re-nagged on the same par-3 (keyed
-  // `${round}_${holeNum}`). Replaces the old "already set by anyone" suppression
-  // so a LATER group still gets prompted — with the current leader shown — and
-  // can tag a closer shot.
-  const promptedCtpHoles = useRef({});
 
 
   const tr = tRounds.find(t => t.round_number === round);
@@ -1001,17 +986,10 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
     if (!allScored) return;
     const holeNum = currentHole + 1;
     const key = `${round}_${holeNum}`;
-    if (promptedCtpHoles.current[key]) return; // already shown to this scorer this session
+    const alreadySet = ((ctpData || {})[round] || {})[holeNum];
+    if (alreadySet) return;
     if (ctpDismissedKeys.has(key)) return;
     if (showCtpForHole === currentHole) return;
-    promptedCtpHoles.current[key] = true;
-    // Seed the picker fresh, and pre-load the wheel to the current leader's
-    // distance (if a prior group already tagged) so "beat it" starts from the
-    // number to beat rather than the default.
-    const existing = ((ctpData || {})[round] || {})[holeNum];
-    const leaderDist = ctpDistOf(existing);
-    setCtpPickPid("");
-    setCtpFeet(leaderDist ? Math.max(1, Math.min(60, leaderDist)) : 10);
     setShowCtpForHole(currentHole);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allScored, par, currentHole, round, ctpData, editingCompleted]);
@@ -1651,30 +1629,10 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
       {showCtpForHole !== null && (() => {
         const holeNum = showCtpForHole + 1;
         const key = `${round}_${holeNum}`;
-        const WHEEL_ITEM = 36, WHEEL_H = 150, WHEEL_MAX_FT = 60;
         const closeAndAdvance = () => setShowCtpForHole(null);
-        // Current leader — a tag from an earlier group this session. Shown so a
-        // later group knows the number to beat and can decide whether they were
-        // closer. (ctpData is in-session client state, so cross-device the bar
-        // only appears once this scorer has a value; behaves like the old flow.)
-        const existing = ((ctpData || {})[round] || {})[holeNum];
-        const leaderPid = ctpPidOf(existing);
-        const leaderPl = leaderPid ? players.find(p => p.id === leaderPid) : null;
-        const leaderDist = ctpDistOf(existing);
-        // Player choices are limited to this group's present (non-WD) players.
-        const groupPls = presentGroupPids.map(pid => players.find(p => p.id === pid)).filter(Boolean);
-        // Wheel init: set scrollTop once when the scroll node mounts.
-        const wheelRef = (el) => {
-          if (el && !el.dataset.init) { el.dataset.init = "1"; el.scrollTop = (ctpFeet - 1) * WHEEL_ITEM; }
-        };
-        const onWheelScroll = (e) => {
-          const v = Math.max(1, Math.min(WHEEL_MAX_FT, Math.round(e.currentTarget.scrollTop / WHEEL_ITEM) + 1));
-          setCtpFeet(prev => (prev === v ? prev : v));
-        };
-        const save = async () => {
-          if (!ctpPickPid) return;
+        const pick = async (pid) => {
           tapBigAction();
-          try { await onSetCtp?.(round, holeNum, ctpPickPid, ctpFeet); } catch {}
+          try { await onSetCtp?.(round, holeNum, pid); } catch {}
           closeAndAdvance();
         };
         const dismiss = () => {
@@ -1690,54 +1648,21 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
               <div style={{ fontSize: 11, color: K.t3, marginTop: 2 }}>Hole {holeNum} · Par 3</div>
             </div>
             <div style={{ padding: "14px 16px" }}>
-              {/* Current-leader bar — shown when an earlier group already tagged */}
-              {leaderPl && (
-                <div style={{ display: "flex", alignItems: "center", gap: 8, background: K.acc + "1a", border: `1px solid ${K.acc}66`, borderRadius: 10, padding: "8px 10px", marginBottom: 12 }}>
-                  <span style={{ fontSize: 15 }}>⛳</span>
-                  <span style={{ flex: 1, minWidth: 0 }}>
-                    <span style={{ display: "block", fontSize: 9, fontWeight: 800, color: K.warn, letterSpacing: 1.2, textTransform: "uppercase" }}>Current CTP</span>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: K.t1 }}>{leaderPl.name}</span>
-                  </span>
-                  {leaderDist != null && <span style={{ fontSize: 13, fontWeight: 800, color: K.acc }}>{leaderDist} ft</span>}
-                </div>
-              )}
-
-              <div style={{ fontSize: 10, fontWeight: 800, color: K.t3, letterSpacing: 1.2, textTransform: "uppercase", marginBottom: 6 }}>{leaderPl ? "Who was closer?" : "Who was closest?"}</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 14 }}>
-                {groupPls.map(pl => {
-                  const sel = ctpPickPid === pl.id;
+              <div style={{ fontSize: 11, color: K.t3, textAlign: "center", marginBottom: 10 }}>Who was closest?</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
+                {presentGroupPids.map(pid => {
+                  const pl = players.find(p => p.id === pid);
+                  if (!pl) return null;
                   return (
-                    <button key={pl.id} onClick={() => { tapNudge(); setCtpPickPid(sel ? "" : pl.id); }} style={{
-                      padding: "11px 6px", borderRadius: 10, background: sel ? K.acc + "24" : K.inp,
-                      border: `1px solid ${sel ? K.acc : K.bdr}`, color: sel ? K.acc : K.t2,
-                      fontSize: 13, fontWeight: 700, cursor: "pointer", textAlign: "center",
+                    <button key={pid} onClick={() => pick(pid)} style={{
+                      padding: "12px 14px", borderRadius: 10, background: K.inp, border: `1px solid ${K.bdr}`,
+                      color: K.t1, fontSize: 14, fontWeight: 700, cursor: "pointer", textAlign: "left",
                     }}>{pl.name}</button>
                   );
                 })}
               </div>
-
-              <div style={{ fontSize: 10, fontWeight: 800, color: K.t3, letterSpacing: 1.2, textTransform: "uppercase", marginBottom: 6 }}>Approx. distance</div>
-              <div style={{ position: "relative", height: WHEEL_H, background: K.inp, border: `1px solid ${K.bdr}`, borderRadius: 12, overflow: "hidden", marginBottom: 14 }}>
-                {/* selection band */}
-                <div style={{ position: "absolute", left: 10, right: 10, top: "50%", height: WHEEL_ITEM + 2, transform: "translateY(-50%)", borderTop: `1.5px solid ${K.acc}`, borderBottom: `1.5px solid ${K.acc}`, borderRadius: 4, background: K.acc + "0d", pointerEvents: "none", zIndex: 2 }} />
-                <div style={{ position: "absolute", right: 46, top: "50%", transform: "translateY(-50%)", fontSize: 11, fontWeight: 800, color: K.acc, letterSpacing: 1.2, pointerEvents: "none", zIndex: 2 }}>FT</div>
-                <div ref={wheelRef} onScroll={onWheelScroll} style={{ height: "100%", overflowY: "scroll", scrollSnapType: "y mandatory", padding: `${(WHEEL_H - WHEEL_ITEM) / 2}px 0`, WebkitOverflowScrolling: "touch", scrollbarWidth: "none" }}>
-                  {Array.from({ length: WHEEL_MAX_FT }, (_, i) => i + 1).map(ft => (
-                    <div key={ft} style={{ height: WHEEL_ITEM, lineHeight: `${WHEEL_ITEM}px`, textAlign: "center", fontSize: ft === ctpFeet ? 21 : 18, fontWeight: ft === ctpFeet ? 800 : 700, color: ft === ctpFeet ? K.t1 : K.t3, scrollSnapAlign: "center" }}>{ft}</div>
-                  ))}
-                </div>
-                {/* edge fades */}
-                <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 46, background: `linear-gradient(${K.inp}, transparent)`, pointerEvents: "none" }} />
-                <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 46, background: `linear-gradient(transparent, ${K.inp})`, pointerEvents: "none" }} />
-              </div>
-
-              <button onClick={save} disabled={!ctpPickPid} style={{
-                width: "100%", padding: 13, borderRadius: 10, background: ctpPickPid ? K.acc : K.inp,
-                border: ctpPickPid ? "none" : `1px solid ${K.bdr}`, color: ctpPickPid ? K.bg : K.t3,
-                fontSize: 14, fontWeight: 800, cursor: ctpPickPid ? "pointer" : "default", letterSpacing: 0.4,
-              }}>{leaderPl ? "Tag New CTP" : "Tag CTP"}</button>
               <button onClick={dismiss} style={{
-                width: "100%", marginTop: 7, padding: 12, borderRadius: 10, background: "transparent",
+                width: "100%", padding: "10px 0", borderRadius: 10, background: "transparent",
                 border: `1px solid ${K.bdr}`, color: K.t3, fontSize: 12, fontWeight: 600, cursor: "pointer",
               }}>None of us — skip</button>
             </div>
@@ -2220,14 +2145,13 @@ function SkinsCtpView({ players, round, tRounds, courses, holeData, ctpData, onS
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {par3s.length === 0 ? <div style={{ background: K.card, borderRadius: 12, padding: 32, textAlign: "center", color: K.t3 }}>No par 3s</div> :
           par3s.map(hole => {
-            const winnerId = ctpPidOf(roundCtps[hole]);
-            const winnerDist = ctpDistOf(roundCtps[hole]);
+            const winnerId = roundCtps[hole];
             const winner = winnerId ? players.find(p => p.id === winnerId) : null;
             return (
               <div key={hole} style={{ background: K.card, borderRadius: 12, border: `1px solid ${K.bdr}`, padding: 14 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <div><span style={{ fontSize: 15, fontWeight: 700 }}>Hole {hole}</span><span style={{ fontSize: 12, color: K.t3, marginLeft: 8 }}>Par 3</span></div>
-                  {winner ? <span style={{ fontSize: 14, fontWeight: 700, color: K.acc }}>🎯 {winner.name}{winnerDist != null ? ` · ${winnerDist} ft` : ""}</span> : <span style={{ fontSize: 12, color: K.t3 }}>No winner yet</span>}
+                  {winner ? <span style={{ fontSize: 14, fontWeight: 700, color: K.acc }}>🎯 {winner.name}</span> : <span style={{ fontSize: 12, color: K.t3 }}>No winner yet</span>}
                 </div>
                 {user.isDirector && !winner && (
                   <select onChange={e => { if (e.target.value) onSetCtp(round, hole, e.target.value); }} style={{ width: "100%", padding: "8px 12px", background: K.inp, border: `1px solid ${K.bdr}`, borderRadius: 8, color: K.t1, fontSize: 13, marginTop: 10 }}>
@@ -4318,6 +4242,15 @@ export default function WBCApp() {
   const [claimBusyId, setClaimBusyId] = useState(null);
   const [authMsg, setAuthMsg] = useState("");        // provider sign-in error, shown on login screen
 
+  // Account sheet (log out / delete account). Delete is only offered to users
+  // who actually signed in with a provider (fbUser set) — that's the "account"
+  // the app stores require to be deletable. PIN-only players have no such
+  // account to delete. deleteStage: null | "confirm" | "working".
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [deleteStage, setDeleteStage] = useState(null);
+  const [deleteErr, setDeleteErr] = useState("");
+  // handleDeleteAccount is defined further down, AFTER notify() exists — see note there.
+
   // iOS standalone height fix, enforced from React. --app-height = window.innerHeight
   // (which excludes the home-indicator area that 100dvh wrongly includes). This
   // mirrors index.html but also runs after React mounts — critical now that a
@@ -4634,6 +4567,29 @@ export default function WBCApp() {
   };
 
   const notify = m => { setNotif(m); setTimeout(() => setNotif(null), 2500); };
+
+  // Account deletion. Defined here (not up with the account state) because its
+  // dependency array references notify(), which is declared just above — putting
+  // the callback higher would evaluate [user, notify] before notify exists and
+  // throw a temporal-dead-zone error during render.
+  const handleDeleteAccount = useCallback(async () => {
+    setDeleteErr("");
+    setDeleteStage("working");
+    try {
+      await deleteAccount(user?.id);
+      // deleteAccount clears the native provider session; also clear the web
+      // session + local state so we land cleanly on the login screen.
+      try { await doSignOut(); } catch { /* non-fatal */ }
+      try { localStorage.removeItem("wbc_user"); } catch { /* non-fatal */ }
+      setAccountOpen(false);
+      setDeleteStage(null);
+      setUser(null);
+      notify("Your account has been deleted");
+    } catch (e) {
+      setDeleteStage("confirm");
+      setDeleteErr(e?.message || "Couldn't delete your account. Please try again.");
+    }
+  }, [user, notify]);
 
   // ── Push notifications (client) ──
   const [notifPerm, setNotifPerm] = useState(() => (typeof Notification !== "undefined" ? Notification.permission : "denied"));
@@ -5106,17 +5062,14 @@ export default function WBCApp() {
     return wins;
   }, [activePlayers, holeData, tRounds, courseList]);
 
-  const onSetCtp = async (rnd, hole, pid, distanceFt = null) => {
-    // Store the object shape when a distance is supplied (on-course popup);
-    // fall back to a bare pid for callers that don't (e.g. the admin select).
-    const val = distanceFt != null ? { pid, distanceFt } : pid;
-    setCtpData(prev => ({ ...prev, [rnd]: { ...(prev[rnd] || {}), [hole]: val } }));
+  const onSetCtp = async (rnd, hole, pid) => {
+    setCtpData(prev => ({ ...prev, [rnd]: { ...(prev[rnd] || {}), [hole]: pid } }));
     // Store CTP as a skin type in the skins table
     const tr = tRounds.find(t => t.round_number === rnd);
     if (tr) {
-      await db.upsert("skins", { id: `ctp_2026_r${rnd}_h${hole}`, tournament_round_id: tr.id, hole_number: hole, player_id: pid, skin_type: "ctp", distance_ft: distanceFt }, "id");
+      await db.upsert("skins", { id: `ctp_2026_r${rnd}_h${hole}`, tournament_round_id: tr.id, hole_number: hole, player_id: pid, skin_type: "ctp" }, "id");
     }
-    notify(distanceFt != null ? `CTP Hole ${hole} — ${distanceFt} ft` : `CTP Hole ${hole} set`);
+    notify(`CTP Hole ${hole} set`);
   };
 
   const setPairings = async (rnd, groups) => {
@@ -5395,11 +5348,84 @@ export default function WBCApp() {
           {notifPerm !== "granted" && !user.isGuest && (
             <button onClick={enableNotifications} title="Enable notifications" style={{ background: "transparent", border: `1px solid ${K.acc}60`, color: K.acc, padding: "4px 9px", borderRadius: 8, fontSize: 14, cursor: "pointer", lineHeight: 1 }}>🔔</button>
           )}
-          <button onClick={handleLogout} style={{ background: "transparent", border: `1px solid ${K.bdr}`, color: K.t3, padding: "4px 10px", borderRadius: 8, fontSize: 10, cursor: "pointer", textAlign: "center", lineHeight: 1.3 }}>
-            Logout<br/><span style={{ fontSize: 9, color: K.t2, fontWeight: 600 }}>{user.name}</span>
+          <button onClick={() => { setDeleteErr(""); setDeleteStage(null); setAccountOpen(true); }} style={{ background: "transparent", border: `1px solid ${K.bdr}`, color: K.t3, padding: "4px 10px", borderRadius: 8, fontSize: 10, cursor: "pointer", textAlign: "center", lineHeight: 1.3 }}>
+            Account<br/><span style={{ fontSize: 9, color: K.t2, fontWeight: 600 }}>{user.name}</span>
           </button>
         </div>
       </div>
+
+      {accountOpen && (
+        <div
+          onClick={() => { if (deleteStage !== "working") { setAccountOpen(false); setDeleteStage(null); } }}
+          style={{ position: "fixed", inset: 0, zIndex: 400, background: "rgba(3,8,16,0.72)", backdropFilter: "blur(2px)", display: "flex", alignItems: "flex-end", justifyContent: "center" }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{ width: "100%", maxWidth: 480, background: K.card, borderTop: `1px solid ${K.bdr}`, borderTopLeftRadius: 18, borderTopRightRadius: 18, padding: "20px 20px calc(20px + env(safe-area-inset-bottom, 0px))", boxShadow: "0 -12px 40px rgba(0,0,0,0.6)" }}
+          >
+            <div style={{ width: 38, height: 4, borderRadius: 2, background: K.bdr, margin: "0 auto 18px" }} />
+
+            {deleteStage === null && (
+              <>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 18 }}>
+                  <div style={{ width: 42, height: 42, borderRadius: 21, background: `linear-gradient(135deg, ${K.acc}, ${K.accDim})`, display: "flex", alignItems: "center", justifyContent: "center", color: K.bg, fontWeight: 800, fontSize: 16 }}>
+                    {(user.name || "?").trim().charAt(0).toUpperCase()}
+                  </div>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: K.t1 }}>{user.name}</div>
+                    <div style={{ fontSize: 11, color: K.t3 }}>{user.isDirector ? "Tournament director" : "Player"}</div>
+                  </div>
+                </div>
+
+                <button onClick={() => { setAccountOpen(false); handleLogout(); }} style={{ width: "100%", padding: "13px 0", borderRadius: 12, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t1, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+                  Log out
+                </button>
+
+                {fbUser && (
+                  <button onClick={() => { setDeleteErr(""); setDeleteStage("confirm"); }} style={{ width: "100%", marginTop: 10, padding: "13px 0", borderRadius: 12, background: "transparent", border: `1px solid ${K.danger}55`, color: K.danger, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+                    Delete account
+                  </button>
+                )}
+
+                <div style={{ textAlign: "center", marginTop: 14 }}>
+                  <a href="/privacy" target="_blank" rel="noopener" style={{ color: K.t3, fontSize: 11, textDecoration: "none" }}>Privacy Policy</a>
+                </div>
+              </>
+            )}
+
+            {(deleteStage === "confirm" || deleteStage === "working") && (
+              <>
+                <div style={{ fontSize: 17, fontWeight: 800, color: K.t1, marginBottom: 10 }}>Delete your account?</div>
+                <div style={{ fontSize: 13, color: K.t2, lineHeight: 1.6, marginBottom: 12 }}>
+                  This removes your login, your email address, and your notification settings. Your
+                  historical tournament scores stay in the WBC record book as de-identified results,
+                  no longer linked to you. This can't be undone.
+                </div>
+                <div style={{ fontSize: 11, color: K.t3, marginBottom: 16 }}>
+                  Details in the <a href="/privacy" target="_blank" rel="noopener" style={{ color: K.t2 }}>Privacy Policy</a>.
+                </div>
+
+                {deleteErr && <div style={{ color: K.danger, fontSize: 12, fontWeight: 600, marginBottom: 12 }}>{deleteErr}</div>}
+
+                <button
+                  onClick={handleDeleteAccount}
+                  disabled={deleteStage === "working"}
+                  style={{ width: "100%", padding: "13px 0", borderRadius: 12, background: deleteStage === "working" ? `${K.danger}22` : K.danger, border: "none", color: "#fff", fontSize: 14, fontWeight: 700, cursor: deleteStage === "working" ? "default" : "pointer", opacity: deleteStage === "working" ? 0.7 : 1 }}
+                >
+                  {deleteStage === "working" ? "Deleting…" : "Permanently delete my account"}
+                </button>
+                <button
+                  onClick={() => { if (deleteStage !== "working") { setDeleteStage(null); setDeleteErr(""); } }}
+                  disabled={deleteStage === "working"}
+                  style={{ width: "100%", marginTop: 10, padding: "12px 0", borderRadius: 12, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t2, fontSize: 14, fontWeight: 600, cursor: deleteStage === "working" ? "default" : "pointer" }}
+                >
+                  Cancel
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {view !== "admin" && view !== "scoring" && view !== "leaderboard" && (
       <div style={{ display: "flex", gap: 6, padding: "10px 20px", borderBottom: `1px solid ${K.bdr}` }}>
