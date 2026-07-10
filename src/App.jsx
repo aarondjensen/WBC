@@ -4164,11 +4164,12 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
 
 // ── CLAIM SCREEN ──
 // Shown after a Google/Apple sign-in when the authenticated Firebase user is
-// not yet mapped to a WBC player (no wbc_users doc, and no unique claim_email
-// match). The signed-in person picks their own name from the unclaimed
-// profiles; picking writes the uid→player_id claim and logs them in. The
-// player_id is the permanent career identity linking to 16 years of history,
-// so this is the moment a real person is bound to that identity.
+// not yet mapped to a WBC player (no wbc_users doc). The signed-in person picks
+// their own name from the unclaimed profiles; picking writes the uid→player_id
+// claim and logs them in. No emails are collected ahead of time or matched —
+// claiming is always by choosing your name. The player_id is the permanent
+// career identity linking to 16 years of history, so this is the moment a real
+// person is bound to that identity.
 function ClaimScreen({ fbUser, candidates, onClaim, onCancel, busyId }) {
   const email = fbUser?.email || "";
   const displayName = fbUser?.displayName || "";
@@ -4234,9 +4235,6 @@ export default function WBCApp() {
   // are the source of truth for which player profiles are already claimed —
   // no redundant `claimed` flag is stored on the player record.
   const [claims, setClaims] = useState({});
-  // claimEmails: player_id → lowercased claim_email (from the players doc),
-  // used for the primary email-prematch claim path.
-  const [claimEmails, setClaimEmails] = useState({});
   const [fbUser, setFbUser] = useState(null);        // current Firebase Auth user
   const [claimState, setClaimState] = useState(null); // null | { status: "needs-claim", candidates }
   const [claimBusyId, setClaimBusyId] = useState(null);
@@ -4388,10 +4386,6 @@ export default function WBCApp() {
         if (playerRows?.length) {
           DEMO_PLAYERS = playerRows.map(r => ({ id: r.id, name: r.name }))
             .sort((a, b) => a.name.localeCompare(b.name));
-          // claim_email map (primary claim path). Optional per player.
-          const emails = {};
-          playerRows.forEach(r => { if (r.claim_email) emails[r.id] = String(r.claim_email).toLowerCase(); });
-          setClaimEmails(emails);
         }
 
         // Existing uid→player_id claims (wbc_users). Doc id is the uid.
@@ -4691,15 +4685,12 @@ export default function WBCApp() {
     setClaimBusyId(null);
     setClaimState(null);
     setUser({ id: player.id, name: player.name, isDirector: isDirectorId(player.id) });
+    // The only record written is the uid→player_id claim (wbc_users). We do NOT
+    // stamp the email onto the shared players profile — emails are never
+    // collected ahead of time or stored on tournament profiles; a player simply
+    // picks their name at sign-in.
     await db.upsert(USERS_COLLECTION, rec).catch(e => console.warn("[claim] wbc_users write failed", e));
-    // Stamp claim_email onto the registry doc so the primary email-prematch
-    // path works on future re-claims and directors can see who holds a profile.
-    // Skipped for Apple "Hide My Email" relay addresses (no @privaterelay).
-    if (email && !email.endsWith("privaterelay.appleid.com") && claimEmails[player.id] !== email) {
-      setClaimEmails(prev => ({ ...prev, [player.id]: email }));
-      await db.upsert("players", { id: player.id, claim_email: email }, "id").catch(() => {});
-    }
-  }, [claimEmails]);
+  }, []);
 
   // Subscribe to Firebase Auth. Also completes any pending redirect sign-in
   // (installed-PWA path) that resolves on cold start. Entirely skipped while
@@ -4713,8 +4704,9 @@ export default function WBCApp() {
   }, []);
 
   // Resolve a signed-in Firebase user to a WBC player: already-claimed fast
-  // path → unique email prematch → manual pick. Waits until the registry and
-  // existing claims have loaded so it never mis-decides "unclaimed".
+  // path → manual "pick your name". No email matching — a player claims their
+  // profile by choosing their name. Waits until the registry and existing
+  // claims have loaded so it never mis-decides "unclaimed".
   useEffect(() => {
     if (!fbUser) { setClaimState(null); return; }
     if (!storageLoaded) return;
@@ -4731,17 +4723,10 @@ export default function WBCApp() {
       // Claimed to a player_id no longer in the registry — fall through to re-claim.
     }
 
-    // 2. Unique email prematch (primary path).
-    const email = (fbUser.email || "").toLowerCase();
+    // 2. Manual "pick your name" (immediate link per CLAIM_REQUIRES_APPROVAL=false).
     const unclaimed = activePlayers.filter(p => !claimedPlayerIds.has(p.id));
-    if (email) {
-      const matches = unclaimed.filter(p => claimEmails[p.id] && claimEmails[p.id] === email);
-      if (matches.length === 1) { claimProfile(fbUser, matches[0], "email"); return; }
-    }
-
-    // 3. Manual "pick your name" fallback (immediate link per CLAIM_REQUIRES_APPROVAL=false).
     setClaimState({ status: "needs-claim", candidates: unclaimed });
-  }, [fbUser, claims, claimedPlayerIds, claimEmails, storageLoaded, activePlayers, user, claimProfile]);
+  }, [fbUser, claims, claimedPlayerIds, storageLoaded, activePlayers, user]);
 
   // Provider sign-in handlers for the login screen.
   const handleGoogleSignIn = useCallback(async () => {

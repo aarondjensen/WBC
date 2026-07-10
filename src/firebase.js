@@ -16,7 +16,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { initializeApp } from "firebase/app";
-import { getFirestore, doc, deleteDoc, updateDoc, deleteField, collection, query, where, getDocs, writeBatch } from "firebase/firestore";
+import { getFirestore, doc, deleteDoc, collection, query, where, getDocs, writeBatch } from "firebase/firestore";
 import {
   getAuth,
   initializeAuth,
@@ -176,11 +176,9 @@ export const _googleProvider = new GoogleAuthProvider();
 
 // Apple uses the generic OAuthProvider with the 'apple.com' provider id —
 // the Firebase JS SDK has no dedicated AppleAuthProvider class. Request
-// name + email scopes so the first Apple sign-in can populate
-// displayName/email when the user allows it. With "Hide My Email" the email
-// is a private relay address — which is exactly why the claim flow's manual
-// "pick your name" fallback must exist: claim_email pre-matching cannot see
-// through the relay.
+// name + email scopes so Apple can populate displayName when the user allows
+// it. WBC never matches on email (players claim their profile by picking their
+// name), so Apple's "Hide My Email" private relay has no effect on the flow.
 export const _appleProvider = new OAuthProvider("apple.com");
 _appleProvider.addScope("email");
 _appleProvider.addScope("name");
@@ -452,20 +450,6 @@ export const deleteAccount = async (playerId) => {
       }
     } catch (e) {
       console.warn("deleteAccount: token sweep failed:", e?.message || e);
-    }
-  }
-
-  // 2b. Strip the stored email (PII) off the player profile so deletion
-  //     actually removes the user's personal data. The player_id and its
-  //     historical scores remain as de-identified tournament records; the
-  //     email that linked a real person to that profile does not. Without
-  //     this, "delete my account" would leave the user's email in Firestore
-  //     and the privacy policy's deletion promise would be untrue.
-  if (playerId) {
-    try {
-      await updateDoc(doc(_db, "players", playerId), { claim_email: deleteField() });
-    } catch (e) {
-      console.warn("deleteAccount: claim_email clear failed:", e?.message || e);
     }
   }
 
