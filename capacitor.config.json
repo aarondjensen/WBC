@@ -1,0 +1,11 @@
+{
+  "appId": "com.wannabecup.app",
+  "appName": "WBC",
+  "webDir": "dist",
+  "plugins": {
+    "FirebaseAuthentication": {
+      "skipNativeAuth": true,
+      "providers": ["google.com", "apple.com"]
+    }
+  }
+}
