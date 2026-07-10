@@ -315,6 +315,11 @@ export const doGoogleSignIn = async () => {
 // if there was no pending redirect.
 export const consumeRedirectResult = async () => {
   if (!_auth) return null; // auth disabled → no pending redirect to consume
+  // Native has no web-redirect flow (it uses the plugin's native sheets), and
+  // the native auth instance intentionally has NO popupRedirectResolver.
+  // getRedirectResult() REQUIRES a resolver and throws auth/argument-error
+  // without one — so calling it on native fails on every launch. Skip it.
+  if (isNativePlatform()) return null;
   try {
     const result = await getRedirectResult(_auth);
     if (result) captureAppleToken(result); // no-op for non-Apple results
