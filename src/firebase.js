@@ -510,17 +510,19 @@ export const deleteAccount = async (playerId) => {
     console.log("[apple-revoke] token present:", !!appleToken, "| native:", isNativePlatform());
     if (appleToken) {
       try {
-        if (isNativePlatform()) {
-          // Native: the Apple flow yields an authorization CODE. The JS SDK's
-          // revokeAccessToken does not accept it, but the plugin routes to iOS's
-          // Auth.auth().revokeToken(withAuthorizationCode:), which does.
-          await FirebaseAuthentication.revokeAccessToken({ token: appleToken });
-        } else {
-          await revokeAccessToken(_auth, appleToken);
-        }
+        const revoke = isNativePlatform()
+          ? FirebaseAuthentication.revokeAccessToken({ token: appleToken })
+          : revokeAccessToken(_auth, appleToken);
+        // Revocation is a best-effort SECONDARY requirement; account deletion is
+        // the hard one. The native revoke can hang in a skipNativeAuth setup, so
+        // cap it — never let it block the deletion below.
+        await Promise.race([
+          revoke,
+          new Promise((_, reject) => setTimeout(() => reject(new Error("revoke timed out")), 6000)),
+        ]);
         console.log("[apple-revoke] revoke call completed OK");
       } catch (e) {
-        console.warn("[apple-revoke] failed:", e?.message || e);
+        console.warn("[apple-revoke] failed/timed out — proceeding with deletion:", e?.message || e);
       }
     }
     _appleAuthorizationCode = null;
