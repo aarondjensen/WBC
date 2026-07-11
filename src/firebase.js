@@ -18,6 +18,7 @@
 import { initializeApp } from "firebase/app";
 import { FirebaseAuthentication } from "@capacitor-firebase/authentication";
 import { getFirestore, doc, deleteDoc, collection, query, where, getDocs, writeBatch } from "firebase/firestore";
+import { getFunctions, httpsCallable } from "firebase/functions";
 import {
   getAuth,
   initializeAuth,
@@ -37,7 +38,6 @@ import {
   onAuthStateChanged,
   signOut,
   deleteUser,
-  revokeAccessToken,
 } from "firebase/auth";
 
 // ─── Feature flag ──────────────────────────────────────────────────────────
@@ -87,6 +87,7 @@ const FIREBASE_CONFIG = {
 
 export const _app = initializeApp(FIREBASE_CONFIG);
 export const _db = getFirestore(_app);
+const _functions = getFunctions(_app);
 
 // Firestore collections owned by this module. wbc_users maps a Firebase
 // Auth uid → player_id (the permanent career identity shared with 16 years
@@ -497,32 +498,26 @@ export const deleteAccount = async (playerId) => {
   }
 
   // 2c. App Store Guideline 5.1.1(v): revoke the Sign in with Apple token on
-  //     deletion. Use the authorization code captured at SIGN-IN — it's single-
-  //     use and expires in ~5 min, but deletion happens in the same session, so
-  //     it's fresh. We deliberately do NOT re-authenticate to refresh it: on iOS
-  //     a second Sign in with Apple request right after the first fails with
-  //     AuthorizationError 1001 (AKAuthenticationError -7003), which would break
-  //     deletion entirely. Revocation is best-effort — if it fails we still
-  //     proceed with deletion (the account removal is the hard requirement).
+  //     deletion. Client-side revocation is unreliable here (the native iOS SDK
+  //     hangs under skipNativeAuth; the JS SDK doesn't accept the native
+  //     authorization code), so we hand the authorization code to the
+  //     revokeAppleToken Cloud Function, which exchanges + revokes it with the
+  //     Apple key server-side. Uses the code captured at SIGN-IN — single-use,
+  //     ~5-min lifetime, but deletion happens in the same session so it's fresh.
+  //     Best-effort and timeboxed: revocation must never block the deletion
+  //     below (account removal is the hard requirement).
   const isAppleUser = (user.providerData || []).some((p) => p.providerId === "apple.com");
   if (isAppleUser) {
-    const appleToken = _appleAuthorizationCode || _appleAccessToken;
-    console.log("[apple-revoke] token present:", !!appleToken, "| native:", isNativePlatform());
-    if (appleToken) {
+    const authorizationCode = _appleAuthorizationCode;
+    if (authorizationCode) {
       try {
-        const revoke = isNativePlatform()
-          ? FirebaseAuthentication.revokeAccessToken({ token: appleToken })
-          : revokeAccessToken(_auth, appleToken);
-        // Revocation is a best-effort SECONDARY requirement; account deletion is
-        // the hard one. The native revoke can hang in a skipNativeAuth setup, so
-        // cap it — never let it block the deletion below.
+        const revokeAppleToken = httpsCallable(_functions, "revokeAppleToken");
         await Promise.race([
-          revoke,
-          new Promise((_, reject) => setTimeout(() => reject(new Error("revoke timed out")), 6000)),
+          revokeAppleToken({ authorizationCode }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("revoke timed out")), 8000)),
         ]);
-        console.log("[apple-revoke] revoke call completed OK");
       } catch (e) {
-        console.warn("[apple-revoke] failed/timed out — proceeding with deletion:", e?.message || e);
+        console.warn("deleteAccount: Apple token revoke failed — proceeding:", e?.message || e);
       }
     }
     _appleAuthorizationCode = null;

@@ -18,7 +18,20 @@
 const admin = require("firebase-admin");
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { onDocumentWritten } = require("firebase-functions/v2/firestore");
+const { defineSecret } = require("firebase-functions/params");
 const logger = require("firebase-functions/logger");
+const jwt = require("jsonwebtoken");
+
+// Apple Sign in with Apple credentials for server-side token revocation.
+// The .p8 private key is stored as a Firebase secret (never in source):
+//   firebase functions:secrets:set APPLE_PRIVATE_KEY   (paste the .p8 contents)
+const APPLE_PRIVATE_KEY = defineSecret("APPLE_PRIVATE_KEY");
+const APPLE_TEAM_ID = "7RRL56R755";
+const APPLE_KEY_ID = "RHPWSCB2HT";
+// The NATIVE iOS app's Sign in with Apple authorization codes are issued for the
+// app's bundle ID (the App ID), not the web Services ID. The revocation key's
+// primary App ID is this same identifier, so it signs a valid client secret.
+const APPLE_CLIENT_ID = "com.wannabecup.app";
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -274,6 +287,83 @@ exports.sendTestPush = onCall(async (request) => {
     });
     throw new HttpsError("internal", `Unexpected: ${err?.message || String(err)}`);
   }
+});
+
+// ═════════════════════════════════════════════════════════════════════════
+//  revokeAppleToken — App Store Guideline 5.1.1(v) token revocation
+// ═════════════════════════════════════════════════════════════════════════
+// When a Sign in with Apple user deletes their account, Apple requires the app
+// to revoke their token. The native client can't do this reliably (the iOS SDK
+// hangs under skipNativeAuth), so it hands the Apple AUTHORIZATION CODE to this
+// function, which:
+//   1. signs a client-secret JWT (ES256) with the .p8 key,
+//   2. exchanges the authorization code for a refresh token at Apple,
+//   3. revokes that refresh token (invalidates the whole grant).
+// Called from the client during account deletion, before the Firebase user is
+// deleted (so request.auth is still present).
+exports.revokeAppleToken = onCall({ secrets: [APPLE_PRIVATE_KEY] }, async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Must be signed in to revoke.");
+  }
+  const authorizationCode = request.data?.authorizationCode;
+  if (!authorizationCode) {
+    throw new HttpsError("invalid-argument", "authorizationCode required");
+  }
+
+  // 1. Client secret JWT — signed with the Apple .p8 key.
+  let clientSecret;
+  try {
+    clientSecret = jwt.sign({}, APPLE_PRIVATE_KEY.value(), {
+      algorithm: "ES256",
+      keyid: APPLE_KEY_ID,
+      issuer: APPLE_TEAM_ID,
+      audience: "https://appleid.apple.com",
+      subject: APPLE_CLIENT_ID,
+      expiresIn: "5m",
+    });
+  } catch (err) {
+    logger.error("Apple client secret sign failed", { message: err?.message });
+    throw new HttpsError("internal", "Could not build Apple client secret.");
+  }
+
+  // 2. Exchange the authorization code for tokens.
+  const tokenResp = await fetch("https://appleid.apple.com/auth/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: APPLE_CLIENT_ID,
+      client_secret: clientSecret,
+      code: authorizationCode,
+      grant_type: "authorization_code",
+    }).toString(),
+  });
+  const tokenJson = await tokenResp.json().catch(() => ({}));
+  if (!tokenResp.ok || (!tokenJson.refresh_token && !tokenJson.access_token)) {
+    logger.error("Apple token exchange failed", { status: tokenResp.status, error: tokenJson.error });
+    throw new HttpsError("internal", `Apple token exchange failed: ${tokenJson.error || tokenResp.status}`);
+  }
+
+  // 3. Revoke — prefer the refresh token (invalidates all tokens for the grant).
+  const token = tokenJson.refresh_token || tokenJson.access_token;
+  const tokenTypeHint = tokenJson.refresh_token ? "refresh_token" : "access_token";
+  const revokeResp = await fetch("https://appleid.apple.com/auth/revoke", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: APPLE_CLIENT_ID,
+      client_secret: clientSecret,
+      token,
+      token_type_hint: tokenTypeHint,
+    }).toString(),
+  });
+  if (!revokeResp.ok) {
+    const body = await revokeResp.text().catch(() => "");
+    logger.error("Apple revoke failed", { status: revokeResp.status, body: body.slice(0, 300) });
+    throw new HttpsError("internal", `Apple revoke failed: ${revokeResp.status}`);
+  }
+
+  logger.info("Apple token revoked", { uid: request.auth.uid });
+  return { revoked: true };
 });
 
 exports.__sendToPlayer = sendToPlayer;
