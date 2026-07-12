@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "281900029443",
+    "project_id": "wannabecup-c5aab",
+    "storage_bucket": "wannabecup-c5aab.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:281900029443:android:4cd132c6f555ce5c74a036",
+        "android_client_info": {
+          "package_name": "com.wannabecup.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "281900029443-guobmlrhtmma6cjomdevceuttl7jq4ed.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.wannabecup.app",
+            "certificate_hash": "efc2a38c42bb3c69dcefd22ad1e049c74b77939c"
+          }
+        },
+        {
+          "client_id": "281900029443-ske7vmk2pl060vn28c29ojushmd2qad9.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAW5a0aelk7iUzFwsWfq0K6aAdzhD8Tljo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "281900029443-ske7vmk2pl060vn28c29ojushmd2qad9.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "281900029443-h6fiklei6h681ssrl240mlq0o9lelqvv.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.wannabecup.app"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
