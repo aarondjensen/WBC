@@ -3,33 +3,38 @@ import { Component } from 'react'
 import './index.css'
 import App from './App.jsx'
 
-// ─────────────────────────────────────────────────────────────────────────
-// NATIVE-ONLY: enable safe-area insets.
-//
-// In the Capacitor shell the WebView fills the ENTIRE screen — including the
-// area behind the status bar and the home indicator. (The installed PWA never
-// had this problem: its opaque status bar meta made iOS reserve that space.)
-//
-// The header and bottom nav already carry the right CSS —
-//   paddingTop: max(10px, calc(env(safe-area-inset-top, 0px) + 10px))
-// — but env(safe-area-inset-*) only resolves to a NON-ZERO value when the
-// viewport is declared `viewport-fit=cover`. index.html deliberately OMITS
-// that (it triggers an iOS PWA viewport flip that corrupts --app-height and
-// blanks the app), so on native the insets silently collapse to 0 and the
-// header renders UNDER the status bar.
-//
-// Adding it here, at runtime and only when running natively, makes the insets
-// resolve in the native shell while leaving the web/PWA viewport policy —
-// and the bug it avoids — completely untouched.
-// ─────────────────────────────────────────────────────────────────────────
-try {
-  if (window.Capacitor?.isNativePlatform?.()) {
+// ── TEMPORARY DIAGNOSTIC: why is env(safe-area-inset-top) still 0 on native? ──
+// Measures the ACTUAL resolved inset by probing a real element, and reports the
+// viewport meta the DOM ended up with. Remove once the header sits correctly.
+setTimeout(() => {
+  try {
+    const probe = document.createElement('div');
+    probe.style.cssText =
+      'position:fixed;top:0;left:0;width:1px;visibility:hidden;' +
+      'height:env(safe-area-inset-top, 0px);';
+    document.body.appendChild(probe);
+    const insetTop = getComputedStyle(probe).height;
+    probe.style.height = 'env(safe-area-inset-bottom, 0px)';
+    const insetBottom = getComputedStyle(probe).height;
+    probe.remove();
+
     const vp = document.querySelector('meta[name="viewport"]');
-    if (vp && !vp.content.includes("viewport-fit")) {
-      vp.setAttribute("content", vp.content + ", viewport-fit=cover");
-    }
+    console.log(
+      '[safe-area-diag]',
+      'protocol=', location.protocol,
+      '| hasCapacitor=', !!window.Capacitor,
+      '| isNative=', (() => { try { return window.Capacitor?.isNativePlatform?.(); } catch { return 'ERR'; } })(),
+      '| viewportMeta=', vp ? vp.getAttribute('content') : 'NONE',
+      '| metaCount=', document.querySelectorAll('meta[name="viewport"]').length,
+      '| insetTop=', insetTop,
+      '| insetBottom=', insetBottom,
+      '| innerHeight=', window.innerHeight,
+      '| screenHeight=', window.screen?.height
+    );
+  } catch (e) {
+    console.log('[safe-area-diag] failed:', e?.message || e);
   }
-} catch { /* non-native or no meta — nothing to do */ }
+}, 800);
 
 // ─────────────────────────────────────────────────────────────────────────
 // Top-level error boundary.
