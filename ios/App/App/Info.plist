@@ -58,5 +58,11 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
+	<!-- WBC is a dark app (bg #080f1e). Without this, iOS renders the status bar
+	     clock/battery in DARK text, which is unreadable on the dark header.
+	     Capacitor's CAPBridgeViewController reads this key and applies
+	     .lightContent (white text). -->
+	<key>UIStatusBarStyle</key>
+	<string>UIStatusBarStyleLightContent</string>
 </dict>
 </plist>

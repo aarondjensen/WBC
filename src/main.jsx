@@ -3,6 +3,39 @@ import { Component } from 'react'
 import './index.css'
 import App from './App.jsx'
 
+// ── TEMPORARY DIAGNOSTIC: why is env(safe-area-inset-top) still 0 on native? ──
+// Measures the ACTUAL resolved inset by probing a real element, and reports the
+// viewport meta the DOM ended up with. Remove once the header sits correctly.
+setTimeout(() => {
+  try {
+    const probe = document.createElement('div');
+    probe.style.cssText =
+      'position:fixed;top:0;left:0;width:1px;visibility:hidden;' +
+      'height:env(safe-area-inset-top, 0px);';
+    document.body.appendChild(probe);
+    const insetTop = getComputedStyle(probe).height;
+    probe.style.height = 'env(safe-area-inset-bottom, 0px)';
+    const insetBottom = getComputedStyle(probe).height;
+    probe.remove();
+
+    const vp = document.querySelector('meta[name="viewport"]');
+    console.log(
+      '[safe-area-diag]',
+      'protocol=', location.protocol,
+      '| hasCapacitor=', !!window.Capacitor,
+      '| isNative=', (() => { try { return window.Capacitor?.isNativePlatform?.(); } catch { return 'ERR'; } })(),
+      '| viewportMeta=', vp ? vp.getAttribute('content') : 'NONE',
+      '| metaCount=', document.querySelectorAll('meta[name="viewport"]').length,
+      '| insetTop=', insetTop,
+      '| insetBottom=', insetBottom,
+      '| innerHeight=', window.innerHeight,
+      '| screenHeight=', window.screen?.height
+    );
+  } catch (e) {
+    console.log('[safe-area-diag] failed:', e?.message || e);
+  }
+}, 800);
+
 // ─────────────────────────────────────────────────────────────────────────
 // Top-level error boundary.
 //

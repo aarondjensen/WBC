@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/wbc-trophy.png" />
+    <link rel="apple-touch-icon" href="/wbc-icon-192.png" />
+    <link rel="manifest" href="/manifest.json" />
+    <!-- ─── Viewport policy: WEB vs NATIVE differ, and it matters ───────────
+         WEB / iOS PWA  → NO viewport-fit=cover. The opaque status bar meta below
+           makes iOS place content BELOW the status bar on its own, so cover is
+           unnecessary — and actively harmful here: cover made iOS flip
+           cover -> no-cover after first paint, corrupting --app-height and
+           blanking the app. Letting iOS own the safe areas is what keeps the
+           header from being clipped or over-padded.
+
+         NATIVE (Capacitor) → viewport-fit=cover IS REQUIRED. The native WebView
+           fills the whole screen, including behind the status bar and home
+           indicator, and it ignores apple-mobile-web-app-status-bar-style. The
+           header/nav already carry env(safe-area-inset-*) padding, but those
+           only resolve to non-zero WITH viewport-fit=cover — without it they
+           collapse to 0 and the header renders under the clock.
+
+         viewport-fit is resolved by WebKit at PARSE time, so setting it later
+         from JS does nothing. Hence this inline script: it emits the meta during
+         head parse, before first layout, with cover added only when native. -->
+    <script>
+      (function () {
+        var native = false;
+        try {
+          native = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform())
+                   || location.protocol === 'capacitor:';
+        } catch (e) {}
+        var m = document.createElement('meta');
+        m.setAttribute('name', 'viewport');
+        m.setAttribute('content',
+          'width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no'
+          + (native ? ', viewport-fit=cover' : '')
+        );
+        document.head.appendChild(m);
+      })();
+    </script>
+    <meta name="theme-color" content="#080f1e" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <!-- Opaque dark status bar (white text), content sits BELOW it. With no
+         viewport-fit=cover this avoids the under-status-bar overlay entirely. -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+    <meta name="apple-mobile-web-app-title" content="WBC 2026" />
+    <title>WBC 2026</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body, #root { height: 100%; overflow: hidden; background: #080f1e; }
+    </style>
+    <script>
+      function setAppHeight() {
+        // GUARD: on iOS PWA cold-reopen/resume, window.innerHeight is briefly 0
+        // (or an unstable tiny value) during the launch transition. Writing that
+        // into --app-height collapses the fixed-height app container to a blank
+        // dark screen (the "flash then dark" bug). Ignore any non-sane value and
+        // keep the last good one (or the CSS 100dvh fallback). Mirrors App.jsx.
+        var h = window.innerHeight;
+        if (!(h > 100)) return;
+        document.documentElement.style.setProperty('--app-height', h + 'px');
+      }
+
+      // Set immediately on load
+      setAppHeight();
+
+      // In standalone PWA mode on iOS, the layout settles after a short delay
+      if (navigator.standalone) {
+        setTimeout(setAppHeight, 100);
+        setTimeout(setAppHeight, 300);
+        setTimeout(setAppHeight, 600);
+      }
+
+      window.addEventListener('resize', setAppHeight);
+      window.addEventListener('orientationchange', function() {
+        setTimeout(setAppHeight, 200);
+        setTimeout(setAppHeight, 500);
+      });
+
+      // Also re-measure when the page becomes visible (e.g. switching back to the app)
+      document.addEventListener('visibilitychange', function() {
+        if (document.visibilityState === 'visible') {
+          setTimeout(setAppHeight, 100);
+        }
+      });
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
