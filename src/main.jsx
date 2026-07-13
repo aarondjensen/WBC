@@ -4,6 +4,34 @@ import './index.css'
 import App from './App.jsx'
 
 // ─────────────────────────────────────────────────────────────────────────
+// NATIVE-ONLY: enable safe-area insets.
+//
+// In the Capacitor shell the WebView fills the ENTIRE screen — including the
+// area behind the status bar and the home indicator. (The installed PWA never
+// had this problem: its opaque status bar meta made iOS reserve that space.)
+//
+// The header and bottom nav already carry the right CSS —
+//   paddingTop: max(10px, calc(env(safe-area-inset-top, 0px) + 10px))
+// — but env(safe-area-inset-*) only resolves to a NON-ZERO value when the
+// viewport is declared `viewport-fit=cover`. index.html deliberately OMITS
+// that (it triggers an iOS PWA viewport flip that corrupts --app-height and
+// blanks the app), so on native the insets silently collapse to 0 and the
+// header renders UNDER the status bar.
+//
+// Adding it here, at runtime and only when running natively, makes the insets
+// resolve in the native shell while leaving the web/PWA viewport policy —
+// and the bug it avoids — completely untouched.
+// ─────────────────────────────────────────────────────────────────────────
+try {
+  if (window.Capacitor?.isNativePlatform?.()) {
+    const vp = document.querySelector('meta[name="viewport"]');
+    if (vp && !vp.content.includes("viewport-fit")) {
+      vp.setAttribute("content", vp.content + ", viewport-fit=cover");
+    }
+  }
+} catch { /* non-native or no meta — nothing to do */ }
+
+// ─────────────────────────────────────────────────────────────────────────
 // Top-level error boundary.
 //
 // Until now the app had NO boundary: any render-time throw anywhere in the
