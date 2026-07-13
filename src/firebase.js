@@ -109,6 +109,20 @@ export const isNativePlatform = () => {
   }
 };
 
+// True only inside the native ANDROID shell. Used to hide Sign in with Apple
+// there: Android has no native Apple SDK, so the plugin falls back to a Chrome
+// Custom Tab web flow that we cannot verify (and which crashed the emulator).
+// Nothing requires Apple sign-in on Android — App Store Guideline 4.8 applies
+// to the iOS app only, and Google Play has no equivalent rule. Android users who
+// registered via Apple can still sign in on the web app at wannabecup.com.
+export const isAndroidNative = () => {
+  try {
+    return isNativePlatform() && window.Capacitor.getPlatform() === "android";
+  } catch {
+    return false;
+  }
+};
+
 // ─── Native auth plugin ──────────────────────────────────────────────────
 // The Capacitor Firebase Auth plugin (FirebaseAuthentication) is imported
 // statically at the top of this module and used DIRECTLY at each call site.
