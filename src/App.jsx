@@ -45,6 +45,13 @@ const NUM_ROUNDS = TOURNAMENT.num_rounds || 4;
 const TOURNAMENT_ID = "wbc_2026";
 const DEFAULT_PW = "wbc2026"; // default player login password
 
+// CTP distance wheel — whole feet, 1..CTP_MAX_FT. Ported from MNQ's hole-CTP prompt.
+// A ball outside 60 ft on a par 3 isn't winning a closest-to-pin, so the wheel caps
+// there rather than scrolling forever.
+const CTP_MAX_FT = 60;
+const CTP_WHEEL_ITEM = 36;   // px per row — also the scroll-snap stride
+const CTP_WHEEL_H = 150;     // px visible wheel height
+
 // Tournament directors — the two player_ids that get admin access. Single
 // source of truth so the login screen, claim resolution, and admin gating
 // all agree.
@@ -189,6 +196,26 @@ const rowsToTeeData = (rows) => {
     td[r.round_number][r.player_id] = r.tee_name;
   });
   return td;
+};
+
+// Convert skins rows (skin_type "ctp") → ctpData { round: { holeNum: { playerId, distanceFt, distance, taggedByName } } }
+// CTP is TOURNAMENT-WIDE: exactly one winner per par-3 per round, held by whichever
+// group has tagged the closest ball so far. Later groups see the standing tag as the
+// number to beat and can claim it — see the CTP prompt in OnCourseScoring.
+const rowsToCtp = (rows) => {
+  const cd = {};
+  (rows || []).filter(r => r.skin_type === "ctp" && r.player_id).forEach(r => {
+    const rnd = r.round_number || extractRound(r.id);
+    if (!cd[rnd]) cd[rnd] = {};
+    const ft = (r.distance_ft === 0 || r.distance_ft) ? r.distance_ft : null;
+    cd[rnd][r.hole_number] = {
+      playerId: r.player_id,
+      distanceFt: ft,
+      distance: r.distance || (ft ? `${ft} ft` : ""),
+      taggedByName: r.tagged_by_name || "",
+    };
+  });
+  return cd;
 };
 
 // Convert tee times rows → teeTimesData { round: [time, time, ...] }
@@ -825,11 +852,17 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
   const [showFinalize, setShowFinalize] = useState(false);
   const [wdConfirm, setWdConfirm] = useState(null);
   const [showFullCard, setShowFullCard] = useState(false);
-  // CTP inline prompt (par-3s only). ctpDismissedKeys: Set of "round_hole" the
-  // user has chosen to skip; keeps us from re-nagging on hole revisit within
-  // the same session. showCtpForHole is 0-indexed hole currently being asked.
+  // CTP inline prompt (par-3s only). showCtpForHole is the 0-indexed hole being asked.
+  // promptedCtpKeys is a SESSION guard keyed by `${round}_${holeNum}_${groupKey}` — it
+  // must include the group, because one device may score several groups (director doing
+  // mock entry, or a scorer covering a second foursome). Keying on round+hole alone was
+  // the bug: the first group to answer consumed the key and every later group was
+  // silently skipped. A standing tag from an earlier group NO LONGER suppresses the
+  // prompt — it's surfaced as the "current CTP" number to beat.
   const [showCtpForHole, setShowCtpForHole] = useState(null);
-  const [ctpDismissedKeys, setCtpDismissedKeys] = useState(() => new Set());
+  const promptedCtpKeys = useRef({});
+  const [ctpPickPlayer, setCtpPickPlayer] = useState("");
+  const [ctpFeet, setCtpFeet] = useState(10);
 
 
   const tr = tRounds.find(t => t.round_number === round);
@@ -869,6 +902,11 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
       if (!allDone) {
         setCurrentHole(i);
         setNavSourceSynced("auto"); // incomplete hole — allow auto-advance after scoring
+        // Clear edit mode. Without this, switching FROM a completed group (which sets
+        // editingCompleted true below) INTO a fresh group left the flag stuck true —
+        // and edit mode suppresses both the CTP prompt and auto-advance. Second path
+        // to the "later groups get no CTP popup" bug.
+        setEditingCompleted(false);
         return;
       }
     }
@@ -974,25 +1012,33 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
     if (!allRoundComplete) shownFinalizeRef.current = false;
   }, [allRoundComplete, JSON.stringify(group), round]);
 
-  // Prompt for CTP when a par-3 completes (unless already recorded or dismissed
-  // for this round+hole). Blocks the auto-advance below until the user picks a
-  // winner or dismisses. Only prompts during fresh scoring — not while editing
-  // an already-completed hole — since the round-level admin view is the right
-  // place to correct a stale CTP.
+  // Prompt for CTP when a par-3 completes for THIS group. Blocks the auto-advance
+  // below until the group tags a winner or passes. Only prompts during fresh scoring —
+  // not while editing an already-completed hole — since the Betting tab is the right
+  // place for a director to correct a stale tag.
+  //
+  // CTP is tournament-wide (one winner per par-3 per round), so an existing tag from an
+  // earlier group must NOT suppress this: every group gets asked, sees the standing
+  // distance, and either beats it or passes. The only suppression is the per-group
+  // session guard, so a group isn't re-nagged when it revisits its own hole.
   useEffect(() => {
     if (!group || isGroupFinalized) return;
     if (editingCompleted) return;
     if (par !== 3) return;
     if (!allScored) return;
     const holeNum = currentHole + 1;
-    const key = `${round}_${holeNum}`;
-    const alreadySet = ((ctpData || {})[round] || {})[holeNum];
-    if (alreadySet) return;
-    if (ctpDismissedKeys.has(key)) return;
+    const key = `${round}_${holeNum}_${group.slice().sort().join(",")}`;
+    if (promptedCtpKeys.current[key]) return;
     if (showCtpForHole === currentHole) return;
+    promptedCtpKeys.current[key] = true;
+    const leader = ((ctpData || {})[round] || {})[holeNum];
+    // Seed the wheel at the standing distance so "beat it" means scrolling up, not
+    // hunting from a cold 10 ft default.
+    setCtpPickPlayer("");
+    setCtpFeet(leader?.distanceFt ? Math.max(1, Math.min(CTP_MAX_FT, leader.distanceFt)) : 10);
     setShowCtpForHole(currentHole);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allScored, par, currentHole, round, ctpData, editingCompleted]);
+  }, [allScored, par, currentHole, round, ctpData, editingCompleted, isGroupFinalized]);
 
   // Auto-advance after short delay when all scored (only on fresh scoring, not editing).
   // Suppressed while the CTP popup is open so the user isn't fighting the animation.
@@ -1623,48 +1669,122 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
         </Popup>
       )}
 
-      {/* CTP popup — asks who was Closest to Pin when a par-3 completes.
-          Blocks auto-advance until user picks a winner or dismisses. Explicit
-          buttons only — no backdrop dismiss (we want a real answer). */}
+      {/* CTP popup — asks who was Closest to Pin when a par-3 completes for this group.
+          Tournament-wide CTP: one winner per par-3 per round. Every group gets the
+          prompt as they finish the hole; an earlier group's tag shows in the "current
+          CTP" leader bar so this group knows the number to beat, and either claims it
+          with a shorter distance or passes. Blocks auto-advance until answered.
+          Explicit buttons only — no backdrop dismiss (we want a real answer). */}
       {showCtpForHole !== null && (() => {
         const holeNum = showCtpForHole + 1;
-        const key = `${round}_${holeNum}`;
-        const closeAndAdvance = () => setShowCtpForHole(null);
-        const pick = async (pid) => {
+        const leader = ((ctpData || {})[round] || {})[holeNum];
+        const leaderPl = leader ? players.find(p => p.id === leader.playerId) : null;
+        const leaderDist = leader ? (leader.distanceFt ? `${leader.distanceFt} ft` : (leader.distance || "")) : "";
+        const closeAndAdvance = () => { setShowCtpForHole(null); setCtpPickPlayer(""); };
+        // Beating the standing tag is a strictly-shorter distance. Equal isn't closer —
+        // ties keep the earlier group's tag (first to hole it holds the pin).
+        const beatsLeader = !leader || !leader.distanceFt || ctpFeet < leader.distanceFt;
+        const canTag = !!ctpPickPlayer && beatsLeader;
+        const save = async () => {
+          if (!canTag) return;
           tapBigAction();
-          try { await onSetCtp?.(round, holeNum, pid); } catch {}
+          try { await onSetCtp?.(round, holeNum, ctpPickPlayer, ctpFeet); } catch {}
           closeAndAdvance();
         };
-        const dismiss = () => {
-          tapNudge();
-          setCtpDismissedKeys(prev => { const next = new Set(prev); next.add(key); return next; });
-          closeAndAdvance();
+        // Wheel: set scrollTop once when the scroll node mounts, then derive feet from
+        // scroll position. Snap stride === CTP_WHEEL_ITEM so a settle always lands on a row.
+        const wheelRef = (el) => {
+          if (el && !el.dataset.init) {
+            el.dataset.init = "1";
+            el.scrollTop = (ctpFeet - 1) * CTP_WHEEL_ITEM;
+          }
+        };
+        const onWheelScroll = (e) => {
+          const v = Math.max(1, Math.min(CTP_MAX_FT, Math.round(e.currentTarget.scrollTop / CTP_WHEEL_ITEM) + 1));
+          setCtpFeet(prev => (prev === v ? prev : v));
         };
         return (
-          <Popup onClose={dismiss} maxWidth={360} dismissOnBackdrop={false} background={K.card} borderColor={K.acc + "40"} padding={0} zIndex={350}>
+          <Popup onClose={closeAndAdvance} maxWidth={360} dismissOnBackdrop={false} background={K.card} borderColor={K.acc + "40"} padding={0} zIndex={350}>
             <div style={{ background: K.acc + "15", borderBottom: `1px solid ${K.acc}30`, padding: "14px 20px", textAlign: "center" }}>
               <div style={{ fontSize: 24, marginBottom: 4 }}>🎯</div>
               <div style={{ fontSize: 14, fontWeight: 800, color: K.acc, letterSpacing: 0.3 }}>Closest to Pin</div>
               <div style={{ fontSize: 11, color: K.t3, marginTop: 2 }}>Hole {holeNum} · Par 3</div>
             </div>
             <div style={{ padding: "14px 16px" }}>
-              <div style={{ fontSize: 11, color: K.t3, textAlign: "center", marginBottom: 10 }}>Who was closest?</div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
+
+              {/* Current-leader bar — the number to beat, tagged by an earlier group */}
+              {leader && leaderPl && (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, background: K.warn + "14", border: `1px solid ${K.warn}55`, borderRadius: 10, padding: "8px 10px", marginBottom: 12 }}>
+                  <span style={{ fontSize: 15 }}>⛳</span>
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ display: "block", fontSize: 9, fontWeight: 800, color: K.warn, letterSpacing: 1.2, textTransform: "uppercase" }}>Current CTP</span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: K.t1 }}>{leaderPl.name}</span>
+                  </span>
+                  {leaderDist && <span style={{ fontSize: 13, fontWeight: 800, color: K.warn }}>{leaderDist}</span>}
+                </div>
+              )}
+
+              <div style={{ fontSize: 10, fontWeight: 800, color: K.t3, letterSpacing: 1.2, textTransform: "uppercase", marginBottom: 6 }}>
+                {leader ? "Who was closer?" : "Who was closest?"}
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 14 }}>
                 {presentGroupPids.map(pid => {
                   const pl = players.find(p => p.id === pid);
                   if (!pl) return null;
+                  const sel = ctpPickPlayer === pid;
                   return (
-                    <button key={pid} onClick={() => pick(pid)} style={{
-                      padding: "12px 14px", borderRadius: 10, background: K.inp, border: `1px solid ${K.bdr}`,
-                      color: K.t1, fontSize: 14, fontWeight: 700, cursor: "pointer", textAlign: "left",
+                    <button key={pid} onClick={() => { tapNudge(); setCtpPickPlayer(sel ? "" : pid); }} style={{
+                      padding: "11px 6px", borderRadius: 10,
+                      background: sel ? K.acc + "24" : K.inp,
+                      border: `1px solid ${sel ? K.acc : K.bdr}`,
+                      color: sel ? K.acc : K.t2,
+                      fontSize: 13, fontWeight: 700, cursor: "pointer", textAlign: "center",
                     }}>{pl.name}</button>
                   );
                 })}
               </div>
-              <button onClick={dismiss} style={{
-                width: "100%", padding: "10px 0", borderRadius: 10, background: "transparent",
-                border: `1px solid ${K.bdr}`, color: K.t3, fontSize: 12, fontWeight: 600, cursor: "pointer",
-              }}>None of us — skip</button>
+
+              <div style={{ fontSize: 10, fontWeight: 800, color: K.t3, letterSpacing: 1.2, textTransform: "uppercase", marginBottom: 6 }}>Approx. distance</div>
+              <div style={{ position: "relative", height: CTP_WHEEL_H, background: K.inp, border: `1px solid ${K.bdr}`, borderRadius: 12, overflow: "hidden", marginBottom: 10 }}>
+                {/* selection band */}
+                <div style={{ position: "absolute", left: 10, right: 10, top: "50%", height: CTP_WHEEL_ITEM + 2, transform: "translateY(-50%)", borderTop: `1.5px solid ${K.acc}`, borderBottom: `1.5px solid ${K.acc}`, borderRadius: 4, background: K.acc + "0d", pointerEvents: "none", zIndex: 2 }} />
+                <div style={{ position: "absolute", right: 46, top: "50%", transform: "translateY(-50%)", fontSize: 11, fontWeight: 800, color: K.acc, letterSpacing: 1.2, pointerEvents: "none", zIndex: 2 }}>FT</div>
+                <div
+                  ref={wheelRef}
+                  onScroll={onWheelScroll}
+                  style={{ height: "100%", overflowY: "scroll", scrollSnapType: "y mandatory", padding: `${(CTP_WHEEL_H - CTP_WHEEL_ITEM) / 2}px 0`, WebkitOverflowScrolling: "touch", scrollbarWidth: "none" }}
+                >
+                  {Array.from({ length: CTP_MAX_FT }, (_, i) => i + 1).map(ft => (
+                    <div key={ft} style={{ height: CTP_WHEEL_ITEM, lineHeight: `${CTP_WHEEL_ITEM}px`, textAlign: "center", fontSize: ft === ctpFeet ? 21 : 18, fontWeight: ft === ctpFeet ? 800 : 700, color: ft === ctpFeet ? K.t1 : K.t3, scrollSnapAlign: "center" }}>
+                      {ft}
+                    </div>
+                  ))}
+                </div>
+                {/* edge fades */}
+                <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 46, background: `linear-gradient(${K.inp}, transparent)`, pointerEvents: "none" }} />
+                <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 46, background: `linear-gradient(transparent, ${K.inp})`, pointerEvents: "none" }} />
+              </div>
+
+              {/* Why the tag button is dead — surfaced instead of leaving it mysteriously grey */}
+              {ctpPickPlayer && !beatsLeader && (
+                <div style={{ fontSize: 11, color: K.warn, textAlign: "center", marginBottom: 8, lineHeight: 1.4 }}>
+                  {ctpFeet === leader.distanceFt
+                    ? `Tied with ${leaderPl?.name || "the current CTP"} — the earlier tag holds.`
+                    : `Not inside ${leaderDist} — ${leaderPl?.name || "the current CTP"} keeps it.`}
+                </div>
+              )}
+
+              <button onClick={save} disabled={!canTag} style={{
+                width: "100%", padding: 13, borderRadius: 10,
+                background: canTag ? K.acc : K.inp,
+                border: canTag ? "none" : `1px solid ${K.bdr}`,
+                color: canTag ? K.bg : K.t3,
+                fontSize: 14, fontWeight: 800, cursor: canTag ? "pointer" : "default", letterSpacing: 0.5,
+              }}>{leader ? "Tag New CTP" : "Tag CTP"}</button>
+              <button onClick={() => { tapNudge(); closeAndAdvance(); }} style={{
+                width: "100%", marginTop: 7, padding: 12, borderRadius: 10, background: "transparent",
+                border: `1px solid ${K.bdr}`, color: K.t3, fontSize: 12, fontWeight: 700, cursor: "pointer",
+              }}>{leader ? "Our group wasn't closer" : "None of us — skip"}</button>
             </div>
           </Popup>
         );
@@ -1905,6 +2025,10 @@ function GroupSetup({ user, players, onStart, presetGroup }) {
 function SkinsCtpView({ players, round, tRounds, courses, holeData, ctpData, onSetCtp, user, teeData, getPlayerTee }) {
   const [tab, setTab] = useState("skins");
   const [expandedPlayer, setExpandedPlayer] = useState(null);
+  // Director CTP override — hole currently being edited, plus the pending winner/feet.
+  const [editCtpHole, setEditCtpHole] = useState(null);
+  const [editCtpPlayer, setEditCtpPlayer] = useState("");
+  const [editCtpFeet, setEditCtpFeet] = useState("");
   const tr = tRounds.find(t => t.round_number === round);
   const course = tr ? courses.find(c => c.id === tr.course_id) : null;
 
@@ -2145,19 +2269,63 @@ function SkinsCtpView({ players, round, tRounds, courses, holeData, ctpData, onS
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {par3s.length === 0 ? <div style={{ background: K.card, borderRadius: 12, padding: 32, textAlign: "center", color: K.t3 }}>No par 3s</div> :
           par3s.map(hole => {
-            const winnerId = roundCtps[hole];
-            const winner = winnerId ? players.find(p => p.id === winnerId) : null;
+            const rec = roundCtps[hole];
+            const winner = rec ? players.find(p => p.id === rec.playerId) : null;
+            const dist = rec ? (rec.distanceFt ? `${rec.distanceFt} ft` : (rec.distance || "")) : "";
+            const isEd = editCtpHole === hole;
             return (
               <div key={hole} style={{ background: K.card, borderRadius: 12, border: `1px solid ${K.bdr}`, padding: 14 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
                   <div><span style={{ fontSize: 15, fontWeight: 700 }}>Hole {hole}</span><span style={{ fontSize: 12, color: K.t3, marginLeft: 8 }}>Par 3</span></div>
-                  {winner ? <span style={{ fontSize: 14, fontWeight: 700, color: K.acc }}>🎯 {winner.name}</span> : <span style={{ fontSize: 12, color: K.t3 }}>No winner yet</span>}
+                  {winner ? (
+                    <span style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
+                      <span style={{ fontSize: 14, fontWeight: 700, color: K.acc, whiteSpace: "nowrap" }}>🎯 {winner.name}</span>
+                      {dist && <span style={{ fontSize: 13, fontWeight: 800, color: K.warn }}>{dist}</span>}
+                    </span>
+                  ) : <span style={{ fontSize: 12, color: K.t3 }}>No winner yet</span>}
                 </div>
-                {user.isDirector && !winner && (
-                  <select onChange={e => { if (e.target.value) onSetCtp(round, hole, e.target.value); }} style={{ width: "100%", padding: "8px 12px", background: K.inp, border: `1px solid ${K.bdr}`, borderRadius: 8, color: K.t1, fontSize: 13, marginTop: 10 }}>
-                    <option value="">Select CTP winner...</option>
-                    {players.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                  </select>
+
+                {/* Tagged-by line — CTP is claimed on-course by whichever group was closest,
+                    so it's worth showing who recorded it when a director is reconciling. */}
+                {rec?.taggedByName && !isEd && (
+                  <div style={{ fontSize: 10, color: K.t3, marginTop: 4 }}>Tagged by {rec.taggedByName}</div>
+                )}
+
+                {/* Director override — available whether or not a tag exists. This is the
+                    correction path for a mis-tagged winner or a mis-scrolled distance. */}
+                {user.isDirector && !isEd && (
+                  <button onClick={() => { setEditCtpHole(hole); setEditCtpPlayer(rec?.playerId || ""); setEditCtpFeet(rec?.distanceFt ? String(rec.distanceFt) : ""); }} style={{
+                    width: "100%", marginTop: 10, padding: "8px 0", borderRadius: 8, background: K.inp,
+                    border: `1px solid ${K.bdr}`, color: K.t2, fontSize: 12, fontWeight: 700, cursor: "pointer",
+                  }}>{winner ? "Edit CTP" : "Set CTP winner"}</button>
+                )}
+                {user.isDirector && isEd && (
+                  <div style={{ marginTop: 10 }}>
+                    <select value={editCtpPlayer} onChange={e => setEditCtpPlayer(e.target.value)} style={{ width: "100%", padding: "8px 12px", background: K.inp, border: `1px solid ${K.bdr}`, borderRadius: 8, color: K.t1, fontSize: 13, marginBottom: 6 }}>
+                      <option value="">Select CTP winner...</option>
+                      {players.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                    <input
+                      type="number" inputMode="numeric" min="1" max={CTP_MAX_FT}
+                      placeholder="Distance (ft)"
+                      value={editCtpFeet}
+                      onChange={e => setEditCtpFeet(e.target.value)}
+                      style={{ width: "100%", padding: "8px 12px", background: K.inp, border: `1px solid ${K.bdr}`, borderRadius: 8, color: K.t1, fontSize: 13, marginBottom: 8, boxSizing: "border-box" }}
+                    />
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button
+                        onClick={async () => {
+                          if (!editCtpPlayer) return;
+                          const ft = editCtpFeet === "" ? null : Math.max(1, Math.min(CTP_MAX_FT, parseInt(editCtpFeet, 10) || 0)) || null;
+                          await onSetCtp(round, hole, editCtpPlayer, ft);
+                          setEditCtpHole(null);
+                        }}
+                        disabled={!editCtpPlayer}
+                        style={{ flex: 1, padding: 9, borderRadius: 8, background: editCtpPlayer ? K.acc : K.inp, border: editCtpPlayer ? "none" : `1px solid ${K.bdr}`, color: editCtpPlayer ? K.bg : K.t3, fontSize: 13, fontWeight: 800, cursor: editCtpPlayer ? "pointer" : "default" }}
+                      >Save</button>
+                      <button onClick={() => setEditCtpHole(null)} style={{ flex: 1, padding: 9, borderRadius: 8, background: K.inp, border: `1px solid ${K.bdr}`, color: K.t2, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Cancel</button>
+                    </div>
+                  </div>
                 )}
               </div>
             );
@@ -4444,6 +4612,12 @@ export default function WBCApp() {
         const teeRows = await db.get("tee_assignments", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
         if (teeRows?.length) setTeeData(rowsToTeeData(teeRows));
 
+        // CTP tags live in `skins` (skin_type "ctp"). This collection was written but
+        // NEVER read — ctpData started empty on every load, so the on-course prompt
+        // treated already-tagged holes as untagged and the Betting tab showed nothing.
+        const skinRows = await db.get("skins", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
+        if (skinRows?.length) setCtpData(rowsToCtp(skinRows));
+
         const stateRows = await db.get("tournament_state", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
         if (stateRows?.length) {
           const s = stateRows[0];
@@ -4484,6 +4658,13 @@ export default function WBCApp() {
 
     unsubs.push(db.subscribe("tee_assignments", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
       setTeeData(rowsToTeeData(docs));
+    }));
+
+    // CTP is tournament-wide, so a tag from Group 1's phone has to reach Group 4's phone
+    // before they hit that par 3 — otherwise the leader bar shows nothing to beat and
+    // the last group in wins by default. Live subscription, same as scores.
+    unsubs.push(db.subscribe("skins", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
+      setCtpData(rowsToCtp(docs));
     }));
 
     unsubs.push(db.subscribe("tournament_state", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
@@ -5059,14 +5240,40 @@ export default function WBCApp() {
     return wins;
   }, [activePlayers, holeData, tRounds, courseList]);
 
-  const onSetCtp = async (rnd, hole, pid) => {
-    setCtpData(prev => ({ ...prev, [rnd]: { ...(prev[rnd] || {}), [hole]: pid } }));
-    // Store CTP as a skin type in the skins table
+  // Tag / re-tag the tournament-wide CTP for a par 3. One doc per round+hole, so a
+  // closer ball from a later group overwrites the standing tag.
+  //
+  // distance_ft is written EXPLICITLY (null when unknown) rather than omitted: db.upsert
+  // uses setDoc(merge:true), so an omitted field would silently retain the previous
+  // player's distance and attach it to the new winner.
+  const onSetCtp = async (rnd, hole, pid, distanceFt = null) => {
+    const ft = (distanceFt === null || distanceFt === undefined || distanceFt === "") ? null : Number(distanceFt);
+    const distance = ft ? `${ft} ft` : "";
+    const taggedByName = user?.name || "";
+    setCtpData(prev => ({
+      ...prev,
+      [rnd]: { ...(prev[rnd] || {}), [hole]: { playerId: pid, distanceFt: ft, distance, taggedByName } },
+    }));
+    // Store CTP as a skin type in the skins table.
+    // tournament_id was previously MISSING — which meant these docs were invisible to
+    // every tournament-scoped query (including Start Fresh's cleanup) and could never
+    // be loaded back. That's why CTPs evaporated on reload.
     const tr = tRounds.find(t => t.round_number === rnd);
-    if (tr) {
-      await db.upsert("skins", { id: `ctp_2026_r${rnd}_h${hole}`, tournament_round_id: tr.id, hole_number: hole, player_id: pid, skin_type: "ctp" }, "id");
-    }
-    notify(`CTP Hole ${hole} set`);
+    await db.upsert("skins", {
+      id: `ctp_2026_r${rnd}_h${hole}`,
+      tournament_id: TOURNAMENT_ID,
+      tournament_round_id: tr?.id || null,
+      round_number: rnd,
+      hole_number: hole,
+      player_id: pid,
+      skin_type: "ctp",
+      distance_ft: ft,
+      distance,
+      tagged_by: user?.id || null,
+      tagged_by_name: taggedByName,
+      tagged_at: new Date().toISOString(),
+    }, "id");
+    notify(ft ? `CTP Hole ${hole} — ${ft} ft` : `CTP Hole ${hole} set`);
   };
 
   const setPairings = async (rnd, groups) => {
