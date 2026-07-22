@@ -233,6 +233,56 @@ const rowsToTeeTimes = (rows) => {
 const calcCH = (hi, slope, rating, par) => (!hi && hi !== 0) ? 0 : Math.round((hi * (slope / 113)) + (rating - par));
 const fmtPar = n => n == null ? "—" : n === 0 ? "E" : n > 0 ? `+${n}` : `${n}`;
 
+// ── SCORING GATE HELPERS ──
+// Minutes before tee time that scoring input unlocks for non-directors.
+const SCORING_LEAD_MIN = 30;
+// Parse a tee-time display string ("8:00 AM") → minutes since midnight; null if unparseable.
+const teeTimeToMinutes = (str) => {
+  if (!str) return null;
+  const match = String(str).match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
+  if (!match) return null;
+  let h = parseInt(match[1]); const m = parseInt(match[2]);
+  const ampm = (match[3] || "").toUpperCase();
+  if (ampm === "PM" && h < 12) h += 12;
+  if (ampm === "AM" && h === 12) h = 0;
+  return h * 60 + m;
+};
+// Minutes since midnight → display time ("7:30 AM").
+const minutesToTimeStr = (mins) => {
+  if (mins == null) return "";
+  const norm = ((mins % 1440) + 1440) % 1440;
+  let h = Math.floor(norm / 60); const m = norm % 60;
+  const ampm = h >= 12 ? "PM" : "AM"; if (h > 12) h -= 12; if (h === 0) h = 12;
+  return `${h}:${String(m).padStart(2, "0")} ${ampm}`;
+};
+// Local calendar date as YYYY-MM-DD — matches an <input type="date"> value.
+const localDateISO = (d = new Date()) => {
+  const y = d.getFullYear(); const mo = String(d.getMonth() + 1).padStart(2, "0"); const da = String(d.getDate()).padStart(2, "0");
+  return `${y}-${mo}-${da}`;
+};
+// Pretty round date ("Sat, Aug 15") from a YYYY-MM-DD string.
+const fmtRoundDate = (iso) => {
+  if (!iso) return "";
+  const [y, mo, da] = iso.split("-").map(Number);
+  if (!y || !mo || !da) return "";
+  return new Date(y, mo - 1, da).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+};
+// Is score entry open right now for a given round + this group's tee time?
+// Director → always open. Director "scoring open" toggle → open. Otherwise the
+// automatic gate: opens SCORING_LEAD_MIN before tee time, on the round's scheduled date.
+const isScoringOpen = ({ round, teeTime, roundDates, scoringOpen, isDirector }) => {
+  if (isDirector) return true;
+  if (scoringOpen && scoringOpen[round] === true) return true;
+  const dateStr = roundDates && roundDates[round];
+  if (!dateStr) return false;                    // no date set → closed until a director opens it
+  if (dateStr !== localDateISO()) return false;  // round isn't today → closed
+  const teeMin = teeTimeToMinutes(teeTime);
+  if (teeMin == null) return false;              // no/invalid tee time → closed
+  const now = new Date();
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  return nowMin >= teeMin - SCORING_LEAD_MIN;
+};
+
 // Resolve tee color from name — handles standard colors, non-standard colors, and word names
 const TEE_COLOR_MAP = {
   black: "#2c2c2c", blue: "#2d8fd4", white: "#e8e8e8", gold: "#d4a843", red: "#9b2335",
@@ -589,6 +639,17 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, teeD
           {(() => {
             const isFinalized = finalizedRounds[round];
             if (isFinalized) return <span style={{ fontSize: 9, fontWeight: 700, color: K.acc, background: K.acc+"15", border: `1px solid ${K.acc}40`, borderRadius: 6, padding: "2px 8px" }}>✓ FINAL</span>;
+            // LIVE: round not finalized AND at least one active player is mid-round (thru 1–17).
+            const live = lb.some(p => !p.isWD && p.rds?.[round - 1]?.thru > 0 && p.rds[round - 1].thru < 18);
+            if (live) return (
+              <>
+                <style>{`@keyframes wbcLivePulse{0%,100%{opacity:1}50%{opacity:.4}}`}</style>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 7px", borderRadius: 10, background: "#ef444418", border: "1px solid #ef444440" }}>
+                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#ef4444", animation: "wbcLivePulse 1.5s ease-in-out infinite" }} />
+                  <span style={{ fontSize: 9, fontWeight: 800, color: "#ef4444", letterSpacing: ".08em" }}>LIVE</span>
+                </span>
+              </>
+            );
             return null;
           })()}
         </div>
@@ -837,7 +898,7 @@ function Popup({ children, onClose, maxWidth = 420, background, borderColor, pad
 
 // ── ON-COURSE SCORING (replaces old ScoringView) ──
 // Flow: Group Setup → Hole-by-hole for entire group → auto-advance
-function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPlayers, onSaveHole, notify, pairingsData, teeData, setTee, getPlayerTee, finalizedRounds, scorecardSigs, onSignScorecard, onAttestScorecard, onUnsignScorecard, onFinalizeRound, onUnfinalizeRound, onNavigate, onGoToAdminCourses, markPlayerWD, ctpData, onSetCtp }) {
+function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPlayers, onSaveHole, notify, pairingsData, teeTimesData, roundDates, scoringOpen, teeData, setTee, getPlayerTee, finalizedRounds, scorecardSigs, onSignScorecard, onAttestScorecard, onUnsignScorecard, onFinalizeRound, onUnfinalizeRound, onNavigate, onGoToAdminCourses, markPlayerWD, ctpData, onSetCtp }) {
   const [group, setGroup] = useState(null);
   const [currentHole, setCurrentHole] = useState(0);
   const [manualOverride, setManualOverride] = useState(false);
@@ -1248,6 +1309,42 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
       </div>
     </div>
   );
+
+  // ── SCORING GATE ──
+  // Non-directors can't enter scores until SCORING_LEAD_MIN before their group's
+  // tee time on the round's scheduled date — unless a director has toggled the
+  // round's scoring open. Directors always bypass (isScoringOpen returns true).
+  // Placed after the finalized early-return so a locked group still shows its
+  // final screen rather than the gate.
+  const _myGroupIdx = group ? presetGroups.findIndex(g => g.slice().sort().join(",") === group.slice().sort().join(",")) : -1;
+  const _myTeeTime = _myGroupIdx >= 0 ? ((teeTimesData || {})[round] || [])[_myGroupIdx] : null;
+  const _scoringGateOpen = isScoringOpen({ round, teeTime: _myTeeTime, roundDates, scoringOpen, isDirector: user.isDirector });
+  if (!_scoringGateOpen) {
+    const teeMin = teeTimeToMinutes(_myTeeTime);
+    const opensAt = teeMin != null ? minutesToTimeStr(teeMin - SCORING_LEAD_MIN) : null;
+    const dateStr = (roundDates || {})[round];
+    return (
+      <div style={{ textAlign: "center", padding: "40px 20px" }}>
+        <div style={{ fontSize: 40, marginBottom: 12 }}>⏱️</div>
+        <div style={{ fontSize: 16, fontWeight: 700, color: K.t1, marginBottom: 6 }}>Scoring Not Open Yet</div>
+        <div style={{ fontSize: 12, color: K.t3, lineHeight: 1.7, maxWidth: 300, margin: "0 auto" }}>
+          {_myTeeTime ? (
+            <>
+              Scoring for your group opens {SCORING_LEAD_MIN} minutes before your{" "}
+              <strong style={{ color: K.t2 }}>{_myTeeTime}</strong> tee time
+              {opensAt ? <> — at <strong style={{ color: K.acc }}>{opensAt}</strong></> : null}
+              {dateStr ? <> on <strong style={{ color: K.t2 }}>{fmtRoundDate(dateStr)}</strong></> : null}.
+            </>
+          ) : (
+            <>Your tournament director will open scoring before the round begins.</>
+          )}
+        </div>
+        {_myGroupIdx >= 0 && (
+          <div style={{ marginTop: 14, fontSize: 11, color: K.t3, opacity: 0.7 }}>Group {_myGroupIdx + 1}</div>
+        )}
+      </div>
+    );
+  }
 
   // ── SIGN / ATTESTATION STATE (two-phase scorecard, ported from league) ──
   // A signed-but-not-attested group renders in the main view (not the
@@ -2407,7 +2504,7 @@ function GroupsView({ players, round, tRounds, courses, pairingsData, teeTimesDa
 
 // ── ADMIN ──
 // ── PAIRINGS EDITOR ──
-function PairingsEditor({ activePlayers, numRounds, pairingsData, setPairings, tRounds, courses, teeTimesData, setTeeTimesData, finalizedRounds, teeData, getPlayerTee, editRound, setEditRound }) {
+function PairingsEditor({ activePlayers, numRounds, pairingsData, setPairings, tRounds, courses, teeTimesData, setTeeTimesData, roundDates, onSetRoundDate, scoringOpen, onSetScoringOpen, finalizedRounds, teeData, getPlayerTee, editRound, setEditRound }) {
   const [groups, setGroups] = useState([]);
   const [unassigned, setUnassigned] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -2586,6 +2683,53 @@ function PairingsEditor({ activePlayers, numRounds, pairingsData, setPairings, t
         </div>
       )}
       <div style={{ opacity: finalizedRounds[editRound] ? 0.6 : 1, pointerEvents: finalizedRounds[editRound] ? "none" : "auto" }}>
+      {/* Round scheduling — play date drives the automatic 30-min scoring gate;
+          the toggle lets a director force scoring open regardless of date/time. */}
+      {onSetRoundDate && (
+        <div style={{ background: K.card, borderRadius: 12, padding: 10, marginBottom: 12, border: `1px solid ${K.bdr}` }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: K.t3, textTransform: "uppercase", letterSpacing: "0.06em" }}>Play date</span>
+              <input
+                type="date"
+                value={(roundDates || {})[editRound] || ""}
+                onChange={e => onSetRoundDate(editRound, e.target.value)}
+                style={{
+                  background: K.inp, border: `1px solid ${(roundDates || {})[editRound] ? K.acc + "40" : "#fbbf24"}`,
+                  borderRadius: 8, color: (roundDates || {})[editRound] ? K.acc : "#fbbf24",
+                  fontSize: 13, fontWeight: 600, padding: "6px 8px", colorScheme: "dark",
+                }}
+              />
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 3, alignItems: "flex-end" }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: K.t3, textTransform: "uppercase", letterSpacing: "0.06em" }}>Scoring</span>
+              <div onClick={() => onSetScoringOpen && onSetScoringOpen(editRound, !((scoringOpen || {})[editRound]))} style={{
+                display: "flex", alignItems: "center", cursor: "pointer", userSelect: "none",
+                background: K.bdr + "20", borderRadius: 20, padding: "2px 3px", gap: 1,
+              }}>
+                {[["Auto", false], ["Open now", true]].map(([label, val]) => {
+                  const active = !!((scoringOpen || {})[editRound]) === val;
+                  return (
+                    <span key={label} style={{
+                      fontSize: 10, fontWeight: 700, padding: "4px 8px", borderRadius: 16, textAlign: "center",
+                      background: active ? (val ? K.acc + "30" : K.t3 + "30") : "transparent",
+                      color: active ? (val ? K.acc : K.t2) : K.t3 + "80",
+                      transition: "background 0.2s, color 0.2s",
+                    }}>{label}</span>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+          <div style={{ marginTop: 8, fontSize: 10, color: K.t3, lineHeight: 1.5 }}>
+            {(scoringOpen || {})[editRound]
+              ? <>Scoring is <strong style={{ color: K.acc }}>open now</strong> for all groups this round.</>
+              : (roundDates || {})[editRound]
+                ? <>Groups can score {SCORING_LEAD_MIN} min before their tee time on <strong style={{ color: K.t2 }}>{fmtRoundDate((roundDates || {})[editRound])}</strong>.</>
+                : <>Set a play date to enable automatic scoring, or flip to <strong style={{ color: K.t2 }}>Open now</strong> to allow scoring immediately.</>}
+          </div>
+        </div>
+      )}
       {/* Player pool - 4 per row */}
           <div style={{
             background: K.card, borderRadius: 12, padding: 10, marginBottom: 12,
@@ -2902,7 +3046,7 @@ function PlayerRow({ player, onUpdateHI, onUpdateName, onRemove, onSavePassword,
   );
 }
 
-function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, passwords, setPasswords, holeData, finalizedRounds, onFinalizeRound, onUnfinalizeRound, notify, notif, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, onExternalSettingsHandled, currentUser, teesSaved, onTeesSave, teesModified, onTeesModify, setTeesModified }) {
+function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, roundDates, onSetRoundDate, scoringOpen, onSetScoringOpen, passwords, setPasswords, holeData, finalizedRounds, onFinalizeRound, onUnfinalizeRound, notify, notif, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, onExternalSettingsHandled, currentUser, teesSaved, onTeesSave, teesModified, onTeesModify, setTeesModified }) {
   const [tab, setTab] = useState("tees");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [showFinalizeModal, setShowFinalizeModal] = useState(false);
@@ -4226,7 +4370,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                 });
                 return next;
               });
-            }} finalizedRounds={finalizedRounds} teeData={teeData} getPlayerTee={getPlayerTee} editRound={editRound} setEditRound={r => { setEditRound(r); setTab("tees"); }} />
+            }} roundDates={roundDates} onSetRoundDate={onSetRoundDate} scoringOpen={scoringOpen} onSetScoringOpen={onSetScoringOpen} finalizedRounds={finalizedRounds} teeData={teeData} getPlayerTee={getPlayerTee} editRound={editRound} setEditRound={r => { setEditRound(r); setTab("tees"); }} />
       )}
 
       {tab === "tees" && (
@@ -4499,6 +4643,8 @@ export default function WBCApp() {
   const [teesModified, setTeesModified] = useState({});
   const [teeTimesData, setTeeTimesData] = useState({});
   const [finalizedRounds, setFinalizedRounds] = useState({});
+  const [roundDates, setRoundDates] = useState({});   // { round: "YYYY-MM-DD" } — scheduled play date
+  const [scoringOpen, setScoringOpen] = useState({}); // { round: true } — director force-open override
   // Two-phase scorecard signing/attestation state, keyed by groupKey.
   // { [groupKey]: { signedBy, signedByName, attestedBy: [pids], signedAt } }
   const [scorecardSigs, setScorecardSigs] = useState({});
@@ -4625,6 +4771,8 @@ export default function WBCApp() {
           if (s.passwords) setPasswords(s.passwords);
           if (s.tees_saved) setTeesSaved(s.tees_saved);
           if (s.tees_modified) setTeesModified(s.tees_modified);
+          if (s.round_dates) setRoundDates(s.round_dates);
+          if (s.scoring_open) setScoringOpen(s.scoring_open);
         }
 
       } catch(e) { console.error("Load failed:", e); }
@@ -4673,6 +4821,8 @@ export default function WBCApp() {
         if (docs[0].passwords) setPasswords(docs[0].passwords);
         if (docs[0].tees_saved) setTeesSaved(docs[0].tees_saved);
         if (docs[0].tees_modified) setTeesModified(docs[0].tees_modified);
+        if (docs[0].round_dates) setRoundDates(docs[0].round_dates);
+        if (docs[0].scoring_open) setScoringOpen(docs[0].scoring_open);
       }
     }));
 
@@ -4697,9 +4847,11 @@ export default function WBCApp() {
   }, []);
 
   // Save tournament state to Firestore
-  const saveTournamentState = async (finalized, pwds, savedTees, modTees) => {
+  const saveTournamentState = async (finalized, pwds, savedTees, modTees, rDates, sOpen) => {
     const tsSaved = savedTees !== undefined ? savedTees : teesSaved;
     const tsMod = modTees !== undefined ? modTees : teesModified;
+    const rd = rDates !== undefined ? rDates : roundDates;
+    const so = sOpen !== undefined ? sOpen : scoringOpen;
     await db.upsert("tournament_state", {
       id: `ts_${TOURNAMENT_ID}`,
       tournament_id: TOURNAMENT_ID,
@@ -4707,6 +4859,8 @@ export default function WBCApp() {
       passwords: pwds,
       tees_saved: tsSaved,
       tees_modified: tsMod,
+      round_dates: rd,
+      scoring_open: so,
       updated_at: new Date().toISOString(),
     });
   };
@@ -4736,8 +4890,10 @@ export default function WBCApp() {
     setTeesModified({});
     setFinalizedRounds({});
     setScorecardSigs({});
+    setRoundDates({});
+    setScoringOpen({});
     setRound(1);
-    await saveTournamentState({}, passwords, {}, {});
+    await saveTournamentState({}, passwords, {}, {}, {}, {});
     notify("Scorecards cleared — player roster preserved");
   };
 
@@ -5655,7 +5811,7 @@ export default function WBCApp() {
       <div style={{ padding: (view === "leaderboard" || view === "admin") ? "14px 20px 0 20px" : "14px 20px", paddingBottom: (view === "leaderboard" || view === "admin") ? "0" : "14px", flex: 1, overflowY: "auto", overflowX: "hidden", display: (view === "leaderboard" || view === "admin") ? "flex" : "block", flexDirection: "column", minHeight: 0, paddingBottom: view === "leaderboard" ? "28px" : 0 }}>
         {view === "leaderboard" && <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} teeData={teeData} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} />}
         <div style={{ display: view === "scoring" ? "block" : "none", paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
-          <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeData={teeData} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={async (key, signerPid, signerName, present, rnd) => { const nonSigners = (present || []).filter(pid => pid !== signerPid); const autoFinal = nonSigners.length === 0; const optimistic = { signedBy: signerPid, signedByName: signerName, attestedBy: [], present: present || [] }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: optimistic })); await db.upsert("wbc_scorecard_sigs", { id: key, tournament_id: TOURNAMENT_ID, groupKey: key, round: rnd, signedBy: signerPid, signedByName: signerName, present: present || [], attestedBy: [], signedAt: new Date().toISOString() }); if (autoFinal) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); } }} onAttestScorecard={async (key, attesterPid, nonSigners) => { const cur = scorecardSigs[key]; if (!cur) return; const attestedBy = [...new Set([...(cur.attestedBy || []), attesterPid])]; const optimistic = { ...cur, attestedBy }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: { ...prev[key], attestedBy } })); await db.upsert("wbc_scorecard_sigs", { id: key, attestedBy }); const allDone = (nonSigners || []).every(pid => attestedBy.includes(pid)); if (allDone) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); } }} onUnsignScorecard={async key => { pendingSigsRef.current.delete(key); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", key); if (finalizedRounds[key]) { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); } }} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); pendingSigsRef.current.delete(key); await db.deleteDoc("wbc_scorecard_sigs", key); await saveTournamentState(nf, passwords); }} onNavigate={setView} onGoToAdminCourses={() => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); }} markPlayerWD={markPlayerWD} ctpData={ctpData} onSetCtp={onSetCtp} />
+          <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeTimesData={teeTimesData} roundDates={roundDates} scoringOpen={scoringOpen} teeData={teeData} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={async (key, signerPid, signerName, present, rnd) => { const nonSigners = (present || []).filter(pid => pid !== signerPid); const autoFinal = nonSigners.length === 0; const optimistic = { signedBy: signerPid, signedByName: signerName, attestedBy: [], present: present || [] }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: optimistic })); await db.upsert("wbc_scorecard_sigs", { id: key, tournament_id: TOURNAMENT_ID, groupKey: key, round: rnd, signedBy: signerPid, signedByName: signerName, present: present || [], attestedBy: [], signedAt: new Date().toISOString() }); if (autoFinal) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); } }} onAttestScorecard={async (key, attesterPid, nonSigners) => { const cur = scorecardSigs[key]; if (!cur) return; const attestedBy = [...new Set([...(cur.attestedBy || []), attesterPid])]; const optimistic = { ...cur, attestedBy }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: { ...prev[key], attestedBy } })); await db.upsert("wbc_scorecard_sigs", { id: key, attestedBy }); const allDone = (nonSigners || []).every(pid => attestedBy.includes(pid)); if (allDone) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); } }} onUnsignScorecard={async key => { pendingSigsRef.current.delete(key); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", key); if (finalizedRounds[key]) { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); } }} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); pendingSigsRef.current.delete(key); await db.deleteDoc("wbc_scorecard_sigs", key); await saveTournamentState(nf, passwords); }} onNavigate={setView} onGoToAdminCourses={() => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); }} markPlayerWD={markPlayerWD} ctpData={ctpData} onSetCtp={onSetCtp} />
         </div>
         {view === "skins" && <SkinsCtpView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} teeData={teeData} getPlayerTee={getPlayerTee} />}
         {view === "groups" && <GroupsView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} pairingsData={pairingsData} teeTimesData={teeTimesData} teeData={teeData} getPlayerTee={getPlayerTee} user={user} />}
@@ -5675,7 +5831,7 @@ export default function WBCApp() {
                 });
                 return next;
               });
-            }} passwords={passwords} setPasswords={async pw => { setPasswords(pw); await saveTournamentState(finalizedRounds, pw); }} holeData={holeData} finalizedRounds={finalizedRounds} onFinalizeRound={async rnd => { const nf = { ...finalizedRounds, [rnd]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${rnd}`, tournament_id: TOURNAMENT_ID, round: rnd, finalized: true }); if (rnd < 4) setRound(rnd + 1); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); if (/^\d+$/.test(String(key))) { await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${key}`, tournament_id: TOURNAMENT_ID, round: Number(key), finalized: false }); } else { setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", key); } }} notify={notify} notif={notif} getPlayerTee={getPlayerTee} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); }} currentUser={user} teesSaved={teesSaved} onTeesSave={async r => { const next = { ...teesSaved, [r]: true }; const nextMod = { ...teesModified, [r]: false }; setTeesSaved(next); setTeesModified(nextMod); await saveTournamentState(finalizedRounds, passwords, next, nextMod); }} teesModified={teesModified} onTeesModify={async r => { const nextMod = { ...teesModified, [r]: true }; setTeesModified(nextMod); await saveTournamentState(finalizedRounds, passwords, teesSaved, nextMod); }} setTeesModified={setTeesModified} /> : (
+            }} roundDates={roundDates} onSetRoundDate={async (rnd, dateStr) => { const next = { ...roundDates }; if (dateStr) next[rnd] = dateStr; else delete next[rnd]; setRoundDates(next); await saveTournamentState(finalizedRounds, passwords, teesSaved, teesModified, next, scoringOpen); }} scoringOpen={scoringOpen} onSetScoringOpen={async (rnd, open) => { const next = { ...scoringOpen }; if (open) next[rnd] = true; else delete next[rnd]; setScoringOpen(next); await saveTournamentState(finalizedRounds, passwords, teesSaved, teesModified, roundDates, next); }} passwords={passwords} setPasswords={async pw => { setPasswords(pw); await saveTournamentState(finalizedRounds, pw); }} holeData={holeData} finalizedRounds={finalizedRounds} onFinalizeRound={async rnd => { const nf = { ...finalizedRounds, [rnd]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${rnd}`, tournament_id: TOURNAMENT_ID, round: rnd, finalized: true }); if (rnd < 4) setRound(rnd + 1); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); if (/^\d+$/.test(String(key))) { await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${key}`, tournament_id: TOURNAMENT_ID, round: Number(key), finalized: false }); } else { setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", key); } }} notify={notify} notif={notif} getPlayerTee={getPlayerTee} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); }} currentUser={user} teesSaved={teesSaved} onTeesSave={async r => { const next = { ...teesSaved, [r]: true }; const nextMod = { ...teesModified, [r]: false }; setTeesSaved(next); setTeesModified(nextMod); await saveTournamentState(finalizedRounds, passwords, next, nextMod); }} teesModified={teesModified} onTeesModify={async r => { const nextMod = { ...teesModified, [r]: true }; setTeesModified(nextMod); await saveTournamentState(finalizedRounds, passwords, teesSaved, nextMod); }} setTeesModified={setTeesModified} /> : (
           <div style={{ textAlign: "center", padding: "40px 20px" }}>
             <div style={{ fontSize: 40, marginBottom: 12 }}>🔒</div>
             <div style={{ fontSize: 16, fontWeight: 700, color: K.t1, marginBottom: 6 }}>Directors Only</div>
