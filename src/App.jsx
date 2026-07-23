@@ -188,6 +188,112 @@ const rowsToPairings = (rows) => {
   return pd;
 };
 
+// ── PAIRING STRATEGY ──
+// Each round can be paired by one of three methods, configurable per-round in the
+// director console (see PairingsEditor). Defaults mirror the classic WBC format:
+//   R1  → manual        (director sets the opening foursomes by hand)
+//   R2  → avoid_repeats (auto: minimize players sharing a group with a prior partner)
+//   R3+ → leaderboard   (auto: group by current standings)
+const PAIRING_MODES = ["manual", "avoid_repeats", "leaderboard"];
+const PAIRING_MODE_LABEL = { manual: "Manual", avoid_repeats: "No repeats", leaderboard: "Leaderboard" };
+const defaultPairingMode = (rnd) => rnd === 1 ? "manual" : rnd === 2 ? "avoid_repeats" : "leaderboard";
+// Resolve the effective per-round strategy config from stored state, applying defaults.
+const resolvePairingCfg = (pairingStrategy, rnd) => {
+  const stored = (pairingStrategy || {})[rnd];
+  return {
+    mode: stored?.mode || defaultPairingMode(rnd),
+    // leadersLast: for leaderboard mode, put the leaders in the LAST group (latest
+    // tee time) — the standard "final pairings go off last" convention. Default true.
+    leadersLast: stored?.leadersLast != null ? stored.leadersLast : true,
+  };
+};
+
+// Balanced group sizes: `numGroups` groups whose sizes differ by at most 1 (max 4
+// each for a full field). e.g. 12/3 → [4,4,4]; 10/3 → [4,3,3]; 13/4 → [4,3,3,3].
+const balancedGroupSizes = (n, numGroups) => {
+  if (numGroups <= 0) return [];
+  const base = Math.floor(n / numGroups);
+  const extra = n % numGroups;
+  return Array.from({ length: numGroups }, (_, i) => base + (i < extra ? 1 : 0));
+};
+
+// Build a map pid → Set(prior partners) from every round strictly BEFORE `beforeRound`.
+// For round 2 this yields exactly each player's round-1 foursome, which is what the
+// "no repeats" method separates.
+const buildPriorPartners = (pairingsData, beforeRound) => {
+  const partners = {};
+  const add = (a, b) => { (partners[a] = partners[a] || new Set()).add(b); };
+  Object.entries(pairingsData || {}).forEach(([rnd, groups]) => {
+    if (parseInt(rnd) >= beforeRound) return;
+    (groups || []).forEach(grp => grp.forEach(a => grp.forEach(b => { if (a !== b) add(a, b); })));
+  });
+  return partners;
+};
+
+// Count intra-group pairs that were also partners in a prior round.
+const countRepeatPairs = (groups, partners) => {
+  let c = 0;
+  groups.forEach(grp => {
+    for (let i = 0; i < grp.length; i++)
+      for (let j = i + 1; j < grp.length; j++)
+        if (partners[grp[i]] && partners[grp[i]].has(grp[j])) c++;
+  });
+  return c;
+};
+
+const shuffleArr = (arr) => {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+};
+
+const chunkBySizes = (order, sizes) => {
+  const g = []; let k = 0;
+  for (const s of sizes) { g.push(order.slice(k, k + s)); k += s; }
+  return g;
+};
+
+// Partition playerIds into `numGroups` balanced groups minimizing the number of
+// repeat-partner pairs. Randomized multi-start + swap hill-climb — fast and reliable
+// for club-sized fields. NOTE: zero repeats is only achievable when the number of
+// groups is >= the group size (e.g. threesomes with 4+ groups). With 12 players in
+// foursomes the mathematical minimum is 3 forced repeat pairs (one per group), which
+// this consistently finds. Returns { groups, repeats }.
+const optimizeAvoidRepeats = (playerIds, numGroups, partners, restarts = 80) => {
+  const sizes = balancedGroupSizes(playerIds.length, numGroups);
+  let best = null, bestCost = Infinity;
+  for (let r = 0; r < restarts; r++) {
+    let groups = chunkBySizes(shuffleArr(playerIds), sizes);
+    let cost = countRepeatPairs(groups, partners);
+    let improved = true, guard = 0;
+    while (improved && cost > 0 && guard++ < 500) {
+      improved = false;
+      outer:
+      for (let gi = 0; gi < groups.length; gi++)
+        for (let gj = gi + 1; gj < groups.length; gj++)
+          for (let ai = 0; ai < groups[gi].length; ai++)
+            for (let bj = 0; bj < groups[gj].length; bj++) {
+              const A = groups[gi][ai], B = groups[gj][bj];
+              groups[gi][ai] = B; groups[gj][bj] = A;
+              const nc = countRepeatPairs(groups, partners);
+              if (nc < cost) { cost = nc; improved = true; }
+              else { groups[gi][ai] = A; groups[gj][bj] = B; }
+              if (cost === 0) break outer;
+            }
+    }
+    if (cost < bestCost) { bestCost = cost; best = groups.map(g => g.slice()); if (bestCost === 0) break; }
+  }
+  return { groups: best || chunkBySizes(playerIds.slice(), sizes), repeats: bestCost === Infinity ? 0 : bestCost };
+};
+
+// Group by leaderboard standings. `orderedPids` is best-first. leadersLast → the
+// leaders land in the LAST group (latest tee time); otherwise they lead off first.
+const groupByLeaderboard = (orderedPids, numGroups, leadersLast) => {
+  const sizes = balancedGroupSizes(orderedPids.length, numGroups);
+  const order = leadersLast ? orderedPids.slice().reverse() : orderedPids.slice();
+  return chunkBySizes(order, sizes);
+};
+
 // Convert tee assignment rows → teeData format { round: { pid: teeName } }
 const rowsToTeeData = (rows) => {
   const td = {};
@@ -2504,12 +2610,78 @@ function GroupsView({ players, round, tRounds, courses, pairingsData, teeTimesDa
 
 // ── ADMIN ──
 // ── PAIRINGS EDITOR ──
-function PairingsEditor({ activePlayers, numRounds, pairingsData, setPairings, tRounds, courses, teeTimesData, setTeeTimesData, roundDates, onSetRoundDate, scoringOpen, onSetScoringOpen, finalizedRounds, teeData, getPlayerTee, editRound, setEditRound }) {
+function PairingsEditor({ activePlayers, numRounds, pairingsData, setPairings, tRounds, courses, teeTimesData, setTeeTimesData, roundDates, onSetRoundDate, scoringOpen, onSetScoringOpen, pairingStrategy, onSetPairingStrategy, leaderboard, finalizedRounds, teeData, getPlayerTee, editRound, setEditRound }) {
   const [groups, setGroups] = useState([]);
   const [unassigned, setUnassigned] = useState([]);
   const [selected, setSelected] = useState(null);
+  const [genMsg, setGenMsg] = useState(null); // { tone: "ok"|"warn", text } — result of the last auto-generate
 
   const numGroups = Math.ceil(activePlayers.length / 4);
+
+  // ── Auto-pairing strategy (configurable per round) ──
+  const cfg = resolvePairingCfg(pairingStrategy, editRound);
+  const setMode = (mode) => {
+    if (!onSetPairingStrategy) return;
+    onSetPairingStrategy(editRound, { ...cfg, mode });
+    setGenMsg(null);
+  };
+  const setLeadersLast = (leadersLast) => {
+    if (!onSetPairingStrategy) return;
+    onSetPairingStrategy(editRound, { ...cfg, leadersLast });
+  };
+
+  // Generate pairings for the current round using the selected method. The result is
+  // written into local `groups`, which the existing auto-save effect persists to
+  // Firestore — so the director can still hand-tweak afterward exactly as before.
+  const generatePairings = () => {
+    const pids = activePlayers.map(p => p.id);
+    if (pids.length === 0) return;
+    const hasExisting = groups.some(g => g.length > 0);
+    if (hasExisting && !confirm(`Replace the current Round ${editRound} pairings with auto-generated ones?\n\nYou can still adjust them by hand afterward.`)) return;
+
+    if (cfg.mode === "avoid_repeats") {
+      const partners = buildPriorPartners(pairingsData, editRound);
+      const anyPrior = Object.keys(partners).length > 0;
+      if (!anyPrior) {
+        setGenMsg({ tone: "warn", text: `No earlier-round pairings found. Set Round ${editRound - 1} pairings first so there's something to separate.` });
+        return;
+      }
+      const { groups: ng, repeats } = optimizeAvoidRepeats(pids, numGroups, partners);
+      const padded = ng.map(g => g.slice());
+      while (padded.length < numGroups) padded.push([]);
+      setGroups(padded);
+      setSelected(null);
+      // With foursomes (groups < 4 in count) some overlap is mathematically forced.
+      const zeroPossible = numGroups >= 4;
+      if (repeats === 0) {
+        setGenMsg({ tone: "ok", text: "Generated — no one repeats a partner from an earlier round." });
+      } else {
+        setGenMsg({ tone: "warn", text: `Generated with ${repeats} repeat pair${repeats === 1 ? "" : "s"} (the minimum possible).${zeroPossible ? "" : " Foursomes can't be fully separated across only " + numGroups + " groups — each group keeps one returning pair."}` });
+      }
+      return;
+    }
+
+    if (cfg.mode === "leaderboard") {
+      // Standings order (best net first), restricted to active players in this field.
+      const activeIds = new Set(pids);
+      const ordered = (leaderboard || []).filter(p => activeIds.has(p.id));
+      const anyScores = ordered.some(p => p.roundsPlayed > 0);
+      if (!anyScores) {
+        setGenMsg({ tone: "warn", text: "No scores posted yet — leaderboard order isn't set. Play an earlier round first, or pair this round another way." });
+        return;
+      }
+      // Append any active players missing from the leaderboard array (safety net).
+      const orderedIds = ordered.map(p => p.id);
+      pids.forEach(id => { if (!orderedIds.includes(id)) orderedIds.push(id); });
+      const ng = groupByLeaderboard(orderedIds, numGroups, cfg.leadersLast);
+      const padded = ng.map(g => g.slice());
+      while (padded.length < numGroups) padded.push([]);
+      setGroups(padded);
+      setSelected(null);
+      setGenMsg({ tone: "ok", text: `Grouped by current standings — leaders tee off ${cfg.leadersLast ? "last" : "first"}.` });
+      return;
+    }
+  };
 
   // Parse time string to minutes since midnight
   const parseTime = (str) => {
@@ -2605,6 +2777,7 @@ function PairingsEditor({ activePlayers, numRounds, pairingsData, setPairings, t
       setUnassigned(activePlayers.map(p => p.id));
     }
     setSelected(null);
+    setGenMsg(null);
   }, [editRound, activePlayers.length]);
 
   // Auto-save whenever groups change (skip initial mount load)
@@ -2730,6 +2903,70 @@ function PairingsEditor({ activePlayers, numRounds, pairingsData, setPairings, t
           </div>
         </div>
       )}
+      {/* Pairing method — configurable per round. Manual keeps the hand-set builder
+          below; the auto methods fill the groups, which the director can then tweak. */}
+      <div style={{ background: K.card, borderRadius: 12, padding: 10, marginBottom: 12, border: `1px solid ${K.bdr}` }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 10, fontWeight: 700, color: K.t3, textTransform: "uppercase", letterSpacing: "0.06em" }}>Pairing method</span>
+          <div style={{ display: "flex", alignItems: "center", background: K.bdr + "20", borderRadius: 20, padding: "2px 3px", gap: 1 }}>
+            {PAIRING_MODES.map(m => {
+              const active = cfg.mode === m;
+              return (
+                <span key={m} onClick={() => setMode(m)} style={{
+                  fontSize: 10, fontWeight: 700, padding: "4px 9px", borderRadius: 16, textAlign: "center", cursor: "pointer", userSelect: "none",
+                  background: active ? K.acc + "30" : "transparent",
+                  color: active ? K.acc : K.t3 + "90",
+                  transition: "background 0.2s, color 0.2s",
+                }}>{PAIRING_MODE_LABEL[m]}</span>
+              );
+            })}
+          </div>
+        </div>
+
+        <div style={{ marginTop: 8, fontSize: 10, color: K.t3, lineHeight: 1.5 }}>
+          {cfg.mode === "manual" && <>Build the foursomes by hand below. This is the usual choice for the opening round.</>}
+          {cfg.mode === "avoid_repeats" && <>Auto-groups this round so players avoid anyone from their earlier-round foursome{editRound === 2 ? "" : "s"}. You can still adjust the result by hand.</>}
+          {cfg.mode === "leaderboard" && <>Auto-groups this round by current standings. Requires an earlier round to be scored.</>}
+        </div>
+
+        {cfg.mode === "leaderboard" && (
+          <div style={{ marginTop: 8, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+            <span style={{ fontSize: 10, fontWeight: 600, color: K.t3 }}>Leaders tee off</span>
+            <div style={{ display: "flex", alignItems: "center", background: K.bdr + "20", borderRadius: 20, padding: "2px 3px", gap: 1 }}>
+              {[["Last", true], ["First", false]].map(([label, val]) => {
+                const active = cfg.leadersLast === val;
+                return (
+                  <span key={label} onClick={() => setLeadersLast(val)} style={{
+                    fontSize: 10, fontWeight: 700, padding: "4px 9px", borderRadius: 16, textAlign: "center", cursor: "pointer", userSelect: "none",
+                    background: active ? K.t3 + "30" : "transparent",
+                    color: active ? K.t2 : K.t3 + "80",
+                  }}>{label}</span>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {cfg.mode !== "manual" && (
+          <button onClick={generatePairings} style={{
+            marginTop: 10, width: "100%", padding: "9px 0", borderRadius: 8, cursor: "pointer",
+            background: K.acc + "18", border: `1.5px solid ${K.acc}55`, color: K.acc,
+            fontSize: 12, fontWeight: 700,
+          }}>
+            {groups.some(g => g.length > 0) ? "Regenerate pairings" : "Generate pairings"}
+          </button>
+        )}
+
+        {genMsg && (
+          <div style={{
+            marginTop: 8, fontSize: 10, lineHeight: 1.5, padding: "6px 8px", borderRadius: 6,
+            background: (genMsg.tone === "ok" ? K.acc : "#fbbf24") + "12",
+            border: `1px solid ${(genMsg.tone === "ok" ? K.acc : "#fbbf24")}30`,
+            color: genMsg.tone === "ok" ? K.acc : "#fbbf24",
+          }}>{genMsg.text}</div>
+        )}
+      </div>
+
       {/* Player pool - 4 per row */}
           <div style={{
             background: K.card, borderRadius: 12, padding: 10, marginBottom: 12,
@@ -3046,7 +3283,7 @@ function PlayerRow({ player, onUpdateHI, onUpdateName, onRemove, onSavePassword,
   );
 }
 
-function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, roundDates, onSetRoundDate, scoringOpen, onSetScoringOpen, passwords, setPasswords, holeData, finalizedRounds, onFinalizeRound, onUnfinalizeRound, notify, notif, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, onExternalSettingsHandled, currentUser, teesSaved, onTeesSave, teesModified, onTeesModify, setTeesModified }) {
+function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, roundDates, onSetRoundDate, scoringOpen, onSetScoringOpen, pairingStrategy, onSetPairingStrategy, leaderboard, passwords, setPasswords, holeData, finalizedRounds, onFinalizeRound, onUnfinalizeRound, notify, notif, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, onExternalSettingsHandled, currentUser, teesSaved, onTeesSave, teesModified, onTeesModify, setTeesModified }) {
   const [tab, setTab] = useState("tees");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [showFinalizeModal, setShowFinalizeModal] = useState(false);
@@ -4370,7 +4607,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                 });
                 return next;
               });
-            }} roundDates={roundDates} onSetRoundDate={onSetRoundDate} scoringOpen={scoringOpen} onSetScoringOpen={onSetScoringOpen} finalizedRounds={finalizedRounds} teeData={teeData} getPlayerTee={getPlayerTee} editRound={editRound} setEditRound={r => { setEditRound(r); setTab("tees"); }} />
+            }} roundDates={roundDates} onSetRoundDate={onSetRoundDate} scoringOpen={scoringOpen} onSetScoringOpen={onSetScoringOpen} pairingStrategy={pairingStrategy} onSetPairingStrategy={onSetPairingStrategy} leaderboard={leaderboard} finalizedRounds={finalizedRounds} teeData={teeData} getPlayerTee={getPlayerTee} editRound={editRound} setEditRound={r => { setEditRound(r); setTab("tees"); }} />
       )}
 
       {tab === "tees" && (
@@ -4645,6 +4882,7 @@ export default function WBCApp() {
   const [finalizedRounds, setFinalizedRounds] = useState({});
   const [roundDates, setRoundDates] = useState({});   // { round: "YYYY-MM-DD" } — scheduled play date
   const [scoringOpen, setScoringOpen] = useState({}); // { round: true } — director force-open override
+  const [pairingStrategy, setPairingStrategy] = useState({}); // { round: { mode, leadersLast } } — per-round auto-pairing method
   // Two-phase scorecard signing/attestation state, keyed by groupKey.
   // { [groupKey]: { signedBy, signedByName, attestedBy: [pids], signedAt } }
   const [scorecardSigs, setScorecardSigs] = useState({});
@@ -4773,6 +5011,7 @@ export default function WBCApp() {
           if (s.tees_modified) setTeesModified(s.tees_modified);
           if (s.round_dates) setRoundDates(s.round_dates);
           if (s.scoring_open) setScoringOpen(s.scoring_open);
+          if (s.pairing_strategy) setPairingStrategy(s.pairing_strategy);
         }
 
       } catch(e) { console.error("Load failed:", e); }
@@ -4823,6 +5062,7 @@ export default function WBCApp() {
         if (docs[0].tees_modified) setTeesModified(docs[0].tees_modified);
         if (docs[0].round_dates) setRoundDates(docs[0].round_dates);
         if (docs[0].scoring_open) setScoringOpen(docs[0].scoring_open);
+        if (docs[0].pairing_strategy) setPairingStrategy(docs[0].pairing_strategy);
       }
     }));
 
@@ -4847,11 +5087,12 @@ export default function WBCApp() {
   }, []);
 
   // Save tournament state to Firestore
-  const saveTournamentState = async (finalized, pwds, savedTees, modTees, rDates, sOpen) => {
+  const saveTournamentState = async (finalized, pwds, savedTees, modTees, rDates, sOpen, pStrat) => {
     const tsSaved = savedTees !== undefined ? savedTees : teesSaved;
     const tsMod = modTees !== undefined ? modTees : teesModified;
     const rd = rDates !== undefined ? rDates : roundDates;
     const so = sOpen !== undefined ? sOpen : scoringOpen;
+    const ps = pStrat !== undefined ? pStrat : pairingStrategy;
     await db.upsert("tournament_state", {
       id: `ts_${TOURNAMENT_ID}`,
       tournament_id: TOURNAMENT_ID,
@@ -4861,6 +5102,7 @@ export default function WBCApp() {
       tees_modified: tsMod,
       round_dates: rd,
       scoring_open: so,
+      pairing_strategy: ps,
       updated_at: new Date().toISOString(),
     });
   };
@@ -4892,8 +5134,9 @@ export default function WBCApp() {
     setScorecardSigs({});
     setRoundDates({});
     setScoringOpen({});
+    setPairingStrategy({});
     setRound(1);
-    await saveTournamentState({}, passwords, {}, {}, {}, {});
+    await saveTournamentState({}, passwords, {}, {}, {}, {}, {});
     notify("Scorecards cleared — player roster preserved");
   };
 
@@ -5831,7 +6074,7 @@ export default function WBCApp() {
                 });
                 return next;
               });
-            }} roundDates={roundDates} onSetRoundDate={async (rnd, dateStr) => { const next = { ...roundDates }; if (dateStr) next[rnd] = dateStr; else delete next[rnd]; setRoundDates(next); await saveTournamentState(finalizedRounds, passwords, teesSaved, teesModified, next, scoringOpen); }} scoringOpen={scoringOpen} onSetScoringOpen={async (rnd, open) => { const next = { ...scoringOpen }; if (open) next[rnd] = true; else delete next[rnd]; setScoringOpen(next); await saveTournamentState(finalizedRounds, passwords, teesSaved, teesModified, roundDates, next); }} passwords={passwords} setPasswords={async pw => { setPasswords(pw); await saveTournamentState(finalizedRounds, pw); }} holeData={holeData} finalizedRounds={finalizedRounds} onFinalizeRound={async rnd => { const nf = { ...finalizedRounds, [rnd]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${rnd}`, tournament_id: TOURNAMENT_ID, round: rnd, finalized: true }); if (rnd < 4) setRound(rnd + 1); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); if (/^\d+$/.test(String(key))) { await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${key}`, tournament_id: TOURNAMENT_ID, round: Number(key), finalized: false }); } else { setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", key); } }} notify={notify} notif={notif} getPlayerTee={getPlayerTee} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); }} currentUser={user} teesSaved={teesSaved} onTeesSave={async r => { const next = { ...teesSaved, [r]: true }; const nextMod = { ...teesModified, [r]: false }; setTeesSaved(next); setTeesModified(nextMod); await saveTournamentState(finalizedRounds, passwords, next, nextMod); }} teesModified={teesModified} onTeesModify={async r => { const nextMod = { ...teesModified, [r]: true }; setTeesModified(nextMod); await saveTournamentState(finalizedRounds, passwords, teesSaved, nextMod); }} setTeesModified={setTeesModified} /> : (
+            }} roundDates={roundDates} onSetRoundDate={async (rnd, dateStr) => { const next = { ...roundDates }; if (dateStr) next[rnd] = dateStr; else delete next[rnd]; setRoundDates(next); await saveTournamentState(finalizedRounds, passwords, teesSaved, teesModified, next, scoringOpen); }} scoringOpen={scoringOpen} onSetScoringOpen={async (rnd, open) => { const next = { ...scoringOpen }; if (open) next[rnd] = true; else delete next[rnd]; setScoringOpen(next); await saveTournamentState(finalizedRounds, passwords, teesSaved, teesModified, roundDates, next); }} pairingStrategy={pairingStrategy} onSetPairingStrategy={async (rnd, cfg) => { const next = { ...pairingStrategy }; if (cfg) next[rnd] = cfg; else delete next[rnd]; setPairingStrategy(next); await saveTournamentState(finalizedRounds, passwords, teesSaved, teesModified, roundDates, scoringOpen, next); }} leaderboard={getLeaderboard} passwords={passwords} setPasswords={async pw => { setPasswords(pw); await saveTournamentState(finalizedRounds, pw); }} holeData={holeData} finalizedRounds={finalizedRounds} onFinalizeRound={async rnd => { const nf = { ...finalizedRounds, [rnd]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${rnd}`, tournament_id: TOURNAMENT_ID, round: rnd, finalized: true }); if (rnd < 4) setRound(rnd + 1); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); if (/^\d+$/.test(String(key))) { await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${key}`, tournament_id: TOURNAMENT_ID, round: Number(key), finalized: false }); } else { setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", key); } }} notify={notify} notif={notif} getPlayerTee={getPlayerTee} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); }} currentUser={user} teesSaved={teesSaved} onTeesSave={async r => { const next = { ...teesSaved, [r]: true }; const nextMod = { ...teesModified, [r]: false }; setTeesSaved(next); setTeesModified(nextMod); await saveTournamentState(finalizedRounds, passwords, next, nextMod); }} teesModified={teesModified} onTeesModify={async r => { const nextMod = { ...teesModified, [r]: true }; setTeesModified(nextMod); await saveTournamentState(finalizedRounds, passwords, teesSaved, nextMod); }} setTeesModified={setTeesModified} /> : (
           <div style={{ textAlign: "center", padding: "40px 20px" }}>
             <div style={{ fontSize: 40, marginBottom: 12 }}>🔒</div>
             <div style={{ fontSize: 16, fontWeight: 700, color: K.t1, marginBottom: 6 }}>Directors Only</div>
