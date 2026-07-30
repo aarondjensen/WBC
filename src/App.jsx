@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import { _app, _db, _auth, onAuthStateChanged, doGoogleSignIn, doAppleSignIn, doSignOut, consumeRedirectResult, deleteAccount, USERS_COLLECTION, NATIVE_APPLE_ENABLED, APPLE_PROVIDER_ENABLED, isNativePlatform, isAndroidNative, AUTH_PROVIDERS_ENABLED } from "./firebase";
+import { readMembership, isDirectorAccount, joinWithCode, readAccessCode, setAccessCode, setDirector, subscribeMemberships, accountsUnreadable } from "./lib/accounts";
 import { collection, doc, setDoc, getDocs, query, where, writeBatch, onSnapshot, deleteDoc } from "firebase/firestore";
 import { getMessaging, getToken, onMessage, isSupported as isMessagingSupported } from "firebase/messaging";
 const WBC_LOGO = "/wbc-icon-512.png";
@@ -3283,7 +3284,150 @@ function PlayerRow({ player, onUpdateHI, onUpdateName, onRemove, onSavePassword,
   );
 }
 
-function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, roundDates, onSetRoundDate, scoringOpen, onSetScoringOpen, pairingStrategy, onSetPairingStrategy, leaderboard, passwords, setPasswords, holeData, finalizedRounds, onFinalizeRound, onUnfinalizeRound, notify, notif, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, onExternalSettingsHandled, currentUser, teesSaved, onTeesSave, teesModified, onTeesModify, setTeesModified }) {
+// ── ADMIN → SETTINGS → ACCESS ──
+// The director's half of the door. Two things live here, and both of them are
+// enforced by firestore.rules rather than by this screen:
+//
+//   • The tournament password (wbc_secrets/access). Only a director may read
+//     or change it. SAVING IT BLANK TURNS THE REQUIREMENT OFF — the rules
+//     treat a missing or empty code as an open door, which is the bootstrap
+//     that makes the very first setup possible.
+//
+//   • Who is a director (`is_director` on each wbc_accounts document). This is
+//     the ONLY flag the rules honour and the only thing the app reads to
+//     decide whether the Admin tab exists, so the crown here and the access
+//     behind it can never disagree.
+//
+// Two things the crown deliberately cannot do, both enforced by the rules:
+// appoint somebody who has never been through the password screen (there is no
+// membership document to flag), and change your own (nobody appoints
+// themselves, and nobody steps down from inside the app — which means the last
+// director can never leave the tournament unadministered). Stepping down is a
+// console edit, and so is the FIRST director, since the rule requires one to
+// already exist.
+function AccessPanel({ memberships, onSetDirector, claims, players, authUid, notify }) {
+  const [code, setCode] = useState("");
+  const [revealed, setRevealed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [dirBusy, setDirBusy] = useState(null);
+
+  const reveal = async () => {
+    setBusy(true); setErr("");
+    const res = await readAccessCode();
+    setBusy(false);
+    // Three answers, and the third is why readAccessCode does not just return
+    // a string: "no password set" and "I was not allowed to look" are the same
+    // absence, and opposite instructions to the person reading this screen.
+    if (!res.ok) { setErr(res.error); return; }
+    setCode(res.code || "");
+    setRevealed(true);
+  };
+
+  const save = async () => {
+    setBusy(true); setErr("");
+    const res = await setAccessCode(code);
+    setBusy(false);
+    if (!res.ok) { setErr(res.error); return; }
+    notify?.((code || "").trim() ? "Password saved" : "Password cleared — anyone can sign in");
+  };
+
+  const toggleDirector = async (uid, on) => {
+    setDirBusy(uid); setErr("");
+    const res = await onSetDirector(uid, on);
+    setDirBusy(null);
+    if (!res.ok) { setErr(res.error); return; }
+    notify?.(on ? "Director added" : "Director removed");
+  };
+
+  // A membership carries an email; the name comes from the claim it made.
+  const nameFor = (m) => {
+    const pid = claims?.[m.id] ?? claims?.[m.uid];
+    return (players || []).find(p => p.id === pid)?.name || null;
+  };
+
+  const rows = [...(memberships || [])].sort((a, b) =>
+    (nameFor(a) || a.email || a.id).localeCompare(nameFor(b) || b.email || b.id));
+
+  const label = { fontSize: 10, fontWeight: 700, color: K.t3, textTransform: "uppercase", letterSpacing: "0.06em" };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      {/* The password */}
+      <div style={{ background: K.card, borderRadius: 12, border: `1px solid ${K.bdr}`, padding: "12px 14px" }}>
+        <div style={{ ...label, marginBottom: 8 }}>Tournament password</div>
+        <p style={{ fontSize: 11, color: K.t3, lineHeight: 1.5, margin: "0 0 10px" }}>
+          Everyone types this once, after signing in with Google or Apple. It&rsquo;s checked by the
+          database, not the app, so it holds even against someone skipping the app entirely.
+          Leave it blank to let anyone in.
+        </p>
+        {revealed ? (
+          <div style={{ display: "flex", gap: 8 }}>
+            <input value={code} onChange={e => { setCode(e.target.value); if (err) setErr(""); }}
+              type="text" autoCapitalize="none" autoCorrect="off" spellCheck={false}
+              placeholder="No password set"
+              style={{ flex: 1, minWidth: 0, padding: "10px 12px", borderRadius: 10, background: K.inp, border: `1px solid ${K.bdr}`, color: K.t1, fontSize: 16, fontWeight: 700, outline: "none", fontFamily: "'Montserrat', sans-serif", boxSizing: "border-box" }} />
+            <button onClick={save} disabled={busy} style={{ flexShrink: 0, padding: "10px 16px", borderRadius: 10, border: "none", background: busy ? K.card : K.acc, color: busy ? K.t3 : "#fff", fontSize: 12, fontWeight: 800, cursor: busy ? "default" : "pointer" }}>
+              {busy ? "…" : "Save"}
+            </button>
+          </div>
+        ) : (
+          <button onClick={reveal} disabled={busy} style={{ padding: "9px 16px", borderRadius: 10, background: "transparent", border: `1px solid ${K.acc}50`, color: K.acc, fontSize: 12, fontWeight: 700, cursor: busy ? "default" : "pointer" }}>
+            {busy ? "Reading…" : "Show"}
+          </button>
+        )}
+        {revealed && !(code || "").trim() && (
+          <div style={{ fontSize: 11, fontWeight: 600, color: K.warn, marginTop: 8 }}>
+            No password set — anyone with a Google or Apple account can sign in and claim a name.
+          </div>
+        )}
+      </div>
+
+      {/* Who's through the door */}
+      <div style={{ background: K.card, borderRadius: 12, border: `1px solid ${K.bdr}`, overflow: "hidden" }}>
+        <div style={{ padding: "10px 14px", borderBottom: `1px solid ${K.bdr}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span style={label}>Signed in ({rows.length})</span>
+          <span style={{ fontSize: 10, color: K.t3 }}>👑 = director</span>
+        </div>
+        {rows.length === 0 ? (
+          <p style={{ fontSize: 11, color: K.t3, lineHeight: 1.5, margin: 0, padding: "14px" }}>
+            {/* A director can always read their own membership, so an empty list
+                means the read was refused — which in practice means one thing. */}
+            {accountsUnreadable(memberships)
+              ? "Can't read this — the rules deployed to Firebase are older than this app. Re-publish firestore.rules."
+              : "Nobody has signed in yet."}
+          </p>
+        ) : rows.map((m, i) => {
+          const isSelf = m.id === authUid || m.uid === authUid;
+          const on = m.is_director === true;
+          const nm = nameFor(m);
+          return (
+            <div key={m.id} style={{ padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, borderBottom: i < rows.length - 1 ? `1px solid ${K.bdr}30` : "none" }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {nm || m.email || m.id}{on && " 👑"}
+                </div>
+                <div style={{ fontSize: 10, color: K.t3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {nm ? (m.email || "no email") : "hasn't claimed a name yet"}
+                </div>
+              </div>
+              {/* Your own crown is not yours to change — see the note above. */}
+              <button onClick={() => !isSelf && toggleDirector(m.id, !on)} disabled={isSelf || dirBusy === m.id}
+                title={isSelf ? "You can't change your own — that's a console edit" : on ? "Remove director" : "Make director"}
+                style={{ flexShrink: 0, padding: "6px 10px", borderRadius: 8, background: "transparent", border: `1px solid ${on ? K.acc + "50" : K.bdr}`, color: isSelf ? K.t3 : on ? K.acc : K.t2, fontSize: 11, fontWeight: 700, cursor: isSelf ? "default" : "pointer", opacity: isSelf ? 0.4 : 1 }}>
+                {dirBusy === m.id ? "…" : on ? "Director" : "Make director"}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      {err && <div style={{ fontSize: 11, fontWeight: 600, color: K.danger, lineHeight: 1.5 }}>{err}</div>}
+    </div>
+  );
+}
+
+function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, roundDates, onSetRoundDate, scoringOpen, onSetScoringOpen, pairingStrategy, onSetPairingStrategy, leaderboard, passwords, setPasswords, holeData, finalizedRounds, onFinalizeRound, onUnfinalizeRound, notify, notif, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, onExternalSettingsHandled, currentUser, teesSaved, onTeesSave, teesModified, onTeesModify, setTeesModified, memberships, onSetDirector, claims, authUid }) {
   const [tab, setTab] = useState("tees");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [showFinalizeModal, setShowFinalizeModal] = useState(false);
@@ -3821,8 +3965,9 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
             </div>
             {/* Settings sub-tabs */}
             <div style={{ display: "flex", gap: 4, padding: "10px 16px 0" }}>
-              {[["course","Courses"],["players","Players"]].map(([k,l]) => {
+              {[["course","Courses"],["players","Players"],["access","Access"]].map(([k,l]) => {
                 const isActive = settingsTab === k;
+                const count = k === "course" ? courses.length : k === "players" ? activePlayers.length : (memberships || []).length;
                 return (
                   <button key={k} onClick={() => setSettingsTab(k)} style={{
                     flex: 1, padding: "8px 0", borderRadius: 8, fontSize: 12, fontWeight: isActive ? 700 : 500,
@@ -3830,12 +3975,16 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                     color: isActive ? K.tourn : K.t2,
                     border: `1px solid ${isActive ? K.tourn + "40" : K.bdr}`,
                     cursor: "pointer",
-                  }}>{l} <span style={{ opacity: 0.7, fontWeight: 400 }}>({k === "course" ? courses.length : activePlayers.length})</span></button>
+                  }}>{l} <span style={{ opacity: 0.7, fontWeight: 400 }}>({count})</span></button>
                 );
               })}
             </div>
             {/* Settings content */}
             <div style={{ flex: 1, overflowY: "auto", padding: "12px 16px 24px" }}>
+              {settingsTab === "access" && (
+                <AccessPanel memberships={memberships} onSetDirector={onSetDirector}
+                  claims={claims} players={players} authUid={authUid} notify={notify} />
+              )}
               {settingsTab === "players" && (
                 <div>
                   <div style={{ background: K.card, borderRadius: 12, border: `1px solid ${K.bdr}`, overflow: "hidden" }}>
@@ -4711,6 +4860,84 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
 
 
 
+// ── GATE SCREEN — the tournament password ──
+// Three steps to get in, each seen once: sign in with Google or Apple, enter
+// the tournament password, then claim your name off the roster. This is the
+// middle one, and it is the one that actually decides who can change
+// anything.
+//
+// Signing in proves who you are. It does not prove you were invited — anybody
+// can make a Google account, and this app's Firebase config ships in the
+// bundle by design. So an account has to present the tournament password and
+// be issued a membership document (wbc_accounts/{uid}), which every write in
+// the project is gated on.
+//
+// The check happens in the SECURITY RULES, not here. Submitting writes a
+// membership document carrying the typed code, and the database rejects it if
+// the code is wrong (src/lib/accounts.js, firestore.rules). Nothing on this
+// screen knows the password, so nothing on this screen can leak it — which is
+// the difference between this and a client-side password check that anybody
+// can walk past with devtools open.
+//
+// A blank or missing code in wbc_secrets/access means the door is open and
+// any password (including none) is accepted. That is the bootstrap, not a
+// bug: before anybody has set one there is no way to present the right one.
+function GateScreen({ fbUser, onPassed, onCancel }) {
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  const submit = async (e) => {
+    e?.preventDefault?.();
+    if (busy) return;
+    setBusy(true); setErr("");
+    const res = await joinWithCode(fbUser, code);
+    setBusy(false);
+    if (!res.ok) { setErr(res.error); return; }
+    onPassed();
+  };
+
+  return (
+    <div style={{ minHeight: "var(--app-height, 100dvh)", background: `radial-gradient(ellipse at 20% 50%, #0d1f3c 0%, ${K.bg} 70%)`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", padding: 20 }}>
+      <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+      <div style={{ width: "100%", maxWidth: 340, textAlign: "center" }}>
+        <img src={WBC_LOGO} alt="WBC" style={{ height: 64, margin: "0 auto 16px", display: "block", filter: "drop-shadow(0 4px 16px rgba(34,211,167,0.3))" }} />
+        <h1 style={{ fontSize: 24, color: K.t1, margin: "0 0 6px", fontWeight: 800, letterSpacing: "-0.02em" }}>Tournament password</h1>
+        <p style={{ color: K.t2, fontSize: 12, margin: "0 0 20px", lineHeight: 1.5 }}>
+          Signed in as {fbUser?.email || "your account"}.<br />Ask a director for the password — you&rsquo;ll only need it once.
+        </p>
+        <form onSubmit={submit}>
+          <input
+            value={code}
+            onChange={e => { setCode(e.target.value); if (err) setErr(""); }}
+            // Not type="password": there is no privacy to protect from
+            // somebody standing on the same tee box, and a masked field on a
+            // phone keyboard is how you get three failed attempts.
+            type="text" autoCapitalize="none" autoCorrect="off" spellCheck={false}
+            autoComplete="one-time-code" autoFocus
+            placeholder="Password"
+            style={{
+              width: "100%", boxSizing: "border-box", padding: "14px 16px", borderRadius: 12,
+              textAlign: "center", background: K.inp,
+              border: `2px solid ${err ? K.danger : K.bdr}`, color: K.t1,
+              // 16px or larger, or iOS Safari zooms the page on focus.
+              fontSize: 17, fontWeight: 700, outline: "none", fontFamily: "'Montserrat', sans-serif",
+            }} />
+          <button type="submit" disabled={busy} style={{
+            width: "100%", marginTop: 14, padding: "13px 0", borderRadius: 12, border: "none",
+            background: busy ? K.card : K.acc, color: busy ? K.t3 : "#fff",
+            fontSize: 15, fontWeight: 800, cursor: busy ? "default" : "pointer",
+          }}>{busy ? "Checking…" : "Continue"}</button>
+        </form>
+        <div style={{ minHeight: 34, marginTop: 10, fontSize: 12, lineHeight: 1.4, fontWeight: 600, color: K.danger }}>{err}</div>
+        <button onClick={onCancel} disabled={busy} style={{ background: "transparent", border: "none", color: K.t3, fontSize: 12, fontWeight: 600, cursor: busy ? "default" : "pointer", opacity: busy ? 0.5 : 1 }}>
+          ← Not now, sign out
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── CLAIM SCREEN ──
 // Shown after a Google/Apple sign-in when the authenticated Firebase user is
 // not yet mapped to a WBC player (no wbc_users doc). The signed-in person picks
@@ -4788,6 +5015,44 @@ export default function WBCApp() {
   const [claimState, setClaimState] = useState(null); // null | { status: "needs-claim", candidates }
   const [claimBusyId, setClaimBusyId] = useState(null);
   const [authMsg, setAuthMsg] = useState("");        // provider sign-in error, shown on login screen
+
+  // ── The door: the tournament-password membership ──
+  // wbc_accounts/{uid}, and the only place Admin access comes from, via its
+  // `is_director` flag. `undefined` while the answer is in flight, which has
+  // to stay distinguishable from null: showing the password screen to
+  // somebody who is already through it, because a read had not landed yet,
+  // would be its own bug. null means signed in but not a member.
+  const [membership, setMembership] = useState(undefined);
+  const member = membership === undefined ? undefined : !!membership;
+
+  // Ask the door. A FAILED read is not a "no" — a phone coming up on bad
+  // signal must not be told its password is needed again — so it retries
+  // before giving an answer. If it still cannot tell, it falls through to the
+  // password screen rather than hanging forever: that screen re-checks
+  // membership on submit, so somebody who is already through gets waved past
+  // as soon as the network returns.
+  const loadMembership = useCallback(async (uid) => {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try { return { ok: true, doc: await readMembership(uid) }; }
+      catch (e) {
+        console.error("[gate] membership check", e);
+        await new Promise(r => setTimeout(r, 800 * (attempt + 1)));
+      }
+    }
+    return { ok: false, doc: null };
+  }, []);
+
+  useEffect(() => {
+    if (!AUTH_PROVIDERS_ENABLED) { setMembership(null); return; }
+    if (!fbUser) { setMembership(null); return; }
+    let live = true;
+    setMembership(undefined);
+    (async () => {
+      const { doc: m } = await loadMembership(fbUser.uid);
+      if (live) setMembership(m);
+    })();
+    return () => { live = false; };
+  }, [fbUser, loadMembership]);
 
   // Account sheet (log out / delete account). Delete is only offered to users
   // who actually signed in with a provider (fbUser set) — that's the "account"
@@ -5301,6 +5566,11 @@ export default function WBCApp() {
   // claims have loaded so it never mis-decides "unclaimed".
   useEffect(() => {
     if (!fbUser) { setClaimState(null); return; }
+    // The door comes before the claim. Claiming a name is a write, and the
+    // rules gate it on the membership document existing, so offering the
+    // roster to somebody who has not been through the password screen would
+    // just be a grid of names whose every tap is refused.
+    if (member !== true) { setClaimState(null); return; }
     if (!storageLoaded) return;
 
     // 1. Already claimed → log straight in (idempotent; guarded against loops).
@@ -5318,7 +5588,37 @@ export default function WBCApp() {
     // 2. Manual "pick your name" (immediate link per CLAIM_REQUIRES_APPROVAL=false).
     const unclaimed = activePlayers.filter(p => !claimedPlayerIds.has(p.id));
     setClaimState({ status: "needs-claim", candidates: unclaimed });
-  }, [fbUser, claims, claimedPlayerIds, storageLoaded, activePlayers, user]);
+  }, [fbUser, member, claims, claimedPlayerIds, storageLoaded, activePlayers, user]);
+
+  // ── Admin access rides on the MEMBERSHIP flag ──
+  // `is_director` on wbc_accounts/{uid} is the only thing the security rules
+  // will honour, so it has to be the only thing the app reads too — otherwise
+  // a phone can show an Admin tab whose every write comes back refused, which
+  // looks like the app is broken rather than like a permission problem.
+  //
+  // DIRECTOR_IDS stays as a transition fallback, and only that. Until both
+  // directors have signed in, been through the password screen, and had
+  // `is_director: true` set on their membership document in the Firebase
+  // console, the flag does not exist yet and removing the list would lock
+  // Admin out of the app entirely. Once those documents carry the flag the
+  // list can go — and it MUST go before firestore.rules is deployed, or a
+  // director on the list but not the flag gets a tab that silently fails.
+  useEffect(() => {
+    if (!user || user.isGuest) return;
+    const flag = isDirectorAccount(membership) || isDirectorId(user.id);
+    if (user.isDirector !== flag) setUser(u => (u ? { ...u, isDirector: flag } : u));
+  }, [membership, user]);
+
+  // Every membership, but only for a director — the rules allow the listing to
+  // nobody else, and nobody else has a screen that needs it. Subscribed rather
+  // than fetched so appointing somebody updates the row you just tapped.
+  const [memberships, setMemberships] = useState([]);
+  useEffect(() => {
+    if (!user?.isDirector) { setMemberships([]); return; }
+    return subscribeMemberships(setMemberships);
+  }, [user?.isDirector]);
+
+  const onSetDirector = useCallback(async (uid, on) => setDirector(uid, on), []);
 
   // Provider sign-in handlers for the login screen.
   const handleGoogleSignIn = useCallback(async () => {
@@ -5740,6 +6040,48 @@ export default function WBCApp() {
     return false;
   }, [activePlayers, holeData, finalizedRounds, tRounds]);
 
+  // ── The ways in ──
+  // Sign in → tournament password → claim a name, each skipped once it has
+  // been answered, which for almost everybody means none of them appear again
+  // after the first time.
+  //
+  // The password screen appears on a DEFINITIVE no (member === false), never
+  // while the answer is still in flight. That ordering is the whole point: a
+  // returning player whose session restored from localStorage renders the app
+  // immediately and the door resolves behind them, so a slow read on the first
+  // tee never puts a signed-in player back on a login screen. If the door then
+  // says no — a revoked membership, or a first sign-in — this appears a beat
+  // later, which beats an app that looks like it works and silently fails
+  // every write.
+  if (fbUser && member === false) {
+    return (
+      <GateScreen
+        fbUser={fbUser}
+        onCancel={handleLogout}
+        onPassed={async () => {
+          // Re-read rather than assume: the membership document that was just
+          // created is also where Admin access is read from, and a director
+          // flag set in the console before the first sign-in would be missed
+          // by a locally-invented one.
+          const { doc: m } = await loadMembership(fbUser.uid);
+          setMembership(m || { uid: fbUser.uid });
+        }}
+      />
+    );
+  }
+
+  // Signed in, through the door or still asking, and nothing to show yet.
+  // Holding here rather than falling to the login screen is what stops the
+  // sign-in buttons flashing at somebody who is already signed in.
+  if (fbUser && !user && member === undefined) {
+    return (
+      <div style={{ minHeight: "var(--app-height, 100dvh)", background: `radial-gradient(ellipse at 20% 50%, #0d1f3c 0%, ${K.bg} 70%)`, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+        <img src={WBC_LOGO} alt="WBC" style={{ height: 72, opacity: 0.85, animation: "pulse 1.5s ease-in-out infinite", filter: "drop-shadow(0 4px 16px rgba(34,211,167,0.3))" }} />
+        <style>{`@keyframes pulse { 0%,100% { opacity: 0.85; } 50% { opacity: 0.4; } }`}</style>
+      </div>
+    );
+  }
+
   // A signed-in Firebase user with no resolved player takes precedence over the
   // login screen so they can pick their profile even before any app `user` is set.
   if (claimState?.status === "needs-claim") {
@@ -6074,7 +6416,7 @@ export default function WBCApp() {
                 });
                 return next;
               });
-            }} roundDates={roundDates} onSetRoundDate={async (rnd, dateStr) => { const next = { ...roundDates }; if (dateStr) next[rnd] = dateStr; else delete next[rnd]; setRoundDates(next); await saveTournamentState(finalizedRounds, passwords, teesSaved, teesModified, next, scoringOpen); }} scoringOpen={scoringOpen} onSetScoringOpen={async (rnd, open) => { const next = { ...scoringOpen }; if (open) next[rnd] = true; else delete next[rnd]; setScoringOpen(next); await saveTournamentState(finalizedRounds, passwords, teesSaved, teesModified, roundDates, next); }} pairingStrategy={pairingStrategy} onSetPairingStrategy={async (rnd, cfg) => { const next = { ...pairingStrategy }; if (cfg) next[rnd] = cfg; else delete next[rnd]; setPairingStrategy(next); await saveTournamentState(finalizedRounds, passwords, teesSaved, teesModified, roundDates, scoringOpen, next); }} leaderboard={getLeaderboard} passwords={passwords} setPasswords={async pw => { setPasswords(pw); await saveTournamentState(finalizedRounds, pw); }} holeData={holeData} finalizedRounds={finalizedRounds} onFinalizeRound={async rnd => { const nf = { ...finalizedRounds, [rnd]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${rnd}`, tournament_id: TOURNAMENT_ID, round: rnd, finalized: true }); if (rnd < 4) setRound(rnd + 1); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); if (/^\d+$/.test(String(key))) { await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${key}`, tournament_id: TOURNAMENT_ID, round: Number(key), finalized: false }); } else { setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", key); } }} notify={notify} notif={notif} getPlayerTee={getPlayerTee} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); }} currentUser={user} teesSaved={teesSaved} onTeesSave={async r => { const next = { ...teesSaved, [r]: true }; const nextMod = { ...teesModified, [r]: false }; setTeesSaved(next); setTeesModified(nextMod); await saveTournamentState(finalizedRounds, passwords, next, nextMod); }} teesModified={teesModified} onTeesModify={async r => { const nextMod = { ...teesModified, [r]: true }; setTeesModified(nextMod); await saveTournamentState(finalizedRounds, passwords, teesSaved, nextMod); }} setTeesModified={setTeesModified} /> : (
+            }} roundDates={roundDates} onSetRoundDate={async (rnd, dateStr) => { const next = { ...roundDates }; if (dateStr) next[rnd] = dateStr; else delete next[rnd]; setRoundDates(next); await saveTournamentState(finalizedRounds, passwords, teesSaved, teesModified, next, scoringOpen); }} scoringOpen={scoringOpen} onSetScoringOpen={async (rnd, open) => { const next = { ...scoringOpen }; if (open) next[rnd] = true; else delete next[rnd]; setScoringOpen(next); await saveTournamentState(finalizedRounds, passwords, teesSaved, teesModified, roundDates, next); }} pairingStrategy={pairingStrategy} onSetPairingStrategy={async (rnd, cfg) => { const next = { ...pairingStrategy }; if (cfg) next[rnd] = cfg; else delete next[rnd]; setPairingStrategy(next); await saveTournamentState(finalizedRounds, passwords, teesSaved, teesModified, roundDates, scoringOpen, next); }} leaderboard={getLeaderboard} passwords={passwords} setPasswords={async pw => { setPasswords(pw); await saveTournamentState(finalizedRounds, pw); }} holeData={holeData} finalizedRounds={finalizedRounds} onFinalizeRound={async rnd => { const nf = { ...finalizedRounds, [rnd]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${rnd}`, tournament_id: TOURNAMENT_ID, round: rnd, finalized: true }); if (rnd < 4) setRound(rnd + 1); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); if (/^\d+$/.test(String(key))) { await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${key}`, tournament_id: TOURNAMENT_ID, round: Number(key), finalized: false }); } else { setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", key); } }} notify={notify} notif={notif} getPlayerTee={getPlayerTee} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); }} currentUser={user} teesSaved={teesSaved} onTeesSave={async r => { const next = { ...teesSaved, [r]: true }; const nextMod = { ...teesModified, [r]: false }; setTeesSaved(next); setTeesModified(nextMod); await saveTournamentState(finalizedRounds, passwords, next, nextMod); }} teesModified={teesModified} onTeesModify={async r => { const nextMod = { ...teesModified, [r]: true }; setTeesModified(nextMod); await saveTournamentState(finalizedRounds, passwords, teesSaved, nextMod); }} setTeesModified={setTeesModified} memberships={memberships} onSetDirector={onSetDirector} claims={claims} authUid={fbUser?.uid || null} /> : (
           <div style={{ textAlign: "center", padding: "40px 20px" }}>
             <div style={{ fontSize: 40, marginBottom: 12 }}>🔒</div>
             <div style={{ fontSize: 16, fontWeight: 700, color: K.t1, marginBottom: 6 }}>Directors Only</div>

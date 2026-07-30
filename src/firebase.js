@@ -246,6 +246,22 @@ export const NATIVE_APPLE_ENABLED = true;
 const mapAuthError = (e) => {
   const code = e?.code || "";
   const friendly = {
+    // The two console-setting failures, named rather than described. Firebase's
+    // own text for these ("This operation is not allowed", "This domain is not
+    // authorized") sends whoever is holding the phone hunting through the app
+    // for a bug that is a toggle in a web console — and the person reading it
+    // is usually also the person who can fix it. Ported from The Bourbon Cup,
+    // where guessing at these cost an afternoon.
+    "auth/operation-not-allowed":
+      "That sign-in method isn't switched on for this app yet — Firebase console → Authentication → Sign-in method.",
+    "auth/unauthorized-domain":
+      `Sign-in isn't allowed from ${typeof location !== "undefined" ? location.hostname : "this domain"} — add it under Firebase console → Authentication → Settings → Authorized domains.`,
+    "auth/operation-not-supported-in-this-environment":
+      "This browser can't complete sign-in. Try opening the site in Safari or Chrome.",
+    "auth/too-many-requests": "Too many attempts. Wait a minute and try again.",
+    "auth/internal-error": "Sign-in failed on the way back. Try again.",
+    "auth/account-exists-with-different-credential":
+      "You already signed in here with the other button. Use the one you used the first time.",
     "auth/provider-already-linked": "That sign-in method is already linked to your account.",
     "auth/credential-already-in-use":
       "That account is already registered as a separate login. A tournament director needs to remove the duplicate user in Firebase before it can be linked.",
@@ -292,6 +308,76 @@ const isStandalonePWA = () =>
   (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) ||
   window.navigator.standalone === true;
 
+// ─── Saying so when a redirect comes back empty (Bourbon Cup lesson) ─────
+// A redirect that returns with neither a user nor an error is the single most
+// confusing failure this file can produce: the app looks like it just ignored
+// you. It happened in The Bourbon Cup from an iOS home-screen install — back
+// from the auth handler with NO user and NO error, straight to the sign-in
+// screen again, twice in a row, with nothing to go on. The cause was Safari
+// partitioning storage per top-level origin, so a handler on
+// <project>.firebaseapp.com could not hand the result back.
+//
+// WBC should not hit that: authDomain is wannabecup.com and vercel.json
+// proxies /__/auth/*, which makes the handler first-party. But "should not"
+// is not "cannot" — a missed OAuth redirect URI in Google Cloud, or a Vercel
+// rewrite that stops matching, reproduces it exactly. So the fact that a
+// redirect was attempted at all gets recorded, and coming back empty becomes
+// a sentence on screen instead of a silent loop.
+//
+// sessionStorage survives the round trip (same tab, same origin) and nothing
+// else does, which is why it is the place this is left.
+const REDIRECT_MARK = "wbc_auth_redirect";
+
+const markRedirect = (providerId) => {
+  try { sessionStorage.setItem(REDIRECT_MARK, providerId || "1"); } catch { /* blocked storage */ }
+};
+
+const takeRedirectMark = () => {
+  try {
+    const v = sessionStorage.getItem(REDIRECT_MARK);
+    if (v) sessionStorage.removeItem(REDIRECT_MARK);
+    return v;
+  } catch { return null; }
+};
+
+// Popup failures worth retrying as a redirect rather than showing to the user.
+// `popup-blocked` is a blocker extension or a browser that wanted a more
+// direct gesture; `operation-not-supported-in-this-environment` is a webview
+// with no popup support at all. Before this, either one ended the attempt with
+// an error message and no way forward on that device.
+const REDIRECT_FALLBACK = new Set([
+  "auth/popup-blocked",
+  "auth/operation-not-supported-in-this-environment",
+  "auth/web-storage-unsupported",
+]);
+
+// ─── The web half of both providers ──────────────────────────────────────
+// One routing decision, shared by Google and Apple so the two can never
+// drift: installed PWA takes the redirect (popups are unreliable in iOS
+// standalone mode, and the first-party authDomain makes the round trip
+// survive storage partitioning); everywhere else takes the popup, which
+// never unloads the app, with the redirect as its fallback.
+const webSignIn = async (providerId, provider) => {
+  const viaRedirect = async () => {
+    markRedirect(providerId);
+    try {
+      // Resolves on the return trip — consumeRedirectResult() on app mount
+      // completes the flow.
+      return await signInWithRedirect(_auth, provider);
+    } catch (e) { takeRedirectMark(); throw e; }
+  };
+
+  if (isStandalonePWA()) return viaRedirect();
+  try {
+    return await signInWithPopup(_auth, provider);
+  } catch (e) {
+    // A popup this environment could never have opened is not a reason to
+    // give up; it is a reason to take the long way round.
+    if (REDIRECT_FALLBACK.has(e?.code)) return viaRedirect();
+    throw e;
+  }
+};
+
 export const doGoogleSignIn = async () => {
   if (!_auth) throw new Error("Sign-in is not enabled yet.");
   try {
@@ -302,12 +388,7 @@ export const doGoogleSignIn = async () => {
       const credential = GoogleAuthProvider.credential(idToken);
       return await signInWithCredential(_auth, credential);
     }
-    if (isStandalonePWA()) {
-      // Resolves on the return trip — the caller must also invoke
-      // consumeRedirectResult() on app mount to complete the flow.
-      return await signInWithRedirect(_auth, _googleProvider);
-    }
-    return await signInWithPopup(_auth, _googleProvider);
+    return await webSignIn("google", _googleProvider);
   } catch (e) {
     throw mapAuthError(e);
   }
@@ -323,11 +404,26 @@ export const consumeRedirectResult = async () => {
   // getRedirectResult() REQUIRES a resolver and throws auth/argument-error
   // without one — so calling it on native fails on every launch. Skip it.
   if (isNativePlatform()) return null;
+  const attempted = takeRedirectMark();
   try {
     const result = await getRedirectResult(_auth);
-    if (result) captureAppleToken(result); // no-op for non-Apple results
-    return result;
+    if (result) {
+      captureAppleToken(result); // no-op for non-Apple results
+      return result;
+    }
+    // We sent them to the provider and got back nothing at all — no user and
+    // no error. Naming it beats another silent trip to the sign-in screen; see
+    // the note on REDIRECT_MARK above for what causes it and what to check.
+    if (attempted) {
+      const err = new Error(
+        "Sign-in came back empty. On an iPhone home-screen app this usually clears if you open wannabecup.com in Safari instead — tell Aaron if it keeps happening.",
+      );
+      err.code = "app/redirect-empty";
+      throw err;
+    }
+    return null;
   } catch (e) {
+    if (e?.code === "app/redirect-empty") throw e;
     throw mapAuthError(e);
   }
 };
@@ -354,11 +450,10 @@ export const doAppleSignIn = async () => {
       const credential = provider.credential({ idToken, rawNonce: result.credential?.nonce });
       return await signInWithCredential(_auth, credential);
     }
-    if (isStandalonePWA()) {
-      return await signInWithRedirect(_auth, _appleProvider);
-    }
-    const result = await signInWithPopup(_auth, _appleProvider);
-    captureAppleToken(result);
+    const result = await webSignIn("apple", _appleProvider);
+    // Null on the redirect path (the browser is navigating away); the token is
+    // captured on the return trip by consumeRedirectResult instead.
+    if (result) captureAppleToken(result);
     return result;
   } catch (e) {
     throw mapAuthError(e);
@@ -494,6 +589,19 @@ export const deleteAccount = async (playerId) => {
     await deleteDoc(doc(_db, USERS_COLLECTION, user.uid));
   } catch (e) {
     console.warn("deleteAccount: wbc_users doc delete failed:", e?.message || e);
+  }
+
+  // 1b. Release the tournament-password membership (wbc_accounts/{uid}) — the
+  //     document every write in the project is gated on. It has to go through a
+  //     callable because firestore.rules denies `delete` on it to every client;
+  //     see src/lib/accounts.js and functions/index.js. Best-effort, and
+  //     deliberately so: a membership left behind once the Auth user is gone
+  //     grants nothing, because nothing can sign in as that uid again.
+  try {
+    const { releaseMembership } = await import("./lib/accounts");
+    await releaseMembership();
+  } catch (e) {
+    console.warn("deleteAccount: membership release skipped:", e?.message || e);
   }
 
   // 2. Sweep this player's push tokens so no orphaned device keeps

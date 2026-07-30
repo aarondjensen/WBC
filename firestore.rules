@@ -1,0 +1,296 @@
+rules_version = '2';
+
+// ══════════════════════════════════════════════════════════════════
+//  Firestore security rules — WBC
+// ══════════════════════════════════════════════════════════════════
+//
+// Ported from The Bourbon Cup's firestore.rules, with WBC's collections and
+// WBC's split between what a phone does on a tee box and what Admin owns.
+//
+// ── Read this before changing anything ────────────────────────────
+// Two gates, and only the second one matters.
+//
+// People sign in with Google or Apple (src/firebase.js), which proves who
+// they are and nothing else — anybody can make a Google account, and the
+// app's Firebase config ships in the bundle by design, so "signed in" on its
+// own would let any stranger who viewed source rewrite sixteen years of
+// tournament history.
+//
+// So writing requires MEMBERSHIP: a wbc_accounts/{uid} document, which an
+// account can only create by presenting the tournament password (see
+// src/lib/accounts.js). The password lives in wbc_secrets/access, which only
+// a director may read; the rules compare against it with `get()`, which is
+// not subject to read rules, so the check works the same for everybody else.
+// That is what makes it a lock rather than a doorman — it holds against
+// someone reading the bundle, disabling the JavaScript, or skipping the app
+// entirely and talking to Firestore with the public config.
+//
+// Reads stay open, deliberately: the Live Leaderboard is meant to be
+// glanceable by a spouse on the couch with a link (the app has a Guest
+// button for exactly that), and the push service worker has no user to sign
+// in as. If that ever needs to change, `isOpen()` is the one place.
+//
+// ── The member / director split ───────────────────────────────────
+// This is where WBC differs from The Bourbon Cup, and the difference was
+// traced from the call sites rather than assumed. In WBC a player on the
+// scoring screen can withdraw somebody (markPlayerWD → tournament_players),
+// change a tee (setTee → tee_assignments), sign or attest a card
+// (wbc_scorecard_sigs), and finalize a card, which writes tournament_state
+// and wbc_rounds_state. All of those therefore have to be MEMBER writes, not
+// director writes, or a rules deploy would silently break scoring on the
+// tee — the failure this file is most able to cause and least able to show.
+//
+// What is left as DIRECTOR-only is the set no player screen can reach:
+// the player registry, the courses and their tee boxes, the round-to-course
+// assignments, the pairings, and the password.
+//
+// Within each half there is no per-document ownership, deliberately. Scoring
+// is communal — one phone posts for a group of four — so "only your own
+// rows" would break the actual workflow before it stopped anybody.
+//
+// ── Deploying this ────────────────────────────────────────────────
+// Rules are deployed by hand and the app is not. Deploy these only once the
+// matching build is live and everyone's phone has loaded it. Deploy them
+// first and any phone on an older bundle — including one signed in but with
+// no membership document yet — silently fails every write it attempts:
+// scores typed on the tee that never arrive.
+//
+//   firebase deploy --only firestore:rules
+//
+// BEFORE the first deploy, two things must be true or nobody can administer
+// the tournament:
+//   1. Both directors have signed in and been through the password screen,
+//      so a wbc_accounts document exists for them.
+//   2. `is_director: true` is set on those documents in the Firebase console.
+//      The rule below requires a director to already exist, so the first one
+//      cannot come from the app. That console edit is also the way back if
+//      the set is ever emptied, and the way somebody steps down.
+//
+// ── Locking somebody out ──────────────────────────────────────────
+// Delete their wbc_accounts document in the Firebase console. Nothing in the
+// app can do it (update is narrow and delete is denied to every client),
+// which is deliberate. Rotating the password afterwards does NOT evict
+// anybody already through the door — existing memberships are never
+// re-checked against it.
+//
+// ── What this replaces ────────────────────────────────────────────
+// Nothing in the repo: there was no firestore.rules file at all, even though
+// firebase.json already pointed at one. Whatever is published to the project
+// today is whatever was last edited in the console. So the enumeration below
+// IS the change, and it was taken from the collections the client actually
+// touches — every db.get / db.upsert / db.subscribe / db.delete in
+// src/App.jsx, plus wbc_users and the token sweep in src/firebase.js.
+// Anything newly denied is by construction something no code path here reads
+// or writes; data in such a collection is untouched, just unreachable until a
+// line is added.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Reading is open to anyone with the app — a shared leaderboard link,
+    // the Guest button, the push service worker, a phone that has not signed
+    // in yet.
+    function isOpen() {
+      return true;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // ── Membership ────────────────────────────────────────────────
+    // Writing needs more than an account: it needs a membership document,
+    // issued only to someone who presented the tournament password. Signing
+    // in is free — anybody can make a Google account — so this is the
+    // predicate that actually decides who can change the tournament, and it
+    // holds against someone talking to Firestore directly rather than
+    // through the app.
+    //
+    // Costs one document read per write. At a dozen phones for a weekend
+    // that is nothing.
+    function isMember() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/wbc_accounts/$(request.auth.uid));
+    }
+
+    // ── Directors ─────────────────────────────────────────────────
+    // A flag on the membership document. It cannot be self-issued: `create`
+    // below rejects any attempt to include it, and `update` refuses your own
+    // document — so knowing the password never promotes anybody, and a
+    // director cannot demote themselves either, which means the set can
+    // never be emptied from inside the app.
+    //
+    // The app reads this same flag to decide whether the Admin tab exists,
+    // so a phone can never show an Admin tab whose writes would be refused.
+    //
+    // `get(key, default)` rather than `.is_director`, so a membership
+    // document written before this existed reads as false instead of
+    // erroring the whole evaluation.
+    function isDirector() {
+      return isMember()
+        && get(/databases/$(database)/documents/wbc_accounts/$(request.auth.uid))
+             .data.get('is_director', false) == true;
+    }
+
+    // The password, and the deliberate hole in it. `accessCode()` reads a
+    // document no ordinary client may read — rules `get()` is not subject to
+    // read rules, which is the whole trick: the secret can be compared
+    // without ever being served.
+    //
+    // A missing or blank code means the door is open. That is not an
+    // oversight, it is the bootstrap: before anybody has set a password
+    // there is no way to present the right one, and without this the very
+    // first membership could never be created and the project would be
+    // bricked to its own owners.
+    function accessCode() {
+      return exists(/databases/$(database)/documents/wbc_secrets/access)
+        ? get(/databases/$(database)/documents/wbc_secrets/access).data.code
+        : null;
+    }
+
+    // Compared without case, because this password's life is being said out
+    // loud across a table and typed into a phone by somebody who did not see
+    // it written down. A capital letter at the front — from the keyboard, or
+    // from whoever repeated it — was never a meaningful part of the secret.
+    //
+    // The `is string` guard is load-bearing: `.lower()` on a missing or
+    // non-string field raises, and while a raised rule denies the write just
+    // the same, denying it deliberately is easier to reason about than
+    // denying it by accident. The stored code keeps whatever casing the
+    // director typed — only the comparison is flattened, so Admin can still
+    // show it back the way it was written.
+    function codeOK() {
+      return accessCode() == null
+        || accessCode() == ''
+        || (request.resource.data.get('code', null) is string
+            && request.resource.data.code.lower() == accessCode().lower());
+    }
+
+    // ── The door ──────────────────────────────────────────────────
+    // One document per account, id = uid, created by the account itself at
+    // the password screen. Its existence IS membership; everything below is
+    // gated on it.
+    //
+    // create: your own uid only, and only with the right password, and never
+    //         carrying is_director. There is no other way to mint a
+    //         membership — not even for a director.
+    // read:   your own, plus every membership for a director, who needs to
+    //         see who else is one to draw the crown in Admin.
+    // update: ONE field, is_director, only a director may set it, and never
+    //         on themselves.
+    // delete: nobody from a client. Account deletion goes through the
+    //         deleteMembership callable on the admin SDK (functions/index.js)
+    //         and revoking somebody entirely is a console edit — a client
+    //         that could delete its own membership could delete somebody
+    //         else's if this rule were ever loosened by accident.
+    match /wbc_accounts/{uid} {
+      allow read: if isDirector() || (isSignedIn() && request.auth.uid == uid);
+      allow create: if isSignedIn() && request.auth.uid == uid && codeOK()
+                    && !('is_director' in request.resource.data);
+      allow update: if isDirector()
+                    && request.auth.uid != uid
+                    && request.resource.data.diff(resource.data).affectedKeys()
+                         .hasOnly(['is_director']);
+      allow delete: if false;
+    }
+
+    // The password itself. Read is denied to everyone outside the door and
+    // that is the load-bearing half: if a stranger could read this document
+    // they could read the code and let themselves in, and the gate would be
+    // worth nothing. `codeOK()` above compares against it regardless, since
+    // rules `get()` is not subject to these read rules.
+    //
+    // Directors can read it, so Admin can show one a code they have
+    // forgotten, and change it. Nobody else can do either.
+    match /wbc_secrets/{doc} {
+      allow read: if isDirector();
+      allow write: if isDirector();
+    }
+
+    // ── The account → player link ─────────────────────────────────
+    // One document per account, id = uid, carrying the player_id: the
+    // permanent career identity that ties a person to sixteen years of
+    // history. Written once at the claim screen, deleted when the account is.
+    //
+    // Read is open because the claim screen needs to know which names are
+    // already taken before the person has claimed one, and a uid → player_id
+    // map is not a secret. Writes are your own document only, pointing at
+    // your own uid, so nobody can claim a name as somebody else or hand
+    // their history to another account.
+    //
+    // Delete allows your own, which is what the in-app Delete Account does
+    // from the client while the session is still valid.
+    match /wbc_users/{uid} {
+      allow read: if isOpen();
+      allow create, update: if isMember() && request.auth.uid == uid
+                            && request.resource.data.get('uid', uid) == uid;
+      allow delete: if isSignedIn() && request.auth.uid == uid;
+    }
+
+    // ── Director-owned setup ──────────────────────────────────────
+    // The set no player screen can reach: the registry, the courses, the
+    // round-to-course assignments and the tee sheet. All written from
+    // AdminView only (addPlayerToTournament, updateName, addCourse, the
+    // course editor, setCourseForRound, PairingsEditor).
+    match /players/{doc}            { allow read: if isOpen();
+                                      allow write: if isDirector(); }
+    match /courses/{doc}            { allow read: if isOpen();
+                                      allow write: if isDirector(); }
+    match /tee_boxes/{doc}          { allow read: if isOpen();
+                                      allow write: if isDirector(); }
+    match /tournament_rounds/{doc}  { allow read: if isOpen();
+                                      allow write: if isDirector(); }
+    match /pairings/{doc}           { allow read: if isOpen();
+                                      allow write: if isDirector(); }
+
+    // ── Written from a tee box ────────────────────────────────────
+    // Members, not directors — see the note at the top of this file. Each of
+    // these has a live call site on a player screen:
+    //
+    //   tournament_players  markPlayerWD (withdraw), as well as Admin's
+    //                       handicap edits and add/remove
+    //   tee_assignments     setTee from the scoring screen, as well as
+    //                       Admin's tee sheet
+    //   tournament_state    the finalize/sign path (saveTournamentState)
+    //   wbc_rounds_state    the same, per round
+    //   hole_scores         scoring, obviously
+    //   skins               skins and CTPs
+    //   wbc_scorecard_sigs  sign, attest and unsign
+    match /tournament_players/{doc} { allow read: if isOpen();
+                                      allow write: if isMember(); }
+    match /tee_assignments/{doc}    { allow read: if isOpen();
+                                      allow write: if isMember(); }
+    match /tournament_state/{doc}   { allow read: if isOpen();
+                                      allow write: if isMember(); }
+    match /wbc_rounds_state/{doc}   { allow read: if isOpen();
+                                      allow write: if isMember(); }
+    match /hole_scores/{doc}        { allow read: if isOpen();
+                                      allow write: if isMember(); }
+    match /skins/{doc}              { allow read: if isOpen();
+                                      allow write: if isMember(); }
+    match /wbc_scorecard_sigs/{doc} { allow read: if isOpen();
+                                      allow write: if isMember(); }
+
+    // ── Push notification tokens ──────────────────────────────────
+    // One document per (player, device). Holds an FCM registration token,
+    // which is a send-to address, not a credential: possession lets you push
+    // a notification to that device, not read anything from it. The Cloud
+    // Functions read this collection through the admin SDK, which bypasses
+    // these rules entirely — the grant below is only for the client that
+    // registers and revokes its own token.
+    //
+    // Worth noting what open READ means here specifically: unlike the rest
+    // of this file, where the data is already public to anyone with the
+    // bundle, this collection lets a reader enumerate the league's devices.
+    // That is the same trade the app makes everywhere else, but it is the
+    // one collection where a future tightening should start.
+    match /wbc_notifications_tokens/{doc} { allow read: if isOpen();
+                                            allow write: if isMember(); }
+
+    // ── Everything else ───────────────────────────────────────────
+    // Default deny. Adding a collection to the app means adding it here.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

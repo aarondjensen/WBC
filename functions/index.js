@@ -366,4 +366,37 @@ exports.revokeAppleToken = onCall({ secrets: [APPLE_PRIVATE_KEY] }, async (reque
   return { revoked: true };
 });
 
+// ─────────────────────────────────────────────────────────────────────────
+//  deleteMembership — releasing the tournament-password membership
+// ─────────────────────────────────────────────────────────────────────────
+// The membership document (wbc_accounts/{uid}) is what every write in the
+// project is gated on, and firestore.rules denies `delete` on it to every
+// client — deliberately. A client that could delete its own membership is one
+// loosened rule away from deleting somebody else's, so revoking one is a
+// console edit and this callable is the single narrow exception, for the one
+// case the App Store requires: a person deleting their own account.
+//
+// It takes NO uid argument. It acts on the verified auth context, so there is
+// no way to phrase a call that releases somebody else's membership. The admin
+// SDK bypasses the rules by design, which is what makes this possible at all.
+//
+// Called from src/lib/accounts.js → releaseMembership(), during deletion and
+// BEFORE the Firebase Auth user goes, while request.auth is still present.
+// Best-effort on the client side: a membership left behind when the Auth user
+// is gone grants nothing, since nothing can sign in as that uid again.
+exports.deleteMembership = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Must be signed in.");
+  }
+  const uid = request.auth.uid;
+  try {
+    await db.collection("wbc_accounts").doc(uid).delete();
+  } catch (err) {
+    logger.error("deleteMembership failed", { uid, message: err?.message });
+    throw new HttpsError("internal", `Could not delete membership: ${err?.message || err}`);
+  }
+  logger.info("Membership deleted", { uid });
+  return { deleted: true };
+});
+
 exports.__sendToPlayer = sendToPlayer;
