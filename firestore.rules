@@ -48,23 +48,41 @@ rules_version = '2';
 // is communal — one phone posts for a group of four — so "only your own
 // rows" would break the actual workflow before it stopped anybody.
 //
-// ── Deploying this ────────────────────────────────────────────────
-// Rules are deployed by hand and the app is not. Deploy these only once the
-// matching build is live and everyone's phone has loaded it. Deploy them
-// first and any phone on an older bundle — including one signed in but with
-// no membership document yet — silently fails every write it attempts:
-// scores typed on the tee that never arrive.
+// ── Deploying this: TWO STAGES ────────────────────────────────────
+// Rules are deployed by hand and the app is not, and this file cannot go out
+// in one shot. Every write below is meant to require a membership document,
+// and nobody can have one until rules that permit wbc_accounts are published
+// — which is the deadlock the password screen ran into the first time it was
+// tapped: the read of wbc_accounts was refused, so the app could not even ask
+// whether you were a member.
+//
+// `enforcing()` below resolves it. Deploy this file as-is, TODAY:
 //
 //   firebase deploy --only firestore:rules
 //
-// BEFORE the first deploy, two things must be true or nobody can administer
-// the tournament:
-//   1. Both directors have signed in and been through the password screen,
-//      so a wbc_accounts document exists for them.
-//   2. `is_director: true` is set on those documents in the Firebase console.
+// STAGE ONE (enforcing() == false, how this file ships):
+//   • wbc_accounts and wbc_secrets get their real rules, so the door works
+//     and a director can be flagged.
+//   • the tournament data stays as open as it is right now. Nothing that
+//     works today stops working, and no phone can be locked out.
+// The security this file exists for is NOT yet in effect at this stage. It
+// adds the door; it does not make anybody walk through it.
+//
+// Then, in order:
+//   1. Everyone signs in and taps through the password screen, so each has a
+//      wbc_accounts document. Count them in the console against the roster.
+//   2. Set `is_director: true` on both directors' documents in the console.
 //      The rule below requires a director to already exist, so the first one
 //      cannot come from the app. That console edit is also the way back if
 //      the set is ever emptied, and the way somebody steps down.
+//   3. Delete the DIRECTOR_IDS fallback in src/App.jsx and deploy the app, so
+//      it reads Admin access from the same flag these rules do.
+//
+// STAGE TWO: flip `enforcing()` to true and re-publish. Do it when nobody is
+// mid-round. A phone that has not loaded the current build, or an account
+// with no membership, silently fails every write it attempts from that
+// moment — scores typed on the tee that never arrive. A `git revert` does not
+// un-lock-out a phone; re-publishing with enforcing() false is the way back.
 //
 // ── Locking somebody out ──────────────────────────────────────────
 // Delete their wbc_accounts document in the Firebase console. Nothing in the
@@ -130,6 +148,53 @@ service cloud.firestore {
       return isMember()
         && get(/databases/$(database)/documents/wbc_accounts/$(request.auth.uid))
              .data.get('is_director', false) == true;
+    }
+
+    // ── The bootstrap switch ──────────────────────────────────────
+    // THE ONE LINE TO FLIP, and the reason this file can be deployed today
+    // without locking anybody out.
+    //
+    // Enforcement is a chicken-and-egg problem. Every write below is meant to
+    // require a membership document, but nobody can HAVE one until rules that
+    // permit wbc_accounts are published — and the moment rules that also gate
+    // the tournament data land, every phone without a membership silently
+    // fails every write it attempts. Deploy the finished article on a Friday
+    // and the field spends Saturday typing scores into a void.
+    //
+    // So this deploys in two stages, and while `enforcing()` is FALSE:
+    //
+    //   • wbc_accounts and wbc_secrets get their REAL rules immediately, so
+    //     people can get through the door and a director can be flagged. That
+    //     is the whole point of stage one.
+    //   • the tournament data stays exactly as permissive as it is today.
+    //     Nothing that works now stops working.
+    //
+    // WHAT THAT COSTS: until this is flipped, the tournament data is as
+    // world-writable as it already is. This stage adds the door; it does not
+    // yet make anyone walk through it. The security this file exists for
+    // arrives at the flip, not at this deploy.
+    //
+    // FLIP IT TO TRUE once all of these are true, and not before:
+    //   1. Everybody who scores has signed in and been through the password
+    //      screen, so a wbc_accounts document exists for them. Check the
+    //      collection in the console against the roster — this is countable,
+    //      so count it rather than assume.
+    //   2. Both directors have `is_director: true` on those documents.
+    //   3. The DIRECTOR_IDS fallback in src/App.jsx is deleted and deployed,
+    //      so the app reads Admin access from the same flag these rules do.
+    // Then re-publish:  firebase deploy --only firestore:rules
+    function enforcing() {
+      return false;
+    }
+
+    // What the tournament data is gated on. Real once enforcing() is true;
+    // until then, open, which is the status quo.
+    function canWrite() {
+      return !enforcing() || isMember();
+    }
+
+    function canAdmin() {
+      return !enforcing() || isDirector();
     }
 
     // The password, and the deliberate hole in it. `accessCode()` reads a
@@ -222,7 +287,7 @@ service cloud.firestore {
     // from the client while the session is still valid.
     match /wbc_users/{uid} {
       allow read: if isOpen();
-      allow create, update: if isMember() && request.auth.uid == uid
+      allow create, update: if canWrite() && request.auth.uid == uid
                             && request.resource.data.get('uid', uid) == uid;
       allow delete: if isSignedIn() && request.auth.uid == uid;
     }
@@ -233,15 +298,15 @@ service cloud.firestore {
     // AdminView only (addPlayerToTournament, updateName, addCourse, the
     // course editor, setCourseForRound, PairingsEditor).
     match /players/{doc}            { allow read: if isOpen();
-                                      allow write: if isDirector(); }
+                                      allow write: if canAdmin(); }
     match /courses/{doc}            { allow read: if isOpen();
-                                      allow write: if isDirector(); }
+                                      allow write: if canAdmin(); }
     match /tee_boxes/{doc}          { allow read: if isOpen();
-                                      allow write: if isDirector(); }
+                                      allow write: if canAdmin(); }
     match /tournament_rounds/{doc}  { allow read: if isOpen();
-                                      allow write: if isDirector(); }
+                                      allow write: if canAdmin(); }
     match /pairings/{doc}           { allow read: if isOpen();
-                                      allow write: if isDirector(); }
+                                      allow write: if canAdmin(); }
 
     // ── Written from a tee box ────────────────────────────────────
     // Members, not directors — see the note at the top of this file. Each of
@@ -257,19 +322,19 @@ service cloud.firestore {
     //   skins               skins and CTPs
     //   wbc_scorecard_sigs  sign, attest and unsign
     match /tournament_players/{doc} { allow read: if isOpen();
-                                      allow write: if isMember(); }
+                                      allow write: if canWrite(); }
     match /tee_assignments/{doc}    { allow read: if isOpen();
-                                      allow write: if isMember(); }
+                                      allow write: if canWrite(); }
     match /tournament_state/{doc}   { allow read: if isOpen();
-                                      allow write: if isMember(); }
+                                      allow write: if canWrite(); }
     match /wbc_rounds_state/{doc}   { allow read: if isOpen();
-                                      allow write: if isMember(); }
+                                      allow write: if canWrite(); }
     match /hole_scores/{doc}        { allow read: if isOpen();
-                                      allow write: if isMember(); }
+                                      allow write: if canWrite(); }
     match /skins/{doc}              { allow read: if isOpen();
-                                      allow write: if isMember(); }
+                                      allow write: if canWrite(); }
     match /wbc_scorecard_sigs/{doc} { allow read: if isOpen();
-                                      allow write: if isMember(); }
+                                      allow write: if canWrite(); }
 
     // ── Push notification tokens ──────────────────────────────────
     // One document per (player, device). Holds an FCM registration token,
@@ -285,7 +350,7 @@ service cloud.firestore {
     // That is the same trade the app makes everywhere else, but it is the
     // one collection where a future tightening should start.
     match /wbc_notifications_tokens/{doc} { allow read: if isOpen();
-                                            allow write: if isMember(); }
+                                            allow write: if canWrite(); }
 
     // ── Everything else ───────────────────────────────────────────
     // Default deny. Adding a collection to the app means adding it here.

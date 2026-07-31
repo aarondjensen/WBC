@@ -6070,10 +6070,13 @@ export default function WBCApp() {
     );
   }
 
-  // Signed in, through the door or still asking, and nothing to show yet.
-  // Holding here rather than falling to the login screen is what stops the
-  // sign-in buttons flashing at somebody who is already signed in.
-  if (fbUser && !user && member === undefined) {
+  // Signed in, and nothing to show yet — either the door has not answered or
+  // the roster has not arrived to say which player this account is. Holding
+  // here rather than falling through to the login screen is what stops the
+  // sign-in buttons appearing to somebody who is already signed in, which
+  // reads as "it threw me back out" and is indistinguishable from the gate
+  // having refused them.
+  if (fbUser && !user && (member === undefined || !storageLoaded)) {
     return (
       <div style={{ minHeight: "var(--app-height, 100dvh)", background: `radial-gradient(ellipse at 20% 50%, #0d1f3c 0%, ${K.bg} 70%)`, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
         <img src={WBC_LOGO} alt="WBC" style={{ height: 72, opacity: 0.85, animation: "pulse 1.5s ease-in-out infinite", filter: "drop-shadow(0 4px 16px rgba(34,211,167,0.3))" }} />
