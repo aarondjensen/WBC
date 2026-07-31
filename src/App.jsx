@@ -6702,10 +6702,12 @@ export default function WBCApp() {
       <div style={{ minHeight: "var(--app-height, 100dvh)", background: "#030810", display: "flex", justifyContent: "center", overflow: "hidden" }}>
       <div style={{ height: "var(--app-height, 100dvh)", display: "flex", flexDirection: "column", background: K.bg, fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", color: K.t1, width: "100%", maxWidth: 480, position: "relative", boxShadow: "0 0 80px rgba(0,0,0,0.8)", flexShrink: 0, overflow: "hidden" }}>
         <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
-        <div style={{ padding: "10px 20px", paddingTop: "max(10px, calc(env(safe-area-inset-top, 0px) + 10px))", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${K.bdr}`, background: "rgba(14,24,41,0.95)", flexShrink: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}><img src={WBC_LOGO} alt="WBC" style={{ height: 32 }} /><div><div style={{ fontWeight: 800, fontSize: 15, color: K.t1 }}>{tournamentName}</div><div style={{ fontSize: 11, color: K.t3 }}>{tournamentLocation || "Gaylord, MI · Aug 26\u201329"}</div></div></div>
-          <button onClick={handleLogout} style={{ background: "transparent", border: `1px solid ${K.bdr}`, borderRadius: 8, color: K.t3, fontSize: 12, fontWeight: 600, padding: "5px 12px", cursor: "pointer" }}>Exit</button>
-        </div>
+        {/* The guest leaderboard is its own render branch, so it gets the
+            same header rather than a second left-aligned copy of one. */}
+        <AppHeader
+          location={tournamentLocation}
+          right={<button onClick={handleLogout} style={{ background: "transparent", border: `1px solid ${K.bdr}`, borderRadius: 8, color: K.t3, fontSize: FS.small, fontWeight: 600, padding: "5px 12px", cursor: "pointer" }}>Exit</button>}
+        />
         <div style={{ padding: "14px 20px 0 20px", flex: 1, overflowY: "hidden", overflowX: "hidden", display: "flex", flexDirection: "column", minHeight: 0, marginBottom: 8 }}>
           <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} />
         </div>
