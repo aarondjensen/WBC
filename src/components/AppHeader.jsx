@@ -64,11 +64,19 @@ export function AppHeader({ location, fallbackLocation = "Gaylord, MI", right })
         mask: `url("${TROPHY_SVG_URL}") center/contain no-repeat`,
       }} />
 
+      {/* WBC's own display treatment, not the one this layout was ported
+          with. Both apps set Montserrat, so the FAMILY was never the
+          difference — what came across from Bourbon Cup was its caption
+          idiom: 10px, +2.2 tracking, all-caps, in the muted text colour.
+          WBC sets its titles the opposite way, and does so everywhere else
+          in the app — larger, NEGATIVE tracking, full-strength ink, and
+          sentence case, so a location reads "Gaylord, MI" rather than being
+          shouted. */}
       <div style={{
-        fontSize: FS.label, fontWeight: 800, letterSpacing: 2.2, color: K.t2,
+        fontSize: FS.lead, fontWeight: 800, letterSpacing: "-0.01em", color: K.t1,
         whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%",
       }}>
-        {getTournamentYear()} · {(location || fallbackLocation).toUpperCase()}
+        {getTournamentYear()} · {location || fallbackLocation}
       </div>
 
       {right && (
