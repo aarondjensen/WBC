@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import { _app, _db, _auth, onAuthStateChanged, doGoogleSignIn, doAppleSignIn, doSignOut, consumeRedirectResult, deleteAccount, USERS_COLLECTION, NATIVE_APPLE_ENABLED, APPLE_PROVIDER_ENABLED, isNativePlatform, isAndroidNative, AUTH_PROVIDERS_ENABLED, TOURNAMENT_ID, getEditionSlug, getTournamentYear, isDefaultEdition } from "./firebase";
 import { readMembership, isDirectorAccount, joinWithCode, readAccessCode, setAccessCode, setDirector, subscribeMemberships, accountsUnreadable } from "./lib/accounts";
-import { K, ON_ACC } from "./theme";
+import { K, ON_ACC, FS, ALPHA, FONT } from "./theme";
+import { SegmentedToggle, StickyTop, SectionLabel, Card, Toast } from "./components/ui";
 import { calcCH, computeIndividualBoard, rankIndividualBoard, rankIndividualBoardIds } from "./lib/individualBoard";
 import { useConfirm } from "./lib/useConfirm";
 import { groupsForRound, assignToGroup, removeFromGroup as removeFromGroupPure, clearGroup, swapIntoGroup } from "./lib/pairings";
@@ -3501,15 +3502,13 @@ function AccessPanel({ memberships, onSetDirector, claims, players, authUid, not
   );
 }
 
-function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, roundDates, onSetRoundDate, scoringOpen, onSetScoringOpen, pairingStrategy, onSetPairingStrategy, leaderboard, passwords, setPasswords, holeData, finalizedRounds, onFinalizeRound, onUnfinalizeRound, notify, notif, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, onExternalSettingsHandled, teesSaved, onTeesSave, teesModified, onTeesModify, memberships, onSetDirector, claims, authUid, tournamentMeta, onSaveTournamentMeta }) {
-  const [tab, setTab] = useState("tees");
+function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, roundDates, onSetRoundDate, scoringOpen, onSetScoringOpen, pairingStrategy, onSetPairingStrategy, leaderboard, passwords, setPasswords, holeData, finalizedRounds, onFinalizeRound, onUnfinalizeRound, notify, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, onExternalSettingsHandled, teesSaved, onTeesSave, teesModified, onTeesModify, memberships, onSetDirector, claims, authUid, tournamentMeta, onSaveTournamentMeta }) {
+  const [tab, setTab] = useState("rounds");
   // Themed confirmations (see lib/useConfirm). The host <ConfirmModal/> is
   // rendered once at the bottom of this view; `confirm(...)` returns a
   // Promise<boolean>.
   const { confirm, confirmModal } = useConfirm();
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [showFinalizeModal, setShowFinalizeModal] = useState(false);
-  const [settingsTab, setSettingsTab] = useState("course");
   // ── Handicap-edit guard ──
   // Handicap indexes are LOCKED-IN for the tournament by design (unlike a rolling
   // league handicap). Because getLeaderboard reads the CURRENT handicap_index for
@@ -3534,13 +3533,16 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
       updateHI(pid, newHI);
     }
   };
-  // Apply external open requests (e.g. from scoring tab)
+  // Deep links from elsewhere in the app (the scoring screen's "no course
+  // assigned" prompt). These used to open the gear modal on a given pane;
+  // with the modal gone they select a top-level tab instead. The old pane
+  // names are mapped rather than changed at the call sites, so a caller
+  // asking for "course" still lands somewhere sensible.
+  const EXTERNAL_TAB = { course: "courses", players: "players", access: "event", tournament: "event" };
   useEffect(() => {
-    if (externalSettingsOpen) {
-      setSettingsOpen(true);
-      if (externalSettingsTab) setSettingsTab(externalSettingsTab);
-      if (onExternalSettingsHandled) onExternalSettingsHandled();
-    }
+    if (!externalSettingsOpen) return;
+    setTab(EXTERNAL_TAB[externalSettingsTab] || "courses");
+    if (onExternalSettingsHandled) onExternalSettingsHandled();
   }, [externalSettingsOpen]);
   const [newName, setNewName] = useState("");
   const [newHI, setNewHI] = useState("");
@@ -3923,6 +3925,46 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
         </Popup>
       )}
 
+      {/* ── Top-level tabs ──────────────────────────────────────────
+          Five always-visible tabs, replacing the round-selector + sub-tabs
+          + gear-modal shell. Ported from Bourbon Cup's Admin, whose console
+          is one flat set of tabs rather than a round-scoped view with
+          everything else hidden behind a gear.
+
+          Pinned in a StickyTop so the bar lands in the SAME place on every
+          tab regardless of that tab's content height — see ui.jsx. */}
+      <StickyTop padBottom={10}>
+        <SegmentedToggle
+          options={[["players","Players"],["rounds","Rounds"],["pairings","Pairings"],["courses","Courses"],["event","Event"]]}
+          value={tab}
+          onChange={setTab}
+        />
+      </StickyTop>
+
+      {/* The round selector belongs to the two ROUND-SCOPED tabs only.
+          Players, Courses and Event act on the tournament as a whole, and a
+          round picker above them would imply otherwise. */}
+      {(tab === "rounds" || tab === "pairings") && (<>
+        {(() => {
+          const _finalizePending = Object.entries(pairingsData || {}).some(([rnd, groups]) => {
+            if (!groups.length) return false;
+            return groups.every(grp => {
+              const gk = `${rnd}_${grp.slice().sort().join(",")}`;
+              if (finalizedRounds[gk] || finalizedRounds[parseInt(rnd)]) return false;
+              return grp.every(pid => {
+                const pd = holeData[`${pid}_${rnd}`] || {};
+                return Object.values(pd).filter(s => s > 0).length === 18;
+              });
+            });
+          });
+          if (!_finalizePending) return null;
+          return (
+            <button onClick={() => setShowFinalizeModal(true)} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", padding: "10px 14px", borderRadius: 10, marginBottom: 10, background: K.warn, border: "none", color: ON_ACC, fontSize: FS.small, fontWeight: 800, cursor: "pointer", letterSpacing: "0.01em" }}>
+              <span style={{ fontSize: FS.lead }}>🏆</span>Round ready to finalize — tap to close out
+            </button>
+          );
+        })()}
+
       {/* Round cards + gear */}
       <div style={{ display: "flex", gap: 4, marginBottom: 10, alignItems: "center" }}>
         {Array.from({ length: numRounds }, (_, i) => i + 1).map(r => {
@@ -3968,41 +4010,6 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
         })}
       </div>
 
-      {/* Sub-tabs: Course / Tees / Pairings for selected round */}
-      {(() => {
-        const st = getRoundStatus(editRound);
-        const _isFinal = st.finalized;
-        const _finalizePending = Object.entries(pairingsData || {}).some(([rnd, groups]) => {
-          if (!groups.length) return false;
-          return groups.every(grp => {
-            const gk = `${rnd}_${grp.slice().sort().join(",")}`;
-            if (finalizedRounds[gk] || finalizedRounds[parseInt(rnd)]) return false;
-            return grp.every(pid => {
-              const pd = holeData[`${pid}_${rnd}`] || {};
-              return Object.values(pd).filter(s => s > 0).length === 18;
-            });
-          });
-        });
-        const subTabs = [["course","Course"],["tees","Tees"],["pairings","Pairings"]];
-        const subDone = { course: st.hasCourse, tees: st.teesDone, pairings: st.pairingsDone };
-        const activeIdx = Math.max(0, subTabs.findIndex(([k]) => k === tab));
-        const N = subTabs.length;
-        return (<>
-          {_finalizePending && (
-            <button onClick={() => setShowFinalizeModal(true)} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", padding: "10px 14px", borderRadius: 10, marginBottom: 10, background: "#fbbf24", border: "none", color: "#1a1100", fontSize: 13, fontWeight: 800, cursor: "pointer", letterSpacing: "0.01em" }}>
-              <span style={{ fontSize: 15 }}>🏆</span>Round ready to finalize — tap to close out
-            </button>
-          )}
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
-            <div style={{ position: "relative", display: "flex", flex: 1, background: K.card, borderRadius: 10, border: `1px solid ${K.bdr}`, padding: 3, gap: 0 }}>
-              <div style={{ position: "absolute", top: 3, bottom: 3, left: `calc(3px + ${activeIdx} * (100% - 6px) / ${N})`, width: `calc((100% - 6px) / ${N})`, background: acGlow, borderRadius: 8, border: `1px solid ${ac}50`, transition: "left 0.2s ease", pointerEvents: "none" }} />
-              {subTabs.map(([k,l]) => { const isActive = tab === k; const isDone = !_isFinal && subDone[k]; return (<button key={k} onClick={() => setTab(k)} style={{ flex: 1, padding: "8px 6px", borderRadius: 8, fontSize: 12, fontWeight: isActive ? 700 : 500, background: "transparent", color: isActive ? ac : K.t2, border: "none", cursor: "pointer", position: "relative", zIndex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}><span>{l}</span>{!_isFinal && <span style={{ width: 6, height: 6, borderRadius: "50%", flexShrink: 0, background: isDone ? "#22c55e" : "transparent", border: `1.5px solid ${isDone ? "#22c55e" : K.t3 + "60"}` }} />}</button>); })}
-            </div>
-            <button onClick={() => setSettingsOpen(true)} title="Tournament Settings" style={{ width: 38, height: 38, borderRadius: 10, background: K.card, border: `1px solid ${K.bdr}`, color: K.t3, fontSize: 16, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>⚙️</button>
-          </div>
-        </>);
-      })()}
-
       {/* Warning banner for incomplete round setup */}
       {!finalizedRounds[editRound] && (() => {
         const st = getRoundStatus(editRound);
@@ -4031,44 +4038,17 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
           </div>
         );
       })()}
+      </>)}
 
-      {/* Settings modal */}
-      {settingsOpen && (
-        <div style={{ position: "fixed", top: 0, bottom: 0, left: 0, right: 0, background: "#00000080", zIndex: 100, display: "flex", alignItems: "flex-end", justifyContent: "center" }} onClick={() => setSettingsOpen(false)}>
-          <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 480, height: "85vh", background: K.bg, borderRadius: "16px 16px 0 0", border: `1px solid ${K.bdr}`, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-            {/* Modal header */}
-            <div style={{ padding: "14px 16px 10px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${K.bdr}` }}>
-              {notif ? <span style={{ fontWeight: 600, fontSize: 13, color: K.acc }}>{notif}</span> : <span style={{ fontWeight: 700, fontSize: 15, color: K.t1 }}>Tournament Settings</span>}
-              <button onClick={() => setSettingsOpen(false)} style={{ background: "transparent", border: "none", color: K.t3, fontSize: 20, cursor: "pointer", lineHeight: 1 }}>✕</button>
-            </div>
-            {/* Settings sub-tabs */}
-            <div style={{ display: "flex", gap: 4, padding: "10px 16px 0" }}>
-              {[["course","Courses"],["players","Players"],["access","Access"],["tournament","Event"]].map(([k,l]) => {
-                const isActive = settingsTab === k;
-                // The Event tab is a single settings form, not a list — a
-                // count next to it would be a number with nothing to count.
-                const count = k === "course" ? courses.length : k === "players" ? activePlayers.length : k === "access" ? (memberships || []).length : null;
-                return (
-                  <button key={k} onClick={() => setSettingsTab(k)} style={{
-                    flex: 1, padding: "8px 0", borderRadius: 8, fontSize: 12, fontWeight: isActive ? 700 : 500,
-                    background: isActive ? K.tourn + "20" : K.card,
-                    color: isActive ? K.tourn : K.t2,
-                    border: `1px solid ${isActive ? K.tourn + "40" : K.bdr}`,
-                    cursor: "pointer",
-                  }}>{l}{count != null && <span style={{ opacity: 0.7, fontWeight: 400 }}> ({count})</span>}</button>
-                );
-              })}
-            </div>
-            {/* Settings content */}
-            <div style={{ flex: 1, overflowY: "auto", padding: "12px 16px 24px" }}>
-              {settingsTab === "access" && (
-                <AccessPanel memberships={memberships} onSetDirector={onSetDirector}
-                  claims={claims} players={players} authUid={authUid} notify={notify} confirm={confirm} />
+
+              {tab === "event" && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  <TournamentPanel meta={tournamentMeta} onSave={onSaveTournamentMeta} notify={notify} />
+                  <AccessPanel memberships={memberships} onSetDirector={onSetDirector}
+                    claims={claims} players={players} authUid={authUid} notify={notify} confirm={confirm} />
+                </div>
               )}
-              {settingsTab === "tournament" && (
-                <TournamentPanel meta={tournamentMeta} onSave={onSaveTournamentMeta} notify={notify} />
-              )}
-              {settingsTab === "players" && (
+              {tab === "players" && (
                 <div>
                   <div style={{ background: K.card, borderRadius: 12, border: `1px solid ${K.bdr}`, overflow: "hidden" }}>
                     <div style={{ padding: "10px 14px", display: "flex", alignItems: "center", borderBottom: `1px solid ${K.bdr}` }}>
@@ -4099,7 +4079,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                 </div>
               )}
 
-              {settingsTab === "course" && (
+              {tab === "courses" && (
                 <div>
                   <div style={{ background: K.card, borderRadius: 12, border: `1px solid ${K.bdr}`, overflow: "hidden" }}>
                     {(() => { const allSet = Array.from({ length: numRounds }, (_, ri) => ri + 1).every(r => tRounds.find(t => t.round_number === r && t.course_id)); const unassigned = Array.from({ length: numRounds }, (_, ri) => ri + 1).filter(r => !tRounds.find(t => t.round_number === r && t.course_id)); return (<div style={{ padding: "9px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${K.bdr}` }}>{allSet ? <span style={{ fontSize: 11, fontWeight: 700, color: K.acc }}>✓ All rounds assigned</span> : <span style={{ fontSize: 11, fontWeight: 600, color: K.warn }}>R{unassigned.join(", R")} unassigned</span>}<button onClick={() => { setSearching(!searching); setCourseSearch(""); setSearchResults([]); }} style={{ padding: "3px 8px", borderRadius: 6, background: "transparent", border: `1px solid ${ac}50`, color: ac, fontSize: 10, fontWeight: 600, cursor: "pointer" }}>{searching ? "Close" : "+ Add"}</button></div>); })()}
@@ -4701,16 +4681,28 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                 </div>
               )}
 
-              {/* Reset options */}
+      {tab === "event" && (
+        <div style={{ marginTop: 16 }}>
               <div style={{ marginTop: 16, paddingTop: 12, borderTop: `1px solid ${K.bdr}30`, display: "flex", flexDirection: "column", gap: 8 }}>
-                <button onClick={() => { if (confirm("Clear all scores, course assignments, pairings, tee assignments, skins and scorecard signatures?\n\nPreserved: player roster, handicap indexes, and login passwords.\n\nThis cannot be undone.")) { startFresh(); setSettingsOpen(false); } }} style={{
+                <button onClick={async () => {
+                  // MUST be awaited. This was window.confirm — a synchronous
+                  // boolean — until useConfirm() was introduced in this
+                  // component and shadowed the global. The hook returns a
+                  // PROMISE, which is always truthy, so the un-awaited form
+                  // silently wiped the tournament with no prompt at all.
+                  const ok = await confirm({
+                    title: "Clear all tournament data?",
+                    message: "Clears all scores, course assignments, pairings, tee assignments, skins and scorecard signatures.\n\nPreserved: the player roster, handicap indexes and login passwords.\n\nThis cannot be undone.",
+                    confirmLabel: "Clear everything",
+                    destructive: true,
+                  });
+                  if (ok) startFresh();
+                }} style={{
                   width: "100%", padding: "10px 0", borderRadius: 8,
                   background: K.danger + "15", border: `1px solid ${K.danger}60`,
                   color: K.danger, fontSize: 12, fontWeight: 700, cursor: "pointer",
                 }}>🗑 Start Fresh — Clear All Data</button>
               </div>
-            </div>
-          </div>
         </div>
       )}
       {editingCourse && (() => {
@@ -4739,8 +4731,8 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
           </div>
         </div>
       )}
-      {/* Round operation tabs */}
-      {tab === "course" && (() => {
+      {/* Rounds tab — course assignment for the selected round */}
+      {tab === "rounds" && (() => {
         const st = getRoundStatus(editRound);
         const assigned = st.course;
         const locked = st.finalized;
@@ -4790,7 +4782,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
               <div style={{ background: K.card, borderRadius: 12, border: `1px solid ${K.bdr}`, overflow: "hidden" }}>
                 <div style={{ padding: "9px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${K.bdr}` }}>
                   <span style={{ fontSize: 10, fontWeight: 600, color: K.t3, textTransform: "uppercase", letterSpacing: "0.04em" }}>Course Library ({courses.length})</span>
-                  <button onClick={() => { setSettingsOpen(true); setSettingsTab("course"); setSearching(true); }} style={{ padding: "3px 8px", borderRadius: 6, background: "transparent", border: `1px solid ${ac}50`, color: ac, fontSize: 10, fontWeight: 600, cursor: "pointer" }}>+ Add / manage</button>
+                  <button onClick={() => { setTab("courses"); setSearching(true); }} style={{ padding: "3px 8px", borderRadius: 6, background: "transparent", border: `1px solid ${ac}50`, color: ac, fontSize: 10, fontWeight: 600, cursor: "pointer" }}>+ Add / manage</button>
                 </div>
                 {courses.length === 0 ? (
                   <div style={{ padding: 16, textAlign: "center", color: K.t3, fontSize: 11 }}>No courses yet — tap “Add / manage” to search 35,000+ courses.</div>
@@ -4842,7 +4834,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
             }} roundDates={roundDates} onSetRoundDate={onSetRoundDate} scoringOpen={scoringOpen} onSetScoringOpen={onSetScoringOpen} pairingStrategy={pairingStrategy} onSetPairingStrategy={onSetPairingStrategy} leaderboard={leaderboard} finalizedRounds={finalizedRounds} getPlayerTee={getPlayerTee} editRound={editRound} />
       )}
 
-      {tab === "tees" && (
+      {tab === "rounds" && (
         <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
         <TeeAssigner activePlayers={activePlayers} tRounds={tRounds} courses={courses} teeData={teeData} setTeeBulk={setTeeBulk} finalizedRounds={finalizedRounds} editRound={editRound} teesSaved={teesSaved} onTeesSave={onTeesSave} teesModified={teesModified} onTeesModify={onTeesModify} />
         </div>
@@ -6358,7 +6350,10 @@ export default function WBCApp() {
       <style>{`:root { --sab: env(safe-area-inset-bottom, 0px); }`}</style>
       <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
 
-      {/* notif shown in settings modal header */}
+      {/* Every notify() in the app lands here. It used to render only in the
+          admin settings modal's header, so a message raised anywhere else —
+          or from admin once that modal closed — was set and never shown. */}
+      <Toast message={notif} />
 
       <div style={{ padding: "10px 20px", paddingTop: "max(10px, calc(env(safe-area-inset-top, 0px) + 10px))", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${K.bdr}`, background: "rgba(14,24,41,0.95)", position: "sticky", top: 0, zIndex: 50 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -6503,7 +6498,7 @@ export default function WBCApp() {
                 });
                 return next;
               });
-            }} roundDates={roundDates} onSetRoundDate={async (rnd, dateStr) => { const next = { ...roundDates }; if (dateStr) next[rnd] = dateStr; else delete next[rnd]; setRoundDates(next); await saveTournamentState(finalizedRounds, passwords, teesSaved, teesModified, next, scoringOpen); }} scoringOpen={scoringOpen} onSetScoringOpen={async (rnd, open) => { const next = { ...scoringOpen }; if (open) next[rnd] = true; else delete next[rnd]; setScoringOpen(next); await saveTournamentState(finalizedRounds, passwords, teesSaved, teesModified, roundDates, next); }} pairingStrategy={pairingStrategy} onSetPairingStrategy={async (rnd, cfg) => { const next = { ...pairingStrategy }; if (cfg) next[rnd] = cfg; else delete next[rnd]; setPairingStrategy(next); await saveTournamentState(finalizedRounds, passwords, teesSaved, teesModified, roundDates, scoringOpen, next); }} leaderboard={getLeaderboard} passwords={passwords} setPasswords={async pw => { setPasswords(pw); await saveTournamentState(finalizedRounds, pw); }} holeData={holeData} finalizedRounds={finalizedRounds} onFinalizeRound={async rnd => { const nf = { ...finalizedRounds, [rnd]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${rnd}`, tournament_id: TOURNAMENT_ID, round: rnd, finalized: true }); if (rnd < 4) setRound(rnd + 1); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); if (/^\d+$/.test(String(key))) { await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${key}`, tournament_id: TOURNAMENT_ID, round: Number(key), finalized: false }); } else { setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); } }} notify={notify} notif={notif} getPlayerTee={getPlayerTee} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); }} teesSaved={teesSaved} onTeesSave={async r => { const next = { ...teesSaved, [r]: true }; const nextMod = { ...teesModified, [r]: false }; setTeesSaved(next); setTeesModified(nextMod); await saveTournamentState(finalizedRounds, passwords, next, nextMod); }} teesModified={teesModified} onTeesModify={async r => { const nextMod = { ...teesModified, [r]: true }; setTeesModified(nextMod); await saveTournamentState(finalizedRounds, passwords, teesSaved, nextMod); }} memberships={memberships} onSetDirector={onSetDirector} claims={claims} authUid={fbUser?.uid || null} tournamentMeta={tournamentMeta} onSaveTournamentMeta={saveTournamentMeta} /> : (
+            }} roundDates={roundDates} onSetRoundDate={async (rnd, dateStr) => { const next = { ...roundDates }; if (dateStr) next[rnd] = dateStr; else delete next[rnd]; setRoundDates(next); await saveTournamentState(finalizedRounds, passwords, teesSaved, teesModified, next, scoringOpen); }} scoringOpen={scoringOpen} onSetScoringOpen={async (rnd, open) => { const next = { ...scoringOpen }; if (open) next[rnd] = true; else delete next[rnd]; setScoringOpen(next); await saveTournamentState(finalizedRounds, passwords, teesSaved, teesModified, roundDates, next); }} pairingStrategy={pairingStrategy} onSetPairingStrategy={async (rnd, cfg) => { const next = { ...pairingStrategy }; if (cfg) next[rnd] = cfg; else delete next[rnd]; setPairingStrategy(next); await saveTournamentState(finalizedRounds, passwords, teesSaved, teesModified, roundDates, scoringOpen, next); }} leaderboard={getLeaderboard} passwords={passwords} setPasswords={async pw => { setPasswords(pw); await saveTournamentState(finalizedRounds, pw); }} holeData={holeData} finalizedRounds={finalizedRounds} onFinalizeRound={async rnd => { const nf = { ...finalizedRounds, [rnd]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${rnd}`, tournament_id: TOURNAMENT_ID, round: rnd, finalized: true }); if (rnd < 4) setRound(rnd + 1); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); if (/^\d+$/.test(String(key))) { await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${key}`, tournament_id: TOURNAMENT_ID, round: Number(key), finalized: false }); } else { setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); } }} notify={notify} getPlayerTee={getPlayerTee} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); }} teesSaved={teesSaved} onTeesSave={async r => { const next = { ...teesSaved, [r]: true }; const nextMod = { ...teesModified, [r]: false }; setTeesSaved(next); setTeesModified(nextMod); await saveTournamentState(finalizedRounds, passwords, next, nextMod); }} teesModified={teesModified} onTeesModify={async r => { const nextMod = { ...teesModified, [r]: true }; setTeesModified(nextMod); await saveTournamentState(finalizedRounds, passwords, teesSaved, nextMod); }} memberships={memberships} onSetDirector={onSetDirector} claims={claims} authUid={fbUser?.uid || null} tournamentMeta={tournamentMeta} onSaveTournamentMeta={saveTournamentMeta} /> : (
           <div style={{ textAlign: "center", padding: "40px 20px" }}>
             <div style={{ fontSize: 40, marginBottom: 12 }}>🔒</div>
             <div style={{ fontSize: 16, fontWeight: 700, color: K.t1, marginBottom: 6 }}>Directors Only</div>
