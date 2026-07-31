@@ -231,3 +231,27 @@ export async function releaseMembership() {
     return { ok: false, reason: e?.code || "failed" };
   }
 }
+
+// ── membershipForPlayer ─────────────────────────────────────────────
+// Which signed-in account, if any, has claimed a given player.
+//
+// Bourbon Cup answers this from a field on the player document
+// (`player.auth_uid`). WBC stores the binding the other way round — the
+// `wbc_users` collection maps uid → player_id, mirrored in memory as the
+// `claims` map — so the lookup is a reverse scan of that map rather than a
+// field read. Same question, opposite index.
+//
+// Matched on the membership's document id first, then a `uid` field: both are
+// the same value for a membership the app created, but a membership typed
+// into the Firebase console by hand — which is how the FIRST director is
+// made — may only have the id.
+export const membershipForPlayer = (memberships, claims, playerId) => {
+  if (!playerId) return null;
+  return (memberships || []).find(m => {
+    const claimed = claims?.[m.id] ?? claims?.[m.uid];
+    return claimed === playerId;
+  }) || null;
+};
+
+export const playerIsDirector = (memberships, claims, playerId) =>
+  membershipForPlayer(memberships, claims, playerId)?.is_director === true;

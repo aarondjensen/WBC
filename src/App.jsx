@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import { _app, _db, _auth, onAuthStateChanged, doGoogleSignIn, doAppleSignIn, doSignOut, consumeRedirectResult, deleteAccount, USERS_COLLECTION, NATIVE_APPLE_ENABLED, APPLE_PROVIDER_ENABLED, isNativePlatform, isAndroidNative, AUTH_PROVIDERS_ENABLED, TOURNAMENT_ID, getEditionSlug, getTournamentYear, isDefaultEdition } from "./firebase";
-import { readMembership, isDirectorAccount, joinWithCode, readAccessCode, setAccessCode, setDirector, subscribeMemberships, accountsUnreadable } from "./lib/accounts";
+import { readMembership, isDirectorAccount, joinWithCode, readAccessCode, setAccessCode, setDirector, subscribeMemberships, accountsUnreadable, membershipForPlayer, playerIsDirector } from "./lib/accounts";
 import { K, ON_ACC, FS, ALPHA, FONT } from "./theme";
 import { SegmentedToggle, StickyTop, SectionLabel, Card, Toast } from "./components/ui";
-import { calcCH, computeIndividualBoard, rankIndividualBoard, rankIndividualBoardIds } from "./lib/individualBoard";
+import { calcCH, computeIndividualBoard, rankIndividualBoard, rankIndividualBoardIds, WD_SCORE } from "./lib/individualBoard";
 import { useConfirm } from "./lib/useConfirm";
 import { groupsForRound, assignToGroup, removeFromGroup as removeFromGroupPure, clearGroup, swapIntoGroup } from "./lib/pairings";
 import { Popup, ConfirmModal } from "./components/Popup";
@@ -3152,66 +3152,231 @@ function TeeAssigner({ activePlayers, tRounds, courses, teeData, setTeeBulk, fin
   );
 }
 
-function PlayerRow({ player, onUpdateHI, onUpdateName, onRemove, onSavePassword, password, isLast, ac }) {
-  const [editing, setEditing] = useState(false);
-  const [confirming, setConfirming] = useState(false);
-  const [hi, setHi] = useState(String(player.handicap_index));
-  const [name, setName] = useState(player.name);
-  const [pw, setPw] = useState(password);
-  const [showPw, setShowPw] = useState(false);
-  const c = ac || K.acc;
+// ── The display-name rule ──
+// Every screen outside this console shows "First LastInitial" ("Aaron J") —
+// which is also where the player ids come from (aaron_j). That is persisted as
+// the player's `name` so all existing display code keeps working unchanged;
+// first_name / last_name are the full source of truth, edited only here.
+// Falls back to first-name-only when no last name is set.
+const toDisplayName = (first, last) => {
+  const f = (first || "").trim();
+  const l = (last || "").trim();
+  return l ? `${f} ${l[0].toUpperCase()}` : f;
+};
+const fullName = (p) =>
+  (p?.first_name || p?.last_name)
+    ? [p.first_name, p.last_name].filter(Boolean).join(" ").trim()
+    : (p?.name || "");
+// Best-effort split for a roster that predates first/last being stored: the
+// editor seeds from these so an existing player opens with their name already
+// in the right boxes rather than blank.
+const splitName = (p) => {
+  if (p?.first_name || p?.last_name) return { first: p.first_name || "", last: p.last_name || "" };
+  const parts = String(p?.name || "").trim().split(/\s+/);
+  return { first: parts[0] || "", last: parts.slice(1).join(" ") };
+};
 
-  const save = () => {
-    if (name.trim() && name.trim() !== player.name) onUpdateName(player.id, name.trim());
-    if (parseFloat(hi) !== player.handicap_index) onUpdateHI(player.id, parseFloat(hi));
-    if (pw.trim() && onSavePassword) onSavePassword(player.id, pw.trim());
-    setEditing(false);
+// How many holes a player has actually posted in a round — used by both the
+// delete confirmation and the discard-scores action, so the number the
+// director is warned about is the number that would be affected.
+const holesEntered = (holeData, pid, round) =>
+  Object.values(holeData?.[`${pid}_${round}`] || {}).filter(s => s > 0 && s !== WD_SCORE).length;
+
+// ── PlayerRow ──
+// A read-only summary line. All editing moved into PlayerEditor, following
+// Bourbon Cup: the previous design swapped this row for a cramped set of
+// inline inputs, which is why it could only ever expose a name, an index and a
+// password — there is no room on a phone row for anything more.
+function PlayerRow({ player, password, isLast, onOpen, isDirector }) {
+  return (
+    <button onClick={onOpen} style={{
+      width: "100%", textAlign: "left", cursor: "pointer", background: "transparent",
+      border: "none", borderBottom: !isLast ? `1px solid ${K.bdr}${ALPHA.hair}` : "none",
+      padding: "10px 14px", display: "flex", alignItems: "center", gap: 8,
+    }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: FS.body, fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {player.name}{isDirector && " 👑"}
+        </div>
+        <div style={{ fontSize: FS.label, color: K.t3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {fullName(player) !== player.name ? fullName(player) : `Password ${password}`}
+        </div>
+      </div>
+      <div style={{ flexShrink: 0, textAlign: "right" }}>
+        <div style={{ fontSize: FS.body, fontWeight: 800, color: K.t1 }}>{player.handicap_index}</div>
+        <div style={{ fontSize: FS.micro, fontWeight: 700, color: K.t3, letterSpacing: 1 }}>INDEX</div>
+      </div>
+      <span style={{ flexShrink: 0, color: K.t3, fontSize: FS.body }}>›</span>
+    </button>
+  );
+}
+
+// ── PlayerEditor ──
+// One modal that owns the whole player record, ported from Bourbon Cup's
+// Admin. Everything commits on Save, so add and edit behave identically and
+// Cancel genuinely discards.
+//
+// The director toggle IS the grant: it writes `is_director` on that person's
+// membership document, the only flag firestore.rules honours. Two things it
+// deliberately cannot do, both enforced by the rules rather than here —
+// appoint somebody who has never been through the password screen (there is
+// no membership document to flag), and change your own (so the last director
+// can never lock everyone out).
+function PlayerEditor({ editing, set, onClose, tPlayers, players, memberships, claims, authUid,
+                        holeData, numRounds, passwords, onSave, onRemove, notify, confirm, tournamentStarted }) {
+  if (!editing) return null;
+  const isNew = !!editing.isNew;
+  const p = isNew ? null : players.find(x => x.id === editing.pid);
+  if (!isNew && !p) return null;
+
+  const defaultNick = toDisplayName(editing.first, editing.last);
+  const theirMembership = isNew ? null : membershipForPlayer(memberships, claims, editing.pid);
+  const isSelf = !!theirMembership && (theirMembership.id === authUid || theirMembership.uid === authUid);
+  const canGrantDirector = !isNew && !!theirMembership && !isSelf;
+
+  // Four reasons the toggle can be unavailable, and they want four different
+  // actions from the director. Telling them apart matters most for the last:
+  // an unreadable accounts list looks exactly like "nobody has signed in",
+  // and the fix has nothing to do with the player on screen.
+  const directorHint = isNew
+    ? "Add them first, then they sign in and claim this name."
+    : accountsUnreadable(memberships)
+      ? "Can't read the accounts list, so no crown can be changed. The rules deployed to Firebase are probably older than this app — re-publish firestore.rules, then reopen this."
+      : !theirMembership
+        ? "They need to sign in and claim this name first."
+        : isSelf
+          ? "You can't change your own — that's what stops the last director locking everyone out. Ask the other director, or edit it in the Firebase console."
+          : "Grants the Admin tab, and every write behind it.";
+
+  const lbl = { fontSize: FS.micro, fontWeight: 800, letterSpacing: 0.5, color: K.t3, textTransform: "uppercase", marginBottom: 3, display: "block" };
+  // FS.lead (16px) on purpose — anything smaller makes iOS Safari zoom the
+  // page on focus and never zoom back out. Height is condensed via padding.
+  const inp = { fontSize: FS.lead, fontWeight: 600, color: K.t1, width: "100%", boxSizing: "border-box", background: K.inp, border: `1px solid ${K.acc}${ALPHA.line}`, borderRadius: 8, padding: "7px 10px", outline: "none", fontFamily: FONT };
+
+  const doSave = async () => {
+    const first = (editing.first || "").trim();
+    const last = (editing.last || "").trim();
+    if (!first) { notify?.("Enter a first name"); return; }
+    const newName = (editing.nick || "").trim() || toDisplayName(first, last);
+    const newHI = parseFloat(editing.hi) || 0;
+    const newDir = !!editing.dir;
+
+    if (isNew) {
+      await onSave({ isNew: true, name: newName, first, last, hi: newHI, pw: (editing.pw || "").trim() });
+      notify?.(`Added ${newName}`);
+      onClose();
+      return;
+    }
+
+    const tp = tPlayers.find(x => x.player_id === editing.pid);
+    const oldHI = parseFloat(tp?.handicap_index) || 0;
+    const wasDir = theirMembership?.is_director === true;
+    const dirChanged = canGrantDirector && newDir !== wasDir;
+    const oldPw = passwords?.[editing.pid] || DEFAULT_PW;
+    const newPw = (editing.pw || "").trim() || oldPw;
+
+    const changes = [];
+    if (first !== (p.first_name || "") || last !== (p.last_name || "") || newName !== p.name)
+      changes.push(`Name → ${[first, last].filter(Boolean).join(" ")} (shows as "${newName}")`);
+    if (newHI !== oldHI) changes.push(`Index: ${oldHI} → ${newHI}`);
+    if (newPw !== oldPw) changes.push(`Password: ${oldPw} → ${newPw}`);
+    if (dirChanged) changes.push(`Director: ${wasDir ? "Yes" : "No"} → ${newDir ? "Yes" : "No"}`);
+    if (changes.length === 0) { onClose(); return; }
+
+    // The handicap-lock warning, stated as part of the same confirmation
+    // rather than as a second dialog behind it. WBC recalculates every
+    // round's net score from the CURRENT index, so this is the one edit here
+    // that can silently rewrite finished rounds.
+    let impact = "";
+    if (newHI !== oldHI && tournamentStarted)
+      impact += "\n\nHandicaps are locked in for the tournament. Changing this index retroactively recalculates their net scores for ALL rounds — including finalized ones — and can reshuffle the leaderboard.";
+    if (dirChanged) impact += newDir
+      ? "\n\nA director can do everything in Admin: the roster, rounds, pairings, courses, tee times, settings, editions and the access password."
+      : "\n\nThey keep their name and everything a player does — scores, skins, signatures. They lose the Admin tab.";
+
+    if (!(await confirm({ title: "Confirm changes", message: changes.join("\n") + impact }))) return;
+
+    await onSave({
+      pid: editing.pid, name: newName, first, last, hi: newHI,
+      hiChanged: newHI !== oldHI, pw: newPw, pwChanged: newPw !== oldPw,
+      dir: dirChanged ? { uid: theirMembership.id || theirMembership.uid, on: newDir } : null,
+    });
+    onClose();
   };
 
-  if (confirming) {
-    return (
-      <div style={{ padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: !isLast ? `1px solid ${K.bdr}10` : "none", background: K.danger + "08" }}>
-        <span style={{ fontSize: 12, color: K.danger, fontWeight: 600 }}>Remove {player.name}?</span>
-        <div style={{ display: "flex", gap: 6 }}>
-          <button onClick={() => setConfirming(false)} style={{ padding: "5px 12px", borderRadius: 6, background: K.card, border: `1px solid ${K.bdr}`, color: K.t2, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>No</button>
-          <button onClick={() => onRemove(player.id)} style={{ padding: "5px 12px", borderRadius: 6, background: K.danger, border: "none", color: "#fff", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>Yes</button>
-        </div>
-      </div>
-    );
-  }
-
-  if (editing) {
-    return (
-      <div style={{ padding: "8px 14px", display: "flex", alignItems: "center", gap: 4, borderBottom: !isLast ? `1px solid ${K.bdr}10` : "none", background: c + "06" }}>
-        <button onClick={() => setConfirming(true)} style={{ background: "transparent", border: "none", color: K.danger, fontSize: 14, cursor: "pointer", padding: 0, lineHeight: 1, flexShrink: 0, marginRight: 4 }}>✕</button>
-        <div style={{ flex: "0 0 36%", minWidth: 0 }}>
-          <input value={name} onChange={e => setName(e.target.value)} style={{ width: "100%", boxSizing: "border-box", padding: "6px 8px", background: K.inp, border: `1px solid ${c}40`, borderRadius: 6, color: K.t1, fontSize: 13, fontWeight: 600 }} />
-        </div>
-        <div style={{ flex: "0 0 13%", display: "flex", justifyContent: "center" }}>
-          <input value={hi} onChange={e => setHi(e.target.value)} type="number" step="0.1" style={{ width: "85%", padding: "6px 2px", background: K.inp, border: `1px solid ${c}40`, borderRadius: 6, color: K.t1, fontSize: 12, textAlign: "center" }} />
-        </div>
-        <div style={{ flex: "0 0 28%", display: "flex", justifyContent: "center" }}>
-          <input value={pw} onChange={e => setPw(e.target.value)} placeholder="password" style={{ width: "95%", padding: "6px 6px", background: K.inp, border: `1px solid ${c}40`, borderRadius: 6, color: K.t1, fontSize: 12 }} />
-        </div>
-        <div style={{ flex: "0 0 13%", display: "flex", justifyContent: "flex-end" }}>
-          <button onClick={save} style={{ padding: "5px 10px", background: c, color: K.bg, border: "none", borderRadius: 6, fontWeight: 700, cursor: "pointer", fontSize: 10 }}>Save</button>
-        </div>
-      </div>
-    );
-  }
+  const doDelete = async () => {
+    const scored = Array.from({ length: numRounds }, (_, i) => i + 1)
+      .map(r => ({ r, holes: holesEntered(holeData, editing.pid, r) }))
+      .filter(x => x.holes > 0);
+    const total = scored.reduce((n, s) => n + s.holes, 0);
+    const msg = ["This removes them from the tournament roster."];
+    if (total) msg.push("", `${total} scored hole${total === 1 ? "" : "s"} stay in the database (${scored.map(s => `Rd ${s.r}: ${s.holes}`).join(", ")}) but stop counting.`);
+    msg.push("", "Their player record and career id are kept, so they can be added back.");
+    if (await confirm({ title: `Remove ${fullName(p) || p.name}?`, message: msg.join("\n"), confirmLabel: "Remove", destructive: true })) {
+      onRemove(editing.pid);
+      onClose();
+    }
+  };
 
   return (
-    <div style={{ padding: "10px 14px", display: "flex", alignItems: "center", borderBottom: !isLast ? `1px solid ${K.bdr}10` : "none" }}>
-      <span style={{ flex: "0 0 40%", fontWeight: 600, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{player.name}</span>
-      <span style={{ flex: "0 0 15%", textAlign: "center", fontSize: 12, color: K.t2 }}>{player.handicap_index}</span>
-      <div style={{ flex: "0 0 30%", display: "flex", alignItems: "center", justifyContent: "center", gap: 3 }}>
-        <span style={{ fontSize: 11, color: K.t2, fontFamily: "monospace" }}>{showPw ? (password || DEFAULT_PW) : "••••••"}</span>
-        <button onClick={() => setShowPw(!showPw)} style={{ background: "transparent", border: "none", color: K.t3, fontSize: 9, cursor: "pointer", padding: "0 1px" }}>{showPw ? "hide" : "show"}</button>
+    <Popup onClose={onClose} maxWidth={420} padding={0} portal background={K.card} zIndex={3000} dismissOnBackdrop={false}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "13px 16px", borderBottom: `1px solid ${K.bdr}` }}>
+        <div style={{ flex: 1, fontSize: FS.body, fontWeight: 800, color: K.t1 }}>{isNew ? "Add Player" : "Edit Player"}</div>
+        <button onClick={onClose} aria-label="Close" style={{ width: 32, height: 32, borderRadius: 9, border: `1px solid ${K.bdr}`, background: "transparent", color: K.t2, fontSize: FS.lead, cursor: "pointer", lineHeight: 1 }}>✕</button>
       </div>
-      <div style={{ flex: "0 0 15%", display: "flex", justifyContent: "flex-end" }}>
-        <button onClick={() => { setEditing(true); setHi(String(player.handicap_index)); setName(player.name); setPw(password || DEFAULT_PW); }} style={{ padding: "3px 10px", borderRadius: 6, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t3, fontSize: 10, fontWeight: 600, cursor: "pointer" }}>Edit</button>
+
+      <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 11 }}>
+        <div style={{ display: "flex", gap: 8 }}>
+          <label style={{ flex: 1, minWidth: 0 }}><span style={lbl}>First name</span>
+            <input autoFocus value={editing.first} onChange={e => set({ first: e.target.value })} style={inp} /></label>
+          <label style={{ flex: 1, minWidth: 0 }}><span style={lbl}>Last name</span>
+            <input value={editing.last} onChange={e => set({ last: e.target.value })} style={inp} /></label>
+        </div>
+
+        {/* Nickname and Director paired on one row, like First/Last. */}
+        <div style={{ display: "flex", gap: 8 }}>
+          <label style={{ flex: 1, minWidth: 0 }}><span style={lbl}>Nickname</span>
+            <input value={editing.nick} placeholder={defaultNick} onChange={e => set({ nick: e.target.value })} style={inp} /></label>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <span style={lbl}>Director</span>
+            <button type="button" disabled={!canGrantDirector} title={directorHint}
+              onClick={() => set({ dir: !editing.dir })}
+              style={{ fontSize: FS.body, fontWeight: 700, padding: "7px 10px", borderRadius: 8, cursor: canGrantDirector ? "pointer" : "default", width: "100%", boxSizing: "border-box", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", opacity: canGrantDirector ? 1 : 0.5,
+                border: `1px solid ${editing.dir ? K.acc : K.bdr}`, background: editing.dir ? K.acc + ALPHA.wash : "transparent", color: editing.dir ? K.acc : K.t2 }}>
+              {editing.dir ? "👑 Director" : "Player"}
+            </button>
+          </div>
+        </div>
+        {!canGrantDirector && (
+          <div style={{ fontSize: FS.label, color: K.t3, marginTop: -6, lineHeight: 1.4 }}>{directorHint}</div>
+        )}
+
+        <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <span style={lbl}>Index</span>
+            <input type="number" inputMode="decimal" step="0.1" value={editing.hi} placeholder="0" onChange={e => set({ hi: e.target.value })} style={inp} />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <span style={lbl}>Password</span>
+            <input value={editing.pw} placeholder={DEFAULT_PW} onChange={e => set({ pw: e.target.value })} style={inp} />
+          </div>
+        </div>
+        {!isNew && tournamentStarted && (
+          <div style={{ fontSize: FS.label, color: K.warn, lineHeight: 1.45 }}>
+            The tournament has started — changing an index re-scores every round, including finalized ones.
+          </div>
+        )}
       </div>
-    </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderTop: `1px solid ${K.bdr}` }}>
+        {!isNew && (
+          <button onClick={doDelete} title="Remove player" style={{ flexShrink: 0, padding: "9px 11px", borderRadius: 10, background: "transparent", border: `1px solid ${K.danger}${ALPHA.line}`, color: K.danger, fontSize: FS.body, fontWeight: 700, cursor: "pointer", lineHeight: 1 }}>🗑</button>
+        )}
+        <span style={{ flex: 1 }} />
+        <button onClick={onClose} style={{ padding: "10px 16px", borderRadius: 10, background: K.inp, border: `1px solid ${K.bdr}`, color: K.t2, fontSize: FS.body, fontWeight: 700, cursor: "pointer" }}>Cancel</button>
+        <button onClick={doSave} style={{ padding: "10px 20px", borderRadius: 10, background: K.acc, border: "none", color: ON_ACC, fontSize: FS.body, fontWeight: 800, cursor: "pointer" }}>{isNew ? "Add" : "Save"}</button>
+      </div>
+    </Popup>
   );
 }
 
@@ -3502,7 +3667,7 @@ function AccessPanel({ memberships, onSetDirector, claims, players, authUid, not
   );
 }
 
-function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, roundDates, onSetRoundDate, scoringOpen, onSetScoringOpen, pairingStrategy, onSetPairingStrategy, leaderboard, passwords, setPasswords, holeData, finalizedRounds, onFinalizeRound, onUnfinalizeRound, notify, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, onExternalSettingsHandled, teesSaved, onTeesSave, teesModified, onTeesModify, memberships, onSetDirector, claims, authUid, tournamentMeta, onSaveTournamentMeta }) {
+function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, roundDates, onSetRoundDate, scoringOpen, onSetScoringOpen, pairingStrategy, onSetPairingStrategy, leaderboard, passwords, setPasswords, holeData, finalizedRounds, onFinalizeRound, onUnfinalizeRound, onDiscardRoundScores, notify, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, onExternalSettingsHandled, teesSaved, onTeesSave, teesModified, onTeesModify, memberships, onSetDirector, claims, authUid, tournamentMeta, onSaveTournamentMeta }) {
   const [tab, setTab] = useState("rounds");
   // Themed confirmations (see lib/useConfirm). The host <ConfirmModal/> is
   // rendered once at the bottom of this view; `confirm(...)` returns a
@@ -3523,16 +3688,11 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
       Object.values(scores || {}).some(s => s > 0 && s !== 99)
     ),
   [holeData, finalizedRounds]);
-  const [hiWarn, setHiWarn] = useState(null); // { pid, name, oldHI, newHI }
-  const guardedUpdateHI = (pid, newHI) => {
-    if (tournamentStarted) {
-      const tp = tPlayers.find(t => t.player_id === pid);
-      const p = players.find(pl => pl.id === pid);
-      setHiWarn({ pid, name: p?.name || "Player", oldHI: parseFloat(tp?.handicap_index) || 0, newHI });
-    } else {
-      updateHI(pid, newHI);
-    }
-  };
+  // The handicap-lock warning used to be a bespoke popup raised from an
+  // inline index edit on the roster row. Editing moved into PlayerEditor,
+  // which folds the same warning into its own change confirmation — one
+  // dialog listing every pending change, rather than a second one behind it.
+  // `tournamentStarted` is still read: the editor takes it as a prop.
   // Deep links from elsewhere in the app (the scoring screen's "no course
   // assigned" prompt). These used to open the gear modal on a given pane;
   // with the modal gone they select a top-level tab instead. The old pane
@@ -3544,9 +3704,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
     setTab(EXTERNAL_TAB[externalSettingsTab] || "courses");
     if (onExternalSettingsHandled) onExternalSettingsHandled();
   }, [externalSettingsOpen]);
-  const [newName, setNewName] = useState("");
-  const [newHI, setNewHI] = useState("");
-  const [adding, setAdding] = useState(false);
+  const [editingPlayer, setEditingPlayer] = useState(null); // { pid, first, last, nick, hi, pw, dir } | { isNew: true, ... }
   const [confirmCourse, setConfirmCourse] = useState(null);
   const [searching, setSearching] = useState(false);
   const [courseSearch, setCourseSearch] = useState("");
@@ -3899,31 +4057,6 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
         </div>
       )}
 
-      {/* HI-change warning — tournament in progress */}
-      {hiWarn && (
-        <Popup onClose={() => setHiWarn(null)} maxWidth={360} borderColor={K.warn + "50"} padding={0} dismissOnBackdrop={false}>
-          <div style={{ padding: "14px 16px", borderBottom: `1px solid ${K.bdr}`, display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 16 }}>⚠️</span>
-            <span style={{ fontSize: 14, fontWeight: 800, color: K.warn }}>Tournament In Progress</span>
-          </div>
-          <div style={{ padding: "14px 16px", fontSize: 12, color: K.t2, lineHeight: 1.6 }}>
-            Handicaps are locked in for the tournament. Changing <strong style={{ color: K.t1 }}>{hiWarn.name}</strong>'s
-            index from <strong style={{ color: K.t1 }}>{hiWarn.oldHI}</strong> to <strong style={{ color: K.t1 }}>{hiWarn.newHI}</strong> will
-            retroactively recalculate their net scores for <strong style={{ color: K.t1 }}>all rounds — including finalized rounds</strong> —
-            and may change leaderboard positions.
-          </div>
-          <div style={{ display: "flex", gap: 8, padding: 12, borderTop: `1px solid ${K.bdr}` }}>
-            <button onClick={() => setHiWarn(null)} style={{
-              flex: 1, padding: "10px 0", borderRadius: 10, background: K.inp, border: `1px solid ${K.bdr}`,
-              color: K.t2, fontSize: 12, fontWeight: 600, cursor: "pointer",
-            }}>Cancel</button>
-            <button onClick={() => { updateHI(hiWarn.pid, hiWarn.newHI); setHiWarn(null); }} style={{
-              flex: 1, padding: "10px 0", borderRadius: 10, background: K.warn, border: "none",
-              color: K.bg, fontSize: 12, fontWeight: 700, cursor: "pointer",
-            }}>Update Anyway</button>
-          </div>
-        </Popup>
-      )}
 
       {/* ── Top-level tabs ──────────────────────────────────────────
           Five always-visible tabs, replacing the round-selector + sub-tabs
@@ -4050,32 +4183,44 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
               )}
               {tab === "players" && (
                 <div>
-                  <div style={{ background: K.card, borderRadius: 12, border: `1px solid ${K.bdr}`, overflow: "hidden" }}>
-                    <div style={{ padding: "10px 14px", display: "flex", alignItems: "center", borderBottom: `1px solid ${K.bdr}` }}>
-                      <span style={{ flex: "0 0 40%", fontSize: 10, fontWeight: 600, color: K.t3, textTransform: "uppercase" }}>Name</span>
-                      <span style={{ flex: "0 0 15%", fontSize: 10, fontWeight: 600, color: K.t3, textTransform: "uppercase", textAlign: "center" }}>Idx</span>
-                      <span style={{ flex: "0 0 30%", fontSize: 10, fontWeight: 600, color: K.t3, textTransform: "uppercase", textAlign: "center" }}>Password</span>
-                      <div style={{ flex: "0 0 15%", textAlign: "right" }}>
-                        <button onClick={() => setAdding(true)} style={{ padding: "3px 8px", borderRadius: 6, background: "transparent", border: `1px solid ${ac}50`, color: ac, fontSize: 10, fontWeight: 600, cursor: "pointer" }}>+ Add</button>
-                      </div>
-                    </div>
-                    {adding && (
-                      <div style={{ padding: "8px 14px", display: "flex", alignItems: "center", borderBottom: `1px solid ${K.bdr}10`, background: ac + "06" }}>
-                        <div style={{ flex: "0 0 40%" }}>
-                          <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="Name" autoFocus style={{ width: "100%", boxSizing: "border-box", padding: "6px 8px", background: K.inp, border: `1px solid ${ac}40`, borderRadius: 6, color: K.t1, fontSize: 13, fontWeight: 600 }} />
-                        </div>
-                        <div style={{ flex: "0 0 15%", display: "flex", justifyContent: "center" }}>
-                          <input value={newHI} onChange={e => setNewHI(e.target.value)} placeholder="0" type="number" step="0.1" style={{ width: "80%", padding: "6px 4px", background: K.inp, border: `1px solid ${ac}40`, borderRadius: 6, color: K.t1, fontSize: 12, textAlign: "center" }} />
-                        </div>
-                        <div style={{ flex: "0 0 30%" }} />
-                        <div style={{ flex: "0 0 15%", display: "flex", justifyContent: "flex-end", gap: 4 }}>
-                          <button onClick={() => { if (newName.trim()) { addPlayerToTournament(newName.trim(), parseFloat(newHI) || 0); setNewName(""); setNewHI(""); setAdding(false); } }} style={{ padding: "4px 8px", background: ac, color: K.bg, border: "none", borderRadius: 5, fontWeight: 700, cursor: "pointer", fontSize: 10 }}>✓</button>
-                          <button onClick={() => { setAdding(false); setNewName(""); setNewHI(""); }} style={{ padding: "4px 6px", background: "transparent", border: "none", color: K.t3, fontSize: 12, cursor: "pointer" }}>✕</button>
-                        </div>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
+                    <SectionLabel style={{ marginBottom: 0 }}>Roster ({activePlayers.length})</SectionLabel>
+                    <button onClick={() => setEditingPlayer({ isNew: true, first: "", last: "", nick: "", hi: "", pw: "", dir: false })}
+                      style={{ padding: "7px 14px", borderRadius: 8, background: K.acc, border: "none", color: ON_ACC, fontSize: FS.small, fontWeight: 800, cursor: "pointer" }}>
+                      + Add player
+                    </button>
+                  </div>
+                  <Card pad={0} style={{ overflow: "hidden" }}>
+                    {activePlayers.length === 0 && (
+                      <div style={{ padding: "18px 14px", textAlign: "center", fontSize: FS.small, color: K.t3, lineHeight: 1.5 }}>
+                        Nobody on the roster yet. Add the field here — everything else in this
+                        console (tees, pairings, scoring) works off it.
                       </div>
                     )}
-                    {[...activePlayers].sort((a,b) => a.name.localeCompare(b.name)).map((p, i) => <PlayerRow key={p.id} player={p} password={passwords[p.id] || DEFAULT_PW} onUpdateHI={guardedUpdateHI} onUpdateName={updateName} onRemove={removePlayer} onSavePassword={(pid, pw) => setPasswords(prev => ({ ...prev, [pid]: pw }))} isLast={i === activePlayers.length - 1} ac={ac} />)}
-                  </div>
+                    {[...activePlayers].sort((a,b) => a.name.localeCompare(b.name)).map((p, i) => (
+                      <PlayerRow
+                        key={p.id}
+                        player={p}
+                        password={passwords[p.id] || DEFAULT_PW}
+                        isLast={i === activePlayers.length - 1}
+                        isDirector={playerIsDirector(memberships, claims, p.id)}
+                        onOpen={() => {
+                          const parts = splitName(p);
+                          setEditingPlayer({
+                            pid: p.id, first: parts.first, last: parts.last,
+                            // The nickname box shows a nickname only when the
+                            // stored display name ISN'T what the parts would
+                            // derive — otherwise it sits empty on its
+                            // placeholder, which is what "no nickname" means.
+                            nick: p.name === toDisplayName(parts.first, parts.last) ? "" : p.name,
+                            hi: String(p.handicap_index ?? ""),
+                            pw: passwords[p.id] || DEFAULT_PW,
+                            dir: playerIsDirector(memberships, claims, p.id),
+                          });
+                        }}
+                      />
+                    ))}
+                  </Card>
                 </div>
               )}
 
@@ -4834,6 +4979,50 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
             }} roundDates={roundDates} onSetRoundDate={onSetRoundDate} scoringOpen={scoringOpen} onSetScoringOpen={onSetScoringOpen} pairingStrategy={pairingStrategy} onSetPairingStrategy={onSetPairingStrategy} leaderboard={leaderboard} finalizedRounds={finalizedRounds} getPlayerTee={getPlayerTee} editRound={editRound} />
       )}
 
+      {/* Discard one player's card for this round. Sits at the bottom of the
+          Rounds tab because it is a repair, not part of setup — but in the
+          tab scoped to the round it acts on, so "this round" is never
+          ambiguous. Only offered for players who have actually posted. */}
+      {tab === "rounds" && (() => {
+        const posted = activePlayers
+          .map(p => ({ p, holes: holesEntered(holeData, p.id, editRound) }))
+          .filter(x => x.holes > 0);
+        if (posted.length === 0) return null;
+        return (
+          <div style={{ marginTop: 14 }}>
+            <SectionLabel color={K.danger}>Discard a card · Round {editRound}</SectionLabel>
+            <Card pad={0} style={{ overflow: "hidden" }}>
+              {posted.map(({ p, holes }, i) => (
+                <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", borderBottom: i < posted.length - 1 ? `1px solid ${K.bdr}${ALPHA.hair}` : "none" }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: FS.small, fontWeight: 700, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
+                    <div style={{ fontSize: FS.label, color: K.t3 }}>{holes} hole{holes === 1 ? "" : "s"} posted</div>
+                  </div>
+                  <button onClick={async () => {
+                    const ok = await confirm({
+                      title: `Discard ${p.name}'s round ${editRound}?`,
+                      message: `Deletes all ${holes} hole${holes === 1 ? "" : "s"} they have posted for this round. Their roster entry, handicap index and other rounds are untouched.\n\nThey can re-enter the round from the scoring screen afterwards.`,
+                      confirmLabel: "Discard",
+                      destructive: true,
+                    });
+                    if (!ok) return;
+                    const n = await onDiscardRoundScores(editRound, p.id);
+                    notify(`Discarded ${n} hole${n === 1 ? "" : "s"} for ${p.name}`);
+                  }} style={{ flexShrink: 0, padding: "6px 11px", borderRadius: 8, background: "transparent", border: `1px solid ${K.danger}${ALPHA.line}`, color: K.danger, fontSize: FS.label, fontWeight: 700, cursor: "pointer" }}>
+                    Discard
+                  </button>
+                </div>
+              ))}
+            </Card>
+            {getRoundStatus(editRound).finalized && (
+              <div style={{ fontSize: FS.label, color: K.warn, marginTop: 6, lineHeight: 1.45 }}>
+                Round {editRound} is finalized. Discarding a card here removes its scores but does not un-finalize the round.
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
       {tab === "rounds" && (
         <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
         <TeeAssigner activePlayers={activePlayers} tRounds={tRounds} courses={courses} teeData={teeData} setTeeBulk={setTeeBulk} finalizedRounds={finalizedRounds} editRound={editRound} teesSaved={teesSaved} onTeesSave={onTeesSave} teesModified={teesModified} onTeesModify={onTeesModify} />
@@ -4925,6 +5114,38 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
           </div>
         </div>
       )}
+
+      <PlayerEditor
+        editing={editingPlayer}
+        set={patch => setEditingPlayer(prev => prev ? { ...prev, ...patch } : prev)}
+        onClose={() => setEditingPlayer(null)}
+        tPlayers={tPlayers} players={activePlayers}
+        memberships={memberships} claims={claims} authUid={authUid}
+        holeData={holeData} numRounds={numRounds} passwords={passwords}
+        notify={notify} confirm={confirm} tournamentStarted={tournamentStarted}
+        onRemove={removePlayer}
+        onSave={async (v) => {
+          if (v.isNew) {
+            const pid = await addPlayerToTournament(v.name, v.hi, { first_name: v.first, last_name: v.last });
+            if (v.pw && pid) setPasswords(prev => ({ ...prev, [pid]: v.pw }));
+            return;
+          }
+          await updateName(v.pid, v.name, { first_name: v.first, last_name: v.last });
+          // updateHI is the GUARDED path everywhere else in this console. Here
+          // the warning has already been shown inside the editor's own
+          // confirmation, so this calls the raw writer rather than raising a
+          // second dialog saying the same thing.
+          if (v.hiChanged) await updateHI(v.pid, v.hi);
+          if (v.pwChanged) setPasswords({ ...passwords, [v.pid]: v.pw });
+          if (v.dir) {
+            const res = await onSetDirector(v.dir.uid, v.dir.on);
+            if (!res.ok) notify(res.error);
+            else notify(v.dir.on ? `${v.name} is a director` : `${v.name} is no longer a director`);
+          } else {
+            notify(`${v.name} saved`);
+          }
+        }}
+      />
 
       {/* Single confirmation host for this console — every `await confirm(...)`
           in AdminView and the panels it renders resolves through this one. */}
@@ -5304,7 +5525,8 @@ export default function WBCApp() {
 
         const playerRows = await db.get("players");
         if (playerRows?.length) {
-          DEMO_PLAYERS = playerRows.map(r => ({ id: r.id, name: r.name }))
+          DEMO_PLAYERS = playerRows
+            .map(r => ({ id: r.id, name: r.name, first_name: r.first_name || "", last_name: r.last_name || "" }))
             .sort((a, b) => a.name.localeCompare(b.name));
         }
 
@@ -5930,10 +6152,15 @@ export default function WBCApp() {
     notify(`Added ${course.name}`);
   };
 
-  const addPlayerToTournament = async (name, hi) => {
+  // Returns the derived player id so the caller can key anything else it needs
+  // to write for the new player (their password) off the SAME value rather
+  // than re-deriving it and risking the two drifting apart.
+  const addPlayerToTournament = async (name, hi, parts = null) => {
     const id = name.toLowerCase().replace(/\s+/g, "_");
-    if (!DEMO_PLAYERS.find(p => p.id === id)) DEMO_PLAYERS.push({ id, name });
-    await db.upsert("players", { id, name }, "id").catch(() => {});
+    const rec = { id, name, ...(parts || {}) };
+    if (!DEMO_PLAYERS.find(p => p.id === id)) DEMO_PLAYERS.push({ ...rec });
+    else Object.assign(DEMO_PLAYERS.find(p => p.id === id), rec);
+    await db.upsert("players", rec, "id").catch(() => {});
     const newTp = { id: docIds.tournamentPlayer(_e(), id), tournament_id: TOURNAMENT_ID, player_id: id, handicap_index: hi, status: "active" };
     setTPlayers(prev => [...prev, newTp]);
     await db.upsert("tournament_players", newTp);
@@ -5957,23 +6184,51 @@ export default function WBCApp() {
       for (const row of teeUpdates) await db.upsert("tee_assignments", row);
     }
     await saveTournamentState(finalizedRounds, newPw);
-    notify(`${name} added`);
+    return id;
+  };
+
+  // ── Discard one player's round ──
+  // Ported from Bourbon Cup. The fix for the two things that actually go wrong
+  // on a scorecard: somebody enters a round against the wrong name, or a group
+  // signs a card that turns out to be wrong. Before this the only remedy was
+  // "Start Fresh", which wipes the whole tournament.
+  //
+  // Deletes by the STORED document id, so it clears whatever id scheme the row
+  // was written under — the pre-editions bare `2026` ids and the edition-slug
+  // ids both — falling back to rebuilding the id only if a row somehow lacks
+  // one. Returns the number of holes removed so the caller can report it.
+  const onDiscardRoundScores = async (round, pid) => {
+    const rows = await db.get("hole_scores", [
+      { field: "tournament_id", op: "==", value: TOURNAMENT_ID },
+      { field: "player_id", op: "==", value: pid },
+      { field: "round_number", op: "==", value: round },
+    ]);
+    for (const r of (rows || [])) {
+      await db.deleteDoc("hole_scores", r.id || docIds.holeScore(_e(), round, pid, (r.hole_number || 1) - 1));
+    }
+    // The subscription says the same thing a moment later; this keeps the
+    // panel that raised the action from re-rendering against the stale card.
+    setHoleData(prev => { const n = { ...prev }; delete n[`${pid}_${round}`]; return n; });
+    return (rows || []).length;
   };
 
   const updateHI = async (pid, newHI) => {
     setTPlayers(prev => prev.map(tp => tp.player_id === pid ? { ...tp, handicap_index: newHI } : tp));
     const tp = tPlayers.find(t => t.player_id === pid);
     if (tp) await db.upsert("tournament_players", { ...tp, handicap_index: newHI }, "id");
-    notify("Handicap updated");
   };
 
-  const updateName = async (pid, newName) => {
+  // `name` is the DISPLAY name ("Aaron J") that every screen outside the admin
+  // console renders, and it stays the source of truth for those. first_name /
+  // last_name are the full parts, edited only in the player editor, and the
+  // display name is derived from them unless a nickname overrides it.
+  const updateName = async (pid, newName, parts = null) => {
+    const patch = { id: pid, name: newName, ...(parts || {}) };
     const p = DEMO_PLAYERS.find(pl => pl.id === pid);
-    if (p) p.name = newName;
-    else DEMO_PLAYERS.push({ id: pid, name: newName });
+    if (p) Object.assign(p, patch);
+    else DEMO_PLAYERS.push({ ...patch });
     setTPlayers(prev => [...prev]); // trigger re-render
-    await db.upsert("players", { id: pid, name: newName }, "id").catch(() => {});
-    notify("Name updated");
+    await db.upsert("players", patch, "id").catch(() => {});
   };
 
   const removePlayer = async (pid) => {
@@ -6498,7 +6753,7 @@ export default function WBCApp() {
                 });
                 return next;
               });
-            }} roundDates={roundDates} onSetRoundDate={async (rnd, dateStr) => { const next = { ...roundDates }; if (dateStr) next[rnd] = dateStr; else delete next[rnd]; setRoundDates(next); await saveTournamentState(finalizedRounds, passwords, teesSaved, teesModified, next, scoringOpen); }} scoringOpen={scoringOpen} onSetScoringOpen={async (rnd, open) => { const next = { ...scoringOpen }; if (open) next[rnd] = true; else delete next[rnd]; setScoringOpen(next); await saveTournamentState(finalizedRounds, passwords, teesSaved, teesModified, roundDates, next); }} pairingStrategy={pairingStrategy} onSetPairingStrategy={async (rnd, cfg) => { const next = { ...pairingStrategy }; if (cfg) next[rnd] = cfg; else delete next[rnd]; setPairingStrategy(next); await saveTournamentState(finalizedRounds, passwords, teesSaved, teesModified, roundDates, scoringOpen, next); }} leaderboard={getLeaderboard} passwords={passwords} setPasswords={async pw => { setPasswords(pw); await saveTournamentState(finalizedRounds, pw); }} holeData={holeData} finalizedRounds={finalizedRounds} onFinalizeRound={async rnd => { const nf = { ...finalizedRounds, [rnd]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${rnd}`, tournament_id: TOURNAMENT_ID, round: rnd, finalized: true }); if (rnd < 4) setRound(rnd + 1); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); if (/^\d+$/.test(String(key))) { await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${key}`, tournament_id: TOURNAMENT_ID, round: Number(key), finalized: false }); } else { setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); } }} notify={notify} getPlayerTee={getPlayerTee} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); }} teesSaved={teesSaved} onTeesSave={async r => { const next = { ...teesSaved, [r]: true }; const nextMod = { ...teesModified, [r]: false }; setTeesSaved(next); setTeesModified(nextMod); await saveTournamentState(finalizedRounds, passwords, next, nextMod); }} teesModified={teesModified} onTeesModify={async r => { const nextMod = { ...teesModified, [r]: true }; setTeesModified(nextMod); await saveTournamentState(finalizedRounds, passwords, teesSaved, nextMod); }} memberships={memberships} onSetDirector={onSetDirector} claims={claims} authUid={fbUser?.uid || null} tournamentMeta={tournamentMeta} onSaveTournamentMeta={saveTournamentMeta} /> : (
+            }} roundDates={roundDates} onSetRoundDate={async (rnd, dateStr) => { const next = { ...roundDates }; if (dateStr) next[rnd] = dateStr; else delete next[rnd]; setRoundDates(next); await saveTournamentState(finalizedRounds, passwords, teesSaved, teesModified, next, scoringOpen); }} scoringOpen={scoringOpen} onSetScoringOpen={async (rnd, open) => { const next = { ...scoringOpen }; if (open) next[rnd] = true; else delete next[rnd]; setScoringOpen(next); await saveTournamentState(finalizedRounds, passwords, teesSaved, teesModified, roundDates, next); }} pairingStrategy={pairingStrategy} onSetPairingStrategy={async (rnd, cfg) => { const next = { ...pairingStrategy }; if (cfg) next[rnd] = cfg; else delete next[rnd]; setPairingStrategy(next); await saveTournamentState(finalizedRounds, passwords, teesSaved, teesModified, roundDates, scoringOpen, next); }} leaderboard={getLeaderboard} passwords={passwords} setPasswords={async pw => { setPasswords(pw); await saveTournamentState(finalizedRounds, pw); }} holeData={holeData} finalizedRounds={finalizedRounds} onDiscardRoundScores={onDiscardRoundScores} onFinalizeRound={async rnd => { const nf = { ...finalizedRounds, [rnd]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${rnd}`, tournament_id: TOURNAMENT_ID, round: rnd, finalized: true }); if (rnd < 4) setRound(rnd + 1); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); if (/^\d+$/.test(String(key))) { await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${key}`, tournament_id: TOURNAMENT_ID, round: Number(key), finalized: false }); } else { setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); } }} notify={notify} getPlayerTee={getPlayerTee} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); }} teesSaved={teesSaved} onTeesSave={async r => { const next = { ...teesSaved, [r]: true }; const nextMod = { ...teesModified, [r]: false }; setTeesSaved(next); setTeesModified(nextMod); await saveTournamentState(finalizedRounds, passwords, next, nextMod); }} teesModified={teesModified} onTeesModify={async r => { const nextMod = { ...teesModified, [r]: true }; setTeesModified(nextMod); await saveTournamentState(finalizedRounds, passwords, teesSaved, nextMod); }} memberships={memberships} onSetDirector={onSetDirector} claims={claims} authUid={fbUser?.uid || null} tournamentMeta={tournamentMeta} onSaveTournamentMeta={saveTournamentMeta} /> : (
           <div style={{ textAlign: "center", padding: "40px 20px" }}>
             <div style={{ fontSize: 40, marginBottom: 12 }}>🔒</div>
             <div style={{ fontSize: 16, fontWeight: 700, color: K.t1, marginBottom: 6 }}>Directors Only</div>
