@@ -48,41 +48,33 @@ rules_version = '2';
 // is communal — one phone posts for a group of four — so "only your own
 // rows" would break the actual workflow before it stopped anybody.
 //
-// ── Deploying this: TWO STAGES ────────────────────────────────────
-// Rules are deployed by hand and the app is not, and this file cannot go out
-// in one shot. Every write below is meant to require a membership document,
-// and nobody can have one until rules that permit wbc_accounts are published
-// — which is the deadlock the password screen ran into the first time it was
-// tapped: the read of wbc_accounts was refused, so the app could not even ask
-// whether you were a member.
+// ── Deploying this: ENFORCING, and how to get back ────────────────
+// This file went out in two stages, because it could not go out in one. Every
+// write below requires a membership document, and nobody could HAVE one until
+// rules permitting wbc_accounts were published — which is the deadlock the
+// password screen hit the first time it was tapped: the read of wbc_accounts
+// was refused, so the app could not even ask whether you were a member.
 //
-// `enforcing()` below resolves it. Deploy this file as-is, TODAY:
+// Stage one published the door with `enforcing()` false, leaving the
+// tournament data as open as it had always been. Stage two — this file —
+// flipped it to true. Both stages are done. The security this file exists for
+// is IN EFFECT: an account without a membership cannot write anything, and an
+// account without the crown cannot touch the roster, the courses, the round
+// assignments, the pairings or the password.
 //
 //   firebase deploy --only firestore:rules
 //
-// STAGE ONE (enforcing() == false, how this file ships):
-//   • wbc_accounts and wbc_secrets get their real rules, so the door works
-//     and a director can be flagged.
-//   • the tournament data stays as open as it is right now. Nothing that
-//     works today stops working, and no phone can be locked out.
-// The security this file exists for is NOT yet in effect at this stage. It
-// adds the door; it does not make anybody walk through it.
+// THE WAY BACK, and it is worth knowing before you need it: a `git revert`
+// does not un-lock-out a phone, because the rules are deployed separately from
+// the app and it is the rules refusing the write. Publish this file with
+// `enforcing()` returning false and every phone works again immediately.
+// Diagnose after the field is scoring, not during.
 //
-// Then, in order:
-//   1. Everyone signs in and taps through the password screen, so each has a
-//      wbc_accounts document. Count them in the console against the roster.
-//   2. Set `is_director: true` on both directors' documents in the console.
-//      The rule below requires a director to already exist, so the first one
-//      cannot come from the app. That console edit is also the way back if
-//      the set is ever emptied, and the way somebody steps down.
-//   3. Delete the DIRECTOR_IDS fallback in src/App.jsx and deploy the app, so
-//      it reads Admin access from the same flag these rules do.
-//
-// STAGE TWO: flip `enforcing()` to true and re-publish. Do it when nobody is
-// mid-round. A phone that has not loaded the current build, or an account
-// with no membership, silently fails every write it attempts from that
-// moment — scores typed on the tee that never arrive. A `git revert` does not
-// un-lock-out a phone; re-publishing with enforcing() false is the way back.
+// Deploy ORDER for any future rules change is app first, rules second, and
+// never while somebody is mid-round: a phone on an old bundle that has not
+// been through the password screen has no membership, and from the moment
+// these rules land it silently fails every write it attempts — scores typed
+// on the tee that never arrive.
 //
 // ── Locking somebody out ──────────────────────────────────────────
 // Delete their wbc_accounts document in the Firebase console. Nothing in the
@@ -150,45 +142,40 @@ service cloud.firestore {
              .data.get('is_director', false) == true;
     }
 
-    // ── The bootstrap switch ──────────────────────────────────────
-    // THE ONE LINE TO FLIP, and the reason this file can be deployed today
-    // without locking anybody out.
+    // ── The bootstrap switch — NOW ON ─────────────────────────────
+    // This was the two-stage deploy's one line, and it has been flipped. The
+    // tournament data is no longer world-writable: every write below needs a
+    // membership document, and the director-owned half needs the crown on it.
     //
-    // Enforcement is a chicken-and-egg problem. Every write below is meant to
-    // require a membership document, but nobody can HAVE one until rules that
-    // permit wbc_accounts are published — and the moment rules that also gate
-    // the tournament data land, every phone without a membership silently
-    // fails every write it attempts. Deploy the finished article on a Friday
-    // and the field spends Saturday typing scores into a void.
+    // It reads as a constant `true` because it IS one now. The function stays
+    // rather than being inlined for one reason, and it is the reason to leave
+    // it alone: `return false` here is the ONLY way back. A phone that gets
+    // locked out cannot be rescued by reverting the app — the rules are
+    // deployed separately and the app is not what is refusing the write. If
+    // scores start silently failing on a tee box, publish this file with
+    // `return false` and diagnose afterwards:
     //
-    // So this deploys in two stages, and while `enforcing()` is FALSE:
+    //   firebase deploy --only firestore:rules
     //
-    //   • wbc_accounts and wbc_secrets get their REAL rules immediately, so
-    //     people can get through the door and a director can be flagged. That
-    //     is the whole point of stage one.
-    //   • the tournament data stays exactly as permissive as it is today.
-    //     Nothing that works now stops working.
+    // The three preconditions this waited on, for whoever is reading the
+    // history and wondering what changed:
+    //   1. Everybody who scores had signed in and been through the password
+    //      screen, so a wbc_accounts document existed for them.
+    //   2. Both directors had `is_director: true` on those documents.
+    //   3. The DIRECTOR_IDS fallback in src/App.jsx was deleted, so the app
+    //      reads Admin access from the same flag these rules do — a director
+    //      on the old list but not the flag would otherwise get an Admin tab
+    //      whose every write comes back refused.
     //
-    // WHAT THAT COSTS: until this is flipped, the tournament data is as
-    // world-writable as it already is. This stage adds the door; it does not
-    // yet make anyone walk through it. The security this file exists for
-    // arrives at the flip, not at this deploy.
-    //
-    // FLIP IT TO TRUE once all of these are true, and not before:
-    //   1. Everybody who scores has signed in and been through the password
-    //      screen, so a wbc_accounts document exists for them. Check the
-    //      collection in the console against the roster — this is countable,
-    //      so count it rather than assume.
-    //   2. Both directors have `is_director: true` on those documents.
-    //   3. The DIRECTOR_IDS fallback in src/App.jsx is deleted and deployed,
-    //      so the app reads Admin access from the same flag these rules do.
-    // Then re-publish:  firebase deploy --only firestore:rules
+    // Deploy ORDER still matters, and it is app first: a phone running the
+    // old bundle is a phone that may not have a membership yet. Publish the
+    // app, let the field open it once, then publish these rules — and not
+    // while anybody is mid-round.
     function enforcing() {
-      return false;
+      return true;
     }
 
-    // What the tournament data is gated on. Real once enforcing() is true;
-    // until then, open, which is the status quo.
+    // What the tournament data is gated on.
     function canWrite() {
       return !enforcing() || isMember();
     }
