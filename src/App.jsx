@@ -4308,34 +4308,6 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
         })}
       </div>
 
-      {/* Warning banner for incomplete round setup */}
-      {!finalizedRounds[editRound] && (() => {
-        const st = getRoundStatus(editRound);
-        const items = [];
-        if (!st.hasCourse) items.push({ text: "No course assigned", action: tab === "rounds" ? null : "Set course", onClick: () => setTab("rounds") });
-        else {
-          if (!st.teesDone && tab !== "rounds") items.push({ text: "Tee assignments incomplete", action: "Go to Tees", onClick: () => setTab("rounds") });
-          if (!st.groupsDone && tab !== "pairings") items.push({ text: "Pairings not set", action: "Go to Pairings", onClick: () => setTab("pairings") });
-          if (!st.teeTimesDone && tab !== "pairings") items.push({ text: "Tee times missing", action: "Go to Pairings", onClick: () => setTab("pairings") });
-        }
-        if (items.length === 0) return null;
-        return (
-          <div style={{ marginBottom: 12, background: "#fbbf2408", border: "1px solid #fbbf2425", borderRadius: 10, padding: "9px 12px", display: "flex", flexDirection: "column", gap: 5 }}>
-            <div style={{ fontSize: 10, fontWeight: 700, color: "#fbbf24", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 1 }}>Round {editRound} needs setup</div>
-            {items.map((item, i) => (
-              <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <div style={{ width: 4, height: 4, borderRadius: "50%", background: "#fbbf2460", flexShrink: 0 }} />
-                  <span style={{ fontSize: 11, color: K.t2 }}>{item.text}</span>
-                </div>
-                {item.action && (
-                  <button onClick={item.onClick} style={{ fontSize: 10, fontWeight: 700, color: "#fbbf24", background: "transparent", border: "none", cursor: "pointer", padding: 0 }}>{item.action} →</button>
-                )}
-              </div>
-            ))}
-          </div>
-        );
-      })()}
       </>)}
 
 
@@ -4457,7 +4429,6 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
               <div style={{ background: K.card, borderRadius: 12, border: `1px solid ${K.acc}40`, padding: "12px 14px", marginBottom: 12 }}>
                 <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 9, fontWeight: 700, color: K.acc, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 }}>Round {editRound} Course</div>
                     <div style={{ fontSize: 15, fontWeight: 700, color: K.t1 }}>{assigned.name}</div>
                     <div style={{ fontSize: 11, color: K.t3 }}>{assigned.city}{assigned.city && assigned.state ? ", " : ""}{assigned.state}</div>
                   </div>
