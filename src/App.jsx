@@ -6,8 +6,6 @@ import { K, ON_ACC } from "./theme";
 import { calcCH, computeIndividualBoard, rankIndividualBoard, rankIndividualBoardIds } from "./lib/individualBoard";
 import { useConfirm } from "./lib/useConfirm";
 import { Popup, ConfirmModal } from "./components/Popup";
-import { GhinLinkButton, GhinSyncButton, GhinBadge } from "./components/GhinLink";
-import { fmtHI } from "./lib/ghin";
 import { collection, doc, setDoc, getDocs, query, where, writeBatch, onSnapshot, deleteDoc } from "firebase/firestore";
 import { getMessaging, getToken, onMessage, isSupported as isMessagingSupported } from "firebase/messaging";
 const WBC_LOGO = "/wbc-icon-512.png";
@@ -3210,7 +3208,7 @@ function TeeAssigner({ activePlayers, numRounds, tRounds, courses, teeData, setT
   );
 }
 
-function PlayerRow({ player, onUpdateHI, onUpdateName, onRemove, onSavePassword, password, isLast, ac, onUpdatePlayer, notify, currentUser }) {
+function PlayerRow({ player, onUpdateHI, onUpdateName, onRemove, onSavePassword, password, isLast, ac }) {
   const [editing, setEditing] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [hi, setHi] = useState(String(player.handicap_index));
@@ -3260,17 +3258,8 @@ function PlayerRow({ player, onUpdateHI, onUpdateName, onRemove, onSavePassword,
 
   return (
     <div style={{ padding: "10px 14px", display: "flex", alignItems: "center", borderBottom: !isLast ? `1px solid ${K.bdr}10` : "none" }}>
-      <div style={{ flex: "0 0 40%", minWidth: 0, display: "flex", alignItems: "center", gap: 5 }}>
-        <span style={{ fontWeight: 600, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{player.name}</span>
-        {/* The GHIN chip sits with the NAME, not with the index, because it
-            binds an identity — the index is what that binding produces. */}
-        {onUpdatePlayer && (
-          <GhinLinkButton player={player} user={currentUser} onUpdatePlayer={onUpdatePlayer} notify={notify} />
-        )}
-      </div>
-      <span style={{ flex: "0 0 15%", textAlign: "center", fontSize: 12, color: K.t2 }} title={player.ghin_number ? `From GHIN #${player.ghin_number}` : undefined}>
-        {fmtHI(player.handicap_index)}
-      </span>
+      <span style={{ flex: "0 0 40%", fontWeight: 600, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{player.name}</span>
+      <span style={{ flex: "0 0 15%", textAlign: "center", fontSize: 12, color: K.t2 }}>{player.handicap_index}</span>
       <div style={{ flex: "0 0 30%", display: "flex", alignItems: "center", justifyContent: "center", gap: 3 }}>
         <span style={{ fontSize: 11, color: K.t2, fontFamily: "monospace" }}>{showPw ? (password || DEFAULT_PW) : "••••••"}</span>
         <button onClick={() => setShowPw(!showPw)} style={{ background: "transparent", border: "none", color: K.t3, fontSize: 9, cursor: "pointer", padding: "0 1px" }}>{showPw ? "hide" : "show"}</button>
@@ -3549,7 +3538,7 @@ function AccessPanel({ memberships, onSetDirector, claims, players, authUid, not
   );
 }
 
-function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, onUpdatePlayerGhin, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, roundDates, onSetRoundDate, scoringOpen, onSetScoringOpen, pairingStrategy, onSetPairingStrategy, leaderboard, passwords, setPasswords, holeData, finalizedRounds, onFinalizeRound, onUnfinalizeRound, notify, notif, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, onExternalSettingsHandled, currentUser, teesSaved, onTeesSave, teesModified, onTeesModify, setTeesModified, memberships, onSetDirector, claims, authUid, tournamentMeta, onSaveTournamentMeta }) {
+function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, roundDates, onSetRoundDate, scoringOpen, onSetScoringOpen, pairingStrategy, onSetPairingStrategy, leaderboard, passwords, setPasswords, holeData, finalizedRounds, onFinalizeRound, onUnfinalizeRound, notify, notif, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, onExternalSettingsHandled, currentUser, teesSaved, onTeesSave, teesModified, onTeesModify, setTeesModified, memberships, onSetDirector, claims, authUid, tournamentMeta, onSaveTournamentMeta }) {
   const [tab, setTab] = useState("tees");
   // Themed confirmations (see lib/useConfirm). The host <ConfirmModal/> is
   // rendered once at the bottom of this view; `confirm(...)` returns a
@@ -4121,14 +4110,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                   <div style={{ background: K.card, borderRadius: 12, border: `1px solid ${K.bdr}`, overflow: "hidden" }}>
                     <div style={{ padding: "10px 14px", display: "flex", alignItems: "center", borderBottom: `1px solid ${K.bdr}` }}>
                       <span style={{ flex: "0 0 40%", fontSize: 10, fontWeight: 600, color: K.t3, textTransform: "uppercase" }}>Name</span>
-                      {/* The badge labels the index column as GHIN-sourced;
-                          the sync button heads that same column, because what
-                          it refreshes is every number under it. */}
-                      <span style={{ flex: "0 0 15%", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}>
-                        <GhinBadge size="xs" title="Handicap indexes sourced from GHIN" />
-                        <GhinSyncButton compact players={activePlayers} onUpdatePlayer={onUpdatePlayerGhin}
-                          notify={notify} confirm={confirm} started={tournamentStarted} />
-                      </span>
+                      <span style={{ flex: "0 0 15%", fontSize: 10, fontWeight: 600, color: K.t3, textTransform: "uppercase", textAlign: "center" }}>Idx</span>
                       <span style={{ flex: "0 0 30%", fontSize: 10, fontWeight: 600, color: K.t3, textTransform: "uppercase", textAlign: "center" }}>Password</span>
                       <div style={{ flex: "0 0 15%", textAlign: "right" }}>
                         <button onClick={() => setAdding(true)} style={{ padding: "3px 8px", borderRadius: 6, background: "transparent", border: `1px solid ${ac}50`, color: ac, fontSize: 10, fontWeight: 600, cursor: "pointer" }}>+ Add</button>
@@ -4149,7 +4131,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                         </div>
                       </div>
                     )}
-                    {[...activePlayers].sort((a,b) => a.name.localeCompare(b.name)).map((p, i) => <PlayerRow key={p.id} player={p} password={passwords[p.id] || DEFAULT_PW} onUpdateHI={guardedUpdateHI} onUpdateName={updateName} onRemove={removePlayer} onSavePassword={(pid, pw) => setPasswords(prev => ({ ...prev, [pid]: pw }))} isLast={i === activePlayers.length - 1} ac={ac} onUpdatePlayer={onUpdatePlayerGhin} notify={notify} currentUser={currentUser} />)}
+                    {[...activePlayers].sort((a,b) => a.name.localeCompare(b.name)).map((p, i) => <PlayerRow key={p.id} player={p} password={passwords[p.id] || DEFAULT_PW} onUpdateHI={guardedUpdateHI} onUpdateName={updateName} onRemove={removePlayer} onSavePassword={(pid, pw) => setPasswords(prev => ({ ...prev, [pid]: pw }))} isLast={i === activePlayers.length - 1} ac={ac} />)}
                   </div>
                 </div>
               )}
@@ -5671,25 +5653,10 @@ export default function WBCApp() {
     else if (res === "unsupported") notify("Notifications aren't supported here — add the app to your home screen first");
   };
 
-  // The GHIN link travels with the handicap index, on the tournament_players
-  // doc: the revision date and sync stamp only mean anything as qualifiers of
-  // THAT index, and the WBC index is tournament-scoped (locked for the event)
-  // rather than a rolling player attribute. Carried onto the player object
-  // here so the roster UI can read it without a second lookup.
-  const withGhin = (p, tp) => ({
-    ...p,
-    handicap_index: parseFloat(tp.handicap_index) || 0,
-    tp_id: tp.id,
-    ghin_number: tp.ghin_number || null,
-    ghin_name: tp.ghin_name || null,
-    ghin_rev_date: tp.ghin_rev_date || null,
-    ghin_synced_at: tp.ghin_synced_at || null,
-  });
-
   const activePlayers = useMemo(() => {
     return tPlayers.filter(tp => tp.status !== "WD").map(tp => {
       const p = DEMO_PLAYERS.find(pl => pl.id === tp.player_id);
-      return p ? withGhin(p, tp) : null;
+      return p ? { ...p, handicap_index: parseFloat(tp.handicap_index) || 0, tp_id: tp.id } : null;
     }).filter(Boolean).sort((a,b) => a.name.localeCompare(b.name));
   }, [tPlayers]);
 
@@ -5697,7 +5664,7 @@ export default function WBCApp() {
   const allPlayers = useMemo(() => {
     return tPlayers.map(tp => {
       const p = DEMO_PLAYERS.find(pl => pl.id === tp.player_id);
-      return p ? { ...withGhin(p, tp), isWD: tp.status === "WD" } : null;
+      return p ? { ...p, handicap_index: parseFloat(tp.handicap_index) || 0, tp_id: tp.id, isWD: tp.status === "WD" } : null;
     }).filter(Boolean).sort((a,b) => a.name.localeCompare(b.name));
   }, [tPlayers]);
 
@@ -6030,30 +5997,6 @@ export default function WBCApp() {
     const tp = tPlayers.find(t => t.player_id === pid);
     if (tp) await db.upsert("tournament_players", { ...tp, handicap_index: newHI }, "id");
     notify("Handicap updated");
-  };
-
-  // Write a GHIN link (and the index it brought with it) back to the player's
-  // tournament_players doc. GhinLinkButton hands back the whole player object
-  // with the GHIN fields patched, so this picks out just the persisted ones
-  // rather than writing the derived display fields back into the database.
-  //
-  // Deliberately silent — GhinLinkButton and GhinSyncButton each report their
-  // own outcome, and they are the ones that know whether an index actually
-  // moved. updateHI's blanket "Handicap updated" would be wrong for a sync
-  // that found nothing changed.
-  const updatePlayerGhin = async (patch) => {
-    const pid = patch?.id;
-    if (!pid) return;
-    const fields = {
-      handicap_index: patch.handicap_index,
-      ghin_number: patch.ghin_number ?? null,
-      ghin_name: patch.ghin_name ?? null,
-      ghin_rev_date: patch.ghin_rev_date ?? null,
-      ghin_synced_at: patch.ghin_synced_at ?? null,
-    };
-    setTPlayers(prev => prev.map(tp => tp.player_id === pid ? { ...tp, ...fields } : tp));
-    const tp = tPlayers.find(t => t.player_id === pid);
-    if (tp) await db.upsert("tournament_players", { ...tp, ...fields }, "id");
   };
 
   const updateName = async (pid, newName) => {
@@ -6568,7 +6511,7 @@ export default function WBCApp() {
         </div>
         {view === "skins" && <SkinsCtpView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} teeData={teeData} getPlayerTee={getPlayerTee} />}
         {view === "groups" && <GroupsView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} pairingsData={pairingsData} teeTimesData={teeTimesData} teeData={teeData} getPlayerTee={getPlayerTee} user={user} />}
-        {view === "admin" && (user.isDirector ? <AdminView players={DEMO_PLAYERS} activePlayers={activePlayers} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} onUpdatePlayerGhin={updatePlayerGhin} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
+        {view === "admin" && (user.isDirector ? <AdminView players={DEMO_PLAYERS} activePlayers={activePlayers} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
               setTeeTimesData(prev => {
                 const next = typeof updater === "function" ? updater(prev) : updater;
                 // Fire-and-forget: update tee times on pairings rows in Firestore
