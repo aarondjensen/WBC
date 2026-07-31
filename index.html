@@ -31,7 +31,16 @@
       input, button, textarea, select { font-family: inherit; }
     </style>
     <script>
-      function setAppHeight() {
+      // Is a text field focused — i.e. is an on-screen keyboard up? See the
+      // shrink guard in setAppHeight. Mirrors App.jsx.
+      function wbcIsEditing() {
+        var el = document.activeElement;
+        if (!el || el === document.body) return false;
+        if (el.isContentEditable) return true;
+        return /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName || '');
+      }
+
+      function setAppHeight(allowShrink) {
         // GUARD: on iOS PWA cold-reopen/resume, window.innerHeight is briefly 0
         // (or an unstable tiny value) during the launch transition. Writing that
         // into --app-height collapses the fixed-height app container to a blank
@@ -39,8 +48,35 @@
         // keep the last good one (or the CSS 100dvh fallback). Mirrors App.jsx.
         var h = window.innerHeight;
         if (!(h > 100)) return;
+        // KEYBOARD GUARD: opening the on-screen keyboard shrinks innerHeight and
+        // fires resize. Believing it collapses the fixed-height app container —
+        // the bottom nav rides up into the middle of the screen with a black band
+        // under it — and the grow-back resize does NOT reliably arrive when the
+        // keyboard closes (dismissing it by unmounting the field, e.g. saving a
+        // course name, is the case that strands it), so the wrong height sticks.
+        // While a field has focus --app-height may grow but never shrink. A real
+        // shrink while typing (rotation) still lands via the orientation handler
+        // and the re-measure after blur, both of which pass allowShrink.
+        var prev = parseFloat(document.documentElement.style.getPropertyValue('--app-height')) || 0;
+        if (!allowShrink && prev && h < prev && wbcIsEditing()) return;
         document.documentElement.style.setProperty('--app-height', h + 'px');
       }
+
+      // iOS scrolls the DOCUMENT to reveal a focused field even though html/body
+      // are overflow:hidden, and does not always scroll back when the keyboard
+      // goes — which lifts the whole app off the bottom of the screen and looks
+      // just like the collapse above. Nothing here scrolls the document (every
+      // scroller is an inner pane), so pinning it back to 0 is always safe.
+      function wbcUnscroll() {
+        if (wbcIsEditing()) return; // don't fight iOS while it reveals the field
+        try {
+          window.scrollTo(0, 0);
+          document.body.scrollTop = 0;
+          document.documentElement.scrollTop = 0;
+        } catch (e) {}
+      }
+
+      function wbcSettle(allowShrink) { setAppHeight(allowShrink); wbcUnscroll(); }
 
       // Set immediately on load
       setAppHeight();
@@ -52,16 +88,27 @@
         setTimeout(setAppHeight, 600);
       }
 
-      window.addEventListener('resize', setAppHeight);
+      window.addEventListener('resize', function() { wbcSettle(false); });
       window.addEventListener('orientationchange', function() {
-        setTimeout(setAppHeight, 200);
-        setTimeout(setAppHeight, 500);
+        setTimeout(function() { wbcSettle(true); }, 200);
+        setTimeout(function() { wbcSettle(true); }, 500);
+      });
+
+      // Keyboard going away: re-measure once it has finished animating out, and
+      // undo any document scroll iOS left behind. Deliberately NOT allowShrink —
+      // moving between two fields also fires focusout with the keyboard still up,
+      // and there the guard (which only blocks while something is focused) is
+      // exactly what we want.
+      document.addEventListener('focusout', function() {
+        setTimeout(function() { wbcSettle(false); }, 50);
+        setTimeout(function() { wbcSettle(false); }, 300);
+        setTimeout(function() { wbcSettle(false); }, 700);
       });
 
       // Also re-measure when the page becomes visible (e.g. switching back to the app)
       document.addEventListener('visibilitychange', function() {
         if (document.visibilityState === 'visible') {
-          setTimeout(setAppHeight, 100);
+          setTimeout(function() { wbcSettle(false); }, 100);
         }
       });
     </script>
