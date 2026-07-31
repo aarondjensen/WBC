@@ -8,4 +8,34 @@ html, body, #root {
 
 body {
   margin: 0;
+  /* ── The app font, declared ONCE, on the document ──────────────────
+     Montserrat used to be set only in inline styles, on the handful of
+     containers App.jsx renders the main screens inside. Two kinds of thing
+     fell outside those containers and rendered in the browser's default UI
+     font instead:
+
+       • Anything portaled to <body> — ConfirmModal, PlayerEditor, and every
+         Popup with `portal` set. createPortal moves the DOM node out of
+         #root, and font-family inherits through the DOM tree, not the React
+         one, so a modal raised from a styled screen landed on an unstyled
+         <body>.
+
+       • Every form control, portaled or not. <input>, <button>, <select> and
+         <textarea> do NOT inherit font-family from their parent — browsers
+         style them from the OS. That is why the course search box, the
+         password fields and the modal buttons read in San Francisco or Roboto
+         while the text beside them read in Montserrat.
+
+     Setting it on <body> fixes the first; `font: inherit` on the controls
+     fixes the second. Both are here rather than sprinkled through App.jsx so
+     the next popup is right without anybody having to remember. */
+  font-family: 'Montserrat', sans-serif;
+  font-variant-numeric: lining-nums tabular-nums;
+}
+
+/* font-family alone, not the `font` shorthand — the shorthand would also reset
+   size and weight, and every call site sets those deliberately. */
+input, button, textarea, select, optgroup {
+  font-family: inherit;
+  font-variant-numeric: inherit;
 }
