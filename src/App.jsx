@@ -5221,11 +5221,6 @@ export default function WBCApp() {
   const [round, setRound] = useState(1);
   const [notif, setNotif] = useState(null);
 
-  // The tab title follows the saved tournament name, so renaming the event in
-  // the Event settings tab renames the browser tab too. Split out of the
-  // favicon effect below because that one deliberately runs once.
-  useEffect(() => { document.title = tournamentName; }, [tournamentName]);
-
   // Set favicon
   useEffect(() => {
     const link = document.querySelector("link[rel*='icon']") || document.createElement("link");
@@ -5321,6 +5316,13 @@ export default function WBCApp() {
   const [tournamentMeta, setTournamentMeta] = useState(null);
   const tournamentName = tournamentMeta?.name || TOURNAMENT.name;
   const tournamentLocation = tournamentMeta?.location || "";
+
+  // The tab title follows the saved tournament name, so renaming the event in
+  // the Event settings tab renames the browser tab too. Kept here rather than up
+  // with the other one-shot document effects: the dependency array is evaluated
+  // during render, so it has to sit below tournamentName's declaration or it
+  // reads a const in its temporal dead zone and throws on first paint.
+  useEffect(() => { document.title = tournamentName; }, [tournamentName]);
   const [storageLoaded, setStorageLoaded] = useState(false);
   const [syncing, setSyncing] = useState(false);
 
