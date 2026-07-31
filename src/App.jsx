@@ -43,21 +43,43 @@ const TROPHY_SVG_URL = `data:image/svg+xml;utf8,${encodeURIComponent(TROPHY_SVG)
 // Player registry — populated from Firestore on mount
 let DEMO_PLAYERS = [];
 
+// ── How many rounds this event plays ──────────────────────────────
+// Four almost every year; three when the schedule loses a day (2010, 2011 and
+// 2022 all ran three). It used to be a hard constant here, which made a
+// three-round year a code change and a redeploy — so it is now part of the
+// event setup a director edits in Admin → Event, stored on the tournament_state
+// document as `meta.rounds`.
+//
+// NUM_ROUNDS is a LIVE BINDING rather than a constant, the same trick
+// firebase.js uses for TOURNAMENT_ID: every round loop, leaderboard column and
+// finalization check in this file reads it at RENDER time, so pointing it at
+// the saved value before React re-renders updates all of them at once. The
+// alternative was threading a `numRounds` prop through a dozen components that
+// only need it to count to four.
+const DEFAULT_NUM_ROUNDS = 4;
+// What Admin offers. Not a free-text field: the only two answers the WBC has
+// ever had are three and four, and a fat-fingered "44" would mean 44 rounds of
+// empty leaderboard columns.
+const ROUND_CHOICES = [3, 4];
+const clampRounds = (n) => {
+  const v = parseInt(n, 10);
+  return ROUND_CHOICES.includes(v) ? v : DEFAULT_NUM_ROUNDS;
+};
+let NUM_ROUNDS = DEFAULT_NUM_ROUNDS;
+const setRoundCount = (n) => { NUM_ROUNDS = clampRounds(n); return NUM_ROUNDS; };
+
 // Derived from the ACTIVE edition rather than pinned to 2026, so switching to
 // wbc_2027 renames the default tournament and moves the year without a code
-// change. `num_rounds` stays a constant: the WBC is a four-round event by
-// definition, and a per-edition round count is a bigger change than a rename.
+// change. `num_rounds` reads the live round count above, so this object and
+// NUM_ROUNDS can never disagree — several call sites reach for one or the
+// other and used to get different answers once the count stopped being fixed.
 const TOURNAMENT = {
   get id() { return TOURNAMENT_ID; },
   get name() { return `WBC ${getTournamentYear()}`; },
   get year() { return getTournamentYear(); },
-  num_rounds: 4,
+  get num_rounds() { return NUM_ROUNDS; },
   status: "active",
 };
-// Single source of truth for tournament length. Change TOURNAMENT.num_rounds above
-// to run a shorter/longer tournament — every round loop, leaderboard column, and
-// finalization check derives from this constant instead of a hardcoded 4.
-const NUM_ROUNDS = TOURNAMENT.num_rounds || 4;
 
 // ── Firebase initialized above ──
 // ── Firebase / Firestore configuration ──
@@ -68,7 +90,6 @@ const NUM_ROUNDS = TOURNAMENT.num_rounds || 4;
 // TOURNAMENT_ID is no longer a constant here — it is the active-edition live
 // binding exported by firebase.js and imported at the top of this file. Every
 // read of it below picks up whichever edition is currently selected.
-const DEFAULT_PW = "wbc2026"; // default player login password
 
 // CTP distance wheel — whole feet, 1..CTP_MAX_FT. Ported from MNQ's hole-CTP prompt.
 // A ball outside 60 ft on a par 3 isn't winning a closest-to-pin, so the wheel caps
@@ -3165,9 +3186,9 @@ const holesEntered = (holeData, pid, round) =>
 // ── PlayerRow ──
 // A read-only summary line. All editing moved into PlayerEditor, following
 // Bourbon Cup: the previous design swapped this row for a cramped set of
-// inline inputs, which is why it could only ever expose a name, an index and a
-// password — there is no room on a phone row for anything more.
-function PlayerRow({ player, password, isLast, onOpen, isDirector }) {
+// inline inputs, which is why it could only ever expose a name and an index —
+// there is no room on a phone row for anything more.
+function PlayerRow({ player, isLast, onOpen, isDirector }) {
   return (
     <button onClick={onOpen} style={{
       width: "100%", textAlign: "left", cursor: "pointer", background: "transparent",
@@ -3179,7 +3200,7 @@ function PlayerRow({ player, password, isLast, onOpen, isDirector }) {
           {player.name}{isDirector && " 👑"}
         </div>
         <div style={{ fontSize: FS.label, color: K.t3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {fullName(player) !== player.name ? fullName(player) : `Password ${password}`}
+          {fullName(player) !== player.name ? fullName(player) : " "}
         </div>
       </div>
       <div style={{ flexShrink: 0, textAlign: "right" }}>
@@ -3203,7 +3224,7 @@ function PlayerRow({ player, password, isLast, onOpen, isDirector }) {
 // no membership document to flag), and change your own (so the last director
 // can never lock everyone out).
 function PlayerEditor({ editing, set, onClose, tPlayers, players, memberships, claims, authUid,
-                        holeData, numRounds, passwords, onSave, onRemove, notify, confirm, tournamentStarted }) {
+                        holeData, numRounds, onSave, onRemove, notify, confirm, tournamentStarted }) {
   if (!editing) return null;
   const isNew = !!editing.isNew;
   const p = isNew ? null : players.find(x => x.id === editing.pid);
@@ -3242,7 +3263,7 @@ function PlayerEditor({ editing, set, onClose, tPlayers, players, memberships, c
     const newDir = !!editing.dir;
 
     if (isNew) {
-      await onSave({ isNew: true, name: newName, first, last, hi: newHI, pw: (editing.pw || "").trim() });
+      await onSave({ isNew: true, name: newName, first, last, hi: newHI });
       notify?.(`Added ${newName}`);
       onClose();
       return;
@@ -3252,14 +3273,11 @@ function PlayerEditor({ editing, set, onClose, tPlayers, players, memberships, c
     const oldHI = parseFloat(tp?.handicap_index) || 0;
     const wasDir = theirMembership?.is_director === true;
     const dirChanged = canGrantDirector && newDir !== wasDir;
-    const oldPw = passwords?.[editing.pid] || DEFAULT_PW;
-    const newPw = (editing.pw || "").trim() || oldPw;
 
     const changes = [];
     if (first !== (p.first_name || "") || last !== (p.last_name || "") || newName !== p.name)
       changes.push(`Name → ${[first, last].filter(Boolean).join(" ")} (shows as "${newName}")`);
     if (newHI !== oldHI) changes.push(`Index: ${oldHI} → ${newHI}`);
-    if (newPw !== oldPw) changes.push(`Password: ${oldPw} → ${newPw}`);
     if (dirChanged) changes.push(`Director: ${wasDir ? "Yes" : "No"} → ${newDir ? "Yes" : "No"}`);
     if (changes.length === 0) { onClose(); return; }
 
@@ -3278,7 +3296,7 @@ function PlayerEditor({ editing, set, onClose, tPlayers, players, memberships, c
 
     await onSave({
       pid: editing.pid, name: newName, first, last, hi: newHI,
-      hiChanged: newHI !== oldHI, pw: newPw, pwChanged: newPw !== oldPw,
+      hiChanged: newHI !== oldHI,
       dir: dirChanged ? { uid: theirMembership.id || theirMembership.uid, on: newDir } : null,
     });
     onClose();
@@ -3331,15 +3349,17 @@ function PlayerEditor({ editing, set, onClose, tPlayers, players, memberships, c
           <div style={{ fontSize: FS.label, color: K.t3, marginTop: -6, lineHeight: 1.4 }}>{directorHint}</div>
         )}
 
+        {/* No password field. There is ONE password and it belongs to the
+            event, not to a player — Admin → Event → Event password. A
+            per-player one was left over from the PIN login this app replaced
+            with Google/Apple sign-in, and it read as though a director had to
+            hand out twelve of them. */}
         <div style={{ display: "flex", gap: 8 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <span style={lbl}>Index</span>
             <input type="number" inputMode="decimal" step="0.1" value={editing.hi} placeholder="0" onChange={e => set({ hi: e.target.value })} style={inp} />
           </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <span style={lbl}>Password</span>
-            <input value={editing.pw} placeholder={DEFAULT_PW} onChange={e => set({ pw: e.target.value })} style={inp} />
-          </div>
+          <div style={{ flex: 1, minWidth: 0 }} />
         </div>
         {!isNew && tournamentStarted && (
           <div style={{ fontSize: FS.label, color: K.warn, lineHeight: 1.45 }}>
@@ -3395,10 +3415,11 @@ function PlayerEditor({ editing, set, onClose, tPlayers, players, memberships, c
 // the event for a new venue would otherwise have to remember two saves. An
 // empty field falls back to its constant rather than saving blank, so the
 // header can't end up with a hole in it.
-function TournamentPanel({ meta, onSave, notify }) {
+function TournamentPanel({ meta, onSave, notify, confirm, scoredRounds = [] }) {
   const [showEditions, setShowEditions] = useState(false);
   const [name, setName] = useState(meta?.name || "");
   const [location, setLocation] = useState(meta?.location || "");
+  const [rounds, setRounds] = useState(clampRounds(meta?.rounds));
   const [busy, setBusy] = useState(false);
 
   // Re-seed the fields when the SAVED values change — React's documented
@@ -3409,12 +3430,13 @@ function TournamentPanel({ meta, onSave, notify }) {
   // object on every snapshot, so comparing identity would wipe whatever the
   // director was mid-way through typing each time any unrelated field of the
   // tournament_state document changed.
-  const savedKey = `${meta?.name || ""} ${meta?.location || ""}`;
+  const savedKey = `${meta?.name || ""} ${meta?.location || ""} ${meta?.rounds || ""}`;
   const [seenKey, setSeenKey] = useState(savedKey);
   if (savedKey !== seenKey) {
     setSeenKey(savedKey);
     setName(meta?.name || "");
     setLocation(meta?.location || "");
+    setRounds(clampRounds(meta?.rounds));
   }
 
   const pendingName = name.trim() || TOURNAMENT.name;
@@ -3422,11 +3444,28 @@ function TournamentPanel({ meta, onSave, notify }) {
   // Compared against the saved DOCUMENT, not against the last save, so a
   // director who types and then undoes it by hand sees the Save light go out.
   const dirty = pendingName !== (meta?.name || TOURNAMENT.name)
-    || pendingLocation !== (meta?.location || "");
+    || pendingLocation !== (meta?.location || "")
+    || rounds !== clampRounds(meta?.rounds);
+
+  // Rounds that already carry a score and would fall off the end of a shorter
+  // tournament. Dropping to three does not DELETE round four — the holes stay
+  // in the database and come back if the count goes back up — but nothing
+  // counts them meanwhile, and a director who came here to fix a typo in the
+  // location should hear that before they save it.
+  const orphaned = scoredRounds.filter(r => r > rounds);
 
   const save = async () => {
+    if (orphaned.length && confirm) {
+      const ok = await confirm({
+        title: `Play ${rounds} rounds?`,
+        message: `Round ${orphaned.join(", ")} already ${orphaned.length === 1 ? "has" : "have"} scores, and a ${rounds}-round event stops counting ${orphaned.length === 1 ? "it" : "them"}.\n\nNothing is deleted — set the count back to ${Math.max(...orphaned)} and those rounds return.`,
+        confirmLabel: `Play ${rounds}`,
+        destructive: true,
+      });
+      if (!ok) return;
+    }
     setBusy(true);
-    await onSave({ name: pendingName, location: pendingLocation });
+    await onSave({ name: pendingName, location: pendingLocation, rounds });
     setBusy(false);
     notify?.("Tournament details saved");
   };
@@ -3487,23 +3526,41 @@ function TournamentPanel({ meta, onSave, notify }) {
                 placeholder={f.ph} style={input} />
             </div>
           ))}
+
+          {/* How many rounds this year plays. Same card and the same Save as
+              the name and location because it is the same question — "what is
+              this event" — and it is answered once, at setup, before anybody
+              tees off. Two choices rather than a number field: see
+              ROUND_CHOICES up top. */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ ...label, width: 58, flexShrink: 0 }}>Rounds</span>
+            <div style={{ flex: 1, display: "flex", gap: 6 }}>
+              {ROUND_CHOICES.map(n => {
+                const on = rounds === n;
+                return (
+                  <button key={n} onClick={() => setRounds(n)} style={{
+                    flex: 1, padding: "10px 0", borderRadius: 8, cursor: "pointer",
+                    background: on ? K.acc : K.inp,
+                    border: on ? "none" : `1px solid ${K.bdr}`,
+                    color: on ? ON_ACC : K.t2, fontSize: 14, fontWeight: 800,
+                  }}>{n}</button>
+                );
+              })}
+            </div>
+          </div>
         </div>
         <div style={{ fontSize: 11, color: K.t3, marginTop: 8, lineHeight: 1.4 }}>
-          Shown in the app header and on the sign-in screen. Leave the name blank to fall back to &ldquo;{TOURNAMENT.name}&rdquo;.
+          Name and location show in the app header and on the sign-in screen; leave the name
+          blank to fall back to &ldquo;{TOURNAMENT.name}&rdquo;. Rounds sets how many the
+          leaderboard, pairings and scoring screens count — usually four, three when the
+          schedule loses a day.
         </div>
-      </div>
-
-      {/* Read-only facts about the event's shape. Surfaced here because this
-          is the tab a director opens asking "what is this tournament", and
-          both are set in code rather than by this screen. */}
-      <div style={{ background: K.card, borderRadius: 12, border: `1px solid ${K.bdr}`, padding: 14 }}>
-        <div style={{ ...label, marginBottom: 8 }}>Format</div>
-        <div style={{ fontSize: 12, color: K.t2, lineHeight: 1.6 }}>
-          {NUM_ROUNDS}-round individual net stroke play.<br />
-          Handicap indexes are locked for the tournament — every round&rsquo;s net score is
-          calculated from the current index, so changing one after play starts re-scores
-          rounds already in the book.
-        </div>
+        {orphaned.length > 0 && (
+          <div style={{ fontSize: 11, fontWeight: 600, color: K.warn, marginTop: 8, lineHeight: 1.4 }}>
+            Round {orphaned.join(", ")} already {orphaned.length === 1 ? "has" : "have"} scores — a {rounds}-round
+            event stops counting {orphaned.length === 1 ? "it" : "them"}.
+          </div>
+        )}
       </div>
     </div>
   );
@@ -3512,6 +3569,10 @@ function TournamentPanel({ meta, onSave, notify }) {
 function AccessPanel({ memberships, onSetDirector, claims, players, authUid, notify, confirm }) {
   const [code, setCode] = useState("");
   const [revealed, setRevealed] = useState(false);
+  // Distinct from `busy`: `loading` is the ONE read that happens on open, and
+  // it is what stops the retry button flashing "Try again" before anything has
+  // been tried.
+  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [dirBusy, setDirBusy] = useState(null);
@@ -3527,6 +3588,29 @@ function AccessPanel({ memberships, onSetDirector, claims, players, authUid, not
     setCode(res.code || "");
     setRevealed(true);
   };
+
+  // Read it on open rather than behind a tap. The reveal button was guarding
+  // against a shoulder over the screen, but this is a director-only tab and
+  // the password's whole life is being said out loud across a table — while
+  // the cost of hiding it was that the one field standing between a stranger
+  // and somebody else's scorecard looked, to a director setting the event up,
+  // like it wasn't there. The button stays as the retry when the read fails.
+  //
+  // Not a call to reveal(): that flips `busy` before it awaits anything, and a
+  // setState in the same tick as the effect is a cascading render. Everything
+  // here happens after the await, so the first paint is the `loading` one.
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const res = await readAccessCode();
+      if (!alive) return;
+      setLoading(false);
+      if (!res.ok) { setErr(res.error); return; }
+      setCode(res.code || "");
+      setRevealed(true);
+    })();
+    return () => { alive = false; };
+  }, []);
 
   const save = async () => {
     const next = (code || "").trim();
@@ -3575,11 +3659,12 @@ function AccessPanel({ memberships, onSetDirector, claims, players, authUid, not
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       {/* The password */}
       <div style={{ background: K.card, borderRadius: 12, border: `1px solid ${K.bdr}`, padding: "12px 14px" }}>
-        <div style={{ ...label, marginBottom: 8 }}>Tournament password</div>
+        <div style={{ ...label, marginBottom: 8 }}>Event password</div>
         <p style={{ fontSize: 11, color: K.t3, lineHeight: 1.5, margin: "0 0 10px" }}>
-          Everyone types this once, after signing in with Google or Apple. It&rsquo;s checked by the
-          database, not the app, so it holds even against someone skipping the app entirely.
-          Leave it blank to let anyone in.
+          One password for the whole event, not one per player. Everyone types it once, after
+          signing in with Google or Apple, and until they do they can&rsquo;t claim a name off
+          the roster or post a score. It&rsquo;s checked by the database, not the app, so it holds
+          even against someone skipping the app entirely. Leave it blank to let anyone in.
         </p>
         {revealed ? (
           <div style={{ display: "flex", gap: 8 }}>
@@ -3592,8 +3677,8 @@ function AccessPanel({ memberships, onSetDirector, claims, players, authUid, not
             </button>
           </div>
         ) : (
-          <button onClick={reveal} disabled={busy} style={{ padding: "9px 16px", borderRadius: 10, background: "transparent", border: `1px solid ${K.acc}50`, color: K.acc, fontSize: 12, fontWeight: 700, cursor: busy ? "default" : "pointer" }}>
-            {busy ? "Reading…" : "Show"}
+          <button onClick={reveal} disabled={loading || busy} style={{ padding: "9px 16px", borderRadius: 10, background: "transparent", border: `1px solid ${K.acc}50`, color: K.acc, fontSize: 12, fontWeight: 700, cursor: loading || busy ? "default" : "pointer" }}>
+            {loading || busy ? "Reading…" : "Try again"}
           </button>
         )}
         {revealed && !(code || "").trim() && (
@@ -3647,7 +3732,7 @@ function AccessPanel({ memberships, onSetDirector, claims, players, authUid, not
   );
 }
 
-function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, roundDates, onSetRoundDate, scoringOpen, onSetScoringOpen, pairingStrategy, onSetPairingStrategy, leaderboard, passwords, setPasswords, holeData, finalizedRounds, onFinalizeRound, onUnfinalizeRound, onDiscardRoundScores, notify, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, onExternalSettingsHandled, teesSaved, onTeesSave, teesModified, onTeesModify, memberships, onSetDirector, claims, authUid, tournamentMeta, onSaveTournamentMeta }) {
+function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, roundDates, onSetRoundDate, scoringOpen, onSetScoringOpen, pairingStrategy, onSetPairingStrategy, leaderboard, holeData, finalizedRounds, onFinalizeRound, onUnfinalizeRound, onDiscardRoundScores, notify, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, onExternalSettingsHandled, teesSaved, onTeesSave, teesModified, onTeesModify, memberships, onSetDirector, claims, authUid, tournamentMeta, onSaveTournamentMeta }) {
   const [tab, setTab] = useState("rounds");
   // Themed confirmations (see lib/useConfirm). The host <ConfirmModal/> is
   // rendered once at the bottom of this view; `confirm(...)` returns a
@@ -3668,6 +3753,19 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
       Object.values(scores || {}).some(s => s > 0 && s !== 99)
     ),
   [holeData, finalizedRounds]);
+  // Which rounds already have a real score on them, ascending. Read only by
+  // the Rounds control on the Event tab, which warns before a director shortens
+  // the tournament past a round somebody has already played.
+  const scoredRounds = useMemo(() => {
+    const seen = new Set();
+    Object.entries(holeData || {}).forEach(([key, scores]) => {
+      if (!Object.values(scores || {}).some(s => s > 0 && s !== WD_SCORE)) return;
+      const rnd = parseInt(key.split("_").pop(), 10);
+      if (rnd > 0) seen.add(rnd);
+    });
+    return [...seen].sort((a, b) => a - b);
+  }, [holeData]);
+
   // The handicap-lock warning used to be a bespoke popup raised from an
   // inline index edit on the roster row. Editing moved into PlayerEditor,
   // which folds the same warning into its own change confirmation — one
@@ -3684,7 +3782,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
     setTab(EXTERNAL_TAB[externalSettingsTab] || "courses");
     if (onExternalSettingsHandled) onExternalSettingsHandled();
   }, [externalSettingsOpen]);
-  const [editingPlayer, setEditingPlayer] = useState(null); // { pid, first, last, nick, hi, pw, dir } | { isNew: true, ... }
+  const [editingPlayer, setEditingPlayer] = useState(null); // { pid, first, last, nick, hi, dir } | { isNew: true, ... }
   const [confirmCourse, setConfirmCourse] = useState(null);
   const [searching, setSearching] = useState(false);
   const [courseSearch, setCourseSearch] = useState("");
@@ -4156,7 +4254,8 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
 
               {tab === "event" && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                  <TournamentPanel meta={tournamentMeta} onSave={onSaveTournamentMeta} notify={notify} />
+                  <TournamentPanel meta={tournamentMeta} onSave={onSaveTournamentMeta} notify={notify}
+                    confirm={confirm} scoredRounds={scoredRounds} />
                   <AccessPanel memberships={memberships} onSetDirector={onSetDirector}
                     claims={claims} players={players} authUid={authUid} notify={notify} confirm={confirm} />
                 </div>
@@ -4165,7 +4264,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                 <div>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
                     <SectionLabel style={{ marginBottom: 0 }}>Roster ({activePlayers.length})</SectionLabel>
-                    <button onClick={() => setEditingPlayer({ isNew: true, first: "", last: "", nick: "", hi: "", pw: "", dir: false })}
+                    <button onClick={() => setEditingPlayer({ isNew: true, first: "", last: "", nick: "", hi: "", dir: false })}
                       style={{ padding: "7px 14px", borderRadius: 8, background: K.acc, border: "none", color: ON_ACC, fontSize: FS.small, fontWeight: 800, cursor: "pointer" }}>
                       + Add player
                     </button>
@@ -4181,7 +4280,6 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                       <PlayerRow
                         key={p.id}
                         player={p}
-                        password={passwords[p.id] || DEFAULT_PW}
                         isLast={i === activePlayers.length - 1}
                         isDirector={playerIsDirector(memberships, claims, p.id)}
                         onOpen={() => {
@@ -4194,7 +4292,6 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                             // placeholder, which is what "no nickname" means.
                             nick: p.name === toDisplayName(parts.first, parts.last) ? "" : p.name,
                             hi: String(p.handicap_index ?? ""),
-                            pw: passwords[p.id] || DEFAULT_PW,
                             dir: playerIsDirector(memberships, claims, p.id),
                           });
                         }}
@@ -4817,7 +4914,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                   // silently wiped the tournament with no prompt at all.
                   const ok = await confirm({
                     title: "Clear all tournament data?",
-                    message: "Clears all scores, course assignments, pairings, tee assignments, skins and scorecard signatures.\n\nPreserved: the player roster, handicap indexes and login passwords.\n\nThis cannot be undone.",
+                    message: "Clears all scores, course assignments, pairings, tee assignments, skins and scorecard signatures.\n\nPreserved: the player roster, handicap indexes, the event setup (name, location, rounds) and the event password.\n\nThis cannot be undone.",
                     confirmLabel: "Clear everything",
                     destructive: true,
                   });
@@ -5101,13 +5198,12 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
         onClose={() => setEditingPlayer(null)}
         tPlayers={tPlayers} players={activePlayers}
         memberships={memberships} claims={claims} authUid={authUid}
-        holeData={holeData} numRounds={numRounds} passwords={passwords}
+        holeData={holeData} numRounds={numRounds}
         notify={notify} confirm={confirm} tournamentStarted={tournamentStarted}
         onRemove={removePlayer}
         onSave={async (v) => {
           if (v.isNew) {
-            const pid = await addPlayerToTournament(v.name, v.hi, { first_name: v.first, last_name: v.last });
-            if (v.pw && pid) setPasswords(prev => ({ ...prev, [pid]: v.pw }));
+            await addPlayerToTournament(v.name, v.hi, { first_name: v.first, last_name: v.last });
             return;
           }
           await updateName(v.pid, v.name, { first_name: v.first, last_name: v.last });
@@ -5116,7 +5212,6 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
           // confirmation, so this calls the raw writer rather than raising a
           // second dialog saying the same thing.
           if (v.hiChanged) await updateHI(v.pid, v.hi);
-          if (v.pwChanged) setPasswords({ ...passwords, [v.pid]: v.pw });
           if (v.dir) {
             const res = await onSetDirector(v.dir.uid, v.dir.on);
             if (!res.ok) notify(res.error);
@@ -5178,7 +5273,7 @@ function GateScreen({ fbUser, onPassed, onCancel }) {
       <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
       <div style={{ width: "100%", maxWidth: 340, textAlign: "center" }}>
         <img src={WBC_LOGO} alt="WBC" style={{ height: 64, margin: "0 auto 16px", display: "block", filter: "drop-shadow(0 4px 16px rgba(34,211,167,0.3))" }} />
-        <h1 style={{ fontSize: 24, color: K.t1, margin: "0 0 6px", fontWeight: 800, letterSpacing: "-0.02em" }}>Tournament password</h1>
+        <h1 style={{ fontSize: 24, color: K.t1, margin: "0 0 6px", fontWeight: 800, letterSpacing: "-0.02em" }}>Event password</h1>
         <p style={{ color: K.t2, fontSize: 12, margin: "0 0 20px", lineHeight: 1.5 }}>
           Signed in as {fbUser?.email || "your account"}.<br />Ask a director for the password — you&rsquo;ll only need it once.
         </p>
@@ -5478,8 +5573,7 @@ export default function WBCApp() {
   }, [JSON.stringify(finalizedRounds)]);
   const [adminSettingsOpen, setAdminSettingsOpen] = useState(false);
   const [adminSettingsTab, setAdminSettingsTab] = useState("players");
-  const [passwords, setPasswords] = useState({});
-  // Editable tournament identity — { name, location }. Null until a director
+  // Editable event setup — { name, location, rounds }. Null until a director
   // saves one, at which point it overrides the TOURNAMENT constant everywhere
   // the event is named. Lives on the existing tournament_state doc rather than
   // in a collection of its own: it is one more piece of the same singleton,
@@ -5488,12 +5582,28 @@ export default function WBCApp() {
   const tournamentName = tournamentMeta?.name || TOURNAMENT.name;
   const tournamentLocation = tournamentMeta?.location || "";
 
+  // Point the module-level NUM_ROUNDS at the saved count, DURING render rather
+  // than from an effect. Everything below — and every child this render is
+  // about to produce — reads that binding while rendering, so an effect would
+  // paint one frame of a four-round leaderboard for a three-round event. The
+  // assignment is idempotent and derived purely from state, which is what
+  // makes it safe to do here.
+  const numRounds = clampRounds(tournamentMeta?.rounds);
+  if (NUM_ROUNDS !== numRounds) setRoundCount(numRounds);
+
   // The tab title follows the saved tournament name, so renaming the event in
   // the Event settings tab renames the browser tab too. Kept here rather than up
   // with the other one-shot document effects: the dependency array is evaluated
   // during render, so it has to sit below tournamentName's declaration or it
   // reads a const in its temporal dead zone and throws on first paint.
   useEffect(() => { document.title = tournamentName; }, [tournamentName]);
+
+  // Shortening the event can strand the app on a round that no longer exists —
+  // a director on Round 4 who switches to three would otherwise keep looking at
+  // a scoring screen nothing else counts. Same reason this is here and not
+  // beside the auto-advance effect further up: `numRounds` is declared above,
+  // and a dep array is evaluated during render.
+  useEffect(() => { setRound(r => Math.min(r, numRounds)); }, [numRounds]);
   const [storageLoaded, setStorageLoaded] = useState(false);
   const [syncing, setSyncing] = useState(false);
 
@@ -5634,7 +5744,6 @@ export default function WBCApp() {
         if (stateRows?.length) {
           const s = stateRows[0];
           if (s.finalized_rounds) setFinalizedRounds(s.finalized_rounds);
-          if (s.passwords) setPasswords(s.passwords);
           if (s.tees_saved) setTeesSaved(s.tees_saved);
           if (s.tees_modified) setTeesModified(s.tees_modified);
           if (s.round_dates) setRoundDates(s.round_dates);
@@ -5686,7 +5795,6 @@ export default function WBCApp() {
     unsubs.push(db.subscribe("tournament_state", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
       if (docs?.length) {
         if (docs[0].finalized_rounds) setFinalizedRounds(docs[0].finalized_rounds);
-        if (docs[0].passwords) setPasswords(docs[0].passwords);
         if (docs[0].tees_saved) setTeesSaved(docs[0].tees_saved);
         if (docs[0].tees_modified) setTeesModified(docs[0].tees_modified);
         if (docs[0].round_dates) setRoundDates(docs[0].round_dates);
@@ -5731,7 +5839,7 @@ export default function WBCApp() {
     });
   };
 
-  const saveTournamentState = async (finalized, pwds, savedTees, modTees, rDates, sOpen, pStrat) => {
+  const saveTournamentState = async (finalized, savedTees, modTees, rDates, sOpen, pStrat) => {
     const tsSaved = savedTees !== undefined ? savedTees : teesSaved;
     const tsMod = modTees !== undefined ? modTees : teesModified;
     const rd = rDates !== undefined ? rDates : roundDates;
@@ -5741,7 +5849,6 @@ export default function WBCApp() {
       id: `ts_${TOURNAMENT_ID}`,
       tournament_id: TOURNAMENT_ID,
       finalized_rounds: finalized,
-      passwords: pwds,
       tees_saved: tsSaved,
       tees_modified: tsMod,
       round_dates: rd,
@@ -5764,7 +5871,7 @@ export default function WBCApp() {
       await db.delete("wbc_scorecard_sigs", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
       await db.delete("wbc_rounds_state", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
     } catch(e) { console.error("Start fresh clear failed:", e); }
-    // Keep tPlayers (roster + HIs) and passwords intact — clear everything else
+    // Keep tPlayers (roster + HIs) intact — clear everything else
     setTRounds([]);
     setCourseList([]);
     setHoleData({});
@@ -5780,7 +5887,13 @@ export default function WBCApp() {
     setScoringOpen({});
     setPairingStrategy({});
     setRound(1);
-    await saveTournamentState({}, passwords, {}, {}, {}, {}, {});
+    await saveTournamentState({}, {}, {}, {}, {}, {});
+    // The event setup is not scorecard data. Deleting tournament_state above
+    // takes `meta` down with it, so the name, location and round count have to
+    // be written back onto the document saveTournamentState just recreated —
+    // otherwise clearing the scores quietly renames the event and puts a
+    // three-round year back to four.
+    if (tournamentMeta) await saveTournamentMeta(tournamentMeta);
     notify("Scorecards cleared — player roster preserved");
   };
 
@@ -6034,13 +6147,13 @@ export default function WBCApp() {
   const getLeaderboard = useMemo(() =>
     rankIndividualBoard(computeIndividualBoard({
       players: allPlayers,
-      numRounds: NUM_ROUNDS,
+      numRounds,
       holeData,
       tRounds,
       courses: courseList,
       getPlayerTee,
     })),
-  [allPlayers, tRounds, courseList, holeData, teeData]);
+  [allPlayers, tRounds, courseList, holeData, teeData, numRounds]);
 
   const onSaveHole = async (pid, rnd, holeIdx, score) => {
     // Optimistic update
@@ -6183,8 +6296,8 @@ export default function WBCApp() {
   };
 
   // Returns the derived player id so the caller can key anything else it needs
-  // to write for the new player (their password) off the SAME value rather
-  // than re-deriving it and risking the two drifting apart.
+  // to write for the new player off the SAME value rather than re-deriving it
+  // and risking the two drifting apart.
   const addPlayerToTournament = async (name, hi, parts = null) => {
     const id = name.toLowerCase().replace(/\s+/g, "_");
     const rec = { id, name, ...(parts || {}) };
@@ -6194,8 +6307,6 @@ export default function WBCApp() {
     const newTp = { id: docIds.tournamentPlayer(_e(), id), tournament_id: TOURNAMENT_ID, player_id: id, handicap_index: hi, status: "active" };
     setTPlayers(prev => [...prev, newTp]);
     await db.upsert("tournament_players", newTp);
-    const newPw = { ...passwords, [id]: DEFAULT_PW };
-    setPasswords(newPw);
     // Seed default tee assignments
     const teeUpdates = [];
     tRounds.forEach(tr => {
@@ -6213,7 +6324,7 @@ export default function WBCApp() {
       });
       for (const row of teeUpdates) await db.upsert("tee_assignments", row);
     }
-    await saveTournamentState(finalizedRounds, newPw);
+    await saveTournamentState(finalizedRounds);
     return id;
   };
 
@@ -6280,7 +6391,7 @@ export default function WBCApp() {
   // Compute gross skin wins for scorecard highlighting: { "round_holeIdx": playerId }
   const skinWins = useMemo(() => {
     const wins = {};
-    for (let r = 1; r <= NUM_ROUNDS; r++) {
+    for (let r = 1; r <= numRounds; r++) {
       const tr = tRounds.find(t => t.round_number === r);
       if (!tr) continue;
       const rCourse = courseList.find(c => c.id === tr.course_id);
@@ -6298,7 +6409,7 @@ export default function WBCApp() {
       }
     }
     return wins;
-  }, [activePlayers, holeData, tRounds, courseList]);
+  }, [activePlayers, holeData, tRounds, courseList, numRounds]);
 
   // Tag / re-tag the tournament-wide CTP for a par 3. One doc per round+hole, so a
   // closer ball from a later group overwrites the standing tag.
@@ -6365,27 +6476,19 @@ export default function WBCApp() {
   };
 
   // ── LOGIN ──
-  const [loginAnim, setLoginAnim] = useState(null);
-  const [loginPrompt, setLoginPrompt] = useState(null); // { id, name, isDirector }
-  const [loginPin, setLoginPin] = useState("");
-  const [loginError, setLoginError] = useState(false);
-
-  const tryLogin = () => {
-    const playerPw = passwords[loginPrompt.id] || DEFAULT_PW;
-    if (loginPin.toLowerCase() === playerPw.toLowerCase()) {
-      setLoginPrompt(null);
-      setLoginPin("");
-      setLoginError(false);
-      setLoginAnim({ id: loginPrompt.id, name: loginPrompt.name, isDirector: loginPrompt.isDirector });
-    } else {
-      setLoginError(true);
-      setTimeout(() => setLoginError(false), 1500);
-    }
-  };
+  // The roster-tile + per-player-PIN screen that used to live here is gone.
+  // It checked a password stored per player, in the client, out of a document
+  // any phone could read — which is to say it was a doorman, not a lock, and
+  // it also meant Admin had to hand out and keep track of twelve of them.
+  //
+  // Getting in is now: sign in with Google or Apple, type the ONE event
+  // password (GateScreen, checked by firestore.rules against a secret no
+  // client can read), then claim your name off the roster. The event password
+  // is set in Admin → Event.
 
   // Check if any round needs admin finalization
   const adminActionNeeded = useMemo(() => {
-    for (let r = 1; r <= NUM_ROUNDS; r++) {
+    for (let r = 1; r <= numRounds; r++) {
       if (finalizedRounds[r]) continue;
       const tr = tRounds.find(t => t.round_number === r);
       if (!tr) continue;
@@ -6399,7 +6502,7 @@ export default function WBCApp() {
       if (allDone) return true;
     }
     return false;
-  }, [activePlayers, holeData, finalizedRounds, tRounds]);
+  }, [activePlayers, holeData, finalizedRounds, tRounds, tPlayers, numRounds]);
 
   // ── The ways in ──
   // Sign in → tournament password → claim a name, each skipped once it has
@@ -6466,79 +6569,11 @@ export default function WBCApp() {
       <style>{`:root { --sab: env(safe-area-inset-bottom, 0px); }`}</style>
       <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
         <style>{`
-          @keyframes loginPulse { 0% { transform: scale(0.8); opacity: 0; } 50% { transform: scale(1.05); opacity: 1; } 100% { transform: scale(1); opacity: 1; } }
-          @keyframes loginCheck { 0% { stroke-dashoffset: 24; } 100% { stroke-dashoffset: 0; } }
-          @keyframes loginFade { 0% { opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; } }
           @keyframes toastDown { 0% { transform: translateX(-50%) translateY(-20px); opacity: 0; } 100% { transform: translateX(-50%) translateY(0); opacity: 1; } }
-          @keyframes shake { 0%,100% { transform: translateX(0); } 20%,60% { transform: translateX(-6px); } 40%,80% { transform: translateX(6px); } }
           @keyframes finalizeGlow { 0%,100% { box-shadow: 0 0 4px rgba(212,168,67,0.2); } 50% { box-shadow: 0 0 14px rgba(212,168,67,0.5); } }
           @keyframes pulse { 0%,100% { opacity: 0.5; } 50% { opacity: 0.2; } }
           @keyframes syncPing { 0% { transform: scale(1); opacity: 1; } 100% { transform: scale(2); opacity: 0; } }
         `}</style>
-
-        {loginAnim && (
-          <div style={{
-            position: "fixed", top: 0, bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 480, zIndex: 999,
-            background: `radial-gradient(ellipse at 50% 50%, #0d1f3c 0%, ${K.bg} 70%)`,
-            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-            animation: "loginFade 1.4s ease forwards",
-          }} onAnimationEnd={() => { setUser({ id: loginAnim.id, name: loginAnim.name, isDirector: loginAnim.isDirector }); setLoginAnim(null); }}>
-            <div style={{ animation: "loginPulse 0.5s ease forwards", display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
-              <div style={{
-                width: 72, height: 72, borderRadius: "50%", background: K.acc + "20",
-                border: `3px solid ${K.acc}`, display: "flex", alignItems: "center", justifyContent: "center",
-              }}>
-                <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke={K.acc} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="20 6 9 17 4 12" style={{ strokeDasharray: 24, animation: "loginCheck 0.4s 0.3s ease forwards", strokeDashoffset: 24 }} />
-                </svg>
-              </div>
-              <div style={{ textAlign: "center" }}>
-                <div style={{ fontSize: 22, fontWeight: 800, color: K.t1 }}>{loginAnim.name}</div>
-                <div style={{ fontSize: 12, color: K.acc, fontWeight: 600, marginTop: 4 }}>Welcome back</div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* PIN entry — shown after a player tile is tapped */}
-        {loginPrompt && !loginAnim && (
-          <div style={{
-            position: "fixed", top: 0, bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 480, zIndex: 998,
-            background: `radial-gradient(ellipse at 50% 50%, #0d1f3c 0%, ${K.bg} 70%)`,
-            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24,
-          }}>
-            <div style={{ width: "100%", maxWidth: 320, textAlign: "center", animation: "loginPulse 0.35s ease forwards" }}>
-              <div style={{
-                width: 64, height: 64, margin: "0 auto 14px", borderRadius: "50%", background: K.acc + "18",
-                border: `2px solid ${K.acc}60`, display: "flex", alignItems: "center", justifyContent: "center",
-                fontSize: 22, fontWeight: 800, color: K.acc,
-              }}>{loginPrompt.name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()}</div>
-              <div style={{ fontSize: 20, fontWeight: 800, color: K.t1 }}>{loginPrompt.name}</div>
-              <div style={{ fontSize: 12, color: K.t3, margin: "4px 0 20px" }}>Enter your PIN to continue</div>
-              <input
-                type="password" inputMode="text" autoFocus value={loginPin}
-                onChange={e => { setLoginPin(e.target.value); if (loginError) setLoginError(false); }}
-                onKeyDown={e => { if (e.key === "Enter") tryLogin(); }}
-                placeholder="••••••"
-                style={{
-                  width: "100%", padding: "14px 16px", borderRadius: 12, textAlign: "center",
-                  background: K.inp, border: `2px solid ${loginError ? K.danger : K.bdr}`,
-                  color: K.t1, fontSize: 18, fontWeight: 700, letterSpacing: "0.15em", outline: "none",
-                  animation: loginError ? "shake 0.4s" : "none", boxSizing: "border-box",
-                }} />
-              {loginError && <div style={{ color: K.danger, fontSize: 12, fontWeight: 600, marginTop: 8 }}>Incorrect PIN — try again</div>}
-              <button onClick={tryLogin} disabled={!loginPin} style={{
-                width: "100%", marginTop: 16, padding: "13px 0", borderRadius: 12, border: "none",
-                background: loginPin ? K.acc : K.card, color: loginPin ? "#fff" : K.t3,
-                fontSize: 15, fontWeight: 800, cursor: loginPin ? "pointer" : "default",
-              }}>Login</button>
-              <button onClick={() => { setLoginPrompt(null); setLoginPin(""); setLoginError(false); }} style={{
-                width: "100%", marginTop: 10, padding: "8px 0", background: "transparent", border: "none",
-                color: K.t3, fontSize: 12, fontWeight: 600, cursor: "pointer",
-              }}>← Back</button>
-            </div>
-          </div>
-        )}
 
         <div style={{ width: "100%", maxWidth: 420, textAlign: "center" }}>
           <div style={{ width: 80, height: 100, margin: "0 auto 20px", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -6547,7 +6582,6 @@ export default function WBCApp() {
           <h1 style={{ fontFamily: "'Montserrat', sans-serif", fontSize: 32, color: K.t1, margin: "0 0 4px", fontWeight: 800, letterSpacing: "-0.03em" }}>{tournamentName}</h1>
           <p style={{ color: K.t2, fontSize: 14, margin: "0 0 32px" }}>Wannabes. For Life.</p>
 
-          {AUTH_PROVIDERS_ENABLED ? (
             <div>
               <p style={{ color: K.t3, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600, margin: "0 0 12px" }}>Sign in</p>
               <button onClick={handleGoogleSignIn} style={{ width: "100%", padding: "13px 0", borderRadius: 12, background: "#fff", border: "none", color: "#1f1f1f", fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
@@ -6563,41 +6597,6 @@ export default function WBCApp() {
               {authMsg && <div style={{ color: K.danger, fontSize: 12, fontWeight: 600, marginTop: 10 }}>{authMsg}</div>}
               <p style={{ color: K.t3, fontSize: 11, margin: "14px 0 0", lineHeight: 1.5 }}>First time? Sign in, then pick your name from the roster.</p>
             </div>
-          ) : (
-            <div>
-              <p style={{ color: K.t3, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600, margin: "0 0 8px" }}>Login</p>
-              {!storageLoaded ? (
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
-                  {Array.from({length: 12}).map((_, i) => (
-                    <div key={i} style={{ background: K.card, border: `1px solid ${K.bdr}`, borderRadius: 10, padding: "12px 6px", height: 44,
-                      animation: "pulse 1.5s ease-in-out infinite", opacity: 0.5 }} />
-                  ))}
-                </div>
-              ) : activePlayers.length === 0 ? (
-              <div style={{ textAlign: "center", padding: "24px 0" }}>
-                <p style={{ color: K.t3, fontSize: 13, marginBottom: 16 }}>No players added yet.</p>
-                <button onClick={() => setUser({ id: "aaron_j", name: "Aaron J", isDirector: true })}
-                  style={{ background: K.acc, border: "none", borderRadius: 10, padding: "13px 28px", cursor: "pointer", color: "#fff", fontSize: 14, fontWeight: 700 }}>
-                  Login as Director
-                </button>
-              </div>
-              ) : (
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
-                {activePlayers.map(p => {
-                  const isDirector = p.id === "aaron_j" || p.id === "scott_r";
-                  return (
-                    <button key={p.id} onClick={() => { setLoginPin(""); setLoginError(false); setLoginPrompt({ id: p.id, name: p.name, isDirector }); }}
-                      style={{ background: K.card, border: `1px solid ${K.bdr}`, borderRadius: 10, padding: "12px 6px", cursor: "pointer", color: K.t1, fontSize: 13, fontWeight: 600, textAlign: "center", transition: "all 0.15s" }}
-                      onMouseEnter={e => { e.currentTarget.style.borderColor = K.acc; e.currentTarget.style.background = K.hover; }}
-                      onMouseLeave={e => { e.currentTarget.style.borderColor = K.bdr; e.currentTarget.style.background = K.card; }}>
-                      {p.name}
-                    </button>
-                  );
-                })}
-              </div>
-              )}
-            </div>
-          )}
           {(() => { const roundIsActive = Object.keys(holeData).some(key => { const parts = key.split("_"); const rnd = parseInt(parts[parts.length - 1]); return !finalizedRounds[rnd] && Object.keys(holeData[key] || {}).length > 0; }); const btnColor = roundIsActive ? K.acc : K.t2; const btnBorder = roundIsActive ? `1px solid ${K.acc}40` : `1px solid ${K.bdr}`; return (<div style={{ marginTop: 24, borderTop: `1px solid ${K.bdr}30`, paddingTop: 20 }}><button onClick={() => setUser({ id: "guest", name: "Guest", isDirector: false, isGuest: true })} style={{ width: "100%", padding: "13px 0", borderRadius: 12, background: "transparent", border: btnBorder, color: btnColor, fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, letterSpacing: "0.02em" }} onMouseEnter={e => { e.currentTarget.style.background = btnColor + "12"; }} onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}>{roundIsActive && <span style={{ width: 7, height: 7, borderRadius: "50%", background: K.acc, display: "inline-block", boxShadow: `0 0 6px ${K.acc}` }} />}<img src="/wbc-trophy.png" alt="" style={{ height: 18, width: "auto", objectFit: "contain", filter: roundIsActive ? "none" : "brightness(0) invert(0.6)" }} />Live Leaderboard</button></div>); })()}
         </div>
       </div>
@@ -6819,7 +6818,7 @@ export default function WBCApp() {
       <div className="wbc-app-body" style={{ padding: (view === "leaderboard" || view === "admin") ? "14px 20px 0 20px" : "14px 20px", flex: 1, overflowY: "auto", overflowX: "hidden", display: (view === "leaderboard" || view === "admin") ? "flex" : "block", flexDirection: "column", minHeight: 0, paddingBottom: view === "leaderboard" ? "28px" : 0 }}>
         {view === "leaderboard" && <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} />}
         <div style={{ display: view === "scoring" ? "block" : "none", paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
-          <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeTimesData={teeTimesData} roundDates={roundDates} scoringOpen={scoringOpen} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={async (key, signerPid, signerName, present, rnd) => { const nonSigners = (present || []).filter(pid => pid !== signerPid); const autoFinal = nonSigners.length === 0; const optimistic = { signedBy: signerPid, signedByName: signerName, attestedBy: [], present: present || [] }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: optimistic })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), tournament_id: TOURNAMENT_ID, groupKey: key, round: rnd, signedBy: signerPid, signedByName: signerName, present: present || [], attestedBy: [], signedAt: new Date().toISOString() }); if (autoFinal) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); } }} onAttestScorecard={async (key, attesterPid, nonSigners) => { const cur = scorecardSigs[key]; if (!cur) return; const attestedBy = [...new Set([...(cur.attestedBy || []), attesterPid])]; const optimistic = { ...cur, attestedBy }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: { ...prev[key], attestedBy } })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), attestedBy }); const allDone = (nonSigners || []).every(pid => attestedBy.includes(pid)); if (allDone) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); } }} onUnsignScorecard={async key => { pendingSigsRef.current.delete(key); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); if (finalizedRounds[key]) { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); } }} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); pendingSigsRef.current.delete(key); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); await saveTournamentState(nf, passwords); }} onGoToAdminCourses={() => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); }} markPlayerWD={markPlayerWD} ctpData={ctpData} onSetCtp={onSetCtp} />
+          <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeTimesData={teeTimesData} roundDates={roundDates} scoringOpen={scoringOpen} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={async (key, signerPid, signerName, present, rnd) => { const nonSigners = (present || []).filter(pid => pid !== signerPid); const autoFinal = nonSigners.length === 0; const optimistic = { signedBy: signerPid, signedByName: signerName, attestedBy: [], present: present || [] }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: optimistic })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), tournament_id: TOURNAMENT_ID, groupKey: key, round: rnd, signedBy: signerPid, signedByName: signerName, present: present || [], attestedBy: [], signedAt: new Date().toISOString() }); if (autoFinal) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onAttestScorecard={async (key, attesterPid, nonSigners) => { const cur = scorecardSigs[key]; if (!cur) return; const attestedBy = [...new Set([...(cur.attestedBy || []), attesterPid])]; const optimistic = { ...cur, attestedBy }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: { ...prev[key], attestedBy } })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), attestedBy }); const allDone = (nonSigners || []).every(pid => attestedBy.includes(pid)); if (allDone) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onUnsignScorecard={async key => { pendingSigsRef.current.delete(key); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); if (finalizedRounds[key]) { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); pendingSigsRef.current.delete(key); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); await saveTournamentState(nf); }} onGoToAdminCourses={() => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); }} markPlayerWD={markPlayerWD} ctpData={ctpData} onSetCtp={onSetCtp} />
         </div>
         {view === "skins" && <SkinsCtpView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} />}
         {view === "groups" && <GroupsView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} pairingsData={pairingsData} teeTimesData={teeTimesData} getPlayerTee={getPlayerTee} user={user} />}
@@ -6839,7 +6838,7 @@ export default function WBCApp() {
                 });
                 return next;
               });
-            }} roundDates={roundDates} onSetRoundDate={async (rnd, dateStr) => { const next = { ...roundDates }; if (dateStr) next[rnd] = dateStr; else delete next[rnd]; setRoundDates(next); await saveTournamentState(finalizedRounds, passwords, teesSaved, teesModified, next, scoringOpen); }} scoringOpen={scoringOpen} onSetScoringOpen={async (rnd, open) => { const next = { ...scoringOpen }; if (open) next[rnd] = true; else delete next[rnd]; setScoringOpen(next); await saveTournamentState(finalizedRounds, passwords, teesSaved, teesModified, roundDates, next); }} pairingStrategy={pairingStrategy} onSetPairingStrategy={async (rnd, cfg) => { const next = { ...pairingStrategy }; if (cfg) next[rnd] = cfg; else delete next[rnd]; setPairingStrategy(next); await saveTournamentState(finalizedRounds, passwords, teesSaved, teesModified, roundDates, scoringOpen, next); }} leaderboard={getLeaderboard} passwords={passwords} setPasswords={async pw => { setPasswords(pw); await saveTournamentState(finalizedRounds, pw); }} holeData={holeData} finalizedRounds={finalizedRounds} onDiscardRoundScores={onDiscardRoundScores} onFinalizeRound={async rnd => { const nf = { ...finalizedRounds, [rnd]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${rnd}`, tournament_id: TOURNAMENT_ID, round: rnd, finalized: true }); if (rnd < 4) setRound(rnd + 1); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); if (/^\d+$/.test(String(key))) { await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${key}`, tournament_id: TOURNAMENT_ID, round: Number(key), finalized: false }); } else { setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); } }} notify={notify} getPlayerTee={getPlayerTee} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); }} teesSaved={teesSaved} onTeesSave={async r => { const next = { ...teesSaved, [r]: true }; const nextMod = { ...teesModified, [r]: false }; setTeesSaved(next); setTeesModified(nextMod); await saveTournamentState(finalizedRounds, passwords, next, nextMod); }} teesModified={teesModified} onTeesModify={async r => { const nextMod = { ...teesModified, [r]: true }; setTeesModified(nextMod); await saveTournamentState(finalizedRounds, passwords, teesSaved, nextMod); }} memberships={memberships} onSetDirector={onSetDirector} claims={claims} authUid={fbUser?.uid || null} tournamentMeta={tournamentMeta} onSaveTournamentMeta={saveTournamentMeta} /> : (
+            }} roundDates={roundDates} onSetRoundDate={async (rnd, dateStr) => { const next = { ...roundDates }; if (dateStr) next[rnd] = dateStr; else delete next[rnd]; setRoundDates(next); await saveTournamentState(finalizedRounds, teesSaved, teesModified, next, scoringOpen); }} scoringOpen={scoringOpen} onSetScoringOpen={async (rnd, open) => { const next = { ...scoringOpen }; if (open) next[rnd] = true; else delete next[rnd]; setScoringOpen(next); await saveTournamentState(finalizedRounds, teesSaved, teesModified, roundDates, next); }} pairingStrategy={pairingStrategy} onSetPairingStrategy={async (rnd, cfg) => { const next = { ...pairingStrategy }; if (cfg) next[rnd] = cfg; else delete next[rnd]; setPairingStrategy(next); await saveTournamentState(finalizedRounds, teesSaved, teesModified, roundDates, scoringOpen, next); }} leaderboard={getLeaderboard} holeData={holeData} finalizedRounds={finalizedRounds} onDiscardRoundScores={onDiscardRoundScores} onFinalizeRound={async rnd => { const nf = { ...finalizedRounds, [rnd]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${rnd}`, tournament_id: TOURNAMENT_ID, round: rnd, finalized: true }); if (rnd < NUM_ROUNDS) setRound(rnd + 1); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf); if (/^\d+$/.test(String(key))) { await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${key}`, tournament_id: TOURNAMENT_ID, round: Number(key), finalized: false }); } else { setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); } }} notify={notify} getPlayerTee={getPlayerTee} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); }} teesSaved={teesSaved} onTeesSave={async r => { const next = { ...teesSaved, [r]: true }; const nextMod = { ...teesModified, [r]: false }; setTeesSaved(next); setTeesModified(nextMod); await saveTournamentState(finalizedRounds, next, nextMod); }} teesModified={teesModified} onTeesModify={async r => { const nextMod = { ...teesModified, [r]: true }; setTeesModified(nextMod); await saveTournamentState(finalizedRounds, teesSaved, nextMod); }} memberships={memberships} onSetDirector={onSetDirector} claims={claims} authUid={fbUser?.uid || null} tournamentMeta={tournamentMeta} onSaveTournamentMeta={saveTournamentMeta} /> : (
           <div style={{ textAlign: "center", padding: "40px 20px" }}>
             <div style={{ fontSize: 40, marginBottom: 12 }}>🔒</div>
             <div style={{ fontSize: 16, fontWeight: 700, color: K.t1, marginBottom: 6 }}>Directors Only</div>

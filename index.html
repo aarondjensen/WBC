@@ -10,6 +10,13 @@
          no-cover after first paint. Letting iOS own the safe areas is what keeps
          the header from being clipped or over-padded. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- The app font, loaded from the document rather than only from whichever
+         React screen happens to render its own <link>. Portaled modals attach
+         to <body>, outside every one of those screens, so the stylesheet has to
+         be here for them to have a font to inherit. -->
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
     <meta name="theme-color" content="#080f1e" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <!-- Opaque dark status bar (white text), content sits BELOW it. With no
@@ -20,6 +27,8 @@
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
       html, body, #root { height: 100%; overflow: hidden; background: #080f1e; }
+      body { font-family: 'Montserrat', sans-serif; }
+      input, button, textarea, select { font-family: inherit; }
     </style>
     <script>
       function setAppHeight() {
