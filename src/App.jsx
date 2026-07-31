@@ -6,13 +6,16 @@ import { K, ON_ACC, FS, ALPHA, FONT, SHADOW } from "./theme";
 import { SegmentedToggle, StickyTop, SectionLabel, Card, Toast } from "./components/ui";
 import { calcCH, computeIndividualBoard, rankIndividualBoard, rankIndividualBoardIds, WD_SCORE } from "./lib/individualBoard";
 import { useConfirm } from "./lib/useConfirm";
+import { useDirtyForm } from "./lib/useDirtyForm";
 import { usePullToRefresh, hasNewBundle } from "./lib/usePullToRefresh";
 import { NotificationSettings } from "./components/NotificationSettings";
 import { registerForPush, getCachedSubscriptionStatus } from "./lib/notifications";
+import { pairingScoreImpact, orphanedScores, describeScored, totalHoles } from "./lib/scoreGuard";
 import { groupsForRound, assignToGroup, removeFromGroup as removeFromGroupPure, clearGroup, swapIntoGroup } from "./lib/pairings";
 import { Popup, ConfirmModal } from "./components/Popup";
 import { EditionSwitcher } from "./components/EditionSwitcher";
 import { docIds } from "./lib/editionId";
+import { openingHole } from "./lib/holeAdvance";
 import { AppHeader } from "./components/AppHeader";
 import { TROPHY_SVG_URL } from "./constants";
 import { collection, doc, setDoc, getDocs, query, where, writeBatch, onSnapshot, deleteDoc } from "firebase/firestore";
@@ -1024,30 +1027,61 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
     }
   }, [round, JSON.stringify(myPresetGroup)]);
 
-  // When group is set, resume at correct hole
+  // ── Resume at the right hole when the group is set ──
+  //
+  // Which hole is decided by lib/holeAdvance's openingHole (pure, tested).
+  // What is decided HERE is when to trust the answer, and that is the fix for
+  // a real cold-load bug:
+  //
+  //   Pairings and hole scores arrive over separate Firestore subscriptions
+  //   with no ordering guarantee. This effect used to be keyed on [group]
+  //   alone, so when the pairings landed first it ran against an empty score
+  //   map, decided hole 1, and never ran again — a player rejoining a round
+  //   mid-way opened on hole 1 and had to walk forward by hand.
+  //
+  // `positionedForRef` records the group we have positioned for using REAL
+  // data. An unresolved answer (nothing posted yet) does not claim the group,
+  // so the effect stays armed and re-runs when the scores arrive. That also
+  // makes it idempotent: once positioned, later score changes don't yank the
+  // screen away from the hole the user is on.
+  const positionedForRef = useRef(null);
+  const positionKey = group ? `${round}:${group.slice().sort().join(",")}` : null;
+  // Cheap signal that the group's scores changed, so the effect can re-run
+  // while unresolved without depending on the whole holeData map.
+  const groupScoreSig = group
+    ? group.map(id => Object.keys(holeData[`${id}_${round}`] || {}).length).join(",")
+    : "";
+
   useEffect(() => {
     if (!group || !course) return;
-    const gPlayers = group.map(id => players.find(p => p.id === id)).filter(Boolean);
-    // Find first incomplete hole
-    for (let i = 0; i < 18; i++) {
-      const allDone = gPlayers.every(p => (holeData[`${p.id}_${round}`] || {})[i] > 0);
-      if (!allDone) {
-        setCurrentHole(i);
-        setNavSourceSynced("auto"); // incomplete hole — allow auto-advance after scoring
-        // Clear edit mode. Without this, switching FROM a completed group (which sets
-        // editingCompleted true below) INTO a fresh group left the flag stuck true —
-        // and edit mode suppresses both the CTP prompt and auto-advance. Second path
-        // to the "later groups get no CTP popup" bug.
-        setEditingCompleted(false);
-        return;
-      }
+    if (positionedForRef.current === positionKey) return;
+
+    const pids = group.map(id => players.find(p => p.id === id)?.id).filter(Boolean);
+    const readScore = (pid, h) => (holeData[`${pid}_${round}`] || {})[h] || 0;
+    const { hole, allComplete, resolved } = openingHole(pids, readScore);
+
+    if (!resolved) {
+      // Nothing posted. That is either a genuinely fresh card or a card whose
+      // scores have not loaded, and they are indistinguishable from here — so
+      // show hole 1 but leave the group unclaimed, and correct it if scores
+      // turn up.
+      setCurrentHole(0);
+      setNavSourceSynced("auto");
+      setEditingCompleted(false);
+      return;
     }
-    // All 18 complete — land on hole 18, manual so editing mode shows
-    const hasAnyScores = gPlayers.some(p => Object.values(holeData[`${p.id}_${round}`] || {}).some(s => s > 0));
-    setCurrentHole(17);
-    setNavSourceSynced("manual");
-    if (hasAnyScores) setEditingCompleted(true);
-  }, [group]);
+
+    positionedForRef.current = positionKey;
+    setCurrentHole(hole);
+    // Auto on a live edge so scoring advances; manual on a finished card so
+    // edit mode shows instead.
+    setNavSourceSynced(allComplete ? "manual" : "auto");
+    // Clear edit mode when landing on a live edge. Without this, switching
+    // FROM a completed group INTO a fresh one left the flag stuck true — and
+    // edit mode suppresses both the CTP prompt and auto-advance. Second path
+    // to the "later groups get no CTP popup" bug.
+    setEditingCompleted(allComplete);
+  }, [positionKey, groupScoreSig, course]);
 
   // Note: round changes from other tabs should NOT reset scoring state
   // since the scoring component stays mounted. The group persists.
@@ -2557,7 +2591,13 @@ function GroupsView({ players, round, tRounds, courses, pairingsData, teeTimesDa
 
 // ── ADMIN ──
 // ── PAIRINGS EDITOR ──
-function PairingsEditor({ activePlayers, pairingsData, setPairings, tRounds, courses, teeTimesData, setTeeTimesData, roundDates, onSetRoundDate, scoringOpen, onSetScoringOpen, pairingStrategy, onSetPairingStrategy, leaderboard, finalizedRounds, getPlayerTee, editRound }) {
+function PairingsEditor({ activePlayers, pairingsData, setPairings, tRounds, courses, teeTimesData, setTeeTimesData, roundDates, onSetRoundDate, scoringOpen, onSetScoringOpen, pairingStrategy, onSetPairingStrategy, leaderboard, finalizedRounds, getPlayerTee, editRound, holeData }) {
+  // Themed confirmations. Also closes a latent hazard: the generate guard
+  // below called the GLOBAL window.confirm, so the day anyone added
+  // useConfirm to this component it would have started returning a Promise
+  // — always truthy — and silently stopped asking. That is exactly how the
+  // admin Start Fresh button lost its confirmation.
+  const { confirm, confirmModal } = useConfirm();
   const numGroups = Math.ceil(activePlayers.length / 4);
 
   // Seeded once per mount from the saved pairings. The parent keys this editor
@@ -2596,11 +2636,30 @@ function PairingsEditor({ activePlayers, pairingsData, setPairings, tRounds, cou
   // Generate pairings for the current round using the selected method. The result is
   // written into local `groups`, which the existing auto-save effect persists to
   // Firestore — so the director can still hand-tweak afterward exactly as before.
-  const generatePairings = () => {
+  const generatePairings = async () => {
     const pids = activePlayers.map(p => p.id);
     if (pids.length === 0) return;
     const hasExisting = groups.some(g => g.length > 0);
-    if (hasExisting && !confirm(`Replace the current Round ${editRound} pairings with auto-generated ones?\n\nYou can still adjust them by hand afterward.`)) return;
+    if (hasExisting) {
+      // What is BEHIND the change, said before the tap. Scores are keyed by
+      // player+round+hole, not by group, so re-drawing does not move or delete
+      // them — it re-attaches them to whoever ends up sharing a card. A
+      // director re-pairing round 2 at lunch is entitled to know that four
+      // players are already eight holes deep. See lib/scoreGuard.
+      const impact = pairingScoreImpact({ groups, holeData, round: editRound });
+      const nameOf = (pid) => activePlayers.find(p => p.id === pid)?.name || pid;
+      const ok = await confirm({
+        title: `Replace the Round ${editRound} pairings?`,
+        message: impact.hasScores
+          ? `${impact.holes} hole${impact.holes === 1 ? "" : "s"} are already posted for this round — ${describeScored(impact.scored, nameOf)}.\n\n`
+            + "Those scores are NOT deleted and they keep counting on the leaderboard. They stay with the player, so after a re-draw they appear under whichever group that player lands in.\n\n"
+            + "You can still adjust the new groups by hand afterward."
+          : "You can still adjust them by hand afterward.",
+        confirmLabel: "Replace",
+        destructive: impact.hasScores,
+      });
+      if (!ok) return;
+    }
 
     if (cfg.mode === "avoid_repeats") {
       const partners = buildPriorPartners(pairingsData, editRound);
@@ -2868,6 +2927,27 @@ function PairingsEditor({ activePlayers, pairingsData, setPairings, tRounds, cou
           </button>
         )}
 
+        {/* Scores with no group. The wreckage of a re-draw that already
+            happened: still live in the database and still counting on the
+            leaderboard, but invisible on the scoring screen because nobody
+            holds a card for them. Surfaced here, where the draw is edited. */}
+        {(() => {
+          const orphans = orphanedScores({ holeData, groups, round: editRound, players: activePlayers });
+          if (!orphans.length) return null;
+          const nameOf = (pid) => activePlayers.find(p => p.id === pid)?.name || pid;
+          const n = totalHoles(orphans);
+          return (
+            <div style={{
+              marginTop: 8, padding: "8px 10px", borderRadius: 8,
+              background: K.warn + ALPHA.wash, border: `1px solid ${K.warn}${ALPHA.line}`,
+              color: K.warn, fontSize: FS.label, fontWeight: 600, lineHeight: 1.5,
+            }}>
+              {n} hole{n === 1 ? "" : "s"} posted by players not in any Round {editRound} group — {describeScored(orphans, nameOf)}.
+              These still count on the leaderboard. Put them back in a group, or discard the card from the Rounds tab.
+            </div>
+          );
+        })()}
+
         {genMsg && (
           <div style={{
             marginTop: 8, fontSize: 10, lineHeight: 1.5, padding: "6px 8px", borderRadius: 6,
@@ -2988,6 +3068,7 @@ function PairingsEditor({ activePlayers, pairingsData, setPairings, tRounds, cou
         );
       })}
       </div>
+      <ConfirmModal modal={confirmModal} />
     </div>
   );
 }
@@ -3394,32 +3475,42 @@ function PlayerEditor({ editing, set, onClose, tPlayers, players, memberships, c
 // header can't end up with a hole in it.
 function TournamentPanel({ meta, onSave, notify, confirm, scoredRounds = [] }) {
   const [showEditions, setShowEditions] = useState(false);
-  const [name, setName] = useState(meta?.name || "");
-  const [location, setLocation] = useState(meta?.location || "");
-  const [rounds, setRounds] = useState(clampRounds(meta?.rounds));
   const [busy, setBusy] = useState(false);
 
-  // Re-seed the fields when the SAVED values change — React's documented
-  // adjust-state-during-render pattern rather than an effect, so the inputs
-  // never paint one frame of stale text after a save lands.
-  //
-  // Keyed on the values, not on the `meta` object: Firestore hands back a new
-  // object on every snapshot, so comparing identity would wipe whatever the
-  // director was mid-way through typing each time any unrelated field of the
-  // tournament_state document changed.
-  const savedKey = `${meta?.name || ""} ${meta?.location || ""} ${meta?.rounds || ""}`;
-  const [seenKey, setSeenKey] = useState(savedKey);
-  if (savedKey !== seenKey) {
-    setSeenKey(savedKey);
-    setName(meta?.name || "");
-    setLocation(meta?.location || "");
-    setRounds(clampRounds(meta?.rounds));
-  }
+  // One working copy rather than three useStates plus a hand-rolled string key
+  // to decide when to re-seed them. useDirtyForm (ported from Bourbon Cup)
+  // owns that: it syncs an incoming value into local state ONLY while the form
+  // is clean, so a Firestore snapshot for an unrelated field of the same
+  // tournament_state document can no longer wipe what the director is midway
+  // through typing.
+  const initialValue = useMemo(() => ({
+    name: meta?.name || "",
+    location: meta?.location || "",
+    rounds: clampRounds(meta?.rounds),
+  }), [meta?.name, meta?.location, meta?.rounds]);
 
-  const pendingName = name.trim() || TOURNAMENT.name;
-  const pendingLocation = location.trim();
-  // Compared against the saved DOCUMENT, not against the last save, so a
-  // director who types and then undoes it by hand sees the Save light go out.
+  // The hook's own save is what reconciles its clean snapshot. Routing the
+  // panel's Save through it — rather than calling onSave directly and leaving
+  // the hook holding a pre-save snapshot forever — is what keeps the
+  // sync-when-clean behaviour alive for the NEXT external change.
+  const { value: form, setValue: setForm, save: commit } = useDirtyForm({
+    initialValue,
+    onSave: async (v) => onSave({
+      name: (v.name || "").trim() || TOURNAMENT.name,
+      location: (v.location || "").trim(),
+      rounds: v.rounds,
+    }),
+  });
+  const set = (patch) => setForm(prev => ({ ...prev, ...patch }));
+  const { name, location, rounds } = form;
+
+  const pendingName = (name || "").trim() || TOURNAMENT.name;
+  const pendingLocation = (location || "").trim();
+  // The Save light compares the NORMALISED pending values against the saved
+  // document, not the hook's raw isDirty. Both answer "has this changed", but
+  // only this one knows that trailing whitespace isn't a change — typing a
+  // space and deleting it should not leave Save lit on a form that would write
+  // the identical document.
   const dirty = pendingName !== (meta?.name || TOURNAMENT.name)
     || pendingLocation !== (meta?.location || "")
     || rounds !== clampRounds(meta?.rounds);
@@ -3442,7 +3533,7 @@ function TournamentPanel({ meta, onSave, notify, confirm, scoredRounds = [] }) {
       if (!ok) return;
     }
     setBusy(true);
-    await onSave({ name: pendingName, location: pendingLocation, rounds });
+    await commit();
     setBusy(false);
     notify?.("Tournament details saved");
   };
@@ -3491,8 +3582,8 @@ function TournamentPanel({ meta, onSave, notify, confirm, scoredRounds = [] }) {
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {[
-            { key: "name", val: name, set: setName, ph: TOURNAMENT.name, lbl: "Name" },
-            { key: "location", val: location, set: setLocation, ph: "e.g. Gaylord, MI", lbl: "Location" },
+            { key: "name", val: name, set: (v) => set({ name: v }), ph: TOURNAMENT.name, lbl: "Name" },
+            { key: "location", val: location, set: (v) => set({ location: v }), ph: "e.g. Gaylord, MI", lbl: "Location" },
           ].map(f => (
             <div key={f.key} style={{ display: "flex", alignItems: "center", gap: 8 }}>
               {/* Fixed 58px gutter — the width of the longest label at this
@@ -3515,7 +3606,7 @@ function TournamentPanel({ meta, onSave, notify, confirm, scoredRounds = [] }) {
               {ROUND_CHOICES.map(n => {
                 const on = rounds === n;
                 return (
-                  <button key={n} onClick={() => setRounds(n)} style={{
+                  <button key={n} onClick={() => set({ rounds: n })} style={{
                     flex: 1, padding: "10px 0", borderRadius: 8, cursor: "pointer",
                     background: on ? K.acc : K.inp,
                     border: on ? "none" : `1px solid ${K.bdr}`,
@@ -5090,7 +5181,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                 });
                 return next;
               });
-            }} roundDates={roundDates} onSetRoundDate={onSetRoundDate} scoringOpen={scoringOpen} onSetScoringOpen={onSetScoringOpen} pairingStrategy={pairingStrategy} onSetPairingStrategy={onSetPairingStrategy} leaderboard={leaderboard} finalizedRounds={finalizedRounds} getPlayerTee={getPlayerTee} editRound={editRound} />
+            }} roundDates={roundDates} onSetRoundDate={onSetRoundDate} scoringOpen={scoringOpen} onSetScoringOpen={onSetScoringOpen} pairingStrategy={pairingStrategy} onSetPairingStrategy={onSetPairingStrategy} leaderboard={leaderboard} finalizedRounds={finalizedRounds} getPlayerTee={getPlayerTee} editRound={editRound} holeData={holeData} />
       )}
 
       {/* Discard one player's card for this round. Sits at the bottom of the
