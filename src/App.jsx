@@ -6640,9 +6640,11 @@ export default function WBCApp() {
           or from admin once that modal closed — was set and never shown. */}
       <Toast message={notif} />
 
-      {/* Pull-to-refresh indicator. A trophy MASK rather than an <img>, the
-          same technique the nav uses, so the silhouette can be tinted and
-          rotated cleanly. Opacity ramps with the pull, and the ring lights up
+      {/* Pull-to-refresh indicator. The app logo (golfer) as a MASK rather
+          than an <img>, the same technique the nav uses, so the silhouette can
+          be tinted and rotated cleanly — the PNG's alpha channel is what gets
+          masked, and its background is fully transparent. Opacity ramps with
+          the pull, and the ring lights up
           at the threshold — the two signals that tell you it will fire before
           you let go. position:fixed at top:0, so it clears the status bar /
           island itself via the safe-area inset. */}
@@ -6667,9 +6669,12 @@ export default function WBCApp() {
             animation: pullRefreshing ? "wbcPullGlow 1s ease-in-out infinite" : "none",
           }}>
             <div style={{
-              width: 26, height: 26, background: K.acc,
-              WebkitMask: `url("${TROPHY_SVG_URL}") center/contain no-repeat`,
-              mask: `url("${TROPHY_SVG_URL}") center/contain no-repeat`,
+              // 32 not 26: the logo PNG carries ~19% transparent padding on
+              // each side, so the golfer itself lands at roughly the size the
+              // trophy SVG used to occupy. Still clears the 39px inner circle.
+              width: 32, height: 32, background: K.acc,
+              WebkitMask: `url("${WBC_LOGO}") center/contain no-repeat`,
+              mask: `url("${WBC_LOGO}") center/contain no-repeat`,
               opacity: pullY >= PULL_THRESHOLD ? 1 : 0.3 + (pullY / PULL_THRESHOLD) * 0.7,
               transform: pullRefreshing ? "none" : `rotate(${pullY * 3}deg)`,
               animation: pullRefreshing ? "wbcPullSpin .8s linear infinite" : "none",
