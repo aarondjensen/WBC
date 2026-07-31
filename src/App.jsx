@@ -5,6 +5,7 @@ import { readMembership, isDirectorAccount, joinWithCode, readAccessCode, setAcc
 import { K, ON_ACC } from "./theme";
 import { calcCH, computeIndividualBoard, rankIndividualBoard, rankIndividualBoardIds } from "./lib/individualBoard";
 import { useConfirm } from "./lib/useConfirm";
+import { groupsForRound, assignToGroup, removeFromGroup as removeFromGroupPure, clearGroup, swapIntoGroup } from "./lib/pairings";
 import { Popup, ConfirmModal } from "./components/Popup";
 import { collection, doc, setDoc, getDocs, query, where, writeBatch, onSnapshot, deleteDoc } from "firebase/firestore";
 import { getMessaging, getToken, onMessage, isSupported as isMessagingSupported } from "firebase/messaging";
@@ -2551,11 +2552,28 @@ function GroupsView({ players, round, tRounds, courses, pairingsData, teeTimesDa
 // ── ADMIN ──
 // ── PAIRINGS EDITOR ──
 function PairingsEditor({ activePlayers, pairingsData, setPairings, tRounds, courses, teeTimesData, setTeeTimesData, roundDates, onSetRoundDate, scoringOpen, onSetScoringOpen, pairingStrategy, onSetPairingStrategy, leaderboard, finalizedRounds, getPlayerTee, editRound }) {
-  const [groups, setGroups] = useState([]);
+  const numGroups = Math.ceil(activePlayers.length / 4);
+
+  // Seeded once per mount from the saved pairings. The parent keys this editor
+  // on the round and the roster size, so a change to either remounts it and
+  // re-runs this initializer — which is what a prop-syncing effect used to do,
+  // minus the extra render pass and minus the risk of the load racing a save.
+  const [groups, setGroups] = useState(() => groupsForRound(pairingsData, editRound, numGroups));
   const [selected, setSelected] = useState(null);
   const [genMsg, setGenMsg] = useState(null); // { tone: "ok"|"warn", text } — result of the last auto-generate
 
-  const numGroups = Math.ceil(activePlayers.length / 4);
+  // Persist a set of groups the director just changed. Saving belongs here, in
+  // the handlers that make an edit, rather than in an effect watching `groups`:
+  // an effect cannot tell an edit apart from the initial load, which is why the
+  // old one needed an isFirstRender ref to avoid saving the freshly-loaded
+  // state straight back over the round's real pairings.
+  const commitGroups = (next) => {
+    setGroups(next);
+    setSelected(null);
+    const nonEmpty = next.filter(g => g.length > 0);
+    // Only write an empty set when there is something saved to clear.
+    if (nonEmpty.length > 0 || (pairingsData || {})[editRound]) setPairings(editRound, nonEmpty);
+  };
 
   // ── Auto-pairing strategy (configurable per round) ──
   const cfg = resolvePairingCfg(pairingStrategy, editRound);
@@ -2588,8 +2606,7 @@ function PairingsEditor({ activePlayers, pairingsData, setPairings, tRounds, cou
       const { groups: ng, repeats } = optimizeAvoidRepeats(pids, numGroups, partners);
       const padded = ng.map(g => g.slice());
       while (padded.length < numGroups) padded.push([]);
-      setGroups(padded);
-      setSelected(null);
+      commitGroups(padded);
       // With foursomes (groups < 4 in count) some overlap is mathematically forced.
       const zeroPossible = numGroups >= 4;
       if (repeats === 0) {
@@ -2620,8 +2637,7 @@ function PairingsEditor({ activePlayers, pairingsData, setPairings, tRounds, cou
       const ng = groupByLeaderboard(orderedIds, numGroups, cfg.leadersLast);
       const padded = ng.map(g => g.slice());
       while (padded.length < numGroups) padded.push([]);
-      setGroups(padded);
-      setSelected(null);
+      commitGroups(padded);
       setGenMsg({ tone: "ok", text: `Grouped by current standings — leaders tee off ${cfg.leadersLast ? "last" : "first"}.` });
       return;
     }
@@ -2705,40 +2721,6 @@ function PairingsEditor({ activePlayers, pairingsData, setPairings, tRounds, cou
     setTeeTimesData(prev => ({ ...prev, [editRound]: current }));
   };
 
-  const isFirstRender = useRef(true);
-
-  // Reload the editable groups from saved pairings whenever the round or the
-  // roster size changes. This is the "reset state when a prop changes" shape
-  // that set-state-in-effect warns about, and the warning is fair — it costs a
-  // second render pass. Left as-is deliberately: the isFirstRender handshake
-  // with the auto-save effect below is what stops a load from immediately
-  // writing back over saved pairings, and moving this to a render-time adjust
-  // or a remount key has to preserve that. Worth doing, but not blind.
-  /* eslint-disable react-hooks/set-state-in-effect */
-  useEffect(() => {
-    isFirstRender.current = true;
-    const existing = (pairingsData || {})[editRound];
-    if (existing && existing.length > 0) {
-      const padded = [...existing.map(g => [...g])];
-      while (padded.length < numGroups) padded.push([]);
-      setGroups(padded);
-    } else {
-      setGroups(Array.from({ length: numGroups }, () => []));
-    }
-    setSelected(null);
-    setGenMsg(null);
-  }, [editRound, activePlayers.length]);
-  /* eslint-enable react-hooks/set-state-in-effect */
-
-  // Auto-save whenever groups change (skip initial mount load)
-  useEffect(() => {
-    if (isFirstRender.current) { isFirstRender.current = false; return; }
-    const nonEmpty = groups.filter(g => g.length > 0);
-    if (nonEmpty.length > 0 || (pairingsData || {})[editRound]) {
-      setPairings(editRound, nonEmpty);
-    }
-  }, [groups]);
-
   const getName = (pid) => activePlayers.find(p => p.id === pid)?.name || pid;
   const getShortName = (pid) => { const n = getName(pid); const parts = n.split(" "); return parts.length > 1 ? parts[0] + " " + parts[1][0] : n; };
   const tapPlayer = (pid) => {
@@ -2748,16 +2730,11 @@ function PairingsEditor({ activePlayers, pairingsData, setPairings, tRounds, cou
   const tapSlot = (gi) => {
     if (!selected) return;
     if (groups[gi].length >= 4) return;
-    // Remove from any other group first
-    const newGroups = groups.map(g => g.filter(id => id !== selected));
-    newGroups[gi] = [...newGroups[gi], selected];
-    setGroups(newGroups);
-    setSelected(null);
+    commitGroups(assignToGroup(groups, gi, selected));
   };
 
   const removeFromGroup = (gi, pid) => {
-    setGroups(prev => prev.map((g, i) => i === gi ? g.filter(id => id !== pid) : g));
-    setSelected(null);
+    commitGroups(removeFromGroupPure(groups, gi, pid));
   };
 
   const isAssigned = (pid) => groups.some(g => g.includes(pid));
@@ -2766,16 +2743,10 @@ function PairingsEditor({ activePlayers, pairingsData, setPairings, tRounds, cou
     if (selected === pid) {
       setSelected(null);
     } else if (selected) {
-      // Swap: put selected into this group, send this player back
-      removeFromGroup(gi, pid);
-      setTimeout(() => {
-        setGroups(prev => {
-          const ng = prev.map(g => g.filter(id => id !== selected));
-          if (ng[gi].length < 4) ng[gi] = [...ng[gi], selected];
-          return ng;
-        });
-        setSelected(null);
-      }, 0);
+      // Swap: the tapped player leaves, the selected one takes the seat. One
+      // pass — this used to be a remove followed by a setTimeout(0) so the
+      // second update could see the first one's result.
+      commitGroups(swapIntoGroup(groups, gi, pid, selected));
     } else {
       setSelected(pid);
     }
@@ -2971,7 +2942,7 @@ function PairingsEditor({ activePlayers, pairingsData, setPairings, tRounds, cou
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 {canDrop && <span style={{ fontSize: 9, color: K.acc, fontWeight: 600 }}>Tap to add {getShortName(selected)}</span>}
                 {grp.length > 0 && (
-                  <span onClick={e => { e.stopPropagation(); setGroups(prev => prev.map((g, i) => i === gi ? [] : g)); setSelected(null); }} style={{ fontSize: 8, color: K.danger, cursor: "pointer", border: `1px solid ${K.danger}40`, borderRadius: 4, padding: "1px 5px", fontWeight: 600 }}>Clear</span>
+                  <span onClick={e => { e.stopPropagation(); commitGroups(clearGroup(groups, gi)); }} style={{ fontSize: 8, color: K.danger, cursor: "pointer", border: `1px solid ${K.danger}40`, borderRadius: 4, padding: "1px 5px", fontWeight: 600 }}>Clear</span>
                 )}
               </div>
             </div>
@@ -4806,7 +4777,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
       })()}
 
       {tab === "pairings" && (
-        <PairingsEditor activePlayers={activePlayers} pairingsData={pairingsData} setPairings={setPairings} tRounds={tRounds} courses={courses} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
+        <PairingsEditor key={`${editRound}:${activePlayers.length}`} activePlayers={activePlayers} pairingsData={pairingsData} setPairings={setPairings} tRounds={tRounds} courses={courses} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
               setTeeTimesData(prev => {
                 const next = typeof updater === "function" ? updater(prev) : updater;
                 // Fire-and-forget: update tee times on pairings rows in Firestore
