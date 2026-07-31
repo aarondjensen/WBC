@@ -30,10 +30,15 @@
 //  director's, set in Admin → Event; the fallback is only for an edition that
 //  has not been through that screen.
 //
-//  The mark is drawn as a CSS MASK rather than an <img> so it takes the theme
-//  accent exactly, the same technique the pull-to-refresh indicator uses.
+//  The mark is the APP LOGO — the golfer — not the trophy. They are different
+//  things: the golfer is WBC's identity (home-screen icon, pull-to-refresh
+//  spinner, this header), while the trophy is an award, used where a result is
+//  being shown. Drawn as a CSS MASK rather than an <img> so it takes the theme
+//  accent exactly, which is the same technique the pull-to-refresh indicator
+//  uses on the same asset — the PNG is a flat silhouette on transparency, so
+//  its alpha channel is what gets masked.
 import { K, FONT, FS } from "../theme";
-import { TROPHY_SVG_URL } from "../constants";
+import { WBC_LOGO } from "../constants";
 import { getTournamentYear } from "../firebase";
 
 // The single knob for how far the header sits from the top of the screen.
@@ -59,9 +64,9 @@ export function AppHeader({ location, fallbackLocation = "Gaylord, MI", right })
       fontFamily: FONT,
     }}>
       <div style={{
-        width: 25, height: 28, background: K.acc, flexShrink: 0,
-        WebkitMask: `url("${TROPHY_SVG_URL}") center/contain no-repeat`,
-        mask: `url("${TROPHY_SVG_URL}") center/contain no-repeat`,
+        width: 30, height: 30, background: K.acc, flexShrink: 0,
+        WebkitMask: `url("${WBC_LOGO}") center/contain no-repeat`,
+        mask: `url("${WBC_LOGO}") center/contain no-repeat`,
       }} />
 
       {/* WBC's own display treatment, not the one this layout was ported

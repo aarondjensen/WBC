@@ -1,10 +1,21 @@
 // ══════════════════════════════════════════════════════════════════
 //  constants — shared assets.
 // ══════════════════════════════════════════════════════════════════
-// Extracted from App.jsx when a second FILE needed the trophy: AppHeader
-// draws it as a CSS mask, and so does the pull-to-refresh indicator. Keeping
-// the path in App.jsx and passing it down as a prop would have made app
-// identity something the shell hands to its own header.
+// Extracted from App.jsx when a second FILE needed them: AppHeader and the
+// pull-to-refresh indicator both draw the app mark as a CSS mask. Keeping the
+// paths in App.jsx and passing them down as props would have made app identity
+// something the shell hands to its own header.
+
+// ── The app mark ──
+// The golfer at the top of his follow-through. This is WBC's identity — it is
+// the home-screen icon, the pull-to-refresh spinner and the header mark — and
+// the trophy below is a TROPHY: an award, used where a result is being shown.
+// They are not interchangeable, which is why both are here rather than one
+// standing in for the other.
+export const WBC_LOGO = "/wbc-icon-512.png";
+// The 192px cut, for the apple-touch-icon. Kept here with its sibling even
+// though the favicon effect currently writes the path literally.
+export const WBC_FAVICON = "/wbc-icon-192.png";
 
 // Clean SVG trophy for large silhouette display
 export const TROPHY_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 260">
