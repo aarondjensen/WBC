@@ -98,12 +98,6 @@ const CTP_MAX_FT = 60;
 const CTP_WHEEL_ITEM = 36;   // px per row — also the scroll-snap stride
 const CTP_WHEEL_H = 150;     // px visible wheel height
 
-// Tournament directors — the two player_ids that get admin access. Single
-// source of truth so the login screen, claim resolution, and admin gating
-// all agree.
-const DIRECTOR_IDS = ["aaron_j", "scott_r"];
-const isDirectorId = (id) => DIRECTOR_IDS.includes(id);
-
 // ── Google/Apple sign-in feature flags ──
 // AUTH_PROVIDERS_ENABLED is defined in src/firebase.js (single source of truth,
 // since it also controls authDomain + the auth resolver there) and imported
@@ -6029,13 +6023,15 @@ export default function WBCApp() {
     setClaims(prev => ({ ...prev, [fb.uid]: player.id }));
     setClaimBusyId(null);
     setClaimState(null);
-    setUser({ id: player.id, name: player.name, isDirector: isDirectorId(player.id) });
+    setUser({ id: player.id, name: player.name, isDirector: isDirectorAccount(membership) });
     // The only record written is the uid→player_id claim (wbc_users). We do NOT
     // stamp the email onto the shared players profile — emails are never
     // collected ahead of time or stored on tournament profiles; a player simply
     // picks their name at sign-in.
     await db.upsert(USERS_COLLECTION, rec).catch(e => console.warn("[claim] wbc_users write failed", e));
-  }, []);
+    // `membership` is read for the isDirector seed above. Only ever called
+    // from the claim screen's onClick, so a changing identity costs nothing.
+  }, [membership]);
 
   // Subscribe to Firebase Auth. Also completes any pending redirect sign-in
   // (installed-PWA path) that resolves on cold start. Entirely skipped while
@@ -6067,7 +6063,7 @@ export default function WBCApp() {
       const p = DEMO_PLAYERS.find(pl => pl.id === claimedPid);
       if (p) {
         setClaimState(null);
-        if (user?.id !== p.id) setUser({ id: p.id, name: p.name, isDirector: isDirectorId(p.id) });
+        if (user?.id !== p.id) setUser({ id: p.id, name: p.name, isDirector: isDirectorAccount(membership) });
         return;
       }
       // Claimed to a player_id no longer in the registry — fall through to re-claim.
@@ -6076,7 +6072,7 @@ export default function WBCApp() {
     // 2. Manual "pick your name" (immediate link per CLAIM_REQUIRES_APPROVAL=false).
     const unclaimed = activePlayers.filter(p => !claimedPlayerIds.has(p.id));
     setClaimState({ status: "needs-claim", candidates: unclaimed });
-  }, [fbUser, member, claims, claimedPlayerIds, storageLoaded, activePlayers, user]);
+  }, [fbUser, member, membership, claims, claimedPlayerIds, storageLoaded, activePlayers, user]);
 
   // ── Admin access rides on the MEMBERSHIP flag ──
   // `is_director` on wbc_accounts/{uid} is the only thing the security rules
@@ -6084,16 +6080,21 @@ export default function WBCApp() {
   // a phone can show an Admin tab whose every write comes back refused, which
   // looks like the app is broken rather than like a permission problem.
   //
-  // DIRECTOR_IDS stays as a transition fallback, and only that. Until both
-  // directors have signed in, been through the password screen, and had
-  // `is_director: true` set on their membership document in the Firebase
-  // console, the flag does not exist yet and removing the list would lock
-  // Admin out of the app entirely. Once those documents carry the flag the
-  // list can go — and it MUST go before firestore.rules is deployed, or a
-  // director on the list but not the flag gets a tab that silently fails.
+  // There was a DIRECTOR_IDS list here as a transition fallback, for the
+  // window between this code landing and the two membership documents
+  // actually carrying `is_director`. Those documents carry it now and
+  // firestore.rules is enforcing, so the list is gone: a director on a
+  // hardcoded list but not on the flag would get an Admin tab whose every
+  // write comes back refused, which reads as a broken app rather than as a
+  // permission problem. One source of truth, and it is the one the database
+  // checks.
+  //
+  // Getting the crown back if the set is ever emptied is a Firebase console
+  // edit on wbc_accounts — by design. Nothing in the app can appoint the
+  // first director, because the rule requires one to already exist.
   useEffect(() => {
     if (!user || user.isGuest) return;
-    const flag = isDirectorAccount(membership) || isDirectorId(user.id);
+    const flag = isDirectorAccount(membership);
     if (user.isDirector !== flag) setUser(u => (u ? { ...u, isDirector: flag } : u));
   }, [membership, user]);
 
