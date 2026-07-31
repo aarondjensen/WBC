@@ -7,12 +7,14 @@ import { SegmentedToggle, StickyTop, SectionLabel, Card, Toast } from "./compone
 import { calcCH, computeIndividualBoard, rankIndividualBoard, rankIndividualBoardIds, WD_SCORE } from "./lib/individualBoard";
 import { useConfirm } from "./lib/useConfirm";
 import { usePullToRefresh, hasNewBundle } from "./lib/usePullToRefresh";
+import { NotificationSettings } from "./components/NotificationSettings";
+import { registerForPush, getCachedSubscriptionStatus } from "./lib/notifications";
 import { groupsForRound, assignToGroup, removeFromGroup as removeFromGroupPure, clearGroup, swapIntoGroup } from "./lib/pairings";
 import { Popup, ConfirmModal } from "./components/Popup";
 import { EditionSwitcher } from "./components/EditionSwitcher";
 import { docIds } from "./lib/editionId";
 import { collection, doc, setDoc, getDocs, query, where, writeBatch, onSnapshot, deleteDoc } from "firebase/firestore";
-import { getMessaging, getToken, onMessage, isSupported as isMessagingSupported } from "firebase/messaging";
+import { getMessaging, onMessage, isSupported as isMessagingSupported } from "firebase/messaging";
 const WBC_LOGO = "/wbc-icon-512.png";
 const WBC_TROPHY_LOGO = "/wbc-trophy.png";
 const WBC_FAVICON = "/wbc-icon-192.png";
@@ -146,32 +148,9 @@ const db = {
   },
 };
 
-// Register this device for push and store its token against the player id.
-// Must be called from a user gesture (iOS requires a tap to prompt). Returns
-// "granted" | "denied" | "unsupported". Sits below `db` because it writes
-// through it.
-async function registerPushForPlayer(playerId) {
-  try {
-    if (!playerId) return "unsupported";
-    const supported = await isMessagingSupported().catch(() => false);
-    if (!supported || !("serviceWorker" in navigator) || !("Notification" in window)) return "unsupported";
-    const perm = await Notification.requestPermission();
-    if (perm !== "granted") return perm; // "denied" or "default"
-    const reg = await navigator.serviceWorker.register("/firebase-messaging-sw.js");
-    const messaging = getMessaging(_app);
-    const token = await getToken(messaging, { vapidKey: VAPID_KEY, serviceWorkerRegistration: reg });
-    if (token) {
-      // doc id = token → re-registering the same device is idempotent.
-      await db.upsert("wbc_notifications_tokens", {
-        id: token, tournament_id: TOURNAMENT_ID, playerId, token, lastSeenAt: Date.now(),
-      });
-    }
-    return "granted";
-  } catch (e) {
-    console.warn("[push] register failed", e);
-    return "error";
-  }
-}
+// Push registration moved to src/lib/notifications.js, alongside the
+// unsubscribe / status / test-send half it never had. registerForPush is
+// imported at the top of this file; the settings screen owns the rest.
 
 
 // ── _e: the active edition's slug, for document ids ──
@@ -5860,11 +5839,20 @@ export default function WBCApp() {
   }, [user]);
 
   // Keep this device's token fresh + mapped to the logged-in player when
-  // permission is already granted (so a re-login re-registers silently).
+  // permission is already granted, so a re-login re-registers silently.
+  //
+  // GUARDED on the cached subscription status, which is the whole reason that
+  // cache exists as a tri-state. Browser permission stays "granted" forever
+  // once given — including for somebody who has since turned notifications OFF
+  // in settings — so an unguarded re-register would silently resubscribe them
+  // on their next login and the toggle would appear not to work. `false` means
+  // they said no on this device; `null` means we have never asked here, which
+  // is the case this effect is for.
   useEffect(() => {
     if (!user || user.isGuest) return;
     if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
-    registerPushForPlayer(user.id);
+    if (getCachedSubscriptionStatus(user.id) === false) return;
+    registerForPush(user.id);
   }, [user]);
 
   // App badge = scorecards this player still owes an attestation on. This is
@@ -5892,14 +5880,6 @@ export default function WBCApp() {
     window.addEventListener("hashchange", applyHash);
     return () => window.removeEventListener("hashchange", applyHash);
   }, []);
-
-  const enableNotifications = async () => {
-    const res = await registerPushForPlayer(user?.id);
-    setNotifPerm(typeof Notification !== "undefined" ? Notification.permission : "denied");
-    if (res === "granted") notify("Notifications enabled ✓");
-    else if (res === "denied") notify("Notifications blocked — enable them in your device settings");
-    else if (res === "unsupported") notify("Notifications aren't supported here — add the app to your home screen first");
-  };
 
   const activePlayers = useMemo(() => {
     return tPlayers.filter(tp => tp.status !== "WD").map(tp => {
@@ -6715,7 +6695,7 @@ export default function WBCApp() {
             </div>
           </div>
           {notifPerm !== "granted" && !user.isGuest && (
-            <button onClick={enableNotifications} title="Enable notifications" style={{ background: "transparent", border: `1px solid ${K.acc}60`, color: K.acc, padding: "4px 9px", borderRadius: 8, fontSize: 14, cursor: "pointer", lineHeight: 1 }}>🔔</button>
+            <button onClick={() => { setDeleteErr(""); setDeleteStage(null); setAccountOpen(true); }} title="Notification settings" style={{ background: "transparent", border: `1px solid ${K.acc}60`, color: K.acc, padding: "4px 9px", borderRadius: 8, fontSize: 14, cursor: "pointer", lineHeight: 1 }}>🔔</button>
           )}
           <button onClick={() => { setDeleteErr(""); setDeleteStage(null); setAccountOpen(true); }} style={{ background: "transparent", border: `1px solid ${K.bdr}`, color: K.t3, padding: "4px 10px", borderRadius: 8, fontSize: 10, cursor: "pointer", textAlign: "center", lineHeight: 1.3 }}>
             Account<br/><span style={{ fontSize: 9, color: K.t2, fontWeight: 600 }}>{user.name}</span>
@@ -6745,6 +6725,18 @@ export default function WBCApp() {
                     <div style={{ fontSize: 11, color: K.t3 }}>{user.isDirector ? "Tournament director" : "Player"}</div>
                   </div>
                 </div>
+
+                {/* Notification settings live in the Account sheet because
+                    that is where the app's other per-person settings already
+                    are. Rendered only for a real player: a guest has no
+                    player id to register a token against. */}
+                {!user.isGuest && (
+                  <NotificationSettings
+                    user={user}
+                    notify={notify}
+                    onPermissionChange={setNotifPerm}
+                  />
+                )}
 
                 <button onClick={() => { setAccountOpen(false); handleLogout(); }} style={{ width: "100%", padding: "13px 0", borderRadius: 12, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t1, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
                   Log out
