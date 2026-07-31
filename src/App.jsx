@@ -1,11 +1,13 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
-import { _app, _db, _auth, onAuthStateChanged, doGoogleSignIn, doAppleSignIn, doSignOut, consumeRedirectResult, deleteAccount, USERS_COLLECTION, NATIVE_APPLE_ENABLED, APPLE_PROVIDER_ENABLED, isNativePlatform, isAndroidNative, AUTH_PROVIDERS_ENABLED } from "./firebase";
+import { _app, _db, _auth, onAuthStateChanged, doGoogleSignIn, doAppleSignIn, doSignOut, consumeRedirectResult, deleteAccount, USERS_COLLECTION, NATIVE_APPLE_ENABLED, APPLE_PROVIDER_ENABLED, isNativePlatform, isAndroidNative, AUTH_PROVIDERS_ENABLED, TOURNAMENT_ID, getEditionSlug, getTournamentYear, isDefaultEdition } from "./firebase";
 import { readMembership, isDirectorAccount, joinWithCode, readAccessCode, setAccessCode, setDirector, subscribeMemberships, accountsUnreadable } from "./lib/accounts";
 import { K, ON_ACC } from "./theme";
 import { calcCH, computeIndividualBoard, rankIndividualBoard, rankIndividualBoardIds } from "./lib/individualBoard";
 import { useConfirm } from "./lib/useConfirm";
 import { Popup, ConfirmModal } from "./components/Popup";
+import { EditionSwitcher } from "./components/EditionSwitcher";
+import { docIds } from "./lib/editionId";
 import { collection, doc, setDoc, getDocs, query, where, writeBatch, onSnapshot, deleteDoc } from "firebase/firestore";
 import { getMessaging, getToken, onMessage, isSupported as isMessagingSupported } from "firebase/messaging";
 const WBC_LOGO = "/wbc-icon-512.png";
@@ -36,7 +38,17 @@ const TROPHY_SVG_URL = `data:image/svg+xml;utf8,${encodeURIComponent(TROPHY_SVG)
 // Player registry — populated from Firestore on mount
 let DEMO_PLAYERS = [];
 
-const TOURNAMENT = { id: "wbc_2026", name: "WBC 2026", year: 2026, num_rounds: 4, status: "active" };
+// Derived from the ACTIVE edition rather than pinned to 2026, so switching to
+// wbc_2027 renames the default tournament and moves the year without a code
+// change. `num_rounds` stays a constant: the WBC is a four-round event by
+// definition, and a per-edition round count is a bigger change than a rename.
+const TOURNAMENT = {
+  get id() { return TOURNAMENT_ID; },
+  get name() { return `WBC ${getTournamentYear()}`; },
+  get year() { return getTournamentYear(); },
+  num_rounds: 4,
+  status: "active",
+};
 // Single source of truth for tournament length. Change TOURNAMENT.num_rounds above
 // to run a shorter/longer tournament — every round loop, leaderboard column, and
 // finalization check derives from this constant instead of a hardcoded 4.
@@ -47,7 +59,10 @@ const NUM_ROUNDS = TOURNAMENT.num_rounds || 4;
 // Firebase config + app/db initialization live in src/firebase.js (the
 // extracted auth module — single source of truth for all Firebase infra).
 // _app and _db are imported at the top of this file.
-const TOURNAMENT_ID = "wbc_2026";
+//
+// TOURNAMENT_ID is no longer a constant here — it is the active-edition live
+// binding exported by firebase.js and imported at the top of this file. Every
+// read of it below picks up whichever edition is currently selected.
 const DEFAULT_PW = "wbc2026"; // default player login password
 
 // CTP distance wheel — whole feet, 1..CTP_MAX_FT. Ported from MNQ's hole-CTP prompt.
@@ -155,6 +170,17 @@ const db = {
 };
 
 
+// ── _e: the active edition's slug, for document ids ──
+// Every id below that used to hardcode `2026` calls this instead, so a second
+// edition writes `hs_2027_...` rather than colliding with 2026's documents.
+// See getEditionSlug in firebase.js for why it's a slug and not a prefix.
+//
+// A FUNCTION, not a captured constant: a module-level `const slug =
+// getEditionSlug()` would freeze whichever edition happened to be active when
+// this module was first evaluated, which is exactly the bug the live binding
+// on TOURNAMENT_ID exists to avoid.
+const _e = () => getEditionSlug();
+
 // Helper: convert Firestore hole_scores docs → holeData format { "pid_round": { holeIdx: score } }
 const extractRound = (roundScoreId) => {
   const m = roundScoreId?.match(/_r(\d+)_/);
@@ -171,8 +197,8 @@ const rowsToHoleData = (rows) => {
 };
 // Convert holeData entry to a Firestore document
 const holeDataToRow = (pid, rnd, holeIdx, score, courseId) => ({
-  id: `hs_2026_r${rnd}_${pid}_h${holeIdx + 1}`,
-  round_score_id: `rs_2026_r${rnd}_${pid}`,
+  id: docIds.holeScore(_e(), rnd, pid, holeIdx),
+  round_score_id: docIds.roundScore(_e(), rnd, pid),
   tournament_id: TOURNAMENT_ID,
   player_id: pid,
   course_id: courseId || "unknown",
@@ -3307,6 +3333,7 @@ function PlayerRow({ player, onUpdateHI, onUpdateName, onRemove, onSavePassword,
 // empty field falls back to its constant rather than saving blank, so the
 // header can't end up with a hole in it.
 function TournamentPanel({ meta, onSave, notify }) {
+  const [showEditions, setShowEditions] = useState(false);
   const [name, setName] = useState(meta?.name || "");
   const [location, setLocation] = useState(meta?.location || "");
   const [busy, setBusy] = useState(false);
@@ -3353,6 +3380,25 @@ function TournamentPanel({ meta, onSave, notify }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <EditionSwitcher open={showEditions} onClose={() => setShowEditions(false)} notify={notify} />
+
+      {/* Active edition — switch year or start a new one. First card on the
+          tab because it decides which tournament everything BELOW it is
+          editing; renaming the wrong year is the mistake this ordering
+          prevents. */}
+      <div>
+        <div style={{ ...label, marginBottom: 8 }}>Active edition</div>
+        <button onClick={() => setShowEditions(true)} style={{
+          width: "100%", padding: "12px 14px", borderRadius: 10,
+          background: K.card, border: `1px solid ${K.bdr}`, color: K.t1,
+          fontSize: 13, fontWeight: 700, letterSpacing: 0.3, cursor: "pointer",
+          display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
+        }}>
+          <span>Edition · <span style={{ color: K.acc }}>{TOURNAMENT_ID}</span></span>
+          <span style={{ fontSize: 11, color: K.t3, flexShrink: 0 }}>Switch / new ›</span>
+        </button>
+      </div>
+
       <div style={{ background: K.card, borderRadius: 12, border: `1px solid ${K.bdr}`, padding: 14 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
           <div style={label}>Tournament</div>
@@ -4869,7 +4915,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                   groups.forEach(async (grp, gi) => {
                     const teeTime = (next[rnd] || [])[gi] || null;
                     grp.forEach(async pid => {
-                      const row = { id: `pair_2026_r${rnd}_g${gi+1}_${pid}`, tournament_id: TOURNAMENT_ID, round_number: parseInt(rnd), group_number: gi+1, player_id: pid, tee_time: teeTime };
+                      const row = { id: docIds.pairing(_e(), rnd, gi + 1, pid), tournament_id: TOURNAMENT_ID, round_number: parseInt(rnd), group_number: gi+1, player_id: pid, tee_time: teeTime };
                       await db.upsert("pairings", row);
                     });
                   });
@@ -5354,8 +5400,17 @@ export default function WBCApp() {
         const tpRows = await db.get("tournament_players", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
         if (tpRows?.length) {
           setTPlayers(tpRows.map(r => ({ id: r.id, tournament_id: r.tournament_id, player_id: r.player_id, handicap_index: parseFloat(r.handicap_index) || 0, status: r.status || "active" })));
-        } else if (playerRows?.length) {
-          const seeded = playerRows.map(r => ({ id: `tp_2026_${r.id}`, tournament_id: TOURNAMENT_ID, player_id: r.id, handicap_index: 0, status: "active" }));
+        } else if (playerRows?.length && isDefaultEdition()) {
+          // One-time bootstrap for the ORIGINAL edition only: lift the global
+          // player registry into a roster the first time this edition loads
+          // without one.
+          //
+          // Gated on isDefaultEdition() because a NEW edition legitimately has
+          // no roster — that is what "start blank" means. Without the guard,
+          // creating an empty 2027 and switching to it would silently import
+          // every golfer who has ever played, at index 0, and the director
+          // would have to work out which ones to delete.
+          const seeded = playerRows.map(r => ({ id: docIds.tournamentPlayer(_e(), r.id), tournament_id: TOURNAMENT_ID, player_id: r.id, handicap_index: 0, status: "active" }));
           setTPlayers(seeded);
           for (const tp of seeded) await db.upsert("tournament_players", tp);
         }
@@ -5881,7 +5936,7 @@ export default function WBCApp() {
         }
       }
     }
-    const trRow = { id: `tr_2026_r${rnd}`, tournament_id: TOURNAMENT_ID, round_number: rnd, course_id: course.id || null };
+    const trRow = { id: docIds.tournamentRound(_e(), rnd), tournament_id: TOURNAMENT_ID, round_number: rnd, course_id: course.id || null };
     setTRounds(prev => {
       const existing = prev.find(t => t.round_number === rnd);
       const updated = existing
@@ -5901,7 +5956,7 @@ export default function WBCApp() {
         const bulk = {};
         activePlayers.forEach(p => { bulk[p.id] = defaultTee.name; });
         setTeeData(prev => ({ ...prev, [rnd]: bulk }));
-        const rows = activePlayers.map(p => ({ id: `ta_2026_r${rnd}_${p.id}`, tournament_id: TOURNAMENT_ID, round_number: rnd, player_id: p.id, tee_name: defaultTee.name }));
+        const rows = activePlayers.map(p => ({ id: docIds.teeAssignment(_e(), rnd, p.id), tournament_id: TOURNAMENT_ID, round_number: rnd, player_id: p.id, tee_name: defaultTee.name }));
         for (const row of rows) await db.upsert("tee_assignments", row);
       }
     }
@@ -5966,7 +6021,7 @@ export default function WBCApp() {
     const id = name.toLowerCase().replace(/\s+/g, "_");
     if (!DEMO_PLAYERS.find(p => p.id === id)) DEMO_PLAYERS.push({ id, name });
     await db.upsert("players", { id, name }, "id").catch(() => {});
-    const newTp = { id: `tp_2026_${id}`, tournament_id: TOURNAMENT_ID, player_id: id, handicap_index: hi, status: "active" };
+    const newTp = { id: docIds.tournamentPlayer(_e(), id), tournament_id: TOURNAMENT_ID, player_id: id, handicap_index: hi, status: "active" };
     setTPlayers(prev => [...prev, newTp]);
     await db.upsert("tournament_players", newTp);
     const newPw = { ...passwords, [id]: DEFAULT_PW };
@@ -5978,7 +6033,7 @@ export default function WBCApp() {
       if (!course) return;
       const defaultTee = getDefaultTee(course.tee_boxes);
       if (!defaultTee) return;
-      teeUpdates.push({ id: `ta_2026_r${tr.round_number}_${id}`, tournament_id: TOURNAMENT_ID, round_number: tr.round_number, player_id: id, tee_name: defaultTee.name });
+      teeUpdates.push({ id: docIds.teeAssignment(_e(), tr.round_number, id), tournament_id: TOURNAMENT_ID, round_number: tr.round_number, player_id: id, tee_name: defaultTee.name });
     });
     if (teeUpdates.length) {
       setTeeData(prev => {
@@ -6067,7 +6122,7 @@ export default function WBCApp() {
     // be loaded back. That's why CTPs evaporated on reload.
     const tr = tRounds.find(t => t.round_number === rnd);
     await db.upsert("skins", {
-      id: `ctp_2026_r${rnd}_h${hole}`,
+      id: docIds.ctp(_e(), rnd, hole),
       tournament_id: TOURNAMENT_ID,
       tournament_round_id: tr?.id || null,
       round_number: rnd,
@@ -6093,7 +6148,7 @@ export default function WBCApp() {
     const rows = [];
     groups.forEach((grp, gi) => {
       grp.forEach(pid => {
-        rows.push({ id: `pair_2026_r${rnd}_g${gi+1}_${pid}`, tournament_id: TOURNAMENT_ID, round_number: rnd, group_number: gi + 1, player_id: pid, tee_time: (teeTimesData[rnd] || [])[gi] || null });
+        rows.push({ id: docIds.pairing(_e(), rnd, gi + 1, pid), tournament_id: TOURNAMENT_ID, round_number: rnd, group_number: gi + 1, player_id: pid, tee_time: (teeTimesData[rnd] || [])[gi] || null });
       });
     });
     for (const row of rows) await db.upsert("pairings", row);
@@ -6102,12 +6157,12 @@ export default function WBCApp() {
 
   const setTee = async (rnd, pid, teeName) => {
     setTeeData(prev => ({ ...prev, [rnd]: { ...(prev[rnd] || {}), [pid]: teeName } }));
-    await db.upsert("tee_assignments", { id: `ta_2026_r${rnd}_${pid}`, tournament_id: TOURNAMENT_ID, round_number: rnd, player_id: pid, tee_name: teeName }, "id");
+    await db.upsert("tee_assignments", { id: docIds.teeAssignment(_e(), rnd, pid), tournament_id: TOURNAMENT_ID, round_number: rnd, player_id: pid, tee_name: teeName }, "id");
   };
 
   const setTeeBulk = async (rnd, assignments) => {
     setTeeData(prev => ({ ...prev, [rnd]: { ...(prev[rnd] || {}), ...assignments } }));
-    const rows = Object.entries(assignments).map(([pid, teeName]) => ({ id: `ta_2026_r${rnd}_${pid}`, tournament_id: TOURNAMENT_ID, round_number: rnd, player_id: pid, tee_name: teeName }));
+    const rows = Object.entries(assignments).map(([pid, teeName]) => ({ id: docIds.teeAssignment(_e(), rnd, pid), tournament_id: TOURNAMENT_ID, round_number: rnd, player_id: pid, tee_name: teeName }));
     for (const row of rows) await db.upsert("tee_assignments", row);
   };
 
@@ -6507,7 +6562,7 @@ export default function WBCApp() {
       <div style={{ padding: (view === "leaderboard" || view === "admin") ? "14px 20px 0 20px" : "14px 20px", paddingBottom: (view === "leaderboard" || view === "admin") ? "0" : "14px", flex: 1, overflowY: "auto", overflowX: "hidden", display: (view === "leaderboard" || view === "admin") ? "flex" : "block", flexDirection: "column", minHeight: 0, paddingBottom: view === "leaderboard" ? "28px" : 0 }}>
         {view === "leaderboard" && <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} teeData={teeData} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} />}
         <div style={{ display: view === "scoring" ? "block" : "none", paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
-          <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeTimesData={teeTimesData} roundDates={roundDates} scoringOpen={scoringOpen} teeData={teeData} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={async (key, signerPid, signerName, present, rnd) => { const nonSigners = (present || []).filter(pid => pid !== signerPid); const autoFinal = nonSigners.length === 0; const optimistic = { signedBy: signerPid, signedByName: signerName, attestedBy: [], present: present || [] }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: optimistic })); await db.upsert("wbc_scorecard_sigs", { id: key, tournament_id: TOURNAMENT_ID, groupKey: key, round: rnd, signedBy: signerPid, signedByName: signerName, present: present || [], attestedBy: [], signedAt: new Date().toISOString() }); if (autoFinal) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); } }} onAttestScorecard={async (key, attesterPid, nonSigners) => { const cur = scorecardSigs[key]; if (!cur) return; const attestedBy = [...new Set([...(cur.attestedBy || []), attesterPid])]; const optimistic = { ...cur, attestedBy }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: { ...prev[key], attestedBy } })); await db.upsert("wbc_scorecard_sigs", { id: key, attestedBy }); const allDone = (nonSigners || []).every(pid => attestedBy.includes(pid)); if (allDone) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); } }} onUnsignScorecard={async key => { pendingSigsRef.current.delete(key); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", key); if (finalizedRounds[key]) { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); } }} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); pendingSigsRef.current.delete(key); await db.deleteDoc("wbc_scorecard_sigs", key); await saveTournamentState(nf, passwords); }} onNavigate={setView} onGoToAdminCourses={() => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); }} markPlayerWD={markPlayerWD} ctpData={ctpData} onSetCtp={onSetCtp} />
+          <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeTimesData={teeTimesData} roundDates={roundDates} scoringOpen={scoringOpen} teeData={teeData} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={async (key, signerPid, signerName, present, rnd) => { const nonSigners = (present || []).filter(pid => pid !== signerPid); const autoFinal = nonSigners.length === 0; const optimistic = { signedBy: signerPid, signedByName: signerName, attestedBy: [], present: present || [] }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: optimistic })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), tournament_id: TOURNAMENT_ID, groupKey: key, round: rnd, signedBy: signerPid, signedByName: signerName, present: present || [], attestedBy: [], signedAt: new Date().toISOString() }); if (autoFinal) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); } }} onAttestScorecard={async (key, attesterPid, nonSigners) => { const cur = scorecardSigs[key]; if (!cur) return; const attestedBy = [...new Set([...(cur.attestedBy || []), attesterPid])]; const optimistic = { ...cur, attestedBy }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: { ...prev[key], attestedBy } })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), attestedBy }); const allDone = (nonSigners || []).every(pid => attestedBy.includes(pid)); if (allDone) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); } }} onUnsignScorecard={async key => { pendingSigsRef.current.delete(key); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); if (finalizedRounds[key]) { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); } }} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); pendingSigsRef.current.delete(key); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); await saveTournamentState(nf, passwords); }} onNavigate={setView} onGoToAdminCourses={() => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); }} markPlayerWD={markPlayerWD} ctpData={ctpData} onSetCtp={onSetCtp} />
         </div>
         {view === "skins" && <SkinsCtpView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} teeData={teeData} getPlayerTee={getPlayerTee} />}
         {view === "groups" && <GroupsView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} pairingsData={pairingsData} teeTimesData={teeTimesData} teeData={teeData} getPlayerTee={getPlayerTee} user={user} />}
@@ -6520,14 +6575,14 @@ export default function WBCApp() {
                   groups.forEach(async (grp, gi) => {
                     const teeTime = (next[rnd] || [])[gi] || null;
                     grp.forEach(async pid => {
-                      const row = { id: `pair_2026_r${rnd}_g${gi+1}_${pid}`, tournament_id: TOURNAMENT_ID, round_number: parseInt(rnd), group_number: gi+1, player_id: pid, tee_time: teeTime };
+                      const row = { id: docIds.pairing(_e(), rnd, gi + 1, pid), tournament_id: TOURNAMENT_ID, round_number: parseInt(rnd), group_number: gi+1, player_id: pid, tee_time: teeTime };
                       await db.upsert("pairings", row);
                     });
                   });
                 });
                 return next;
               });
-            }} roundDates={roundDates} onSetRoundDate={async (rnd, dateStr) => { const next = { ...roundDates }; if (dateStr) next[rnd] = dateStr; else delete next[rnd]; setRoundDates(next); await saveTournamentState(finalizedRounds, passwords, teesSaved, teesModified, next, scoringOpen); }} scoringOpen={scoringOpen} onSetScoringOpen={async (rnd, open) => { const next = { ...scoringOpen }; if (open) next[rnd] = true; else delete next[rnd]; setScoringOpen(next); await saveTournamentState(finalizedRounds, passwords, teesSaved, teesModified, roundDates, next); }} pairingStrategy={pairingStrategy} onSetPairingStrategy={async (rnd, cfg) => { const next = { ...pairingStrategy }; if (cfg) next[rnd] = cfg; else delete next[rnd]; setPairingStrategy(next); await saveTournamentState(finalizedRounds, passwords, teesSaved, teesModified, roundDates, scoringOpen, next); }} leaderboard={getLeaderboard} passwords={passwords} setPasswords={async pw => { setPasswords(pw); await saveTournamentState(finalizedRounds, pw); }} holeData={holeData} finalizedRounds={finalizedRounds} onFinalizeRound={async rnd => { const nf = { ...finalizedRounds, [rnd]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${rnd}`, tournament_id: TOURNAMENT_ID, round: rnd, finalized: true }); if (rnd < 4) setRound(rnd + 1); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); if (/^\d+$/.test(String(key))) { await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${key}`, tournament_id: TOURNAMENT_ID, round: Number(key), finalized: false }); } else { setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", key); } }} notify={notify} notif={notif} getPlayerTee={getPlayerTee} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); }} currentUser={user} teesSaved={teesSaved} onTeesSave={async r => { const next = { ...teesSaved, [r]: true }; const nextMod = { ...teesModified, [r]: false }; setTeesSaved(next); setTeesModified(nextMod); await saveTournamentState(finalizedRounds, passwords, next, nextMod); }} teesModified={teesModified} onTeesModify={async r => { const nextMod = { ...teesModified, [r]: true }; setTeesModified(nextMod); await saveTournamentState(finalizedRounds, passwords, teesSaved, nextMod); }} setTeesModified={setTeesModified} memberships={memberships} onSetDirector={onSetDirector} claims={claims} authUid={fbUser?.uid || null} tournamentMeta={tournamentMeta} onSaveTournamentMeta={saveTournamentMeta} /> : (
+            }} roundDates={roundDates} onSetRoundDate={async (rnd, dateStr) => { const next = { ...roundDates }; if (dateStr) next[rnd] = dateStr; else delete next[rnd]; setRoundDates(next); await saveTournamentState(finalizedRounds, passwords, teesSaved, teesModified, next, scoringOpen); }} scoringOpen={scoringOpen} onSetScoringOpen={async (rnd, open) => { const next = { ...scoringOpen }; if (open) next[rnd] = true; else delete next[rnd]; setScoringOpen(next); await saveTournamentState(finalizedRounds, passwords, teesSaved, teesModified, roundDates, next); }} pairingStrategy={pairingStrategy} onSetPairingStrategy={async (rnd, cfg) => { const next = { ...pairingStrategy }; if (cfg) next[rnd] = cfg; else delete next[rnd]; setPairingStrategy(next); await saveTournamentState(finalizedRounds, passwords, teesSaved, teesModified, roundDates, scoringOpen, next); }} leaderboard={getLeaderboard} passwords={passwords} setPasswords={async pw => { setPasswords(pw); await saveTournamentState(finalizedRounds, pw); }} holeData={holeData} finalizedRounds={finalizedRounds} onFinalizeRound={async rnd => { const nf = { ...finalizedRounds, [rnd]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${rnd}`, tournament_id: TOURNAMENT_ID, round: rnd, finalized: true }); if (rnd < 4) setRound(rnd + 1); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); if (/^\d+$/.test(String(key))) { await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${key}`, tournament_id: TOURNAMENT_ID, round: Number(key), finalized: false }); } else { setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); } }} notify={notify} notif={notif} getPlayerTee={getPlayerTee} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); }} currentUser={user} teesSaved={teesSaved} onTeesSave={async r => { const next = { ...teesSaved, [r]: true }; const nextMod = { ...teesModified, [r]: false }; setTeesSaved(next); setTeesModified(nextMod); await saveTournamentState(finalizedRounds, passwords, next, nextMod); }} teesModified={teesModified} onTeesModify={async r => { const nextMod = { ...teesModified, [r]: true }; setTeesModified(nextMod); await saveTournamentState(finalizedRounds, passwords, teesSaved, nextMod); }} setTeesModified={setTeesModified} memberships={memberships} onSetDirector={onSetDirector} claims={claims} authUid={fbUser?.uid || null} tournamentMeta={tournamentMeta} onSaveTournamentMeta={saveTournamentMeta} /> : (
           <div style={{ textAlign: "center", padding: "40px 20px" }}>
             <div style={{ fontSize: 40, marginBottom: 12 }}>🔒</div>
             <div style={{ fontSize: 16, fontWeight: 700, color: K.t1, marginBottom: 6 }}>Directors Only</div>

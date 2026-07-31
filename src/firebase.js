@@ -39,6 +39,7 @@ import {
   signOut,
   deleteUser,
 } from "firebase/auth";
+import { editionSlug, editionYear } from "./lib/editionId";
 
 // ─── Feature flag ──────────────────────────────────────────────────────────
 // Master switch for the whole Google/Apple sign-in feature. Keep FALSE until
@@ -94,6 +95,86 @@ const _functions = getFunctions(_app);
 // of historical CSV data). Docs are keyed by uid.
 export const USERS_COLLECTION = "wbc_users";
 const TOKENS_COLLECTION = "wbc_notifications_tokens";
+
+// ── Active edition pointer ──────────────────────────────────────────
+// Every tournament-scoped query and write is filtered by `tournament_id`, so
+// multiple editions (wbc_2026, wbc_2027, …) coexist in one Firestore. That id
+// used to be a `const` in App.jsx; it is now a single mutable source, so a
+// director can start next year's tournament without a redeploy.
+//
+// `TOURNAMENT_ID` is exported as a LIVE BINDING: it is an exported `let`
+// reassigned inside this module, so every importer reads the current edition
+// at access time and no existing call site had to change. New code should
+// prefer getActiveTournamentId() / tournamentFilter(); all three read the same
+// source. The pointer persists per-device in localStorage and defaults to
+// wbc_2026, so behavior is unchanged until an edition is chosen.
+const DEFAULT_TOURNAMENT_ID = "wbc_2026";
+export const ACTIVE_EDITION_KEY = "wbc_active_edition";
+
+const _readInitialEdition = () => {
+  try {
+    if (typeof localStorage !== "undefined") {
+      return localStorage.getItem(ACTIVE_EDITION_KEY) || DEFAULT_TOURNAMENT_ID;
+    }
+  } catch { /* blocked storage / SSR */ }
+  return DEFAULT_TOURNAMENT_ID;
+};
+
+export let TOURNAMENT_ID = _readInitialEdition();
+
+// ── Per-edition document-ID slug ────────────────────────────────────
+// WBC's document ids embed the year directly — `hs_2026_r1_aaron_j_h4`,
+// `tp_2026_aaron_j`, `tr_2026_r1`. That literal `2026` was hardcoded, so a
+// second edition would have written the SAME ids and overwritten the first,
+// even though its rows carry a different tournament_id and read back
+// correctly. Filtering separates the reads; only distinct ids separate the
+// writes.
+//
+// So the year in those ids now comes from the active edition. The slug is the
+// edition id with its `wbc_` prefix removed:
+//
+//   wbc_2026 → "2026"   — byte-identical to every id already in the database
+//   wbc_2027 → "2027"
+//
+// That back-compatibility is the reason for a slug rather than Bourbon Cup's
+// `${tid}__${bareId}` prefix scheme: BC had to leave its original edition
+// un-namespaced as a special case, whereas here the existing edition's ids
+// simply keep falling out of the general rule.
+//
+// A non-year id still works — wbc_masters → "masters" — it just has to be
+// unique, which is exactly the constraint the edition id itself already has.
+export const getEditionSlug = (tid = TOURNAMENT_ID) => editionSlug(tid);
+
+export const getActiveTournamentId = () => TOURNAMENT_ID;
+
+// Is the active edition the original one the app shipped with?
+//
+// This exists for exactly one caller: App.jsx's roster bootstrap, which seeds
+// `tournament_players` from the global `players` registry when an edition has
+// no roster yet. That was a one-time migration for the original edition, and
+// it becomes actively wrong once editions exist — a director who creates a
+// BLANK 2027 would find it pre-filled with every golfer who has ever played,
+// all at index 0, with no indication of where they came from. A newly created
+// edition's roster is whatever the director cloned or added, including empty.
+export const isDefaultEdition = () => TOURNAMENT_ID === DEFAULT_TOURNAMENT_ID;
+
+// The active edition's year, derived from its id (wbc_2026 → 2026). Single
+// source for every "which year is this" label, so the displayed year always
+// matches the edition whose data is on screen.
+export const getTournamentYear = () => editionYear(TOURNAMENT_ID);
+
+export const setActiveTournamentId = (id) => {
+  if (!id) return TOURNAMENT_ID;
+  TOURNAMENT_ID = id;
+  try {
+    if (typeof localStorage !== "undefined") localStorage.setItem(ACTIVE_EDITION_KEY, id);
+  } catch { /* ignore */ }
+  return TOURNAMENT_ID;
+};
+
+// Standard tournament-scope filter for db queries — routes through the active
+// edition. Prefer this over hand-writing the filter literal.
+export const tournamentFilter = () => [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }];
 
 // ─── Native platform detection ───────────────────────────────────────────
 // The Capacitor shells (iOS/Android) are not built yet, so @capacitor/core

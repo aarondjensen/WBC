@@ -292,6 +292,22 @@ service cloud.firestore {
       allow delete: if isSignedIn() && request.auth.uid == uid;
     }
 
+    // ── Editions ──────────────────────────────────────────────────
+    // The index of tournaments — one document per year (wbc_2026, …). Unlike
+    // everything below, it is NOT tournament-scoped: it is the list every
+    // other collection's tournament_id refers to.
+    //
+    // Read is open because the app must resolve the edition list before it
+    // knows which tournament it is showing — including on the very first load,
+    // before anyone has signed in.
+    //
+    // Write is DIRECTOR-only, and deliberately stricter than the collections
+    // below it: creating an edition is harmless, but deleting one takes a
+    // whole year's tournament with it (see deleteEdition in lib/editions.js).
+    // That is not a thing a member with a scorecard open should be able to do.
+    match /wbc_editions/{doc}       { allow read: if isOpen();
+                                      allow write: if canAdmin(); }
+
     // ── Director-owned setup ──────────────────────────────────────
     // The set no player screen can reach: the registry, the courses, the
     // round-to-course assignments and the tee sheet. All written from
