@@ -2,10 +2,11 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import { _app, _db, _auth, onAuthStateChanged, doGoogleSignIn, doAppleSignIn, doSignOut, consumeRedirectResult, deleteAccount, USERS_COLLECTION, NATIVE_APPLE_ENABLED, APPLE_PROVIDER_ENABLED, isNativePlatform, isAndroidNative, AUTH_PROVIDERS_ENABLED, TOURNAMENT_ID, getEditionSlug, getTournamentYear, isDefaultEdition } from "./firebase";
 import { readMembership, isDirectorAccount, joinWithCode, readAccessCode, setAccessCode, setDirector, subscribeMemberships, accountsUnreadable, membershipForPlayer, playerIsDirector } from "./lib/accounts";
-import { K, ON_ACC, FS, ALPHA, FONT } from "./theme";
+import { K, ON_ACC, FS, ALPHA, FONT, SHADOW } from "./theme";
 import { SegmentedToggle, StickyTop, SectionLabel, Card, Toast } from "./components/ui";
 import { calcCH, computeIndividualBoard, rankIndividualBoard, rankIndividualBoardIds, WD_SCORE } from "./lib/individualBoard";
 import { useConfirm } from "./lib/useConfirm";
+import { usePullToRefresh, hasNewBundle } from "./lib/usePullToRefresh";
 import { groupsForRound, assignToGroup, removeFromGroup as removeFromGroupPure, clearGroup, swapIntoGroup } from "./lib/pairings";
 import { Popup, ConfirmModal } from "./components/Popup";
 import { EditionSwitcher } from "./components/EditionSwitcher";
@@ -5517,6 +5518,55 @@ export default function WBCApp() {
   const [storageLoaded, setStorageLoaded] = useState(false);
   const [syncing, setSyncing] = useState(false);
 
+  // ── Pull-to-refresh ──
+  // Two jobs, and the first is the reason it exists at all: an installed PWA
+  // has no address bar, so a player running a stale bundle has no way to pick
+  // up a new deploy. hasNewBundle diffs the hashed asset URLs and reloads.
+  //
+  // The second is the collections that are NOT live. Most of this app arrives
+  // over onSnapshot — scores, pairings, tee assignments, skins, signatures,
+  // roster, tournament state — so it needs no refreshing. But `players`,
+  // `tournament_rounds`, `courses` and `tee_boxes` are read once at mount:
+  // they change only when a director edits them, which is rare, and paying for
+  // four more live listeners on every device would be a poor trade. The cost
+  // is that a course assigned mid-trip doesn't reach anyone else's phone until
+  // they relaunch. This is the pull that fixes that.
+  const refreshStaticData = useCallback(async () => {
+    const playerRows = await db.get("players");
+    if (playerRows?.length) {
+      DEMO_PLAYERS = playerRows
+        .map(r => ({ id: r.id, name: r.name, first_name: r.first_name || "", last_name: r.last_name || "" }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      // DEMO_PLAYERS is module-level, so replacing it does not by itself
+      // re-render anything that reads it. Nudge the state the roster derives
+      // from so activePlayers/allPlayers recompute against the new names.
+      setTPlayers(prev => [...prev]);
+    }
+
+    const trRows = await db.get("tournament_rounds", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
+    const sortedTRounds = (trRows || []).sort((a, b) => a.round_number - b.round_number);
+    if (!sortedTRounds.length) return;
+    setTRounds(sortedTRounds.map(r => ({ id: r.id, tournament_id: r.tournament_id, round_number: r.round_number, course_id: r.course_id })));
+
+    const courseIds = sortedTRounds.map(r => r.course_id).filter(Boolean);
+    if (!courseIds.length) return;
+    const cRows = await db.get("courses", [{ field: "id", op: "in", value: courseIds }]);
+    if (!cRows?.length) return;
+    const tbRows = await db.get("tee_boxes", [{ field: "course_id", op: "in", value: courseIds }]);
+    const coursesWithTees = cRows.map(c => ({
+      ...c,
+      hole_pars: c.hole_pars || [],
+      hole_handicaps: c.hole_handicaps || [],
+      tee_boxes: (tbRows || []).filter(t => t.course_id === c.id).map(t => ({ name: t.name, color: t.color, rating: parseFloat(t.rating), slope: parseInt(t.slope), par: parseInt(t.par), yardage: parseInt(t.yardage) })),
+    }));
+    setCourseList(sortCoursesByRound(coursesWithTees, sortedTRounds));
+  }, []);
+
+  const { pullY, refreshing: pullRefreshing, PULL_THRESHOLD } = usePullToRefresh({
+    hasNewBundle,
+    onRefresh: refreshStaticData,
+  });
+
   // ── Load all data from Firestore on mount ──
   useEffect(() => {
     (async () => {
@@ -6610,6 +6660,45 @@ export default function WBCApp() {
           or from admin once that modal closed — was set and never shown. */}
       <Toast message={notif} />
 
+      {/* Pull-to-refresh indicator. A trophy MASK rather than an <img>, the
+          same technique the nav uses, so the silhouette can be tinted and
+          rotated cleanly. Opacity ramps with the pull, and the ring lights up
+          at the threshold — the two signals that tell you it will fire before
+          you let go. position:fixed at top:0, so it clears the status bar /
+          island itself via the safe-area inset. */}
+      {pullY > 0 && (
+        <div style={{
+          position: "fixed", top: 0, left: 0, right: 0, zIndex: 999,
+          display: "flex", justifyContent: "center",
+          paddingTop: `calc(env(safe-area-inset-top, 0px) + ${Math.min(pullY, 100) - 20}px)`,
+          transition: pullRefreshing ? "all .3s" : "none",
+          pointerEvents: "none",
+        }}>
+          <style>{`
+            @keyframes wbcPullSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+            @keyframes wbcPullGlow { 0%,100% { box-shadow: 0 0 8px ${K.acc}${ALPHA.line}; } 50% { box-shadow: 0 0 18px ${K.acc}${ALPHA.panel}; } }
+          `}</style>
+          <div style={{
+            width: 44, height: 44, borderRadius: "50%", background: K.card,
+            border: `2.5px solid ${pullY >= PULL_THRESHOLD ? K.acc : K.bdr}`,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            boxShadow: pullY >= PULL_THRESHOLD ? `0 0 12px ${K.acc}${ALPHA.line}` : `0 2px 12px ${SHADOW}`,
+            transition: "border-color .2s, box-shadow .3s", overflow: "hidden",
+            animation: pullRefreshing ? "wbcPullGlow 1s ease-in-out infinite" : "none",
+          }}>
+            <div style={{
+              width: 26, height: 26, background: K.acc,
+              WebkitMask: `url("${TROPHY_SVG_URL}") center/contain no-repeat`,
+              mask: `url("${TROPHY_SVG_URL}") center/contain no-repeat`,
+              opacity: pullY >= PULL_THRESHOLD ? 1 : 0.3 + (pullY / PULL_THRESHOLD) * 0.7,
+              transform: pullRefreshing ? "none" : `rotate(${pullY * 3}deg)`,
+              animation: pullRefreshing ? "wbcPullSpin .8s linear infinite" : "none",
+              transition: pullRefreshing ? "none" : "opacity .2s",
+            }} />
+          </div>
+        </div>
+      )}
+
       <div style={{ padding: "10px 20px", paddingTop: "max(10px, calc(env(safe-area-inset-top, 0px) + 10px))", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${K.bdr}`, background: "rgba(14,24,41,0.95)", position: "sticky", top: 0, zIndex: 50 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <img src={WBC_TROPHY_LOGO} alt="WBC" style={{ height: 32 }} />
@@ -6730,7 +6819,7 @@ export default function WBCApp() {
       </div>
       )}
 
-      <div style={{ padding: (view === "leaderboard" || view === "admin") ? "14px 20px 0 20px" : "14px 20px", flex: 1, overflowY: "auto", overflowX: "hidden", display: (view === "leaderboard" || view === "admin") ? "flex" : "block", flexDirection: "column", minHeight: 0, paddingBottom: view === "leaderboard" ? "28px" : 0 }}>
+      <div className="wbc-app-body" style={{ padding: (view === "leaderboard" || view === "admin") ? "14px 20px 0 20px" : "14px 20px", flex: 1, overflowY: "auto", overflowX: "hidden", display: (view === "leaderboard" || view === "admin") ? "flex" : "block", flexDirection: "column", minHeight: 0, paddingBottom: view === "leaderboard" ? "28px" : 0 }}>
         {view === "leaderboard" && <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} />}
         <div style={{ display: view === "scoring" ? "block" : "none", paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
           <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeTimesData={teeTimesData} roundDates={roundDates} scoringOpen={scoringOpen} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={async (key, signerPid, signerName, present, rnd) => { const nonSigners = (present || []).filter(pid => pid !== signerPid); const autoFinal = nonSigners.length === 0; const optimistic = { signedBy: signerPid, signedByName: signerName, attestedBy: [], present: present || [] }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: optimistic })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), tournament_id: TOURNAMENT_ID, groupKey: key, round: rnd, signedBy: signerPid, signedByName: signerName, present: present || [], attestedBy: [], signedAt: new Date().toISOString() }); if (autoFinal) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); } }} onAttestScorecard={async (key, attesterPid, nonSigners) => { const cur = scorecardSigs[key]; if (!cur) return; const attestedBy = [...new Set([...(cur.attestedBy || []), attesterPid])]; const optimistic = { ...cur, attestedBy }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: { ...prev[key], attestedBy } })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), attestedBy }); const allDone = (nonSigners || []).every(pid => attestedBy.includes(pid)); if (allDone) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); } }} onUnsignScorecard={async key => { pendingSigsRef.current.delete(key); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); if (finalizedRounds[key]) { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); } }} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); pendingSigsRef.current.delete(key); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); await saveTournamentState(nf, passwords); }} onGoToAdminCourses={() => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); }} markPlayerWD={markPlayerWD} ctpData={ctpData} onSetCtp={onSetCtp} />

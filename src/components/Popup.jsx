@@ -33,6 +33,11 @@ export function Popup({
   const node = (
     <div
       onClick={dismissOnBackdrop ? onClose : undefined}
+      // Marks this subtree as a modal for usePullToRefresh, which bails when
+      // the walk up from a touch target crosses it. That is what stops the
+      // page's pull-to-refresh fighting a scrolling modal, without the app
+      // having to keep a "is any popup open" ref in sync by hand.
+      data-popup="1"
       style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.82)", zIndex, display: "flex", alignItems: "center", justifyContent: "center", padding: overlayPadding }}
     >
       <div
