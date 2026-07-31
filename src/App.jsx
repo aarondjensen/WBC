@@ -2,6 +2,12 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import { _app, _db, _auth, onAuthStateChanged, doGoogleSignIn, doAppleSignIn, doSignOut, consumeRedirectResult, deleteAccount, USERS_COLLECTION, NATIVE_APPLE_ENABLED, APPLE_PROVIDER_ENABLED, isNativePlatform, isAndroidNative, AUTH_PROVIDERS_ENABLED } from "./firebase";
 import { readMembership, isDirectorAccount, joinWithCode, readAccessCode, setAccessCode, setDirector, subscribeMemberships, accountsUnreadable } from "./lib/accounts";
+import { K, ON_ACC } from "./theme";
+import { calcCH, computeIndividualBoard, rankIndividualBoard, rankIndividualBoardIds } from "./lib/individualBoard";
+import { useConfirm } from "./lib/useConfirm";
+import { Popup, ConfirmModal } from "./components/Popup";
+import { GhinLinkButton, GhinSyncButton, GhinBadge } from "./components/GhinLink";
+import { fmtHI } from "./lib/ghin";
 import { collection, doc, setDoc, getDocs, query, where, writeBatch, onSnapshot, deleteDoc } from "firebase/firestore";
 import { getMessaging, getToken, onMessage, isSupported as isMessagingSupported } from "firebase/messaging";
 const WBC_LOGO = "/wbc-icon-512.png";
@@ -337,7 +343,9 @@ const rowsToTeeTimes = (rows) => {
   return tt;
 };
 
-const calcCH = (hi, slope, rating, par) => (!hi && hi !== 0) ? 0 : Math.round((hi * (slope / 113)) + (rating - par));
+// calcCH now lives in lib/individualBoard.js, alongside the net-to-par math it
+// feeds, and is imported at the top of this file — one implementation for the
+// leaderboard, the scorecards and the finalize preview alike.
 const fmtPar = n => n == null ? "—" : n === 0 ? "E" : n > 0 ? `+${n}` : `${n}`;
 
 // ── SCORING GATE HELPERS ──
@@ -486,15 +494,8 @@ const getDefaultTee = (tees) => {
   return best;
 };
 
-const K = {
-  bg: "#080f1a", card: "#0e1829", inp: "#0a1425", hover: "#142036",
-  acc: "#22d3a7", accDim: "#0d9b73", accGlow: "rgba(34,211,167,0.12)",
-  tourn: "#38bdf8", tournGlow: "rgba(56,189,248,0.12)",
-  warn: "#f59e0b", danger: "#ef4444",
-  t1: "#e8edf5", t2: "#8b9ec2", t3: "#526484",
-  bdr: "#1a2b47",
-  eagle: "#3b82f6", birdie: "#22c55e", par: "#8b9ec2", bogey: "#eab308", dbl: "#ef4444",
-};
+// K moved to src/theme.js when a second file needed it — see that file's
+// header. Imported at the top; every read below is unchanged.
 
 const TEE_PALETTE = ["#60a5fa","#f59e0b","#a78bfa","#34d399","#fb923c","#f472b6","#38bdf8","#e879f9"];
 
@@ -982,26 +983,9 @@ function ScoreButtonRow({ score, par, onPick }) {
 
 // ═══════════════════════════════════════════════════════════════
 //  Popup — shared modal chrome (backdrop + centered card)
-// ═══════════════════════════════════════════════════════════════
-// Reusable modal used by Full Scorecard, WD confirm, Finalize, and CTP.
-// Backdrop dismisses by default; opt out with dismissOnBackdrop={false}
-// for destructive/blocking modals. Card height caps at (--app-height - 90px)
-// so long content scrolls without pushing the modal off-screen on iOS PWA.
-function Popup({ children, onClose, maxWidth = 420, background, borderColor, padding = 14, dismissOnBackdrop = true, zIndex = 300, overlayPadding = 12 }) {
-  return (
-    <div
-      onClick={dismissOnBackdrop ? onClose : undefined}
-      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.82)", zIndex, display: "flex", alignItems: "center", justifyContent: "center", padding: overlayPadding }}
-    >
-      <div
-        onClick={e => e.stopPropagation()}
-        style={{ background: background || K.bg, border: `1px solid ${borderColor || K.bdr}`, borderRadius: 16, width: "100%", maxWidth, maxHeight: "calc(var(--app-height, 100dvh) - 90px)", overflowY: "auto", padding }}
-      >
-        {children}
-      </div>
-    </div>
-  );
-}
+// Popup moved to components/Popup.jsx (alongside ConfirmModal, which builds on
+// it) and is imported at the top of this file. Behavior is unchanged for every
+// caller below; the extracted version adds an opt-in `portal` prop.
 
 // ── ON-COURSE SCORING (replaces old ScoringView) ──
 // Flow: Group Setup → Hole-by-hole for entire group → auto-advance
@@ -2671,8 +2655,13 @@ function PairingsEditor({ activePlayers, numRounds, pairingsData, setPairings, t
         setGenMsg({ tone: "warn", text: "No scores posted yet — leaderboard order isn't set. Play an earlier round first, or pair this round another way." });
         return;
       }
+      // Re-rank through the canonical comparator rather than trusting the
+      // incoming array's order. Filtering a ranked list does preserve order, so
+      // this is a no-op today — but it is the call that makes "pairings are
+      // drawn in leaderboard order" true by construction rather than by a
+      // convention some future caller could break.
+      const orderedIds = rankIndividualBoardIds(ordered);
       // Append any active players missing from the leaderboard array (safety net).
-      const orderedIds = ordered.map(p => p.id);
       pids.forEach(id => { if (!orderedIds.includes(id)) orderedIds.push(id); });
       const ng = groupByLeaderboard(orderedIds, numGroups, cfg.leadersLast);
       const padded = ng.map(g => g.slice());
@@ -3221,7 +3210,7 @@ function TeeAssigner({ activePlayers, numRounds, tRounds, courses, teeData, setT
   );
 }
 
-function PlayerRow({ player, onUpdateHI, onUpdateName, onRemove, onSavePassword, password, isLast, ac }) {
+function PlayerRow({ player, onUpdateHI, onUpdateName, onRemove, onSavePassword, password, isLast, ac, onUpdatePlayer, notify, currentUser }) {
   const [editing, setEditing] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [hi, setHi] = useState(String(player.handicap_index));
@@ -3271,8 +3260,17 @@ function PlayerRow({ player, onUpdateHI, onUpdateName, onRemove, onSavePassword,
 
   return (
     <div style={{ padding: "10px 14px", display: "flex", alignItems: "center", borderBottom: !isLast ? `1px solid ${K.bdr}10` : "none" }}>
-      <span style={{ flex: "0 0 40%", fontWeight: 600, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{player.name}</span>
-      <span style={{ flex: "0 0 15%", textAlign: "center", fontSize: 12, color: K.t2 }}>{player.handicap_index}</span>
+      <div style={{ flex: "0 0 40%", minWidth: 0, display: "flex", alignItems: "center", gap: 5 }}>
+        <span style={{ fontWeight: 600, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{player.name}</span>
+        {/* The GHIN chip sits with the NAME, not with the index, because it
+            binds an identity — the index is what that binding produces. */}
+        {onUpdatePlayer && (
+          <GhinLinkButton player={player} user={currentUser} onUpdatePlayer={onUpdatePlayer} notify={notify} />
+        )}
+      </div>
+      <span style={{ flex: "0 0 15%", textAlign: "center", fontSize: 12, color: K.t2 }} title={player.ghin_number ? `From GHIN #${player.ghin_number}` : undefined}>
+        {fmtHI(player.handicap_index)}
+      </span>
       <div style={{ flex: "0 0 30%", display: "flex", alignItems: "center", justifyContent: "center", gap: 3 }}>
         <span style={{ fontSize: 11, color: K.t2, fontFamily: "monospace" }}>{showPw ? (password || DEFAULT_PW) : "••••••"}</span>
         <button onClick={() => setShowPw(!showPw)} style={{ background: "transparent", border: "none", color: K.t3, fontSize: 9, cursor: "pointer", padding: "0 1px" }}>{showPw ? "hide" : "show"}</button>
@@ -3305,7 +3303,115 @@ function PlayerRow({ player, onUpdateHI, onUpdateName, onRemove, onSavePassword,
 // director can never leave the tournament unadministered). Stepping down is a
 // console edit, and so is the FIRST director, since the rule requires one to
 // already exist.
-function AccessPanel({ memberships, onSetDirector, claims, players, authUid, notify }) {
+// ── ADMIN → SETTINGS → EVENT ──
+// Tournament identity: the name and location shown in the app header and on
+// the login screen. Ported from Bourbon Cup's Admin "Tournament" tab.
+//
+// Before this, both were baked into the TOURNAMENT constant at the top of this
+// file, so renaming the event — or moving it to a different course town — was
+// a code change and a redeploy. They are now a document, and the constant is
+// the fallback used until one is saved.
+//
+// One card and one Save for both, because they are the same sentence on every
+// screen that shows them ("WBC 2026 · Gaylord, MI"), and a director renaming
+// the event for a new venue would otherwise have to remember two saves. An
+// empty field falls back to its constant rather than saving blank, so the
+// header can't end up with a hole in it.
+function TournamentPanel({ meta, onSave, notify }) {
+  const [name, setName] = useState(meta?.name || "");
+  const [location, setLocation] = useState(meta?.location || "");
+  const [busy, setBusy] = useState(false);
+
+  // Re-seed the fields when the SAVED values change — React's documented
+  // adjust-state-during-render pattern rather than an effect, so the inputs
+  // never paint one frame of stale text after a save lands.
+  //
+  // Keyed on the values, not on the `meta` object: Firestore hands back a new
+  // object on every snapshot, so comparing identity would wipe whatever the
+  // director was mid-way through typing each time any unrelated field of the
+  // tournament_state document changed.
+  const savedKey = `${meta?.name || ""} ${meta?.location || ""}`;
+  const [seenKey, setSeenKey] = useState(savedKey);
+  if (savedKey !== seenKey) {
+    setSeenKey(savedKey);
+    setName(meta?.name || "");
+    setLocation(meta?.location || "");
+  }
+
+  const pendingName = name.trim() || TOURNAMENT.name;
+  const pendingLocation = location.trim();
+  // Compared against the saved DOCUMENT, not against the last save, so a
+  // director who types and then undoes it by hand sees the Save light go out.
+  const dirty = pendingName !== (meta?.name || TOURNAMENT.name)
+    || pendingLocation !== (meta?.location || "");
+
+  const save = async () => {
+    setBusy(true);
+    await onSave({ name: pendingName, location: pendingLocation });
+    setBusy(false);
+    notify?.("Tournament details saved");
+  };
+
+  const label = { fontSize: 10, fontWeight: 700, color: K.t3, textTransform: "uppercase", letterSpacing: "0.06em" };
+  const input = {
+    flex: 1, minWidth: 0, boxSizing: "border-box", padding: "10px 12px",
+    background: K.inp, border: `1px solid ${K.bdr}`, borderRadius: 8,
+    // 16px, not 13: iOS Safari zooms the page when a focused input is under
+    // 16px and does not zoom back out on blur, stranding the director at 2x
+    // on a form they still have to finish.
+    color: K.t1, fontSize: 16, fontWeight: 700, outline: "none",
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ background: K.card, borderRadius: 12, border: `1px solid ${K.bdr}`, padding: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
+          <div style={label}>Tournament</div>
+          <button onClick={save} disabled={!dirty || busy} style={{
+            flexShrink: 0, fontSize: 11, fontWeight: 700, borderRadius: 6, padding: "8px 14px",
+            color: dirty ? ON_ACC : K.t3,
+            background: dirty ? K.acc : K.inp,
+            border: dirty ? "none" : `1px solid ${K.bdr}`,
+            cursor: dirty && !busy ? "pointer" : "default",
+          }}>{busy ? "…" : "Save"}</button>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {[
+            { key: "name", val: name, set: setName, ph: TOURNAMENT.name, lbl: "Name" },
+            { key: "location", val: location, set: setLocation, ph: "e.g. Gaylord, MI", lbl: "Location" },
+          ].map(f => (
+            <div key={f.key} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              {/* Fixed 58px gutter — the width of the longest label at this
+                  size — so both inputs share a left edge. */}
+              <span style={{ ...label, width: 58, flexShrink: 0 }}>{f.lbl}</span>
+              <input value={f.val} onChange={e => f.set(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }}
+                placeholder={f.ph} style={input} />
+            </div>
+          ))}
+        </div>
+        <div style={{ fontSize: 11, color: K.t3, marginTop: 8, lineHeight: 1.4 }}>
+          Shown in the app header and on the sign-in screen. Leave the name blank to fall back to &ldquo;{TOURNAMENT.name}&rdquo;.
+        </div>
+      </div>
+
+      {/* Read-only facts about the event's shape. Surfaced here because this
+          is the tab a director opens asking "what is this tournament", and
+          both are set in code rather than by this screen. */}
+      <div style={{ background: K.card, borderRadius: 12, border: `1px solid ${K.bdr}`, padding: 14 }}>
+        <div style={{ ...label, marginBottom: 8 }}>Format</div>
+        <div style={{ fontSize: 12, color: K.t2, lineHeight: 1.6 }}>
+          {NUM_ROUNDS}-round individual net stroke play.<br />
+          Handicap indexes are locked for the tournament — every round&rsquo;s net score is
+          calculated from the current index, so changing one after play starts re-scores
+          rounds already in the book.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AccessPanel({ memberships, onSetDirector, claims, players, authUid, notify, confirm }) {
   const [code, setCode] = useState("");
   const [revealed, setRevealed] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -3325,11 +3431,27 @@ function AccessPanel({ memberships, onSetDirector, claims, players, authUid, not
   };
 
   const save = async () => {
+    const next = (code || "").trim();
+    // Ported from Bourbon Cup: taking the password OFF is a one-tap action
+    // with no undo that opens the tournament to anyone with a Google account,
+    // and it is one keystroke away from a normal edit. Ask first, and say
+    // which of the two things is about to happen.
+    if (confirm) {
+      const ok = await confirm({
+        title: next ? "Change the password?" : "Remove the password?",
+        message: next
+          ? `Anyone signing in from now on needs "${next}" before they can claim a name or post a score.\n\nNobody already through the door is affected — this does not sign anybody out.`
+          : "Anybody who signs in with Google or Apple will be able to claim a name and post scores.",
+        confirmLabel: next ? "Change it" : "Remove it",
+        destructive: !next,
+      });
+      if (!ok) return;
+    }
     setBusy(true); setErr("");
     const res = await setAccessCode(code);
     setBusy(false);
     if (!res.ok) { setErr(res.error); return; }
-    notify?.((code || "").trim() ? "Password saved" : "Password cleared — anyone can sign in");
+    notify?.(next ? "Password saved" : "Password cleared — anyone can sign in");
   };
 
   const toggleDirector = async (uid, on) => {
@@ -3427,8 +3549,12 @@ function AccessPanel({ memberships, onSetDirector, claims, players, authUid, not
   );
 }
 
-function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, roundDates, onSetRoundDate, scoringOpen, onSetScoringOpen, pairingStrategy, onSetPairingStrategy, leaderboard, passwords, setPasswords, holeData, finalizedRounds, onFinalizeRound, onUnfinalizeRound, notify, notif, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, onExternalSettingsHandled, currentUser, teesSaved, onTeesSave, teesModified, onTeesModify, setTeesModified, memberships, onSetDirector, claims, authUid }) {
+function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, onUpdatePlayerGhin, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, roundDates, onSetRoundDate, scoringOpen, onSetScoringOpen, pairingStrategy, onSetPairingStrategy, leaderboard, passwords, setPasswords, holeData, finalizedRounds, onFinalizeRound, onUnfinalizeRound, notify, notif, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, onExternalSettingsHandled, currentUser, teesSaved, onTeesSave, teesModified, onTeesModify, setTeesModified, memberships, onSetDirector, claims, authUid, tournamentMeta, onSaveTournamentMeta }) {
   const [tab, setTab] = useState("tees");
+  // Themed confirmations (see lib/useConfirm). The host <ConfirmModal/> is
+  // rendered once at the bottom of this view; `confirm(...)` returns a
+  // Promise<boolean>.
+  const { confirm, confirmModal } = useConfirm();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [showFinalizeModal, setShowFinalizeModal] = useState(false);
   const [settingsTab, setSettingsTab] = useState("course");
@@ -3965,9 +4091,11 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
             </div>
             {/* Settings sub-tabs */}
             <div style={{ display: "flex", gap: 4, padding: "10px 16px 0" }}>
-              {[["course","Courses"],["players","Players"],["access","Access"]].map(([k,l]) => {
+              {[["course","Courses"],["players","Players"],["access","Access"],["tournament","Event"]].map(([k,l]) => {
                 const isActive = settingsTab === k;
-                const count = k === "course" ? courses.length : k === "players" ? activePlayers.length : (memberships || []).length;
+                // The Event tab is a single settings form, not a list — a
+                // count next to it would be a number with nothing to count.
+                const count = k === "course" ? courses.length : k === "players" ? activePlayers.length : k === "access" ? (memberships || []).length : null;
                 return (
                   <button key={k} onClick={() => setSettingsTab(k)} style={{
                     flex: 1, padding: "8px 0", borderRadius: 8, fontSize: 12, fontWeight: isActive ? 700 : 500,
@@ -3975,7 +4103,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                     color: isActive ? K.tourn : K.t2,
                     border: `1px solid ${isActive ? K.tourn + "40" : K.bdr}`,
                     cursor: "pointer",
-                  }}>{l} <span style={{ opacity: 0.7, fontWeight: 400 }}>({count})</span></button>
+                  }}>{l}{count != null && <span style={{ opacity: 0.7, fontWeight: 400 }}> ({count})</span>}</button>
                 );
               })}
             </div>
@@ -3983,14 +4111,24 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
             <div style={{ flex: 1, overflowY: "auto", padding: "12px 16px 24px" }}>
               {settingsTab === "access" && (
                 <AccessPanel memberships={memberships} onSetDirector={onSetDirector}
-                  claims={claims} players={players} authUid={authUid} notify={notify} />
+                  claims={claims} players={players} authUid={authUid} notify={notify} confirm={confirm} />
+              )}
+              {settingsTab === "tournament" && (
+                <TournamentPanel meta={tournamentMeta} onSave={onSaveTournamentMeta} notify={notify} />
               )}
               {settingsTab === "players" && (
                 <div>
                   <div style={{ background: K.card, borderRadius: 12, border: `1px solid ${K.bdr}`, overflow: "hidden" }}>
                     <div style={{ padding: "10px 14px", display: "flex", alignItems: "center", borderBottom: `1px solid ${K.bdr}` }}>
                       <span style={{ flex: "0 0 40%", fontSize: 10, fontWeight: 600, color: K.t3, textTransform: "uppercase" }}>Name</span>
-                      <span style={{ flex: "0 0 15%", fontSize: 10, fontWeight: 600, color: K.t3, textTransform: "uppercase", textAlign: "center" }}>Idx</span>
+                      {/* The badge labels the index column as GHIN-sourced;
+                          the sync button heads that same column, because what
+                          it refreshes is every number under it. */}
+                      <span style={{ flex: "0 0 15%", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}>
+                        <GhinBadge size="xs" title="Handicap indexes sourced from GHIN" />
+                        <GhinSyncButton compact players={activePlayers} onUpdatePlayer={onUpdatePlayerGhin}
+                          notify={notify} confirm={confirm} started={tournamentStarted} />
+                      </span>
                       <span style={{ flex: "0 0 30%", fontSize: 10, fontWeight: 600, color: K.t3, textTransform: "uppercase", textAlign: "center" }}>Password</span>
                       <div style={{ flex: "0 0 15%", textAlign: "right" }}>
                         <button onClick={() => setAdding(true)} style={{ padding: "3px 8px", borderRadius: 6, background: "transparent", border: `1px solid ${ac}50`, color: ac, fontSize: 10, fontWeight: 600, cursor: "pointer" }}>+ Add</button>
@@ -4011,7 +4149,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                         </div>
                       </div>
                     )}
-                    {[...activePlayers].sort((a,b) => a.name.localeCompare(b.name)).map((p, i) => <PlayerRow key={p.id} player={p} password={passwords[p.id] || DEFAULT_PW} onUpdateHI={guardedUpdateHI} onUpdateName={updateName} onRemove={removePlayer} onSavePassword={(pid, pw) => setPasswords(prev => ({ ...prev, [pid]: pw }))} isLast={i === activePlayers.length - 1} ac={ac} />)}
+                    {[...activePlayers].sort((a,b) => a.name.localeCompare(b.name)).map((p, i) => <PlayerRow key={p.id} player={p} password={passwords[p.id] || DEFAULT_PW} onUpdateHI={guardedUpdateHI} onUpdateName={updateName} onRemove={removePlayer} onSavePassword={(pid, pw) => setPasswords(prev => ({ ...prev, [pid]: pw }))} isLast={i === activePlayers.length - 1} ac={ac} onUpdatePlayer={onUpdatePlayerGhin} notify={notify} currentUser={currentUser} />)}
                   </div>
                 </div>
               )}
@@ -4851,9 +4989,9 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
         </div>
       )}
 
-
-
-
+      {/* Single confirmation host for this console — every `await confirm(...)`
+          in AdminView and the panels it renders resolves through this one. */}
+      <ConfirmModal modal={confirmModal} />
     </div>
   );
 }
@@ -5101,10 +5239,13 @@ export default function WBCApp() {
   const [round, setRound] = useState(1);
   const [notif, setNotif] = useState(null);
 
-  // Set favicon and page title
+  // The tab title follows the saved tournament name, so renaming the event in
+  // the Event settings tab renames the browser tab too. Split out of the
+  // favicon effect below because that one deliberately runs once.
+  useEffect(() => { document.title = tournamentName; }, [tournamentName]);
+
+  // Set favicon
   useEffect(() => {
-    // Set tab title
-    document.title = "WBC 2026";
     const link = document.querySelector("link[rel*='icon']") || document.createElement("link");
     link.type = "image/png"; link.rel = "shortcut icon"; link.href = "/wbc-trophy.png";
     document.head.appendChild(link);
@@ -5190,6 +5331,14 @@ export default function WBCApp() {
   const [adminSettingsOpen, setAdminSettingsOpen] = useState(false);
   const [adminSettingsTab, setAdminSettingsTab] = useState("players");
   const [passwords, setPasswords] = useState({});
+  // Editable tournament identity — { name, location }. Null until a director
+  // saves one, at which point it overrides the TOURNAMENT constant everywhere
+  // the event is named. Lives on the existing tournament_state doc rather than
+  // in a collection of its own: it is one more piece of the same singleton,
+  // and a new collection would need its own firestore.rules entry.
+  const [tournamentMeta, setTournamentMeta] = useState(null);
+  const tournamentName = tournamentMeta?.name || TOURNAMENT.name;
+  const tournamentLocation = tournamentMeta?.location || "";
   const [storageLoaded, setStorageLoaded] = useState(false);
   const [syncing, setSyncing] = useState(false);
 
@@ -5277,6 +5426,7 @@ export default function WBCApp() {
           if (s.round_dates) setRoundDates(s.round_dates);
           if (s.scoring_open) setScoringOpen(s.scoring_open);
           if (s.pairing_strategy) setPairingStrategy(s.pairing_strategy);
+          if (s.meta) setTournamentMeta(s.meta);
         }
 
       } catch(e) { console.error("Load failed:", e); }
@@ -5328,6 +5478,7 @@ export default function WBCApp() {
         if (docs[0].round_dates) setRoundDates(docs[0].round_dates);
         if (docs[0].scoring_open) setScoringOpen(docs[0].scoring_open);
         if (docs[0].pairing_strategy) setPairingStrategy(docs[0].pairing_strategy);
+        if (docs[0].meta) setTournamentMeta(docs[0].meta);
       }
     }));
 
@@ -5352,6 +5503,20 @@ export default function WBCApp() {
   }, []);
 
   // Save tournament state to Firestore
+  // Written on its own rather than through saveTournamentState: that helper
+  // takes seven positional arguments and rewrites all of them, so threading an
+  // eighth through every existing call site to change a name would be a much
+  // bigger edit than the feature. db.upsert merges, so this touches only `meta`.
+  const saveTournamentMeta = async (meta) => {
+    setTournamentMeta(meta);
+    await db.upsert("tournament_state", {
+      id: `ts_${TOURNAMENT_ID}`,
+      tournament_id: TOURNAMENT_ID,
+      meta,
+      updated_at: new Date().toISOString(),
+    });
+  };
+
   const saveTournamentState = async (finalized, pwds, savedTees, modTees, rDates, sOpen, pStrat) => {
     const tsSaved = savedTees !== undefined ? savedTees : teesSaved;
     const tsMod = modTees !== undefined ? modTees : teesModified;
@@ -5506,10 +5671,25 @@ export default function WBCApp() {
     else if (res === "unsupported") notify("Notifications aren't supported here — add the app to your home screen first");
   };
 
+  // The GHIN link travels with the handicap index, on the tournament_players
+  // doc: the revision date and sync stamp only mean anything as qualifiers of
+  // THAT index, and the WBC index is tournament-scoped (locked for the event)
+  // rather than a rolling player attribute. Carried onto the player object
+  // here so the roster UI can read it without a second lookup.
+  const withGhin = (p, tp) => ({
+    ...p,
+    handicap_index: parseFloat(tp.handicap_index) || 0,
+    tp_id: tp.id,
+    ghin_number: tp.ghin_number || null,
+    ghin_name: tp.ghin_name || null,
+    ghin_rev_date: tp.ghin_rev_date || null,
+    ghin_synced_at: tp.ghin_synced_at || null,
+  });
+
   const activePlayers = useMemo(() => {
     return tPlayers.filter(tp => tp.status !== "WD").map(tp => {
       const p = DEMO_PLAYERS.find(pl => pl.id === tp.player_id);
-      return p ? { ...p, handicap_index: parseFloat(tp.handicap_index) || 0, tp_id: tp.id } : null;
+      return p ? withGhin(p, tp) : null;
     }).filter(Boolean).sort((a,b) => a.name.localeCompare(b.name));
   }, [tPlayers]);
 
@@ -5517,7 +5697,7 @@ export default function WBCApp() {
   const allPlayers = useMemo(() => {
     return tPlayers.map(tp => {
       const p = DEMO_PLAYERS.find(pl => pl.id === tp.player_id);
-      return p ? { ...p, handicap_index: parseFloat(tp.handicap_index) || 0, tp_id: tp.id, isWD: tp.status === "WD" } : null;
+      return p ? { ...withGhin(p, tp), isWD: tp.status === "WD" } : null;
     }).filter(Boolean).sort((a,b) => a.name.localeCompare(b.name));
   }, [tPlayers]);
 
@@ -5654,59 +5834,20 @@ export default function WBCApp() {
     return getDefaultTee(course.tee_boxes) || course.tee_boxes[0];
   };
 
-  const getLeaderboard = useMemo(() => {
-    return allPlayers.map(p => {
-      let totalNetToPar = 0, roundsPlayed = 0, totalThru = 0;
-      const rds = [];
-      for (let r = 1; r <= NUM_ROUNDS; r++) {
-        const tr = tRounds.find(t => t.round_number === r);
-        if (!tr) { rds.push({ netToPar: null, thru: 0, wd: false }); continue; }
-        const course = courseList.find(c => c.id === tr.course_id);
-        if (!course) { rds.push({ netToPar: null, thru: 0, wd: false }); continue; }
-        const tee = getPlayerTee(r, p.id, course);
-        const slope = tee?.slope || course.slope;
-        const rating = tee?.rating || course.rating;
-        const par = tee?.par || course.par;
-        const key = `${p.id}_${r}`;
-        const scores = holeData[key] || {};
-        // Only count real scores (not WD sentinel 99) for net calculation
-        const realEntries = Object.entries(scores).filter(([_, s]) => s !== 99);
-        const thru = realEntries.length;
-        const isWDRound = Object.values(scores).some(s => s === 99);
-        if (thru > 0 || isWDRound) {
-          const gross = realEntries.reduce((a, [_, s]) => a + s, 0);
-          const parForHoles = realEntries.reduce((a, [h]) => a + ((course.hole_pars || [])[parseInt(h)] || 4), 0);
-          // Distribute handicap strokes by hole difficulty order, only count strokes for played holes
-          const ch = calcCH(p.handicap_index, slope, rating, par);
-          const holeHcps = course.hole_handicaps || [];
-          const sorted = holeHcps.length
-            ? holeHcps.map((h, i) => ({ idx: i, hcp: h })).sort((a, b) => a.hcp - b.hcp)
-            : Array.from({ length: 18 }, (_, i) => ({ idx: i, hcp: i + 1 }));
-          const strokeMap = {};
-          let rem = Math.abs(ch);
-          for (let pass = 0; pass < 3 && rem > 0; pass++) {
-            for (const h of sorted) { if (rem <= 0) break; strokeMap[h.idx] = (strokeMap[h.idx] || 0) + 1; rem--; }
-          }
-          // Only sum strokes for holes that were actually played
-          const strokesForPlayedHoles = realEntries.reduce((a, [h]) => a + (strokeMap[parseInt(h)] || 0), 0);
-          const netToPar = ch >= 0
-            ? gross - parForHoles - strokesForPlayedHoles
-            : gross - parForHoles + strokesForPlayedHoles;
-          roundsPlayed++; totalNetToPar += netToPar; totalThru += thru;
-          rds.push({ netToPar, thru, wd: isWDRound });
-        } else { rds.push({ netToPar: null, thru: 0, wd: false }); }
-      }
-      return { ...p, totalNetToPar, roundsPlayed, totalThru, rds };
-    }).sort((a, b) => {
-      // WD players always sort to the bottom
-      if (a.isWD && b.isWD) return 0;
-      if (a.isWD) return 1;
-      if (b.isWD) return -1;
-      if (!a.roundsPlayed && !b.roundsPlayed) return 0;
-      if (!a.roundsPlayed) return 1; if (!b.roundsPlayed) return -1;
-      return a.totalNetToPar - b.totalNetToPar;
-    });
-  }, [allPlayers, tRounds, courseList, holeData, teeData]);
+  // The board, ranked best → worst. Both halves come from lib/individualBoard
+  // so the standings players read and the order the `leaderboard` pairing mode
+  // draws from are provably the same number — see that module's header for why
+  // this is not computed here any more.
+  const getLeaderboard = useMemo(() =>
+    rankIndividualBoard(computeIndividualBoard({
+      players: allPlayers,
+      numRounds: NUM_ROUNDS,
+      holeData,
+      tRounds,
+      courses: courseList,
+      getPlayerTee,
+    })),
+  [allPlayers, tRounds, courseList, holeData, teeData]);
 
   const onSaveHole = async (pid, rnd, holeIdx, score) => {
     // Optimistic update
@@ -5889,6 +6030,30 @@ export default function WBCApp() {
     const tp = tPlayers.find(t => t.player_id === pid);
     if (tp) await db.upsert("tournament_players", { ...tp, handicap_index: newHI }, "id");
     notify("Handicap updated");
+  };
+
+  // Write a GHIN link (and the index it brought with it) back to the player's
+  // tournament_players doc. GhinLinkButton hands back the whole player object
+  // with the GHIN fields patched, so this picks out just the persisted ones
+  // rather than writing the derived display fields back into the database.
+  //
+  // Deliberately silent — GhinLinkButton and GhinSyncButton each report their
+  // own outcome, and they are the ones that know whether an index actually
+  // moved. updateHI's blanket "Handicap updated" would be wrong for a sync
+  // that found nothing changed.
+  const updatePlayerGhin = async (patch) => {
+    const pid = patch?.id;
+    if (!pid) return;
+    const fields = {
+      handicap_index: patch.handicap_index,
+      ghin_number: patch.ghin_number ?? null,
+      ghin_name: patch.ghin_name ?? null,
+      ghin_rev_date: patch.ghin_rev_date ?? null,
+      ghin_synced_at: patch.ghin_synced_at ?? null,
+    };
+    setTPlayers(prev => prev.map(tp => tp.player_id === pid ? { ...tp, ...fields } : tp));
+    const tp = tPlayers.find(t => t.player_id === pid);
+    if (tp) await db.upsert("tournament_players", { ...tp, ...fields }, "id");
   };
 
   const updateName = async (pid, newName) => {
@@ -6183,7 +6348,7 @@ export default function WBCApp() {
           <div style={{ width: 80, height: 100, margin: "0 auto 20px", display: "flex", alignItems: "center", justifyContent: "center" }}>
             <img src={WBC_LOGO} alt="WBC" style={{ height: 90, filter: "drop-shadow(0 4px 16px rgba(34,211,167,0.3))" }} />
           </div>
-          <h1 style={{ fontFamily: "'Montserrat', sans-serif", fontSize: 32, color: K.t1, margin: "0 0 4px", fontWeight: 800, letterSpacing: "-0.03em" }}>WBC 2026</h1>
+          <h1 style={{ fontFamily: "'Montserrat', sans-serif", fontSize: 32, color: K.t1, margin: "0 0 4px", fontWeight: 800, letterSpacing: "-0.03em" }}>{tournamentName}</h1>
           <p style={{ color: K.t2, fontSize: 14, margin: "0 0 32px" }}>Wannabes. For Life.</p>
 
           {AUTH_PROVIDERS_ENABLED ? (
@@ -6248,7 +6413,7 @@ export default function WBCApp() {
       <div style={{ height: "var(--app-height, 100dvh)", display: "flex", flexDirection: "column", background: K.bg, fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", color: K.t1, width: "100%", maxWidth: 480, position: "relative", boxShadow: "0 0 80px rgba(0,0,0,0.8)", flexShrink: 0, overflow: "hidden" }}>
         <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
         <div style={{ padding: "10px 20px", paddingTop: "max(10px, calc(env(safe-area-inset-top, 0px) + 10px))", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${K.bdr}`, background: "rgba(14,24,41,0.95)", flexShrink: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}><img src={WBC_LOGO} alt="WBC" style={{ height: 32 }} /><div><div style={{ fontWeight: 800, fontSize: 15, color: K.t1 }}>WBC 2026</div><div style={{ fontSize: 11, color: K.t3 }}>Gaylord, MI · Aug 26–29</div></div></div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}><img src={WBC_LOGO} alt="WBC" style={{ height: 32 }} /><div><div style={{ fontWeight: 800, fontSize: 15, color: K.t1 }}>{tournamentName}</div><div style={{ fontSize: 11, color: K.t3 }}>{tournamentLocation || "Gaylord, MI · Aug 26\u201329"}</div></div></div>
           <button onClick={handleLogout} style={{ background: "transparent", border: `1px solid ${K.bdr}`, borderRadius: 8, color: K.t3, fontSize: 12, fontWeight: 600, padding: "5px 12px", cursor: "pointer" }}>Exit</button>
         </div>
         <div style={{ padding: "14px 20px 0 20px", flex: 1, overflowY: "hidden", overflowX: "hidden", display: "flex", flexDirection: "column", minHeight: 0, marginBottom: 8 }}>
@@ -6280,7 +6445,7 @@ export default function WBCApp() {
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <img src={WBC_TROPHY_LOGO} alt="WBC" style={{ height: 32 }} />
           <div>
-            <h1 style={{ fontFamily: "'Montserrat', sans-serif", fontSize: 18, margin: 0, fontWeight: 800 }}>WBC 2026</h1>
+            <h1 style={{ fontFamily: "'Montserrat', sans-serif", fontSize: 18, margin: 0, fontWeight: 800 }}>{tournamentName}</h1>
             <p style={{ color: K.t2, fontSize: 11, margin: 0 }}>Gaylord, MI · Aug 26–29</p>
           </div>
         </div>
@@ -6403,7 +6568,7 @@ export default function WBCApp() {
         </div>
         {view === "skins" && <SkinsCtpView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} teeData={teeData} getPlayerTee={getPlayerTee} />}
         {view === "groups" && <GroupsView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} pairingsData={pairingsData} teeTimesData={teeTimesData} teeData={teeData} getPlayerTee={getPlayerTee} user={user} />}
-        {view === "admin" && (user.isDirector ? <AdminView players={DEMO_PLAYERS} activePlayers={activePlayers} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
+        {view === "admin" && (user.isDirector ? <AdminView players={DEMO_PLAYERS} activePlayers={activePlayers} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} onUpdatePlayerGhin={updatePlayerGhin} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
               setTeeTimesData(prev => {
                 const next = typeof updater === "function" ? updater(prev) : updater;
                 // Fire-and-forget: update tee times on pairings rows in Firestore
@@ -6419,7 +6584,7 @@ export default function WBCApp() {
                 });
                 return next;
               });
-            }} roundDates={roundDates} onSetRoundDate={async (rnd, dateStr) => { const next = { ...roundDates }; if (dateStr) next[rnd] = dateStr; else delete next[rnd]; setRoundDates(next); await saveTournamentState(finalizedRounds, passwords, teesSaved, teesModified, next, scoringOpen); }} scoringOpen={scoringOpen} onSetScoringOpen={async (rnd, open) => { const next = { ...scoringOpen }; if (open) next[rnd] = true; else delete next[rnd]; setScoringOpen(next); await saveTournamentState(finalizedRounds, passwords, teesSaved, teesModified, roundDates, next); }} pairingStrategy={pairingStrategy} onSetPairingStrategy={async (rnd, cfg) => { const next = { ...pairingStrategy }; if (cfg) next[rnd] = cfg; else delete next[rnd]; setPairingStrategy(next); await saveTournamentState(finalizedRounds, passwords, teesSaved, teesModified, roundDates, scoringOpen, next); }} leaderboard={getLeaderboard} passwords={passwords} setPasswords={async pw => { setPasswords(pw); await saveTournamentState(finalizedRounds, pw); }} holeData={holeData} finalizedRounds={finalizedRounds} onFinalizeRound={async rnd => { const nf = { ...finalizedRounds, [rnd]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${rnd}`, tournament_id: TOURNAMENT_ID, round: rnd, finalized: true }); if (rnd < 4) setRound(rnd + 1); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); if (/^\d+$/.test(String(key))) { await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${key}`, tournament_id: TOURNAMENT_ID, round: Number(key), finalized: false }); } else { setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", key); } }} notify={notify} notif={notif} getPlayerTee={getPlayerTee} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); }} currentUser={user} teesSaved={teesSaved} onTeesSave={async r => { const next = { ...teesSaved, [r]: true }; const nextMod = { ...teesModified, [r]: false }; setTeesSaved(next); setTeesModified(nextMod); await saveTournamentState(finalizedRounds, passwords, next, nextMod); }} teesModified={teesModified} onTeesModify={async r => { const nextMod = { ...teesModified, [r]: true }; setTeesModified(nextMod); await saveTournamentState(finalizedRounds, passwords, teesSaved, nextMod); }} setTeesModified={setTeesModified} memberships={memberships} onSetDirector={onSetDirector} claims={claims} authUid={fbUser?.uid || null} /> : (
+            }} roundDates={roundDates} onSetRoundDate={async (rnd, dateStr) => { const next = { ...roundDates }; if (dateStr) next[rnd] = dateStr; else delete next[rnd]; setRoundDates(next); await saveTournamentState(finalizedRounds, passwords, teesSaved, teesModified, next, scoringOpen); }} scoringOpen={scoringOpen} onSetScoringOpen={async (rnd, open) => { const next = { ...scoringOpen }; if (open) next[rnd] = true; else delete next[rnd]; setScoringOpen(next); await saveTournamentState(finalizedRounds, passwords, teesSaved, teesModified, roundDates, next); }} pairingStrategy={pairingStrategy} onSetPairingStrategy={async (rnd, cfg) => { const next = { ...pairingStrategy }; if (cfg) next[rnd] = cfg; else delete next[rnd]; setPairingStrategy(next); await saveTournamentState(finalizedRounds, passwords, teesSaved, teesModified, roundDates, scoringOpen, next); }} leaderboard={getLeaderboard} passwords={passwords} setPasswords={async pw => { setPasswords(pw); await saveTournamentState(finalizedRounds, pw); }} holeData={holeData} finalizedRounds={finalizedRounds} onFinalizeRound={async rnd => { const nf = { ...finalizedRounds, [rnd]: true }; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${rnd}`, tournament_id: TOURNAMENT_ID, round: rnd, finalized: true }); if (rnd < 4) setRound(rnd + 1); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf, passwords); if (/^\d+$/.test(String(key))) { await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${key}`, tournament_id: TOURNAMENT_ID, round: Number(key), finalized: false }); } else { setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", key); } }} notify={notify} notif={notif} getPlayerTee={getPlayerTee} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); }} currentUser={user} teesSaved={teesSaved} onTeesSave={async r => { const next = { ...teesSaved, [r]: true }; const nextMod = { ...teesModified, [r]: false }; setTeesSaved(next); setTeesModified(nextMod); await saveTournamentState(finalizedRounds, passwords, next, nextMod); }} teesModified={teesModified} onTeesModify={async r => { const nextMod = { ...teesModified, [r]: true }; setTeesModified(nextMod); await saveTournamentState(finalizedRounds, passwords, teesSaved, nextMod); }} setTeesModified={setTeesModified} memberships={memberships} onSetDirector={onSetDirector} claims={claims} authUid={fbUser?.uid || null} tournamentMeta={tournamentMeta} onSaveTournamentMeta={saveTournamentMeta} /> : (
           <div style={{ textAlign: "center", padding: "40px 20px" }}>
             <div style={{ fontSize: 40, marginBottom: 12 }}>🔒</div>
             <div style={{ fontSize: 16, fontWeight: 700, color: K.t1, marginBottom: 6 }}>Directors Only</div>
