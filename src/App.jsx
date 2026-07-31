@@ -5358,7 +5358,15 @@ export default function WBCApp() {
   // has settled the standalone viewport. Without it, the view can lock to a wrong
   // height (fat top gap + clipped bottom nav).
   useEffect(() => {
-    const setAppHeight = () => {
+    // Is a text field focused — i.e. is the on-screen keyboard up? Drives the
+    // shrink guard below. Must mirror index.html.
+    const isEditing = () => {
+      const el = document.activeElement;
+      if (!el || el === document.body) return false;
+      if (el.isContentEditable) return true;
+      return /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName || "");
+    };
+    const setAppHeight = (allowShrink = false) => {
       try {
         // GUARD: on iOS PWA cold-reopen/resume, window.innerHeight is briefly 0
         // (or an unstable tiny value) during the launch transition. Writing that
@@ -5369,19 +5377,59 @@ export default function WBCApp() {
         // no real device viewport is shorter. Must mirror index.html.
         const h = window.innerHeight;
         if (!(h > 100)) return;
+        // KEYBOARD GUARD: opening the on-screen keyboard shrinks innerHeight and
+        // fires resize. Believing it collapses the app container the same way —
+        // the bottom nav rides up into the middle of the screen with a black band
+        // beneath it — and the grow-back resize does NOT reliably arrive when the
+        // keyboard closes. Dismissing it by unmounting the field is the case that
+        // strands it: save a course name in Admin and the editor (and its input)
+        // disappear, so the height stays shrunk with no keyboard left to explain
+        // it. While a field owns focus --app-height may grow but never shrink; a
+        // genuine shrink while typing (rotation) still lands via the orientation
+        // handler, which passes allowShrink, and via the re-measure after blur.
+        const prev = parseFloat(document.documentElement.style.getPropertyValue("--app-height")) || 0;
+        if (!allowShrink && prev && h < prev && isEditing()) return;
         document.documentElement.style.setProperty("--app-height", h + "px");
       } catch {}
     };
+    // iOS scrolls the DOCUMENT to reveal a focused field even though html/body
+    // are overflow:hidden, and does not always scroll back when the keyboard
+    // goes — which lifts the whole app off the bottom of the screen and looks
+    // identical to the collapse above. Nothing in this app scrolls the document
+    // (every scroller is an inner pane), so pinning it back to 0 is always safe.
+    const unscroll = () => {
+      if (isEditing()) return; // don't fight iOS while it reveals the field
+      try {
+        window.scrollTo(0, 0);
+        document.body.scrollTop = 0;
+        document.documentElement.scrollTop = 0;
+      } catch {}
+    };
+    const settle = (allowShrink = false) => { setAppHeight(allowShrink); unscroll(); };
+    // Tracked, self-clearing timeouts: these fire on every blur and rotation for
+    // the life of the app, so they must not pile up in the pending set.
+    const timers = new Set();
+    const later = (fn, ms) => { const id = setTimeout(() => { timers.delete(id); fn(); }, ms); timers.add(id); };
     setAppHeight();
-    const timers = [setTimeout(setAppHeight, 100), setTimeout(setAppHeight, 300), setTimeout(setAppHeight, 600)];
-    const onVis = () => { if (document.visibilityState === "visible") setTimeout(setAppHeight, 100); };
-    window.addEventListener("resize", setAppHeight);
-    window.addEventListener("orientationchange", setAppHeight);
+    [100, 300, 600].forEach(ms => later(() => setAppHeight(), ms));
+    const onResize = () => settle(false);
+    // Rotation overrides the shrink guard: the field usually keeps focus across
+    // it, and the delays let the new viewport settle first.
+    const onOrient = () => { [200, 500].forEach(ms => later(() => settle(true), ms)); };
+    // Keyboard going away. Deliberately NOT allowShrink — moving between two
+    // fields also fires focusout with the keyboard still up, and there the guard
+    // (which only blocks while something is focused) is exactly what we want.
+    const onFocusOut = () => { [50, 300, 700].forEach(ms => later(() => settle(false), ms)); };
+    const onVis = () => { if (document.visibilityState === "visible") later(() => settle(false), 100); };
+    window.addEventListener("resize", onResize);
+    window.addEventListener("orientationchange", onOrient);
+    document.addEventListener("focusout", onFocusOut);
     document.addEventListener("visibilitychange", onVis);
     return () => {
       timers.forEach(clearTimeout);
-      window.removeEventListener("resize", setAppHeight);
-      window.removeEventListener("orientationchange", setAppHeight);
+      window.removeEventListener("resize", onResize);
+      window.removeEventListener("orientationchange", onOrient);
+      document.removeEventListener("focusout", onFocusOut);
       document.removeEventListener("visibilitychange", onVis);
     };
   }, []);
