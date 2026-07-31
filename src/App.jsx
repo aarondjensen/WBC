@@ -17,6 +17,7 @@ import { EditionSwitcher } from "./components/EditionSwitcher";
 import { docIds } from "./lib/editionId";
 import { openingHole } from "./lib/holeAdvance";
 import { AppHeader } from "./components/AppHeader";
+import { MoreMenu } from "./components/MoreMenu";
 import { TROPHY_SVG_URL } from "./constants";
 import { collection, doc, setDoc, getDocs, query, where, writeBatch, onSnapshot, deleteDoc } from "firebase/firestore";
 import { getMessaging, onMessage, isSupported as isMessagingSupported } from "firebase/messaging";
@@ -5570,6 +5571,22 @@ export default function WBCApp() {
   // the app stores require to be deletable. PIN-only players have no such
   // account to delete. deleteStage: null | "confirm" | "working".
   const [accountOpen, setAccountOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [notifOpen, setNotifOpen] = useState(false);
+  // The bar's real height, measured rather than guessed: the menu sits flush
+  // on top of it, and the bar's height moves with the device's bottom inset.
+  const navRef = useRef(null);
+  const [navH, setNavH] = useState(62);
+  useEffect(() => {
+    const measure = () => { if (navRef.current) setNavH(navRef.current.offsetHeight); };
+    measure();
+    window.addEventListener("resize", measure);
+    window.addEventListener("orientationchange", measure);
+    return () => {
+      window.removeEventListener("resize", measure);
+      window.removeEventListener("orientationchange", measure);
+    };
+  }, []);
   const [deleteStage, setDeleteStage] = useState(null);
   const [deleteErr, setDeleteErr] = useState("");
   // handleDeleteAccount is defined further down, AFTER notify() exists — see note there.
@@ -6813,7 +6830,11 @@ export default function WBCApp() {
     { key: "scoring", label: "Scoring", icon: "score" },
     { key: "leaderboard", label: "Board", icon: "trophy" },
     { key: "skins", label: "Betting", icon: "betting" },
-    { key: "admin", label: "Admin", icon: "admin" },
+    // "More" rather than "Admin": the slot now opens a menu holding
+    // everything that isn't the event — the director console, notifications
+    // and the account — instead of being one of those three things and
+    // leaving the other two scattered. See components/MoreMenu.
+    { key: "more", label: "More", icon: "admin" },
   ];
 
   return (
@@ -6880,14 +6901,46 @@ export default function WBCApp() {
                 {syncing && <div style={{ position: "absolute", inset: 0, borderRadius: "50%", background: K.acc, animation: "syncPing 0.8s ease-out" }} />}
               </div>
             </div>
-            {notifPerm !== "granted" && !user.isGuest && (
-              <button onClick={() => { setDeleteErr(""); setDeleteStage(null); setAccountOpen(true); }} title="Notification settings" style={{ background: "transparent", border: `1px solid ${K.acc}60`, color: K.acc, padding: "4px 9px", borderRadius: 8, fontSize: 14, cursor: "pointer", lineHeight: 1 }}>🔔</button>
-            )}
-            <button onClick={() => { setDeleteErr(""); setDeleteStage(null); setAccountOpen(true); }} style={{ background: "transparent", border: `1px solid ${K.bdr}`, color: K.t3, padding: "4px 10px", borderRadius: 8, fontSize: 10, cursor: "pointer", textAlign: "center", lineHeight: 1.3 }}>
-              Account<br/><span style={{ fontSize: 9, color: K.t2, fontWeight: 600 }}>{user.name}</span>
-            </button>
         </>}
       />
+
+      <MoreMenu
+        open={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        isDirector={!!user.isDirector}
+        adminFlag={adminActionNeeded && user.isDirector}
+        notifFlag={notifPerm !== "granted" && !user.isGuest}
+        navH={navH}
+        onSelect={(key) => {
+          if (key === "admin") { setView("admin"); return; }
+          if (key === "notifications") { setNotifOpen(true); return; }
+          if (key === "account") { setDeleteErr(""); setDeleteStage(null); setAccountOpen(true); }
+        }}
+      />
+
+      {/* Notifications, in their own sheet rather than a section buried inside
+          Account. They are a menu entry now, so they need somewhere to land —
+          and they are no longer rendered in the Account sheet, so a preference
+          still has exactly one home. */}
+      {notifOpen && (
+        <div
+          onClick={() => setNotifOpen(false)}
+          data-popup="1"
+          style={{ position: "fixed", inset: 0, zIndex: 400, background: "rgba(3,8,16,0.72)", backdropFilter: "blur(2px)", display: "flex", alignItems: "flex-end", justifyContent: "center" }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{ width: "100%", maxWidth: 480, background: K.card, borderTop: `1px solid ${K.bdr}`, borderTopLeftRadius: 18, borderTopRightRadius: 18, padding: "14px 20px calc(20px + env(safe-area-inset-bottom, 0px))", maxHeight: "88vh", overflowY: "auto" }}
+          >
+            <div style={{ width: 38, height: 4, borderRadius: 2, background: K.bdr, margin: "0 auto 6px" }} />
+            <NotificationSettings
+              user={user}
+              notify={notify}
+              onPermissionChange={setNotifPerm}
+            />
+          </div>
+        </div>
+      )}
 
       {accountOpen && (
         <div
@@ -6911,18 +6964,6 @@ export default function WBCApp() {
                     <div style={{ fontSize: 11, color: K.t3 }}>{user.isDirector ? "Tournament director" : "Player"}</div>
                   </div>
                 </div>
-
-                {/* Notification settings live in the Account sheet because
-                    that is where the app's other per-person settings already
-                    are. Rendered only for a real player: a guest has no
-                    player id to register a token against. */}
-                {!user.isGuest && (
-                  <NotificationSettings
-                    user={user}
-                    notify={notify}
-                    onPermissionChange={setNotifPerm}
-                  />
-                )}
 
                 <button onClick={() => { setAccountOpen(false); handleLogout(); }} style={{ width: "100%", padding: "13px 0", borderRadius: 12, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t1, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
                   Log out
@@ -7029,9 +7070,12 @@ export default function WBCApp() {
         ))}
       </div>
 
-      <div style={{ display: "flex", background: "rgba(14,24,41,0.97)", borderTop: `1px solid ${K.bdr}`, zIndex: 100, paddingBottom: "env(safe-area-inset-bottom, 0px)", flexShrink: 0 }}>
+      <div ref={navRef} style={{ display: "flex", background: "rgba(14,24,41,0.97)", borderTop: `1px solid ${K.bdr}`, zIndex: 100, paddingBottom: "env(safe-area-inset-bottom, 0px)", flexShrink: 0 }}>
         {navItems.map(item => {
-          const active = view === item.key;
+          // More reads active while its menu is open OR while the view it
+          // leads to (Admin) is the one on screen — otherwise opening Admin
+          // from the menu would leave the whole bar looking unselected.
+          const active = item.key === "more" ? (menuOpen || view === "admin") : view === item.key;
           const clr = active ? K.acc : K.t3;
           const iconSz = 18;
           const navIcon = () => {
@@ -7045,6 +7089,8 @@ export default function WBCApp() {
           const isTrophy = item.key === "leaderboard";
           return (
             <button key={item.key} onClick={() => {
+              // The only nav item that is not a destination.
+              if (item.key === "more") { setMenuOpen(o => !o); return; }
               if (item.key === "scoring") {
                 // Find the correct active round: first after consecutive finalized rounds
                 let activeRound = 1;
@@ -7076,7 +7122,7 @@ export default function WBCApp() {
                 }} />
               )}
               {navIcon()}
-              {item.key === "admin" && adminActionNeeded && user.isDirector && (
+              {item.key === "more" && ((adminActionNeeded && user.isDirector) || (notifPerm !== "granted" && !user.isGuest)) && (
                 <span style={{
                   position: "absolute", top: 6, right: "50%", marginRight: -14,
                   width: 8, height: 8, borderRadius: "50%", background: "#ef4444",
