@@ -18,7 +18,7 @@ import { docIds } from "./lib/editionId";
 import { openingHole } from "./lib/holeAdvance";
 import { AppHeader } from "./components/AppHeader";
 import { MoreMenu } from "./components/MoreMenu";
-import { TROPHY_SVG_URL, WBC_LOGO } from "./constants";
+import { TROPHY_SVG_URL, WBC_LOGO, WBC_FAVICON } from "./constants";
 import { collection, doc, setDoc, getDocs, query, where, writeBatch, onSnapshot, deleteDoc } from "firebase/firestore";
 import { getMessaging, onMessage, isSupported as isMessagingSupported } from "firebase/messaging";
 
@@ -5649,13 +5649,16 @@ export default function WBCApp() {
   // dependency arrays name `notify`, and those are evaluated during render.
   const notify = m => { setNotif(m); setTimeout(() => setNotif(null), 2500); };
 
-  // Set favicon
+  // Set favicon. The APP MARK, matching index.html, the header and the
+  // pull-to-refresh spinner — the trophy is the award, not the identity.
+  // index.html already ships the same href; this runs anyway because a
+  // previously-cached tab can be holding the old one.
   useEffect(() => {
     const link = document.querySelector("link[rel*='icon']") || document.createElement("link");
-    link.type = "image/png"; link.rel = "shortcut icon"; link.href = "/wbc-trophy.png";
+    link.type = "image/png"; link.rel = "shortcut icon"; link.href = WBC_FAVICON;
     document.head.appendChild(link);
     const apple = document.querySelector("link[rel='apple-touch-icon']") || document.createElement("link");
-    apple.rel = "apple-touch-icon"; apple.href = "/wbc-icon-192.png";
+    apple.rel = "apple-touch-icon"; apple.href = WBC_FAVICON;
     document.head.appendChild(apple);
   }, []);
 
@@ -6794,6 +6797,19 @@ export default function WBCApp() {
   }
 
   // ── MAIN ──
+  // How far the bar's contents sit above the bottom of the screen.
+  //
+  // This was a bare safe-area inset, which is 0 on any device WITHOUT a home
+  // indicator — every home-button iPhone and iPad. There the icons sat flush
+  // on the physical edge, and a tap that landed slightly low hit the home
+  // button instead of the button on screen: on those devices a held home
+  // button is Siri, so a sloppy tap on the raised Board trophy opened Siri.
+  //
+  // So: a real floor for the devices with no inset, and a few px ON TOP of
+  // the inset for the ones that have it, since the same slip is merely less
+  // likely there rather than impossible.
+  const NAV_BOTTOM_PAD = "max(16px, calc(env(safe-area-inset-bottom, 0px) + 6px))";
+
   const navItems = [
     { key: "groups", label: "Pairings", icon: "pairings" },
     { key: "scoring", label: "Scoring", icon: "score" },
@@ -6803,7 +6819,7 @@ export default function WBCApp() {
     // everything that isn't the event — the director console, notifications
     // and the account — instead of being one of those three things and
     // leaving the other two scattered. See components/MoreMenu.
-    { key: "more", label: "More", icon: "admin" },
+    { key: "more", label: "More", icon: "more" },
   ];
 
   return (
@@ -7039,7 +7055,7 @@ export default function WBCApp() {
         ))}
       </div>
 
-      <div ref={navRef} style={{ display: "flex", background: "rgba(14,24,41,0.97)", borderTop: `1px solid ${K.bdr}`, zIndex: 100, paddingBottom: "env(safe-area-inset-bottom, 0px)", flexShrink: 0 }}>
+      <div ref={navRef} style={{ display: "flex", background: "rgba(14,24,41,0.97)", borderTop: `1px solid ${K.bdr}`, zIndex: 100, paddingBottom: NAV_BOTTOM_PAD, flexShrink: 0 }}>
         {navItems.map(item => {
           // More reads active while its menu is open OR while the view it
           // leads to (Admin) is the one on screen — otherwise opening Admin
@@ -7052,7 +7068,7 @@ export default function WBCApp() {
             if (item.icon === "pairings") return <svg width={iconSz} height={iconSz} viewBox="0 0 24 24" fill="none" stroke={clr} strokeWidth="2" strokeLinecap="round"><circle cx="9" cy="7" r="3"/><circle cx="17" cy="7" r="3"/><path d="M3 21v-2a4 4 0 014-4h4a4 4 0 014 4v2"/><path d="M21 21v-2a3 3 0 00-2-2.83"/></svg>;
             if (item.icon === "score") return <svg width={iconSz} height={iconSz} viewBox="0 0 24 24" fill="none" stroke={clr} strokeWidth="2" strokeLinecap="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4z"/></svg>;
             if (item.icon === "betting") return <svg width={iconSz} height={iconSz} viewBox="0 0 24 24" fill="none" stroke={clr} strokeWidth="2" strokeLinecap="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>;
-            if (item.icon === "admin") return <svg width={iconSz} height={iconSz} viewBox="0 0 24 24" fill="none" stroke={clr} strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>;
+            if (item.icon === "more") return <svg width={iconSz} height={iconSz} viewBox="0 0 24 24" fill="none" stroke={clr} strokeWidth="2" strokeLinecap="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>;
             return null;
           };
           const isTrophy = item.key === "leaderboard";
