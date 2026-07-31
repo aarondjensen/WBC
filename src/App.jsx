@@ -4442,15 +4442,6 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
 
             {/* Header: what round, what course, and the way out of both states */}
             <div style={{ padding: "10px 14px", borderBottom: `1px solid ${K.bdr}` }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: assigned || picking ? 6 : 0 }}>
-                <span style={{ fontSize: 9, fontWeight: 700, color: assigned ? ac : K.t3, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                  Round {editRound} course{locked ? " · finalized" : ""}
-                </span>
-                {unassignedRounds.length > 0
-                  ? <span style={{ fontSize: 9, fontWeight: 600, color: K.warn }}>R{unassignedRounds.join(", R")} unset</span>
-                  : <span style={{ fontSize: 9, fontWeight: 700, color: ac }}>✓ all rounds set</span>}
-              </div>
-
               {assigned && !picking && (
                 <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
                   <div style={{ minWidth: 0 }}>
@@ -4458,6 +4449,12 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                     <div style={{ fontSize: 10, color: K.t3 }}>
                       {assigned.city}{assigned.city && assigned.state ? ", " : ""}{assigned.state}
                       {assigned.par ? ` · Par ${assigned.par}` : ""}
+                      {/* Which rounds still have no course is the one thing the
+                          round pills above do NOT show (their dots are tees and
+                          pairings), so it rides along on this line rather than
+                          claiming a row of its own. */}
+                      {locked && <span style={{ color: K.t3, fontWeight: 700 }}> · finalized</span>}
+                      {!locked && unassignedRounds.length > 0 && <span style={{ color: K.warn, fontWeight: 700 }}> · R{unassignedRounds.join(", R")} unset</span>}
                     </div>
                   </div>
                   {!locked && (
@@ -4478,7 +4475,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                   is nothing to set and nothing to play. Say that rather than
                   leaving an empty card. */}
               {locked && !assigned && (
-                <div style={{ fontSize: 11, color: K.t3 }}>No course was set for this round.</div>
+                <div style={{ fontSize: 11, color: K.t3 }}>Round {editRound} is finalized, and no course was ever set for it.</div>
               )}
 
               {picking && (
@@ -4488,7 +4485,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                     <option value="">All</option>
                     {["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"].map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
-                  <input value={courseSearch} onChange={e => doCourseSearch(e.target.value)} placeholder="Search courses by name or city…"
+                  <input value={courseSearch} onChange={e => doCourseSearch(e.target.value)} placeholder={`Search courses for Round ${editRound}…`}
                     style={{ flex: 1, minWidth: 0, padding: "8px 11px", background: K.inp, border: `1px solid ${ac}40`, borderRadius: 8, color: K.t1, fontSize: 13, boxSizing: "border-box" }} />
                   {/* Cancel only exists when there is something to go back to. */}
                   {assigned
