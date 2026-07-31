@@ -6,39 +6,25 @@ import { K, ON_ACC, FS, ALPHA, FONT, SHADOW } from "./theme";
 import { SegmentedToggle, StickyTop, SectionLabel, Card, Toast } from "./components/ui";
 import { calcCH, computeIndividualBoard, rankIndividualBoard, rankIndividualBoardIds, WD_SCORE } from "./lib/individualBoard";
 import { useConfirm } from "./lib/useConfirm";
+import { useDirtyForm } from "./lib/useDirtyForm";
 import { usePullToRefresh, hasNewBundle } from "./lib/usePullToRefresh";
 import { NotificationSettings } from "./components/NotificationSettings";
 import { registerForPush, getCachedSubscriptionStatus } from "./lib/notifications";
+import { pairingScoreImpact, orphanedScores, describeScored, totalHoles } from "./lib/scoreGuard";
 import { groupsForRound, assignToGroup, removeFromGroup as removeFromGroupPure, clearGroup, swapIntoGroup } from "./lib/pairings";
 import { Popup, ConfirmModal } from "./components/Popup";
 import { EditionSwitcher } from "./components/EditionSwitcher";
 import { docIds } from "./lib/editionId";
+import { openingHole } from "./lib/holeAdvance";
+import { AppHeader } from "./components/AppHeader";
+import { MoreMenu } from "./components/MoreMenu";
+import { TROPHY_SVG_URL, WBC_LOGO, WBC_FAVICON } from "./constants";
 import { collection, doc, setDoc, getDocs, query, where, writeBatch, onSnapshot, deleteDoc } from "firebase/firestore";
 import { getMessaging, onMessage, isSupported as isMessagingSupported } from "firebase/messaging";
-const WBC_LOGO = "/wbc-icon-512.png";
-const WBC_TROPHY_LOGO = "/wbc-trophy.png";
-const WBC_FAVICON = "/wbc-icon-192.png";
 
 const WBC_TROPHY = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIoAAADgAgMAAAChhhbLAAAACVBMVEX///8i06f///8qYg9HAAAAAXRSTlMAQObYZgAAAAFiS0dEAIgFHUgAAAAHdElNRQfqAhwPCRGrKvWFAAACeElEQVRYw+3YW3LdIAwAUPHBDsp+9NN/dQb2v5WaxzUgJFCapNOkZvK8PmM9kO2bAAwrpNdCUFYnKhpJSpJwiS1aTVrWEs6vJu2TkU16zH9pwj8W6zGKyQdRNfVo/kqqScWknfHdxK0huD6casL1mQ3uTD5yGdgZehkwGr81aDNJNXibIJrYDJbTec1E6AZl46ibq0GiycdyMsUk2ZRHxhvMtW9Sn/1tojKptbJuZBRhMkp/jobeZtL7jSuDU3/cGffpBuuBsleaqWX5bmBvcG+wzuLOlMOelBuZ3aS7OJvxW6MMRzQbZzGxn+1kcGN8M/ROE2j4przPbMbvTJuKGlIzMJQnG2cxbUcgikNGQ+mvmLJpF3S+9WqmDXIb64OpU8ZNmeP72VyT/1MTXmW14kVDt0kGEyQz7OjdoLAaN7wtKd0UjO+hamGCCaNJ68bHOZ32i2AGUrdl2S4XR1NvaNz4yTjZ0GhgLQxba/v6YTBBMnE2eRRnc704p1OSXgyejWMGuMlPG0ZyYZ6Z5f3qlbSbjYuLobO5XmGG7QTUOZi3Kywkz/RYGJbt4cGQGRIMzcYJBub3Uu1mwg1OJkgG4mjW7tQTDQ2KYqir9F9sNoTF+iwvNqpysGOoOZhm4JzOGIwMBlXjz6F60nqonvTO+FPlRuOOKd8J0daEQ3fuhPanqQnhY76dgQ86zxczYKi9XDwfYf5iny3XsuWeYDCGe1R/yBmIhhJbeip90T6QlnhIx2Dq3++7UEIwwXzW/2mdZPAxb+nhYx7zpQ3OxHJdeMnQbIJk4jc1rHaxP6yHlr0wPS8sz6b1RARnhIKZ0/4J8jqdZBo0Jn4DUtjOuhjt96MAAAAASUVORK5CYII=";
 
 const WBC_TROPHY_SILHOUETTE = "data:image/png;base64,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";
-// Clean SVG trophy for large silhouette display
-const TROPHY_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 260">
-  <!-- Cup body -->
-  <path d="M55,10 L145,10 L145,20 C145,20 170,22 170,45 C170,68 152,88 130,95 C124,115 118,125 110,130 L110,160 L130,160 L135,175 L65,175 L70,160 L90,160 L90,130 C82,125 76,115 70,95 C48,88 30,68 30,45 C30,22 55,20 55,20 Z" fill="white"/>
-  <!-- Left handle detail -->
-  <path d="M55,20 C55,20 42,22 38,30 C34,38 34,52 42,62 C48,70 58,76 70,80" fill="none" stroke="white" stroke-width="0" />
-  <!-- Right handle detail -->
-  <path d="M145,20 C145,20 158,22 162,30 C166,38 166,52 158,62 C152,70 142,76 130,80" fill="none" stroke="white" stroke-width="0" />
-  <!-- Base stem -->
-  <rect x="88" y="160" width="24" height="20" rx="2" fill="white"/>
-  <!-- Base platform -->
-  <rect x="58" y="175" width="84" height="14" rx="5" fill="white"/>
-  <!-- Base foot -->
-  <rect x="50" y="189" width="100" height="10" rx="5" fill="white"/>
-</svg>`;
-
-const TROPHY_SVG_URL = `data:image/svg+xml;utf8,${encodeURIComponent(TROPHY_SVG)}`;
 
 // Player registry — populated from Firestore on mount
 let DEMO_PLAYERS = [];
@@ -1040,30 +1026,61 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
     }
   }, [round, JSON.stringify(myPresetGroup)]);
 
-  // When group is set, resume at correct hole
+  // ── Resume at the right hole when the group is set ──
+  //
+  // Which hole is decided by lib/holeAdvance's openingHole (pure, tested).
+  // What is decided HERE is when to trust the answer, and that is the fix for
+  // a real cold-load bug:
+  //
+  //   Pairings and hole scores arrive over separate Firestore subscriptions
+  //   with no ordering guarantee. This effect used to be keyed on [group]
+  //   alone, so when the pairings landed first it ran against an empty score
+  //   map, decided hole 1, and never ran again — a player rejoining a round
+  //   mid-way opened on hole 1 and had to walk forward by hand.
+  //
+  // `positionedForRef` records the group we have positioned for using REAL
+  // data. An unresolved answer (nothing posted yet) does not claim the group,
+  // so the effect stays armed and re-runs when the scores arrive. That also
+  // makes it idempotent: once positioned, later score changes don't yank the
+  // screen away from the hole the user is on.
+  const positionedForRef = useRef(null);
+  const positionKey = group ? `${round}:${group.slice().sort().join(",")}` : null;
+  // Cheap signal that the group's scores changed, so the effect can re-run
+  // while unresolved without depending on the whole holeData map.
+  const groupScoreSig = group
+    ? group.map(id => Object.keys(holeData[`${id}_${round}`] || {}).length).join(",")
+    : "";
+
   useEffect(() => {
     if (!group || !course) return;
-    const gPlayers = group.map(id => players.find(p => p.id === id)).filter(Boolean);
-    // Find first incomplete hole
-    for (let i = 0; i < 18; i++) {
-      const allDone = gPlayers.every(p => (holeData[`${p.id}_${round}`] || {})[i] > 0);
-      if (!allDone) {
-        setCurrentHole(i);
-        setNavSourceSynced("auto"); // incomplete hole — allow auto-advance after scoring
-        // Clear edit mode. Without this, switching FROM a completed group (which sets
-        // editingCompleted true below) INTO a fresh group left the flag stuck true —
-        // and edit mode suppresses both the CTP prompt and auto-advance. Second path
-        // to the "later groups get no CTP popup" bug.
-        setEditingCompleted(false);
-        return;
-      }
+    if (positionedForRef.current === positionKey) return;
+
+    const pids = group.map(id => players.find(p => p.id === id)?.id).filter(Boolean);
+    const readScore = (pid, h) => (holeData[`${pid}_${round}`] || {})[h] || 0;
+    const { hole, allComplete, resolved } = openingHole(pids, readScore);
+
+    if (!resolved) {
+      // Nothing posted. That is either a genuinely fresh card or a card whose
+      // scores have not loaded, and they are indistinguishable from here — so
+      // show hole 1 but leave the group unclaimed, and correct it if scores
+      // turn up.
+      setCurrentHole(0);
+      setNavSourceSynced("auto");
+      setEditingCompleted(false);
+      return;
     }
-    // All 18 complete — land on hole 18, manual so editing mode shows
-    const hasAnyScores = gPlayers.some(p => Object.values(holeData[`${p.id}_${round}`] || {}).some(s => s > 0));
-    setCurrentHole(17);
-    setNavSourceSynced("manual");
-    if (hasAnyScores) setEditingCompleted(true);
-  }, [group]);
+
+    positionedForRef.current = positionKey;
+    setCurrentHole(hole);
+    // Auto on a live edge so scoring advances; manual on a finished card so
+    // edit mode shows instead.
+    setNavSourceSynced(allComplete ? "manual" : "auto");
+    // Clear edit mode when landing on a live edge. Without this, switching
+    // FROM a completed group INTO a fresh one left the flag stuck true — and
+    // edit mode suppresses both the CTP prompt and auto-advance. Second path
+    // to the "later groups get no CTP popup" bug.
+    setEditingCompleted(allComplete);
+  }, [positionKey, groupScoreSig, course]);
 
   // Note: round changes from other tabs should NOT reset scoring state
   // since the scoring component stays mounted. The group persists.
@@ -2573,7 +2590,13 @@ function GroupsView({ players, round, tRounds, courses, pairingsData, teeTimesDa
 
 // ── ADMIN ──
 // ── PAIRINGS EDITOR ──
-function PairingsEditor({ activePlayers, pairingsData, setPairings, tRounds, courses, teeTimesData, setTeeTimesData, roundDates, onSetRoundDate, scoringOpen, onSetScoringOpen, pairingStrategy, onSetPairingStrategy, leaderboard, finalizedRounds, getPlayerTee, editRound }) {
+function PairingsEditor({ activePlayers, pairingsData, setPairings, tRounds, courses, teeTimesData, setTeeTimesData, roundDates, onSetRoundDate, scoringOpen, onSetScoringOpen, pairingStrategy, onSetPairingStrategy, leaderboard, finalizedRounds, getPlayerTee, editRound, holeData }) {
+  // Themed confirmations. Also closes a latent hazard: the generate guard
+  // below called the GLOBAL window.confirm, so the day anyone added
+  // useConfirm to this component it would have started returning a Promise
+  // — always truthy — and silently stopped asking. That is exactly how the
+  // admin Start Fresh button lost its confirmation.
+  const { confirm, confirmModal } = useConfirm();
   const numGroups = Math.ceil(activePlayers.length / 4);
 
   // Seeded once per mount from the saved pairings. The parent keys this editor
@@ -2612,11 +2635,30 @@ function PairingsEditor({ activePlayers, pairingsData, setPairings, tRounds, cou
   // Generate pairings for the current round using the selected method. The result is
   // written into local `groups`, which the existing auto-save effect persists to
   // Firestore — so the director can still hand-tweak afterward exactly as before.
-  const generatePairings = () => {
+  const generatePairings = async () => {
     const pids = activePlayers.map(p => p.id);
     if (pids.length === 0) return;
     const hasExisting = groups.some(g => g.length > 0);
-    if (hasExisting && !confirm(`Replace the current Round ${editRound} pairings with auto-generated ones?\n\nYou can still adjust them by hand afterward.`)) return;
+    if (hasExisting) {
+      // What is BEHIND the change, said before the tap. Scores are keyed by
+      // player+round+hole, not by group, so re-drawing does not move or delete
+      // them — it re-attaches them to whoever ends up sharing a card. A
+      // director re-pairing round 2 at lunch is entitled to know that four
+      // players are already eight holes deep. See lib/scoreGuard.
+      const impact = pairingScoreImpact({ groups, holeData, round: editRound });
+      const nameOf = (pid) => activePlayers.find(p => p.id === pid)?.name || pid;
+      const ok = await confirm({
+        title: `Replace the Round ${editRound} pairings?`,
+        message: impact.hasScores
+          ? `${impact.holes} hole${impact.holes === 1 ? "" : "s"} are already posted for this round — ${describeScored(impact.scored, nameOf)}.\n\n`
+            + "Those scores are NOT deleted and they keep counting on the leaderboard. They stay with the player, so after a re-draw they appear under whichever group that player lands in.\n\n"
+            + "You can still adjust the new groups by hand afterward."
+          : "You can still adjust them by hand afterward.",
+        confirmLabel: "Replace",
+        destructive: impact.hasScores,
+      });
+      if (!ok) return;
+    }
 
     if (cfg.mode === "avoid_repeats") {
       const partners = buildPriorPartners(pairingsData, editRound);
@@ -2884,6 +2926,27 @@ function PairingsEditor({ activePlayers, pairingsData, setPairings, tRounds, cou
           </button>
         )}
 
+        {/* Scores with no group. The wreckage of a re-draw that already
+            happened: still live in the database and still counting on the
+            leaderboard, but invisible on the scoring screen because nobody
+            holds a card for them. Surfaced here, where the draw is edited. */}
+        {(() => {
+          const orphans = orphanedScores({ holeData, groups, round: editRound, players: activePlayers });
+          if (!orphans.length) return null;
+          const nameOf = (pid) => activePlayers.find(p => p.id === pid)?.name || pid;
+          const n = totalHoles(orphans);
+          return (
+            <div style={{
+              marginTop: 8, padding: "8px 10px", borderRadius: 8,
+              background: K.warn + ALPHA.wash, border: `1px solid ${K.warn}${ALPHA.line}`,
+              color: K.warn, fontSize: FS.label, fontWeight: 600, lineHeight: 1.5,
+            }}>
+              {n} hole{n === 1 ? "" : "s"} posted by players not in any Round {editRound} group — {describeScored(orphans, nameOf)}.
+              These still count on the leaderboard. Put them back in a group, or discard the card from the Rounds tab.
+            </div>
+          );
+        })()}
+
         {genMsg && (
           <div style={{
             marginTop: 8, fontSize: 10, lineHeight: 1.5, padding: "6px 8px", borderRadius: 6,
@@ -3004,6 +3067,7 @@ function PairingsEditor({ activePlayers, pairingsData, setPairings, tRounds, cou
         );
       })}
       </div>
+      <ConfirmModal modal={confirmModal} />
     </div>
   );
 }
@@ -3411,32 +3475,42 @@ function PlayerEditor({ editing, set, onClose, tPlayers, players, memberships, c
 // header can't end up with a hole in it.
 function TournamentPanel({ meta, onSave, notify, confirm, scoredRounds = [] }) {
   const [showEditions, setShowEditions] = useState(false);
-  const [name, setName] = useState(meta?.name || "");
-  const [location, setLocation] = useState(meta?.location || "");
-  const [rounds, setRounds] = useState(clampRounds(meta?.rounds));
   const [busy, setBusy] = useState(false);
 
-  // Re-seed the fields when the SAVED values change — React's documented
-  // adjust-state-during-render pattern rather than an effect, so the inputs
-  // never paint one frame of stale text after a save lands.
-  //
-  // Keyed on the values, not on the `meta` object: Firestore hands back a new
-  // object on every snapshot, so comparing identity would wipe whatever the
-  // director was mid-way through typing each time any unrelated field of the
-  // tournament_state document changed.
-  const savedKey = `${meta?.name || ""} ${meta?.location || ""} ${meta?.rounds || ""}`;
-  const [seenKey, setSeenKey] = useState(savedKey);
-  if (savedKey !== seenKey) {
-    setSeenKey(savedKey);
-    setName(meta?.name || "");
-    setLocation(meta?.location || "");
-    setRounds(clampRounds(meta?.rounds));
-  }
+  // One working copy rather than three useStates plus a hand-rolled string key
+  // to decide when to re-seed them. useDirtyForm (ported from Bourbon Cup)
+  // owns that: it syncs an incoming value into local state ONLY while the form
+  // is clean, so a Firestore snapshot for an unrelated field of the same
+  // tournament_state document can no longer wipe what the director is midway
+  // through typing.
+  const initialValue = useMemo(() => ({
+    name: meta?.name || "",
+    location: meta?.location || "",
+    rounds: clampRounds(meta?.rounds),
+  }), [meta?.name, meta?.location, meta?.rounds]);
 
-  const pendingName = name.trim() || TOURNAMENT.name;
-  const pendingLocation = location.trim();
-  // Compared against the saved DOCUMENT, not against the last save, so a
-  // director who types and then undoes it by hand sees the Save light go out.
+  // The hook's own save is what reconciles its clean snapshot. Routing the
+  // panel's Save through it — rather than calling onSave directly and leaving
+  // the hook holding a pre-save snapshot forever — is what keeps the
+  // sync-when-clean behaviour alive for the NEXT external change.
+  const { value: form, setValue: setForm, save: commit } = useDirtyForm({
+    initialValue,
+    onSave: async (v) => onSave({
+      name: (v.name || "").trim() || TOURNAMENT.name,
+      location: (v.location || "").trim(),
+      rounds: v.rounds,
+    }),
+  });
+  const set = (patch) => setForm(prev => ({ ...prev, ...patch }));
+  const { name, location, rounds } = form;
+
+  const pendingName = (name || "").trim() || TOURNAMENT.name;
+  const pendingLocation = (location || "").trim();
+  // The Save light compares the NORMALISED pending values against the saved
+  // document, not the hook's raw isDirty. Both answer "has this changed", but
+  // only this one knows that trailing whitespace isn't a change — typing a
+  // space and deleting it should not leave Save lit on a form that would write
+  // the identical document.
   const dirty = pendingName !== (meta?.name || TOURNAMENT.name)
     || pendingLocation !== (meta?.location || "")
     || rounds !== clampRounds(meta?.rounds);
@@ -3459,7 +3533,7 @@ function TournamentPanel({ meta, onSave, notify, confirm, scoredRounds = [] }) {
       if (!ok) return;
     }
     setBusy(true);
-    await onSave({ name: pendingName, location: pendingLocation, rounds });
+    await commit();
     setBusy(false);
     notify?.("Tournament details saved");
   };
@@ -3508,8 +3582,8 @@ function TournamentPanel({ meta, onSave, notify, confirm, scoredRounds = [] }) {
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {[
-            { key: "name", val: name, set: setName, ph: TOURNAMENT.name, lbl: "Name" },
-            { key: "location", val: location, set: setLocation, ph: "e.g. Gaylord, MI", lbl: "Location" },
+            { key: "name", val: name, set: (v) => set({ name: v }), ph: TOURNAMENT.name, lbl: "Name" },
+            { key: "location", val: location, set: (v) => set({ location: v }), ph: "e.g. Gaylord, MI", lbl: "Location" },
           ].map(f => (
             <div key={f.key} style={{ display: "flex", alignItems: "center", gap: 8 }}>
               {/* Fixed 58px gutter — the width of the longest label at this
@@ -3532,7 +3606,7 @@ function TournamentPanel({ meta, onSave, notify, confirm, scoredRounds = [] }) {
               {ROUND_CHOICES.map(n => {
                 const on = rounds === n;
                 return (
-                  <button key={n} onClick={() => setRounds(n)} style={{
+                  <button key={n} onClick={() => set({ rounds: n })} style={{
                     flex: 1, padding: "10px 0", borderRadius: 8, cursor: "pointer",
                     background: on ? K.acc : K.inp,
                     border: on ? "none" : `1px solid ${K.bdr}`,
@@ -4236,34 +4310,6 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
         })}
       </div>
 
-      {/* Warning banner for incomplete round setup */}
-      {!finalizedRounds[editRound] && (() => {
-        const st = getRoundStatus(editRound);
-        const items = [];
-        if (!st.hasCourse) items.push({ text: "No course assigned", action: tab === "rounds" ? null : "Set course", onClick: () => setTab("rounds") });
-        else {
-          if (!st.teesDone && tab !== "rounds") items.push({ text: "Tee assignments incomplete", action: "Go to Tees", onClick: () => setTab("rounds") });
-          if (!st.groupsDone && tab !== "pairings") items.push({ text: "Pairings not set", action: "Go to Pairings", onClick: () => setTab("pairings") });
-          if (!st.teeTimesDone && tab !== "pairings") items.push({ text: "Tee times missing", action: "Go to Pairings", onClick: () => setTab("pairings") });
-        }
-        if (items.length === 0) return null;
-        return (
-          <div style={{ marginBottom: 12, background: "#fbbf2408", border: "1px solid #fbbf2425", borderRadius: 10, padding: "9px 12px", display: "flex", flexDirection: "column", gap: 5 }}>
-            <div style={{ fontSize: 10, fontWeight: 700, color: "#fbbf24", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 1 }}>Round {editRound} needs setup</div>
-            {items.map((item, i) => (
-              <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <div style={{ width: 4, height: 4, borderRadius: "50%", background: "#fbbf2460", flexShrink: 0 }} />
-                  <span style={{ fontSize: 11, color: K.t2 }}>{item.text}</span>
-                </div>
-                {item.action && (
-                  <button onClick={item.onClick} style={{ fontSize: 10, fontWeight: 700, color: "#fbbf24", background: "transparent", border: "none", cursor: "pointer", padding: 0 }}>{item.action} →</button>
-                )}
-              </div>
-            ))}
-          </div>
-        );
-      })()}
       </>)}
 
 
@@ -5070,7 +5116,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                 });
                 return next;
               });
-            }} roundDates={roundDates} onSetRoundDate={onSetRoundDate} scoringOpen={scoringOpen} onSetScoringOpen={onSetScoringOpen} pairingStrategy={pairingStrategy} onSetPairingStrategy={onSetPairingStrategy} leaderboard={leaderboard} finalizedRounds={finalizedRounds} getPlayerTee={getPlayerTee} editRound={editRound} />
+            }} roundDates={roundDates} onSetRoundDate={onSetRoundDate} scoringOpen={scoringOpen} onSetScoringOpen={onSetScoringOpen} pairingStrategy={pairingStrategy} onSetPairingStrategy={onSetPairingStrategy} leaderboard={leaderboard} finalizedRounds={finalizedRounds} getPlayerTee={getPlayerTee} editRound={editRound} holeData={holeData} />
       )}
 
       {/* Discard one player's card for this round. Sits at the bottom of the
@@ -5453,6 +5499,22 @@ export default function WBCApp() {
   // the app stores require to be deletable. PIN-only players have no such
   // account to delete. deleteStage: null | "confirm" | "working".
   const [accountOpen, setAccountOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [notifOpen, setNotifOpen] = useState(false);
+  // The bar's real height, measured rather than guessed: the menu sits flush
+  // on top of it, and the bar's height moves with the device's bottom inset.
+  const navRef = useRef(null);
+  const [navH, setNavH] = useState(62);
+  useEffect(() => {
+    const measure = () => { if (navRef.current) setNavH(navRef.current.offsetHeight); };
+    measure();
+    window.addEventListener("resize", measure);
+    window.addEventListener("orientationchange", measure);
+    return () => {
+      window.removeEventListener("resize", measure);
+      window.removeEventListener("orientationchange", measure);
+    };
+  }, []);
   const [deleteStage, setDeleteStage] = useState(null);
   const [deleteErr, setDeleteErr] = useState("");
   // handleDeleteAccount is defined further down, AFTER notify() exists — see note there.
@@ -5546,13 +5608,16 @@ export default function WBCApp() {
   // dependency arrays name `notify`, and those are evaluated during render.
   const notify = m => { setNotif(m); setTimeout(() => setNotif(null), 2500); };
 
-  // Set favicon
+  // Set favicon. The APP MARK, matching index.html, the header and the
+  // pull-to-refresh spinner — the trophy is the award, not the identity.
+  // index.html already ships the same href; this runs anyway because a
+  // previously-cached tab can be holding the old one.
   useEffect(() => {
     const link = document.querySelector("link[rel*='icon']") || document.createElement("link");
-    link.type = "image/png"; link.rel = "shortcut icon"; link.href = "/wbc-trophy.png";
+    link.type = "image/png"; link.rel = "shortcut icon"; link.href = WBC_FAVICON;
     document.head.appendChild(link);
     const apple = document.querySelector("link[rel='apple-touch-icon']") || document.createElement("link");
-    apple.rel = "apple-touch-icon"; apple.href = "/wbc-icon-192.png";
+    apple.rel = "apple-touch-icon"; apple.href = WBC_FAVICON;
     document.head.appendChild(apple);
   }, []);
 
@@ -6676,10 +6741,12 @@ export default function WBCApp() {
       <div style={{ minHeight: "var(--app-height, 100dvh)", background: "#030810", display: "flex", justifyContent: "center", overflow: "hidden" }}>
       <div style={{ height: "var(--app-height, 100dvh)", display: "flex", flexDirection: "column", background: K.bg, fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", color: K.t1, width: "100%", maxWidth: 480, position: "relative", boxShadow: "0 0 80px rgba(0,0,0,0.8)", flexShrink: 0, overflow: "hidden" }}>
         <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
-        <div style={{ padding: "10px 20px", paddingTop: "max(10px, calc(env(safe-area-inset-top, 0px) + 10px))", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${K.bdr}`, background: "rgba(14,24,41,0.95)", flexShrink: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}><img src={WBC_LOGO} alt="WBC" style={{ height: 32 }} /><div><div style={{ fontWeight: 800, fontSize: 15, color: K.t1 }}>{tournamentName}</div><div style={{ fontSize: 11, color: K.t3 }}>{tournamentLocation || "Gaylord, MI · Aug 26\u201329"}</div></div></div>
-          <button onClick={handleLogout} style={{ background: "transparent", border: `1px solid ${K.bdr}`, borderRadius: 8, color: K.t3, fontSize: 12, fontWeight: 600, padding: "5px 12px", cursor: "pointer" }}>Exit</button>
-        </div>
+        {/* The guest leaderboard is its own render branch, so it gets the
+            same header rather than a second left-aligned copy of one. */}
+        <AppHeader
+          location={tournamentLocation}
+          right={<button onClick={handleLogout} style={{ background: "transparent", border: `1px solid ${K.bdr}`, borderRadius: 8, color: K.t3, fontSize: FS.small, fontWeight: 600, padding: "5px 12px", cursor: "pointer" }}>Exit</button>}
+        />
         <div style={{ padding: "14px 20px 0 20px", flex: 1, overflowY: "hidden", overflowX: "hidden", display: "flex", flexDirection: "column", minHeight: 0, marginBottom: 8 }}>
           <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} />
         </div>
@@ -6689,12 +6756,29 @@ export default function WBCApp() {
   }
 
   // ── MAIN ──
+  // How far the bar's contents sit above the bottom of the screen.
+  //
+  // This was a bare safe-area inset, which is 0 on any device WITHOUT a home
+  // indicator — every home-button iPhone and iPad. There the icons sat flush
+  // on the physical edge, and a tap that landed slightly low hit the home
+  // button instead of the button on screen: on those devices a held home
+  // button is Siri, so a sloppy tap on the raised Board trophy opened Siri.
+  //
+  // So: a real floor for the devices with no inset, and a few px ON TOP of
+  // the inset for the ones that have it, since the same slip is merely less
+  // likely there rather than impossible.
+  const NAV_BOTTOM_PAD = "max(16px, calc(env(safe-area-inset-bottom, 0px) + 6px))";
+
   const navItems = [
     { key: "groups", label: "Pairings", icon: "pairings" },
     { key: "scoring", label: "Scoring", icon: "score" },
     { key: "leaderboard", label: "Board", icon: "trophy" },
     { key: "skins", label: "Betting", icon: "betting" },
-    { key: "admin", label: "Admin", icon: "admin" },
+    // "More" rather than "Admin": the slot now opens a menu holding
+    // everything that isn't the event — the director console, notifications
+    // and the account — instead of being one of those three things and
+    // leaving the other two scattered. See components/MoreMenu.
+    { key: "more", label: "More", icon: "more" },
   ];
 
   return (
@@ -6752,29 +6836,55 @@ export default function WBCApp() {
         </div>
       )}
 
-      <div style={{ padding: "10px 20px", paddingTop: "max(10px, calc(env(safe-area-inset-top, 0px) + 10px))", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${K.bdr}`, background: "rgba(14,24,41,0.95)", position: "sticky", top: 0, zIndex: 50 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <img src={WBC_TROPHY_LOGO} alt="WBC" style={{ height: 32 }} />
-          <div>
-            <h1 style={{ fontFamily: "'Montserrat', sans-serif", fontSize: 18, margin: 0, fontWeight: 800 }}>{tournamentName}</h1>
-            <p style={{ color: K.t2, fontSize: 11, margin: 0 }}>Gaylord, MI · Aug 26–29</p>
-          </div>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-            <div style={{ position: "relative", width: 6, height: 6 }}>
-              <div style={{ width: 6, height: 6, borderRadius: "50%", background: syncing ? K.acc : "#22c55e" }} />
-              {syncing && <div style={{ position: "absolute", inset: 0, borderRadius: "50%", background: K.acc, animation: "syncPing 0.8s ease-out" }} />}
+      <AppHeader
+        location={tournamentLocation}
+        right={<>
+            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <div style={{ position: "relative", width: 6, height: 6 }}>
+                <div style={{ width: 6, height: 6, borderRadius: "50%", background: syncing ? K.acc : "#22c55e" }} />
+                {syncing && <div style={{ position: "absolute", inset: 0, borderRadius: "50%", background: K.acc, animation: "syncPing 0.8s ease-out" }} />}
+              </div>
             </div>
+        </>}
+      />
+
+      <MoreMenu
+        open={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        isDirector={!!user.isDirector}
+        adminFlag={adminActionNeeded && user.isDirector}
+        notifFlag={notifPerm !== "granted" && !user.isGuest}
+        navH={navH}
+        onSelect={(key) => {
+          if (key === "admin") { setView("admin"); return; }
+          if (key === "notifications") { setNotifOpen(true); return; }
+          if (key === "account") { setDeleteErr(""); setDeleteStage(null); setAccountOpen(true); }
+        }}
+      />
+
+      {/* Notifications, in their own sheet rather than a section buried inside
+          Account. They are a menu entry now, so they need somewhere to land —
+          and they are no longer rendered in the Account sheet, so a preference
+          still has exactly one home. */}
+      {notifOpen && (
+        <div
+          onClick={() => setNotifOpen(false)}
+          data-popup="1"
+          style={{ position: "fixed", inset: 0, zIndex: 400, background: "rgba(3,8,16,0.72)", backdropFilter: "blur(2px)", display: "flex", alignItems: "flex-end", justifyContent: "center" }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{ width: "100%", maxWidth: 480, background: K.card, borderTop: `1px solid ${K.bdr}`, borderTopLeftRadius: 18, borderTopRightRadius: 18, padding: "14px 20px calc(20px + env(safe-area-inset-bottom, 0px))", maxHeight: "88vh", overflowY: "auto" }}
+          >
+            <div style={{ width: 38, height: 4, borderRadius: 2, background: K.bdr, margin: "0 auto 6px" }} />
+            <NotificationSettings
+              user={user}
+              notify={notify}
+              onPermissionChange={setNotifPerm}
+            />
           </div>
-          {notifPerm !== "granted" && !user.isGuest && (
-            <button onClick={() => { setDeleteErr(""); setDeleteStage(null); setAccountOpen(true); }} title="Notification settings" style={{ background: "transparent", border: `1px solid ${K.acc}60`, color: K.acc, padding: "4px 9px", borderRadius: 8, fontSize: 14, cursor: "pointer", lineHeight: 1 }}>🔔</button>
-          )}
-          <button onClick={() => { setDeleteErr(""); setDeleteStage(null); setAccountOpen(true); }} style={{ background: "transparent", border: `1px solid ${K.bdr}`, color: K.t3, padding: "4px 10px", borderRadius: 8, fontSize: 10, cursor: "pointer", textAlign: "center", lineHeight: 1.3 }}>
-            Account<br/><span style={{ fontSize: 9, color: K.t2, fontWeight: 600 }}>{user.name}</span>
-          </button>
         </div>
-      </div>
+      )}
 
       {accountOpen && (
         <div
@@ -6798,18 +6908,6 @@ export default function WBCApp() {
                     <div style={{ fontSize: 11, color: K.t3 }}>{user.isDirector ? "Tournament director" : "Player"}</div>
                   </div>
                 </div>
-
-                {/* Notification settings live in the Account sheet because
-                    that is where the app's other per-person settings already
-                    are. Rendered only for a real player: a guest has no
-                    player id to register a token against. */}
-                {!user.isGuest && (
-                  <NotificationSettings
-                    user={user}
-                    notify={notify}
-                    onPermissionChange={setNotifPerm}
-                  />
-                )}
 
                 <button onClick={() => { setAccountOpen(false); handleLogout(); }} style={{ width: "100%", padding: "13px 0", borderRadius: 12, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t1, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
                   Log out
@@ -6916,9 +7014,12 @@ export default function WBCApp() {
         ))}
       </div>
 
-      <div style={{ display: "flex", background: "rgba(14,24,41,0.97)", borderTop: `1px solid ${K.bdr}`, zIndex: 100, paddingBottom: "env(safe-area-inset-bottom, 0px)", flexShrink: 0 }}>
+      <div ref={navRef} style={{ display: "flex", background: "rgba(14,24,41,0.97)", borderTop: `1px solid ${K.bdr}`, zIndex: 100, paddingBottom: NAV_BOTTOM_PAD, flexShrink: 0 }}>
         {navItems.map(item => {
-          const active = view === item.key;
+          // More reads active while its menu is open OR while the view it
+          // leads to (Admin) is the one on screen — otherwise opening Admin
+          // from the menu would leave the whole bar looking unselected.
+          const active = item.key === "more" ? (menuOpen || view === "admin") : view === item.key;
           const clr = active ? K.acc : K.t3;
           const iconSz = 18;
           const navIcon = () => {
@@ -6926,12 +7027,14 @@ export default function WBCApp() {
             if (item.icon === "pairings") return <svg width={iconSz} height={iconSz} viewBox="0 0 24 24" fill="none" stroke={clr} strokeWidth="2" strokeLinecap="round"><circle cx="9" cy="7" r="3"/><circle cx="17" cy="7" r="3"/><path d="M3 21v-2a4 4 0 014-4h4a4 4 0 014 4v2"/><path d="M21 21v-2a3 3 0 00-2-2.83"/></svg>;
             if (item.icon === "score") return <svg width={iconSz} height={iconSz} viewBox="0 0 24 24" fill="none" stroke={clr} strokeWidth="2" strokeLinecap="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4z"/></svg>;
             if (item.icon === "betting") return <svg width={iconSz} height={iconSz} viewBox="0 0 24 24" fill="none" stroke={clr} strokeWidth="2" strokeLinecap="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>;
-            if (item.icon === "admin") return <svg width={iconSz} height={iconSz} viewBox="0 0 24 24" fill="none" stroke={clr} strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>;
+            if (item.icon === "more") return <svg width={iconSz} height={iconSz} viewBox="0 0 24 24" fill="none" stroke={clr} strokeWidth="2" strokeLinecap="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>;
             return null;
           };
           const isTrophy = item.key === "leaderboard";
           return (
             <button key={item.key} onClick={() => {
+              // The only nav item that is not a destination.
+              if (item.key === "more") { setMenuOpen(o => !o); return; }
               if (item.key === "scoring") {
                 // Find the correct active round: first after consecutive finalized rounds
                 let activeRound = 1;
@@ -6963,7 +7066,7 @@ export default function WBCApp() {
                 }} />
               )}
               {navIcon()}
-              {item.key === "admin" && adminActionNeeded && user.isDirector && (
+              {item.key === "more" && ((adminActionNeeded && user.isDirector) || (notifPerm !== "granted" && !user.isGuest)) && (
                 <span style={{
                   position: "absolute", top: 6, right: "50%", marginRight: -14,
                   width: 8, height: 8, borderRadius: "50%", background: "#ef4444",
