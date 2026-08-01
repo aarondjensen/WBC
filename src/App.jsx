@@ -409,6 +409,22 @@ const fmtRoundDate = (iso) => {
   if (!y || !mo || !da) return "";
   return new Date(y, mo - 1, da).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 };
+// Every day the event runs, start..end inclusive, as YYYY-MM-DD. This is what
+// turns two dates typed once in Admin → Event into the only dates a round can
+// be played on. Capped at 14: a longer span is a typo (2026 for 2027), and a
+// mis-keyed year would otherwise try to render thousands of chips.
+const tournamentDays = (start, end) => {
+  if (!start) return [];
+  const parse = (iso) => { const [y, mo, da] = String(iso).split("-").map(Number); return (y && mo && da) ? new Date(y, mo - 1, da) : null; };
+  const a = parse(start);
+  const b = parse(end) || a;
+  if (!a || !b || b < a) return a ? [start] : [];
+  const out = [];
+  for (const d = new Date(a); d <= b && out.length < 14; d.setDate(d.getDate() + 1)) {
+    out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
+  }
+  return out;
+};
 // Is score entry open right now for a given round + this group's tee time?
 // Director → always open. Director "scoring open" toggle → open. Otherwise the
 // automatic gate: opens SCORING_LEAD_MIN before tee time, on the round's scheduled date.
@@ -3269,7 +3285,7 @@ const holesEntered = (holeData, pid, round) =>
 // Bourbon Cup: the previous design swapped this row for a cramped set of
 // inline inputs, which is why it could only ever expose a name and an index —
 // there is no room on a phone row for anything more.
-function PlayerRow({ player, isLast, onOpen, isDirector }) {
+function PlayerRow({ player, isLast, onOpen, isDirector, account }) {
   return (
     <button onClick={onOpen} style={{
       width: "100%", textAlign: "left", cursor: "pointer", background: "transparent",
@@ -3278,10 +3294,14 @@ function PlayerRow({ player, isLast, onOpen, isDirector }) {
     }}>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: FS.body, fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {player.name}{isDirector && " 👑"}
+          {/* 🔗 = this name is claimed by a signed-in account. It replaces the
+              "Signed in" list that used to sit in the Event tab restating the
+              roster: the question it answered — who can actually post a score —
+              is about a player, so it belongs on the player. */}
+          {player.name}{account && " 🔗"}{isDirector && " 👑"}
         </div>
         <div style={{ fontSize: FS.label, color: K.t3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {fullName(player) !== player.name ? fullName(player) : " "}
+          {account?.email || (fullName(player) !== player.name ? fullName(player) : " ")}
         </div>
       </div>
       <div style={{ flexShrink: 0, textAlign: "right" }}>
@@ -3510,7 +3530,12 @@ function TournamentPanel({ meta, onSave, notify, confirm, scoredRounds = [] }) {
     name: meta?.name || "",
     location: meta?.location || "",
     rounds: clampRounds(meta?.rounds),
-  }), [meta?.name, meta?.location, meta?.rounds]);
+    // The days the event runs. Typed once here and nowhere else: Rounds offers
+    // exactly these days when a round is scheduled, so a round can only ever
+    // land on a day the tournament is actually being played.
+    startDate: meta?.startDate || "",
+    endDate: meta?.endDate || "",
+  }), [meta?.name, meta?.location, meta?.rounds, meta?.startDate, meta?.endDate]);
 
   // The hook's own save is what reconciles its clean snapshot. Routing the
   // panel's Save through it — rather than calling onSave directly and leaving
@@ -3522,10 +3547,15 @@ function TournamentPanel({ meta, onSave, notify, confirm, scoredRounds = [] }) {
       name: (v.name || "").trim() || TOURNAMENT.name,
       location: (v.location || "").trim(),
       rounds: v.rounds,
+      startDate: v.startDate || "",
+      // An end before the start is a half-typed range, not a range — keep the
+      // start and let them finish, rather than saving something that yields no
+      // days at all.
+      endDate: (v.endDate && v.startDate && v.endDate < v.startDate) ? v.startDate : (v.endDate || ""),
     }),
   });
   const set = (patch) => setForm(prev => ({ ...prev, ...patch }));
-  const { name, location, rounds } = form;
+  const { name, location, rounds, startDate, endDate } = form;
 
   const pendingName = (name || "").trim() || TOURNAMENT.name;
   const pendingLocation = (location || "").trim();
@@ -3536,7 +3566,9 @@ function TournamentPanel({ meta, onSave, notify, confirm, scoredRounds = [] }) {
   // the identical document.
   const dirty = pendingName !== (meta?.name || TOURNAMENT.name)
     || pendingLocation !== (meta?.location || "")
-    || rounds !== clampRounds(meta?.rounds);
+    || rounds !== clampRounds(meta?.rounds)
+    || (startDate || "") !== (meta?.startDate || "")
+    || (endDate || "") !== (meta?.endDate || "");
 
   // Rounds that already carry a score and would fall off the end of a shorter
   // tournament. Dropping to three does not DELETE round four — the holes stay
@@ -3639,12 +3671,27 @@ function TournamentPanel({ meta, onSave, notify, confirm, scoredRounds = [] }) {
               })}
             </div>
           </div>
-        </div>
-        <div style={{ fontSize: 11, color: K.t3, marginTop: 8, lineHeight: 1.4 }}>
-          Name and location show in the app header and on the sign-in screen; leave the name
-          blank to fall back to &ldquo;{TOURNAMENT.name}&rdquo;. Rounds sets how many the
-          leaderboard, pairings and scoring screens count — usually four, three when the
-          schedule loses a day.
+
+          {/* When it is played. Two dates, and Rounds turns them into the list
+              of days a round can be scheduled on — so nobody hand-types a date
+              in the wrong month, or a Tuesday nobody is at the course. */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ ...label, width: 58, flexShrink: 0 }}>Dates</span>
+            <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+              <input type="date" value={startDate} max={endDate || undefined}
+                onChange={e => set({ startDate: e.target.value, endDate: (endDate && e.target.value && endDate < e.target.value) ? e.target.value : endDate })}
+                style={{ ...input, fontSize: 13, colorScheme: "dark" }} />
+              <span style={{ fontSize: 11, color: K.t3, flexShrink: 0 }}>to</span>
+              <input type="date" value={endDate} min={startDate || undefined}
+                onChange={e => set({ endDate: e.target.value })}
+                style={{ ...input, fontSize: 13, colorScheme: "dark" }} />
+            </div>
+          </div>
+          {startDate && (
+            <div style={{ fontSize: 10, color: K.t3, paddingLeft: 66 }}>
+              {(() => { const n = tournamentDays(startDate, endDate).length; return `${n} day${n === 1 ? "" : "s"} — Rounds picks from these`; })()}
+            </div>
+          )}
         </div>
         {orphaned.length > 0 && (
           <div style={{ fontSize: 11, fontWeight: 600, color: K.warn, marginTop: 8, lineHeight: 1.4 }}>
@@ -3657,7 +3704,7 @@ function TournamentPanel({ meta, onSave, notify, confirm, scoredRounds = [] }) {
   );
 }
 
-function AccessPanel({ memberships, onSetDirector, claims, players, authUid, notify, confirm }) {
+function AccessPanel({ notify, confirm }) {
   const [code, setCode] = useState("");
   const [revealed, setRevealed] = useState(false);
   // Distinct from `busy`: `loading` is the ONE read that happens on open, and
@@ -3666,7 +3713,6 @@ function AccessPanel({ memberships, onSetDirector, claims, players, authUid, not
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const [dirBusy, setDirBusy] = useState(null);
 
   const reveal = async () => {
     setBusy(true); setErr("");
@@ -3727,23 +3773,6 @@ function AccessPanel({ memberships, onSetDirector, claims, players, authUid, not
     notify?.(next ? "Password saved" : "Password cleared — anyone can sign in");
   };
 
-  const toggleDirector = async (uid, on) => {
-    setDirBusy(uid); setErr("");
-    const res = await onSetDirector(uid, on);
-    setDirBusy(null);
-    if (!res.ok) { setErr(res.error); return; }
-    notify?.(on ? "Director added" : "Director removed");
-  };
-
-  // A membership carries an email; the name comes from the claim it made.
-  const nameFor = (m) => {
-    const pid = claims?.[m.id] ?? claims?.[m.uid];
-    return (players || []).find(p => p.id === pid)?.name || null;
-  };
-
-  const rows = [...(memberships || [])].sort((a, b) =>
-    (nameFor(a) || a.email || a.id).localeCompare(nameFor(b) || b.email || b.id));
-
   const label = { fontSize: 10, fontWeight: 700, color: K.t3, textTransform: "uppercase", letterSpacing: "0.06em" };
 
   return (
@@ -3751,12 +3780,6 @@ function AccessPanel({ memberships, onSetDirector, claims, players, authUid, not
       {/* The password */}
       <div style={{ background: K.card, borderRadius: 12, border: `1px solid ${K.bdr}`, padding: "12px 14px" }}>
         <div style={{ ...label, marginBottom: 8 }}>Event password</div>
-        <p style={{ fontSize: 11, color: K.t3, lineHeight: 1.5, margin: "0 0 10px" }}>
-          One password for the whole event, not one per player. Everyone types it once, after
-          signing in with Google or Apple, and until they do they can&rsquo;t claim a name off
-          the roster or post a score. It&rsquo;s checked by the database, not the app, so it holds
-          even against someone skipping the app entirely. Leave it blank to let anyone in.
-        </p>
         {revealed ? (
           <div style={{ display: "flex", gap: 8 }}>
             <input value={code} onChange={e => { setCode(e.target.value); if (err) setErr(""); }}
@@ -3779,51 +3802,12 @@ function AccessPanel({ memberships, onSetDirector, claims, players, authUid, not
         )}
       </div>
 
-      {/* Who's through the door */}
-      <div style={{ background: K.card, borderRadius: 12, border: `1px solid ${K.bdr}`, overflow: "hidden" }}>
-        <div style={{ padding: "10px 14px", borderBottom: `1px solid ${K.bdr}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span style={label}>Signed in ({rows.length})</span>
-          <span style={{ fontSize: 10, color: K.t3 }}>👑 = director</span>
-        </div>
-        {rows.length === 0 ? (
-          <p style={{ fontSize: 11, color: K.t3, lineHeight: 1.5, margin: 0, padding: "14px" }}>
-            {/* A director can always read their own membership, so an empty list
-                means the read was refused — which in practice means one thing. */}
-            {accountsUnreadable(memberships)
-              ? "Can't read this — the rules deployed to Firebase are older than this app. Re-publish firestore.rules."
-              : "Nobody has signed in yet."}
-          </p>
-        ) : rows.map((m, i) => {
-          const isSelf = m.id === authUid || m.uid === authUid;
-          const on = m.is_director === true;
-          const nm = nameFor(m);
-          return (
-            <div key={m.id} style={{ padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, borderBottom: i < rows.length - 1 ? `1px solid ${K.bdr}30` : "none" }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {nm || m.email || m.id}{on && " 👑"}
-                </div>
-                <div style={{ fontSize: 10, color: K.t3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {nm ? (m.email || "no email") : "hasn't claimed a name yet"}
-                </div>
-              </div>
-              {/* Your own crown is not yours to change — see the note above. */}
-              <button onClick={() => !isSelf && toggleDirector(m.id, !on)} disabled={isSelf || dirBusy === m.id}
-                title={isSelf ? "You can't change your own — that's a console edit" : on ? "Remove director" : "Make director"}
-                style={{ flexShrink: 0, padding: "6px 10px", borderRadius: 8, background: "transparent", border: `1px solid ${on ? K.acc + "50" : K.bdr}`, color: isSelf ? K.t3 : on ? K.acc : K.t2, fontSize: 11, fontWeight: 700, cursor: isSelf ? "default" : "pointer", opacity: isSelf ? 0.4 : 1 }}>
-                {dirBusy === m.id ? "…" : on ? "Director" : "Make director"}
-              </button>
-            </div>
-          );
-        })}
-      </div>
-
       {err && <div style={{ fontSize: 11, fontWeight: 600, color: K.danger, lineHeight: 1.5 }}>{err}</div>}
     </div>
   );
 }
 
-function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, roundDates, onSetRoundDate, scoringOpen, onSetScoringOpen, pairingStrategy, onSetPairingStrategy, leaderboard, holeData, finalizedRounds, onFinalizeRound, onUnfinalizeRound, onDiscardRoundScores, notify, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, externalSettingsRound, onExternalSettingsHandled, teesSaved, onTeesSave, teesModified, onTeesModify, memberships, onSetDirector, claims, authUid, tournamentMeta, onSaveTournamentMeta }) {
+function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, roundDates, onSetRoundDate, scoringOpen, onSetScoringOpen, pairingStrategy, onSetPairingStrategy, leaderboard, holeData, finalizedRounds, onFinalizeRound, onUnfinalizeRound, onDiscardRoundScores, notify, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, externalSettingsRound, onExternalSettingsHandled, teesSaved, onTeesSave, teesModified, onTeesModify, memberships, onSetDirector, claims, authUid, tournamentMeta, onSaveTournamentMeta }) {
   const [tab, setTab] = useState("rounds");
   // Themed confirmations (see lib/useConfirm). The host <ConfirmModal/> is
   // rendered once at the bottom of this view; `confirm(...)` returns a
@@ -4340,8 +4324,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                 <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                   <TournamentPanel meta={tournamentMeta} onSave={onSaveTournamentMeta} notify={notify}
                     confirm={confirm} scoredRounds={scoredRounds} />
-                  <AccessPanel memberships={memberships} onSetDirector={onSetDirector}
-                    claims={claims} players={players} authUid={authUid} notify={notify} confirm={confirm} />
+                  <AccessPanel notify={notify} confirm={confirm} />
                 </div>
               )}
               {tab === "players" && (
@@ -4366,6 +4349,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                         player={p}
                         isLast={i === activePlayers.length - 1}
                         isDirector={playerIsDirector(memberships, claims, p.id)}
+                        account={membershipForPlayer(memberships, claims, p.id)}
                         onOpen={() => {
                           const parts = splitName(p);
                           setEditingPlayer({
@@ -4382,6 +4366,16 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                       />
                     ))}
                   </Card>
+                  {(() => {
+                    const claimed = new Set(Object.values(claims || {}));
+                    const waiting = (memberships || []).filter(m => !claimed.has(claims?.[m.id] ?? claims?.[m.uid]) || !(claims?.[m.id] ?? claims?.[m.uid]));
+                    if (!waiting.length) return null;
+                    return (
+                      <div style={{ fontSize: FS.label, color: K.t3, marginTop: 8, lineHeight: 1.5 }}>
+                        {waiting.length} signed in without claiming a name yet — they appear here once they do.
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
 
@@ -4516,6 +4510,49 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                     : courseSearch !== "" && <button onClick={() => { doCourseSearch(""); setManualCourse(null); }} style={{ flexShrink: 0, padding: "0 10px", borderRadius: 8, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t3, fontSize: 13, cursor: "pointer" }}>✕</button>}
                 </div>
               )}
+
+              {/* Which day this round is played. The choices are the days the
+                  tournament runs — typed once in Admin → Event — because every
+                  round of a four-day event is one of those four days, and a
+                  free date field is how a round ends up scheduled in the wrong
+                  month. It is what opens scoring for the field, so it sits in
+                  the round's own setup, not two tabs away. No dates on the
+                  event yet: fall back to a plain date field rather than showing
+                  an empty row nobody can act on. */}
+              {!locked && onSetRoundDate && (() => {
+                const days = tournamentDays(tournamentMeta?.startDate, tournamentMeta?.endDate);
+                const mine = (roundDates || {})[editRound] || "";
+                // A date set before the event dates were (or after they moved)
+                // still shows, as its own chip — otherwise the round would look
+                // unscheduled while the leaderboard and scoring gate use it.
+                const chips = days.includes(mine) || !mine ? days : [...days, mine];
+                const oneMonth = new Set(chips.map(d => d.slice(0, 7))).size <= 1;
+                // "Wed, Aug 26" -> "Wed 26" while the whole event is in one month.
+                const chipLabel = (d) => oneMonth ? fmtRoundDate(d).replace(/,?\s\w+\s(\d+)$/, " $1") : fmtRoundDate(d);
+                return (
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 9, fontWeight: 700, color: mine ? K.t3 : K.warn, textTransform: "uppercase", letterSpacing: "0.05em", flexShrink: 0 }}>Date</span>
+                    {chips.length === 0 ? (
+                      <input type="date" value={mine} onChange={e => onSetRoundDate(editRound, e.target.value)}
+                        style={{ background: K.inp, border: `1px solid ${mine ? ac + "40" : K.warn}`, borderRadius: 8, color: mine ? ac : K.warn, fontSize: 12, fontWeight: 600, padding: "5px 8px", colorScheme: "dark" }} />
+                    ) : chips.map(d => {
+                      const on = mine === d;
+                      const taken = !on && Object.entries(roundDates || {}).find(([r, v]) => v === d && Number(r) !== editRound);
+                      return (
+                        <button key={d} onClick={() => onSetRoundDate(editRound, on ? "" : d)}
+                          title={taken ? `Also Round ${taken[0]}` : undefined}
+                          style={{
+                            padding: "4px 8px", borderRadius: 999, fontSize: 10, fontWeight: 700, cursor: "pointer",
+                            background: on ? ac : "transparent", color: on ? K.bg : K.t3,
+                            border: `1px solid ${on ? ac : K.bdr}`,
+                          }}>
+                          {chipLabel(d)}{taken ? ` · R${taken[0]}` : ""}
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
             </div>
 
             {/* ── PICKING: your courses, then the API ── */}
@@ -7009,7 +7046,7 @@ export default function WBCApp() {
         </div>
         {view === "skins" && <SkinsCtpView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} />}
         {view === "groups" && <GroupsView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} pairingsData={pairingsData} teeTimesData={teeTimesData} getPlayerTee={getPlayerTee} user={user} />}
-        {view === "admin" && (user.isDirector ? <AdminView players={DEMO_PLAYERS} activePlayers={activePlayers} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
+        {view === "admin" && (user.isDirector ? <AdminView activePlayers={activePlayers} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
               setTeeTimesData(prev => {
                 const next = typeof updater === "function" ? updater(prev) : updater;
                 // Fire-and-forget: update tee times on pairings rows in Firestore
