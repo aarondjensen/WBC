@@ -229,7 +229,7 @@ const rowsToPairings = (rows) => {
 //   R2  → avoid_repeats (auto: minimize players sharing a group with a prior partner)
 //   R3+ → leaderboard   (auto: group by current standings)
 const PAIRING_MODES = ["manual", "avoid_repeats", "leaderboard"];
-const PAIRING_MODE_LABEL = { manual: "Manual", avoid_repeats: "No repeats", leaderboard: "Leaderboard" };
+const PAIRING_MODE_LABEL = { manual: "Manual", avoid_repeats: "Optimal", leaderboard: "Leaderboard" };
 const defaultPairingMode = (rnd) => rnd === 1 ? "manual" : rnd === 2 ? "avoid_repeats" : "leaderboard";
 // Resolve the effective per-round strategy config from stored state, applying defaults.
 const resolvePairingCfg = (pairingStrategy, rnd) => {
@@ -789,7 +789,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
             if (live) return (
               <>
                 <style>{`@keyframes wbcLivePulse{0%,100%{opacity:1}50%{opacity:.4}}`}</style>
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 7px", borderRadius: 10, background: "#ef444418", border: "1px solid #ef444440" }}>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 7px", borderRadius: 10, background: K.danger + "18", border: "1px solid #ef444440" }}>
                   <span style={{ width: 6, height: 6, borderRadius: "50%", background: K.danger, animation: "wbcLivePulse 1.5s ease-in-out infinite" }} />
                   <span style={{ fontSize: 9, fontWeight: 800, color: K.danger, letterSpacing: ".08em" }}>LIVE</span>
                 </span>
@@ -1665,7 +1665,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
                       <div key={btn} style={{
                         flex: 1, height: 38,
                         fontWeight: 800, fontSize: 15, textAlign: "center",
-                        background: isCur ? K.t2 : "#94a3b80a",
+                        background: isCur ? K.t2 : K.t2 + "0a",
                         color: isCur ? K.bg : K.t2,
                         borderRadius: 8, position: "relative",
                         display: "flex", alignItems: "center", justifyContent: "center",
@@ -2613,7 +2613,7 @@ function GroupsView({ players, round, tRounds, courses, pairingsData, teeTimesDa
                 const teeClr = getTeeColor(p);
                 const isMe = pid === user.id;
                 return (
-                  <div key={pid} style={{ padding: "5px 12px", display: "grid", gridTemplateColumns: "5fr 1.6fr 2.4fr 2fr", alignItems: "center", borderBottom: pi < grp.length - 1 ? `1px solid ${K.bdr}10` : "none", background: isMe ? "#8b9ec215" : "transparent" }}>
+                  <div key={pid} style={{ padding: "5px 12px", display: "grid", gridTemplateColumns: "5fr 1.6fr 2.4fr 2fr", alignItems: "center", borderBottom: pi < grp.length - 1 ? `1px solid ${K.bdr}10` : "none", background: isMe ? K.t2 + "15" : "transparent" }}>
                     <span style={{ fontWeight: 600, fontSize: 13, color: isMe ? "#d4a843" : K.t1 }}>{p.name}</span>
                     <span style={{ fontSize: 10, fontWeight: 600, color: K.t2, textAlign: "center" }}>{p.handicap_index}</span>
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 10, fontWeight: 600, color: isDarkTee(teeClr) ? "#9ca3af" : isLightTee(teeClr) ? K.t3 : teeClr }}>
@@ -2909,7 +2909,7 @@ function PairingsEditor({ activePlayers, pairingsData, setPairings, tRounds, cou
             {(scoringOpen || {})[editRound]
               ? <>Scoring is <strong style={{ color: K.acc }}>open now</strong> for all groups this round.</>
               : (roundDates || {})[editRound]
-                ? <>Groups can score {SCORING_LEAD_MIN} min before their tee time on <strong style={{ color: K.t2 }}>{fmtRoundDate((roundDates || {})[editRound])}</strong>.</>
+                ? <>Scoring opens {SCORING_LEAD_MIN} minutes before tee times on <strong style={{ color: K.t2 }}>{fmtRoundDate((roundDates || {})[editRound])}</strong>.</>
                 : <>Set a play date to enable automatic scoring, or flip to <strong style={{ color: K.t2 }}>Open now</strong> to allow scoring immediately.</>}
           </div>
         </div>
@@ -3109,7 +3109,7 @@ function PairingsEditor({ activePlayers, pairingsData, setPairings, tRounds, cou
 }
 
 // ── TEE ASSIGNER ──
-function TeeAssigner({ activePlayers, tRounds, courses, teeData, setTeeBulk, finalizedRounds, editRound, teesSaved, onTeesSave, teesModified, onTeesModify }) {
+function TeeAssigner({ activePlayers, tRounds, courses, teeData, setTeeBulk, finalizedRounds, editRound, teesSaved, onTeesModify }) {
 
   const tr = tRounds.find(t => t.round_number === editRound);
   const course = tr ? courses.find(c => c.id === tr.course_id) : null;
@@ -3142,8 +3142,12 @@ function TeeAssigner({ activePlayers, tRounds, courses, teeData, setTeeBulk, fin
     if (teesSaved && teesSaved[editRound]) onTeesModify && onTeesModify(editRound);
   };
 
-  const isSaved = teesSaved && teesSaved[editRound];
-  const isModified = teesModified && teesModified[editRound];
+  // Per-player tees are folded away. Almost every field plays the tee the
+  // director set for everyone, so the list of names below the Set-all row was
+  // a page of confirmation that nothing was different — and the space it took
+  // is where this round's foursomes go now. It opens when one player needs a
+  // different box.
+  const [openTees, setOpenTees] = useState(false);
 
   // No course, nothing to assign tees from. This used to read
   // `!finalized && !course`, which let a FINALIZED round with no course
@@ -3164,11 +3168,18 @@ function TeeAssigner({ activePlayers, tRounds, courses, teeData, setTeeBulk, fin
               title says what tapping does for anyone who hovers. */}
           {tees.length > 0 && !finalizedRounds[editRound] && (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(68px, 1fr))", gap: 4, padding: "8px 14px", borderBottom: `1px solid ${K.bdr}${ALPHA.hair}` }}>
-              {[...tees].sort((a, b) => (parseFloat(b.slope) || 0) - (parseFloat(a.slope) || 0)).map(tee => (
+              {[...tees].sort((a, b) => (parseFloat(b.slope) || 0) - (parseFloat(a.slope) || 0)).map(tee => {
+                // In use = at least one player is on it this round, counting the
+                // default nobody has moved off. The accent edge is what tells you
+                // at a glance which boxes this round is actually played from —
+                // one on a normal round, two when somebody is moved up or back.
+                const inUse = activePlayers.some(p =>
+                  (assignments[p.id] || getDefaultTee(tees)?.name || tees[0]?.name) === tee.name);
+                return (
                 <button key={tee.name} onClick={() => setAll(tee.name)} title={`Put every player on ${tee.name}`} style={{
                   display: "flex", flexDirection: "column", alignItems: "center", gap: 2, minWidth: 0,
                   padding: "5px 4px", borderRadius: 8,
-                  background: K.inp, border: `1px solid ${K.bdr}`, color: K.t1, cursor: "pointer",
+                  background: K.inp, border: `1px solid ${inUse ? K.acc : K.bdr}`, color: K.t1, cursor: "pointer",
                 }}>
                   <span style={{ display: "flex", alignItems: "center", gap: 4, maxWidth: "100%", minWidth: 0 }}>
                     <TeeColorSwatch color={resolveTeeColor(tee, 0)} name={tee.name} size={11} style={{ borderRadius: 3, flexShrink: 0 }} />
@@ -3176,29 +3187,43 @@ function TeeAssigner({ activePlayers, tRounds, courses, teeData, setTeeBulk, fin
                   </span>
                   <span style={{ fontSize: 9, color: K.t3, lineHeight: 1 }}>{tee.slope}/{tee.rating}</span>
                 </button>
-              ))}
+                );
+              })}
             </div>
           )}
 
-          {/* Save confirmation button */}
-          {!finalizedRounds[editRound] && (
-            <div style={{ padding: "8px 14px 0" }}>
-            <button onClick={() => (!isSaved || isModified) && onTeesSave && onTeesSave(editRound)} style={{
-              width: "100%", padding: "8px 0", borderRadius: 8,
-              background: isModified ? K.warn : isSaved ? K.inp : K.acc,
-              border: `1px solid ${isModified ? K.warn + "40" : isSaved ? K.ok + "40" : "transparent"}`,
-              color: isModified ? K.bg : isSaved ? K.ok : K.bg,
-              fontSize: 11, fontWeight: 700, cursor: isSaved && !isModified ? "default" : "pointer",
-              display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-              transition: "background 0.25s ease, color 0.25s ease, border-color 0.25s ease",
-            }}>
-              {isModified ? "⚠ Tee changes — confirm again" : isSaved ? "✓ Tee selections confirmed" : "Confirm tee selections"}
-            </button>
-            </div>
-          )}
+          {/* The confirm control is a tick beside Edit in the card header — a
+              full-width bar to say "yes, those tees" cost more room than the
+              tee list it confirmed. See TeeConfirmTick. */}
 
           {/* Per-player tee assignment */}
-          <div style={{ overflow: "hidden", marginTop: 8 }}>
+          <button onClick={() => setOpenTees(o => !o)} style={{
+            width: "100%", marginTop: 8, padding: "8px 14px", background: "transparent", border: "none",
+            borderTop: `1px solid ${K.bdr}${ALPHA.hair}`, cursor: "pointer",
+            display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
+          }}>
+            <span style={{ fontSize: 10, fontWeight: 700, color: K.t3, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              Player tees
+            </span>
+            <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+              {/* What the list would say if it were open: one tee, or the split. */}
+              {(() => {
+                const counts = {};
+                activePlayers.forEach(p => {
+                  const t = assignments[p.id] || getDefaultTee(tees)?.name || tees[0]?.name || "—";
+                  counts[t] = (counts[t] || 0) + 1;
+                });
+                const names = Object.keys(counts);
+                return (
+                  <span style={{ fontSize: 10, fontWeight: 700, color: names.length === 1 ? K.t2 : K.acc, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {names.length === 1 ? `All ${names[0]}` : names.map(n => `${counts[n]} ${n}`).join(" · ")}
+                  </span>
+                );
+              })()}
+              <span style={{ fontSize: 10, color: K.t3 }}>{openTees ? "▲" : "▼"}</span>
+            </span>
+          </button>
+          <div style={{ overflow: "hidden", display: openTees ? "block" : "none" }}>
             <div>
             {activePlayers.map((p, i) => {
               const defaultTee = getDefaultTee(tees);
@@ -4004,6 +4029,7 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
   const [courseStateFilter, setCourseStateFilter] = useState("MI");
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
+  const roundStripRef = useRef(null);
   // Which round has its day list open, if any — the pill's date field sets it.
   const [datePickRound, setDatePickRound] = useState(null);
   // Is the course card showing its search instead of its course? Forced open
@@ -4022,6 +4048,13 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
       return NUM_ROUNDS;
     });
   }, [JSON.stringify(finalizedRounds)]);
+  // Keep the selected round on screen when something OTHER than a tap moves it
+  // — finalizing advances the round, and scoring's "no course" link jumps to
+  // one — which matters once the strip is wide enough to scroll sideways.
+  useEffect(() => {
+    const el = roundStripRef.current?.querySelector(`[data-round="${editRound}"]`);
+    el?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [editRound]);
   useEffect(() => {
     if (!externalSettingsOpen) return;
     setTab(EXTERNAL_TAB[externalSettingsTab] || "rounds");
@@ -4390,7 +4423,7 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
           tab regardless of that tab's content height — see ui.jsx. */}
       <StickyTop padBottom={10}>
         <SegmentedToggle
-          options={[["players","Players"],["rounds","Rounds"],["pairings","Pairings"],["event","Event"]]}
+          options={[["players","Players"],["rounds","Rounds"],["event","Event"]]}
           value={tab}
           onChange={setTab}
         />
@@ -4399,7 +4432,7 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
       {/* The round selector belongs to the two ROUND-SCOPED tabs only.
           Players, Courses and Event act on the tournament as a whole, and a
           round picker above them would imply otherwise. */}
-      {(tab === "rounds" || tab === "pairings") && (<>
+      {tab === "rounds" && (<>
         {(() => {
           const _finalizePending = Object.entries(pairingsData || {}).some(([rnd, groups]) => {
             if (!groups.length) return false;
@@ -4429,7 +4462,15 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
           there are rounds — under the pill it belongs to. Tapping one selects
           that round and opens the day list for it, so the full set of days is
           on screen only while a date is actually being chosen. */}
-      <div style={{ display: "flex", gap: 4, marginBottom: 10, alignItems: "stretch" }}>
+      {/* Four rounds share the width evenly. Beyond that they would be too
+          narrow to read a date under, so the strip switches to fixed-width
+          columns and scrolls sideways instead — the round count is a setting,
+          and this is what happens when it grows past what a phone fits. */}
+      <div ref={roundStripRef} className={numRounds > 4 ? "wbc-hscroll" : undefined}
+        style={{
+          display: "flex", gap: 4, marginBottom: 10, alignItems: "stretch",
+          ...(numRounds > 4 ? { overflowX: "auto", overflowY: "hidden", paddingBottom: 2 } : {}),
+        }}>
         {Array.from({ length: numRounds }, (_, i) => i + 1).map(r => {
           const st = getRoundStatus(r);
           const isFinal = st.finalized;
@@ -4438,7 +4479,7 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
           const pairingsDone = st.pairingsDone;
           const rDate = (roundDates || {})[r];
           return (
-            <div key={r} style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 3 }}>
+            <div key={r} data-round={r} style={{ flex: numRounds > 4 ? "0 0 78px" : 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 3 }}>
             <button onClick={() => setEditRound(r)} style={{
               width: "100%", padding: "7px 4px 6px", borderRadius: 10, cursor: "pointer",
               background: isActive ? acGlow : K.card,
@@ -4697,7 +4738,7 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
         const closePicker = () => { setPickingCourse(false); doCourseSearch(""); setManualCourse(null); };
         const unassignedRounds = Array.from({ length: numRounds }, (_, ri) => ri + 1).filter(r => !tRounds.find(t => t.round_number === r && t.course_id));
         return (
-          <div style={{ background: K.card, borderRadius: 12, border: `1px solid ${assigned ? ac + "40" : K.bdr}`, overflow: "hidden" }}>
+          <div style={{ background: K.card, borderRadius: 12, border: `1px solid ${assigned ? ac + "40" : K.bdr}`, overflow: "hidden", marginBottom: 12 }}>
 
             {/* Header: what round, what course, and the way out of both states */}
             <div style={{ padding: "10px 14px", borderBottom: `1px solid ${K.bdr}` }}>
@@ -4705,23 +4746,47 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
                 <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 15, fontWeight: 700, color: K.t1 }}>{assigned.name}</div>
-                    <div style={{ fontSize: 10, color: K.t3 }}>
-                      {assigned.city}{assigned.city && assigned.state ? ", " : ""}{assigned.state}
-                      {assigned.par ? ` · Par ${assigned.par}` : ""}
-                      {/* Which rounds still have no course is the one thing the
-                          round pills above do NOT show (their dots are tees and
-                          pairings), so it rides along on this line rather than
-                          claiming a row of its own. */}
-                      {locked && <span style={{ color: K.t3, fontWeight: 700 }}> · finalized</span>}
-                      {!locked && unassignedRounds.length > 0 && <span style={{ color: K.warn, fontWeight: 700 }}> · R{unassignedRounds.join(", R")} unset</span>}
-                    </div>
+                    {/* Which rounds still have no course is the one thing the
+                        round pills above do NOT show (their dots are tees and
+                        pairings). The course's city and par used to lead this
+                        line; they are on the scorecard behind Edit, and this
+                        space is better spent on what the event still needs. */}
+                    {(locked || unassignedRounds.length > 0) && (
+                      <div style={{ fontSize: 10, color: K.t3 }}>
+                        {locked && <span style={{ fontWeight: 700 }}>Finalized</span>}
+                        {!locked && unassignedRounds.length > 0 && <span style={{ color: K.warn, fontWeight: 700 }}>R{unassignedRounds.join(", R")} unset</span>}
+                      </div>
+                    )}
                   </div>
                   {!locked && (
-                    /* Pars, handicaps and tee boxes for the course this round is
-                       playing — and, from inside the editor, swapping the course
-                       for a different one. */
-                    <button onClick={() => setEditingCourse({ courseId: assigned.id, draft: { ...assigned, hole_pars: [...(assigned.hole_pars || Array(18).fill(4))], hole_handicaps: [...(assigned.hole_handicaps || Array(18).fill(0))], tee_boxes: (assigned.tee_boxes || []).map(t => ({ ...t })) } })}
-                      style={{ flexShrink: 0, padding: "5px 12px", borderRadius: 8, background: "transparent", border: `1px solid ${ac}60`, color: ac, fontSize: 10, fontWeight: 700, cursor: "pointer" }}>Edit</button>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                      {/* Tee sign-off. Lit while there is something to sign off —
+                          never saved, or saved and then changed — and spent once
+                          the round's tees are settled. A tick that is also a
+                          button is a status light you have to discover you can
+                          press; this says the word. */}
+                      {(() => {
+                        const saved = !!(teesSaved || {})[editRound];
+                        const modified = !!(teesModified || {})[editRound];
+                        const pending = !saved || modified;
+                        return (
+                          <button onClick={() => pending && onTeesSave && onTeesSave(editRound)}
+                            title={pending ? "Save tee selections for this round" : "Tees saved"}
+                            style={{
+                              flexShrink: 0, padding: "5px 12px", borderRadius: 8, cursor: pending ? "pointer" : "default",
+                              background: pending ? ac : "transparent",
+                              border: `1px solid ${pending ? "transparent" : K.bdr}`,
+                              color: pending ? ON_ACC : K.t3, fontSize: 10, fontWeight: 700,
+                              transition: "background 0.25s ease, border-color 0.25s ease, color 0.25s ease",
+                            }}>{pending ? "Save" : "Saved"}</button>
+                        );
+                      })()}
+                      {/* Pars, handicaps and tee boxes for the course this round is
+                          playing — and, from inside the editor, swapping the course
+                          for a different one. */}
+                      <button onClick={() => setEditingCourse({ courseId: assigned.id, draft: { ...assigned, hole_pars: [...(assigned.hole_pars || Array(18).fill(4))], hole_handicaps: [...(assigned.hole_handicaps || Array(18).fill(0))], tee_boxes: (assigned.tee_boxes || []).map(t => ({ ...t })) } })}
+                        style={{ flexShrink: 0, padding: "5px 12px", borderRadius: 8, background: "transparent", border: `1px solid ${ac}60`, color: ac, fontSize: 10, fontWeight: 700, cursor: "pointer" }}>Edit</button>
+                    </div>
                   )}
                 </div>
               )}
@@ -5346,13 +5411,17 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
 
             {/* ── ASSIGNED: tees, in the same card as the course they belong to ── */}
             {assigned && !picking && (
-              <TeeAssigner activePlayers={activePlayers} tRounds={tRounds} courses={courses} teeData={teeData} setTeeBulk={setTeeBulk} finalizedRounds={finalizedRounds} editRound={editRound} teesSaved={teesSaved} onTeesSave={onTeesSave} teesModified={teesModified} onTeesModify={onTeesModify} />
+              <TeeAssigner activePlayers={activePlayers} tRounds={tRounds} courses={courses} teeData={teeData} setTeeBulk={setTeeBulk} finalizedRounds={finalizedRounds} editRound={editRound} teesSaved={teesSaved} onTeesModify={onTeesModify} />
             )}
           </div>
         );
       })()}
 
-      {tab === "pairings" && (
+      {/* Groups and tee times for this round, under the course and tees they
+          are played on. It was its own tab, which split one job across two:
+          the round selector, the play date and the course all lived over here,
+          and the foursomes that use them lived over there. */}
+      {tab === "rounds" && (
         <PairingsEditor key={`${editRound}:${activePlayers.length}`} activePlayers={activePlayers} pairingsData={pairingsData} setPairings={setPairings} tRounds={tRounds} courses={courses} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
               setTeeTimesData(prev => {
                 const next = typeof updater === "function" ? updater(prev) : updater;
