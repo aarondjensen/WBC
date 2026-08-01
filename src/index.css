@@ -43,3 +43,13 @@ input, button, textarea, select, optgroup {
   font-family: inherit;
   font-variant-numeric: inherit;
 }
+
+/* Horizontal strips that scroll on touch — the admin round pills once the
+   round count outgrows the width. No scrollbar sitting under them, and iOS
+   momentum scrolling, which `overflow-x: auto` alone does not give in a
+   standalone PWA. */
+.wbc-hscroll {
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.wbc-hscroll::-webkit-scrollbar { display: none; }
