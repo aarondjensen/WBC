@@ -229,7 +229,7 @@ const rowsToPairings = (rows) => {
 //   R2  → avoid_repeats (auto: minimize players sharing a group with a prior partner)
 //   R3+ → leaderboard   (auto: group by current standings)
 const PAIRING_MODES = ["manual", "avoid_repeats", "leaderboard"];
-const PAIRING_MODE_LABEL = { manual: "Manual", avoid_repeats: "No repeats", leaderboard: "Leaderboard" };
+const PAIRING_MODE_LABEL = { manual: "Manual", avoid_repeats: "Optimal", leaderboard: "Leaderboard" };
 const defaultPairingMode = (rnd) => rnd === 1 ? "manual" : rnd === 2 ? "avoid_repeats" : "leaderboard";
 // Resolve the effective per-round strategy config from stored state, applying defaults.
 const resolvePairingCfg = (pairingStrategy, rnd) => {
@@ -3109,7 +3109,7 @@ function PairingsEditor({ activePlayers, pairingsData, setPairings, tRounds, cou
 }
 
 // ── TEE ASSIGNER ──
-function TeeAssigner({ activePlayers, tRounds, courses, teeData, setTeeBulk, finalizedRounds, editRound, teesSaved, onTeesSave, teesModified, onTeesModify }) {
+function TeeAssigner({ activePlayers, tRounds, courses, teeData, setTeeBulk, finalizedRounds, editRound, teesSaved, onTeesModify }) {
 
   const tr = tRounds.find(t => t.round_number === editRound);
   const course = tr ? courses.find(c => c.id === tr.course_id) : null;
@@ -3142,8 +3142,6 @@ function TeeAssigner({ activePlayers, tRounds, courses, teeData, setTeeBulk, fin
     if (teesSaved && teesSaved[editRound]) onTeesModify && onTeesModify(editRound);
   };
 
-  const isSaved = teesSaved && teesSaved[editRound];
-  const isModified = teesModified && teesModified[editRound];
   // Per-player tees are folded away. Almost every field plays the tee the
   // director set for everyone, so the list of names below the Set-all row was
   // a page of confirmation that nothing was different — and the space it took
@@ -3186,22 +3184,9 @@ function TeeAssigner({ activePlayers, tRounds, courses, teeData, setTeeBulk, fin
             </div>
           )}
 
-          {/* Save confirmation button */}
-          {!finalizedRounds[editRound] && (
-            <div style={{ padding: "8px 14px 0" }}>
-            <button onClick={() => (!isSaved || isModified) && onTeesSave && onTeesSave(editRound)} style={{
-              width: "100%", padding: "8px 0", borderRadius: 8,
-              background: isModified ? "#f59e0b" : isSaved ? K.inp : K.acc,
-              border: `1px solid ${isModified ? "#f59e0b40" : isSaved ? "#22c55e40" : "transparent"}`,
-              color: isModified ? K.bg : isSaved ? "#22c55e" : K.bg,
-              fontSize: 11, fontWeight: 700, cursor: isSaved && !isModified ? "default" : "pointer",
-              display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-              transition: "background 0.25s ease, color 0.25s ease, border-color 0.25s ease",
-            }}>
-              {isModified ? "⚠ Tee changes — confirm again" : isSaved ? "✓ Tee selections confirmed" : "Confirm tee selections"}
-            </button>
-            </div>
-          )}
+          {/* The confirm control is a tick beside Edit in the card header — a
+              full-width bar to say "yes, those tees" cost more room than the
+              tee list it confirmed. See TeeConfirmTick. */}
 
           {/* Per-player tee assignment */}
           <button onClick={() => setOpenTees(o => !o)} style={{
@@ -4745,7 +4730,7 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
         const closePicker = () => { setPickingCourse(false); doCourseSearch(""); setManualCourse(null); };
         const unassignedRounds = Array.from({ length: numRounds }, (_, ri) => ri + 1).filter(r => !tRounds.find(t => t.round_number === r && t.course_id));
         return (
-          <div style={{ background: K.card, borderRadius: 12, border: `1px solid ${assigned ? ac + "40" : K.bdr}`, overflow: "hidden" }}>
+          <div style={{ background: K.card, borderRadius: 12, border: `1px solid ${assigned ? ac + "40" : K.bdr}`, overflow: "hidden", marginBottom: 12 }}>
 
             {/* Header: what round, what course, and the way out of both states */}
             <div style={{ padding: "10px 14px", borderBottom: `1px solid ${K.bdr}` }}>
@@ -4753,23 +4738,47 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
                 <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 15, fontWeight: 700, color: K.t1 }}>{assigned.name}</div>
-                    <div style={{ fontSize: 10, color: K.t3 }}>
-                      {assigned.city}{assigned.city && assigned.state ? ", " : ""}{assigned.state}
-                      {assigned.par ? ` · Par ${assigned.par}` : ""}
-                      {/* Which rounds still have no course is the one thing the
-                          round pills above do NOT show (their dots are tees and
-                          pairings), so it rides along on this line rather than
-                          claiming a row of its own. */}
-                      {locked && <span style={{ color: K.t3, fontWeight: 700 }}> · finalized</span>}
-                      {!locked && unassignedRounds.length > 0 && <span style={{ color: K.warn, fontWeight: 700 }}> · R{unassignedRounds.join(", R")} unset</span>}
-                    </div>
+                    {/* Which rounds still have no course is the one thing the
+                        round pills above do NOT show (their dots are tees and
+                        pairings). The course's city and par used to lead this
+                        line; they are on the scorecard behind Edit, and this
+                        space is better spent on what the event still needs. */}
+                    {(locked || unassignedRounds.length > 0) && (
+                      <div style={{ fontSize: 10, color: K.t3 }}>
+                        {locked && <span style={{ fontWeight: 700 }}>Finalized</span>}
+                        {!locked && unassignedRounds.length > 0 && <span style={{ color: K.warn, fontWeight: 700 }}>R{unassignedRounds.join(", R")} unset</span>}
+                      </div>
+                    )}
                   </div>
                   {!locked && (
-                    /* Pars, handicaps and tee boxes for the course this round is
-                       playing — and, from inside the editor, swapping the course
-                       for a different one. */
-                    <button onClick={() => setEditingCourse({ courseId: assigned.id, draft: { ...assigned, hole_pars: [...(assigned.hole_pars || Array(18).fill(4))], hole_handicaps: [...(assigned.hole_handicaps || Array(18).fill(0))], tee_boxes: (assigned.tee_boxes || []).map(t => ({ ...t })) } })}
-                      style={{ flexShrink: 0, padding: "5px 12px", borderRadius: 8, background: "transparent", border: `1px solid ${ac}60`, color: ac, fontSize: 10, fontWeight: 700, cursor: "pointer" }}>Edit</button>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                      {/* Tee sign-off. Green tick = the field's tees are confirmed
+                          and unchanged since; amber = they moved and want another
+                          look; hollow = never confirmed. Tapping it confirms. */}
+                      {(() => {
+                        const saved = !!(teesSaved || {})[editRound];
+                        const modified = !!(teesModified || {})[editRound];
+                        const ok = saved && !modified;
+                        const tone = ok ? "#22c55e" : modified ? "#f59e0b" : K.t3;
+                        return (
+                          <button onClick={() => (!saved || modified) && onTeesSave && onTeesSave(editRound)}
+                            title={ok ? "Tees confirmed" : modified ? "Tees changed — confirm again" : "Confirm tee selections"}
+                            style={{
+                              width: 26, height: 26, borderRadius: "50%", flexShrink: 0, cursor: ok ? "default" : "pointer",
+                              display: "flex", alignItems: "center", justifyContent: "center",
+                              background: ok ? "#22c55e20" : "transparent",
+                              border: `1px solid ${tone}${ok ? "" : "70"}`,
+                              color: tone, fontSize: 12, fontWeight: 800, lineHeight: 1,
+                              transition: "background 0.25s ease, border-color 0.25s ease, color 0.25s ease",
+                            }}>✓</button>
+                        );
+                      })()}
+                      {/* Pars, handicaps and tee boxes for the course this round is
+                          playing — and, from inside the editor, swapping the course
+                          for a different one. */}
+                      <button onClick={() => setEditingCourse({ courseId: assigned.id, draft: { ...assigned, hole_pars: [...(assigned.hole_pars || Array(18).fill(4))], hole_handicaps: [...(assigned.hole_handicaps || Array(18).fill(0))], tee_boxes: (assigned.tee_boxes || []).map(t => ({ ...t })) } })}
+                        style={{ flexShrink: 0, padding: "5px 12px", borderRadius: 8, background: "transparent", border: `1px solid ${ac}60`, color: ac, fontSize: 10, fontWeight: 700, cursor: "pointer" }}>Edit</button>
+                    </div>
                   )}
                 </div>
               )}
@@ -5394,7 +5403,7 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
 
             {/* ── ASSIGNED: tees, in the same card as the course they belong to ── */}
             {assigned && !picking && (
-              <TeeAssigner activePlayers={activePlayers} tRounds={tRounds} courses={courses} teeData={teeData} setTeeBulk={setTeeBulk} finalizedRounds={finalizedRounds} editRound={editRound} teesSaved={teesSaved} onTeesSave={onTeesSave} teesModified={teesModified} onTeesModify={onTeesModify} />
+              <TeeAssigner activePlayers={activePlayers} tRounds={tRounds} courses={courses} teeData={teeData} setTeeBulk={setTeeBulk} finalizedRounds={finalizedRounds} editRound={editRound} teesSaved={teesSaved} onTeesModify={onTeesModify} />
             )}
           </div>
         );
