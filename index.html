@@ -17,7 +17,7 @@
          to <body>, outside every one of those screens, so the stylesheet has to
          be here for them to have a font to inherit. -->
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
-    <meta name="theme-color" content="#080f1e" />
+    <meta name="theme-color" content="#080f1a" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <!-- Opaque dark status bar (white text), content sits BELOW it. With no
          viewport-fit=cover this avoids the under-status-bar overlay entirely. -->
@@ -26,7 +26,12 @@
     <title>WBC 2026</title>
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
-      html, body, #root { height: 100%; overflow: hidden; background: #080f1e; }
+      /* Must match K.bg in src/theme.js and the background in src/index.css.
+         This is the colour on screen from the first paint until React mounts;
+         if it differs from the app's own background the whole screen changes
+         shade the moment the app appears. Three values used to disagree here
+         (#080f1e, #030810, K.bg) and each hand-off was a visible flash. */
+      html, body, #root { height: 100%; overflow: hidden; background: #080f1a; }
       body { font-family: 'Montserrat', sans-serif; }
       input, button, textarea, select { font-family: inherit; }
     </style>

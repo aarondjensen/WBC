@@ -1,9 +1,13 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* Matches K.bg in src/theme.js and the inline style in index.html — see the
+   comment there. The letterbox either side of the app column on wide screens
+   is painted by the app's own outer wrapper, so it stays #030810 without this
+   needing to differ. */
 html, body, #root {
   height: 100%;
   width: 100%;
-  background: #030810;
+  background: #080f1a;
 }
 
 body {

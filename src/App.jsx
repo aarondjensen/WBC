@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import { _app, _db, _auth, onAuthStateChanged, doGoogleSignIn, doAppleSignIn, doSignOut, consumeRedirectResult, deleteAccount, USERS_COLLECTION, NATIVE_APPLE_ENABLED, APPLE_PROVIDER_ENABLED, isNativePlatform, isAndroidNative, AUTH_PROVIDERS_ENABLED, TOURNAMENT_ID, getEditionSlug, getTournamentYear, isDefaultEdition } from "./firebase";
-import { readMembership, isDirectorAccount, joinWithCode, readAccessCode, setAccessCode, setDirector, subscribeMemberships, accountsUnreadable, membershipForPlayer, playerIsDirector } from "./lib/accounts";
+import { readMembership, isDirectorAccount, resolveMember, joinWithCode, readAccessCode, setAccessCode, setDirector, subscribeMemberships, accountsUnreadable, membershipForPlayer, playerIsDirector } from "./lib/accounts";
 import { K, ON_ACC, FS, ALPHA, FONT, SHADOW } from "./theme";
 import { SegmentedToggle, StickyTop, SectionLabel, Card, Toast } from "./components/ui";
 import { calcCH, computeIndividualBoard, rankIndividualBoard, rankIndividualBoardIds, WD_SCORE } from "./lib/individualBoard";
@@ -538,7 +538,7 @@ const getDefaultTee = (tees) => {
 const TEE_PALETTE = ["#60a5fa","#f59e0b","#a78bfa","#34d399","#fb923c","#f472b6","#38bdf8","#e879f9"];
 
 // ── LEADERBOARD ──
-function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getPlayerTee, finalizedRounds, skinWins }) {
+function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getPlayerTee, finalizedRounds, skinWins, loaded = true }) {
   const [expanded, setExpanded] = useState(null);
   const [scorecardRound, setScorecardRound] = useState(null);
   const [showGross, setShowGross] = useState(false);
@@ -550,9 +550,16 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
   const [rowStyle, setRowStyle] = useState({ padding: "6px 12px", fontSize: 12 });
   const [rowMinH, setRowMinH] = useState(0);
 
-  // Compute player column width to center Total, and align trophy to match
+  // Compute player column width to center Total, and align trophy to match.
+  //
+  // useLayoutEffect, not useEffect: this MEASURES the container and then
+  // restyles from the measurement. useEffect runs after the browser has
+  // painted, so the "auto" width below was painted first and the real width
+  // one frame later — the player column visibly jumped from ~39px to ~122px
+  // on every mount, which is what the pull-to-refresh flash was. Laying out
+  // synchronously before paint means the wrong layout is never shown.
   const [playerColW, setPlayerColW] = useState("auto");
-  useEffect(() => {
+  useLayoutEffect(() => {
     const align = () => {
       if (!containerRef.current) return;
       // Card has padding 12px each side, grid padding 12px each side
@@ -585,8 +592,11 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
     prevPositions.current = newPos;
   }, [lb.map(p => p.id).join(",")]);
 
-  // Row styles handled via CSS flex — rowStyle kept for font size only
-  useEffect(() => {
+  // Row styles handled via CSS flex — rowStyle kept for font size only.
+  // useLayoutEffect for the same reason as the column measurement above: this
+  // reads the rendered height and rewrites the row font size and padding from
+  // it, so running it after paint shows one frame at the pre-measurement size.
+  useLayoutEffect(() => {
     const calc = () => {
       if (!containerRef.current || !headerRef.current || lb.length === 0) return;
       // Use the container's own bounding rect — it already lives inside the padded content area
@@ -597,7 +607,10 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
       const perRow = Math.floor(available / lb.length);
       const clampedPerRow = Math.min(perRow, 36);
       const fSize = clampedPerRow >= 32 ? 13 : clampedPerRow >= 26 ? 12 : clampedPerRow >= 18 ? 11 : 10;
-      setRowStyle({ fontSize: fSize, lineHeight: 1 });
+      // Same object identity when the numbers have not moved, so the delayed
+      // re-measure below is free unless it actually found a different layout.
+      setRowStyle(prev => (prev.fontSize === fSize && prev.lineHeight === 1 && prev.padding === undefined)
+        ? prev : { fontSize: fSize, lineHeight: 1 });
       setRowMinH(perRow);
     };
     calc();
@@ -821,7 +834,12 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                 <span />
                 {allPriorRounds.map(r => <span key={r} style={{ textAlign: "center" }}>R{r}</span>)}
               </div>
-              {lb.length === 0 && <div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: 12 }}>No scores yet — be the first!</div>}
+              {/* Only once the round data is actually in. An empty `lb` also means
+                  "Firestore has not answered yet", and reporting that as "no scores"
+                  flashed the message up on every reload before the board arrived. */}
+              {lb.length === 0 && (loaded
+                ? <div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: 12 }}>No scores yet — be the first!</div>
+                : <div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: 12, opacity: 0.5 }}>&nbsp;</div>)}
               <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: expanded ? "auto" : "hidden" }}>
               {(() => {
                 // Pre-compute tied positions
@@ -5749,8 +5767,19 @@ export default function WBCApp() {
   // to stay distinguishable from null: showing the password screen to
   // somebody who is already through it, because a read had not landed yet,
   // would be its own bug. null means signed in but not a member.
-  const [membership, setMembership] = useState(undefined);
-  const member = membership === undefined ? undefined : !!membership;
+  //
+  // The answer is stored WITH the account it is about, in one value, because
+  // the two must never disagree. Keeping only the document meant the answer
+  // for "nobody is signed in" (null) was indistinguishable from "the read came
+  // back no" — and auth resolving changes fbUser one render BEFORE the effect
+  // below can start the new read. For that one render a returning player had a
+  // truthy fbUser sitting next to a stale null, which is exactly the shape the
+  // gate below tests for, so the password screen painted at somebody who was
+  // already through it. Comparing the answer's uid against the current one
+  // makes that window read as "still in flight", which is what it is.
+  const [membershipAnswer, setMembershipAnswer] = useState({ uid: undefined, doc: null });
+  const membership = membershipAnswer.doc;
+  const member = resolveMember(membershipAnswer, fbUser?.uid);
 
   // Ask the door. A FAILED read is not a "no" — a phone coming up on bad
   // signal must not be told its password is needed again — so it retries
@@ -5770,13 +5799,14 @@ export default function WBCApp() {
   }, []);
 
   useEffect(() => {
-    if (!AUTH_PROVIDERS_ENABLED) { setMembership(null); return; }
-    if (!fbUser) { setMembership(null); return; }
+    if (!AUTH_PROVIDERS_ENABLED) { setMembershipAnswer({ uid: fbUser ? fbUser.uid : null, doc: null }); return; }
+    if (!fbUser) { setMembershipAnswer({ uid: null, doc: null }); return; }
     let live = true;
-    setMembership(undefined);
+    // No "in flight" write needed — the answer already fails the uid check
+    // above the moment fbUser changes, so it reads as unresolved for free.
     (async () => {
       const { doc: m } = await loadMembership(fbUser.uid);
-      if (live) setMembership(m);
+      if (live) setMembershipAnswer({ uid: fbUser.uid, doc: m });
     })();
     return () => { live = false; };
   }, [fbUser, loadMembership]);
@@ -5792,7 +5822,10 @@ export default function WBCApp() {
   // on top of it, and the bar's height moves with the device's bottom inset.
   const navRef = useRef(null);
   const [navH, setNavH] = useState(62);
-  useEffect(() => {
+  // Measured, so useLayoutEffect — same reason as the leaderboard's column
+  // sizing: a measure-then-restyle in useEffect paints the guessed 62px first
+  // and the real height a frame later.
+  useLayoutEffect(() => {
     const measure = () => { if (navRef.current) setNavH(navRef.current.offsetHeight); };
     measure();
     window.addEventListener("resize", measure);
@@ -6949,7 +6982,7 @@ export default function WBCApp() {
           // flag set in the console before the first sign-in would be missed
           // by a locally-invented one.
           const { doc: m } = await loadMembership(fbUser.uid);
-          setMembership(m || { uid: fbUser.uid });
+          setMembershipAnswer({ uid: fbUser.uid, doc: m || { uid: fbUser.uid } });
         }}
       />
     );
@@ -7035,7 +7068,7 @@ export default function WBCApp() {
           right={<button onClick={handleLogout} style={{ background: "transparent", border: `1px solid ${K.bdr}`, borderRadius: 8, color: K.t3, fontSize: FS.small, fontWeight: 600, padding: "5px 12px", cursor: "pointer" }}>Exit</button>}
         />
         <div style={{ padding: "14px 20px 0 20px", flex: 1, overflowY: "hidden", overflowX: "hidden", display: "flex", flexDirection: "column", minHeight: 0, marginBottom: 8 }}>
-          <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} />
+          <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} loaded={storageLoaded} />
         </div>
       </div>
       </div>
@@ -7270,7 +7303,7 @@ export default function WBCApp() {
       )}
 
       <div className="wbc-app-body" style={{ padding: (view === "leaderboard" || view === "admin") ? "14px 20px 0 20px" : "14px 20px", flex: 1, overflowY: "auto", overflowX: "hidden", display: (view === "leaderboard" || view === "admin") ? "flex" : "block", flexDirection: "column", minHeight: 0, paddingBottom: (view === "leaderboard" || view === "admin") ? "28px" : 0 }}>
-        {view === "leaderboard" && <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} />}
+        {view === "leaderboard" && <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} loaded={storageLoaded} />}
         <div style={{ display: view === "scoring" ? "block" : "none", paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
           <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeTimesData={teeTimesData} roundDates={roundDates} scoringOpen={scoringOpen} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={async (key, signerPid, signerName, present, rnd) => { const nonSigners = (present || []).filter(pid => pid !== signerPid); const autoFinal = nonSigners.length === 0; const optimistic = { signedBy: signerPid, signedByName: signerName, attestedBy: [], present: present || [] }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: optimistic })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), tournament_id: TOURNAMENT_ID, groupKey: key, round: rnd, signedBy: signerPid, signedByName: signerName, present: present || [], attestedBy: [], signedAt: new Date().toISOString() }); if (autoFinal) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onAttestScorecard={async (key, attesterPid, nonSigners) => { const cur = scorecardSigs[key]; if (!cur) return; const attestedBy = [...new Set([...(cur.attestedBy || []), attesterPid])]; const optimistic = { ...cur, attestedBy }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: { ...prev[key], attestedBy } })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), attestedBy }); const allDone = (nonSigners || []).every(pid => attestedBy.includes(pid)); if (allDone) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onUnsignScorecard={async key => { pendingSigsRef.current.delete(key); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); if (finalizedRounds[key]) { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); pendingSigsRef.current.delete(key); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); await saveTournamentState(nf); }} onGoToAdminCourses={(rnd) => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); setAdminSettingsRound(rnd || null); }} markPlayerWD={markPlayerWD} ctpData={ctpData} onSetCtp={onSetCtp} />
         </div>
@@ -7340,11 +7373,21 @@ export default function WBCApp() {
               marginTop: 0,
             }}>
               {isTrophy && (
+                // The dome the trophy sits in: a true 68px circle — equal
+                // radii, so the arc is a circle and not a squashed ellipse —
+                // with everything below the bar's top border clipped away.
+                //
+                // The circle is 34 tall but only rises 24, so its widest point
+                // and the near-vertical sides beneath it fall 10px BELOW that
+                // border and read as two stubs poking down past the top of the
+                // bar. clip-path cuts the box off at exactly the border line,
+                // taking those sides with it and leaving the arc untouched.
                 <div style={{
                   position: "absolute", top: "-24px", left: "50%", transform: "translateX(-50%)",
                   width: 68, height: 34,
                   background: "rgba(14,24,41,0.97)",
                   borderRadius: "34px 34px 0 0",
+                  clipPath: "inset(0 0 10px 0)",
                   borderTop: `1px solid ${K.bdr}`,
                   borderLeft: `1px solid ${K.bdr}`,
                   borderRight: `1px solid ${K.bdr}`,
