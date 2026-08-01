@@ -4537,16 +4537,24 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
                         style={{ background: K.inp, border: `1px solid ${mine ? ac + "40" : K.warn}`, borderRadius: 8, color: mine ? ac : K.warn, fontSize: 12, fontWeight: 600, padding: "5px 8px", colorScheme: "dark" }} />
                     ) : chips.map(d => {
                       const on = mine === d;
-                      const taken = !on && Object.entries(roundDates || {}).find(([r, v]) => v === d && Number(r) !== editRound);
+                      // Two rounds on one day is a 36-hole day, not a mistake —
+                      // nothing here blocks it. The marker is information: every
+                      // OTHER round already on this day, listed, and shown even
+                      // when this round is the one selected, so doubling up is
+                      // visible while you do it rather than only before.
+                      const others = Object.entries(roundDates || {})
+                        .filter(([r, v]) => v === d && Number(r) !== editRound)
+                        .map(([r]) => Number(r))
+                        .sort((a, b) => a - b);
                       return (
                         <button key={d} onClick={() => onSetRoundDate(editRound, on ? "" : d)}
-                          title={taken ? `Also Round ${taken[0]}` : undefined}
+                          title={others.length ? `Round ${others.join(" and ")} also play${others.length === 1 ? "s" : ""} this day` : undefined}
                           style={{
                             padding: "4px 8px", borderRadius: 999, fontSize: 10, fontWeight: 700, cursor: "pointer",
                             background: on ? ac : "transparent", color: on ? K.bg : K.t3,
                             border: `1px solid ${on ? ac : K.bdr}`,
                           }}>
-                          {chipLabel(d)}{taken ? ` · R${taken[0]}` : ""}
+                          {chipLabel(d)}{others.length ? ` · R${others.join(",R")}` : ""}
                         </button>
                       );
                     })}
