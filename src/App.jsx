@@ -3118,25 +3118,29 @@ function TeeAssigner({ activePlayers, tRounds, courses, teeData, setTeeBulk, fin
     <div style={{ opacity: finalizedRounds[editRound] ? 0.6 : 1, pointerEvents: finalizedRounds[editRound] ? "none" : "auto" }}>
       <div>
         <div>
-          {/* Set-all row. This doubles as the course's tee list — it used to be
-              printed twice, once as read-only chips on the course card and again
-              as a stack of tall buttons here. One row, each tee still showing
-              slope/rating, and tapping one puts the whole field on it. */}
+          {/* The course's tee list, and the set-all control — one thing, not the
+              two it used to be (read-only chips on the course card, plus a stack
+              of tall buttons here). Slope/rating sits UNDER the colour and name
+              rather than beside it, which is what lets three tees share the width
+              of a phone; each tile takes an equal share and wraps past four.
+              No "Set all" label: the tiles are the only tap targets in the row,
+              they carry the same swatches as the player rows below, and the
+              title says what tapping does for anyone who hovers. */}
           {tees.length > 0 && !finalizedRounds[editRound] && (
-            <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderBottom: `1px solid ${K.bdr}${ALPHA.hair}` }}>
-              <span style={{ fontSize: 9, fontWeight: 700, color: K.t3, textTransform: "uppercase", letterSpacing: "0.04em", flexShrink: 0 }}>Set all</span>
-              <div style={{ display: "flex", gap: 4, flexWrap: "wrap", flex: 1, minWidth: 0 }}>
-                {[...tees].sort((a, b) => (parseFloat(b.slope) || 0) - (parseFloat(a.slope) || 0)).map(tee => (
-                  <button key={tee.name} onClick={() => setAll(tee.name)} style={{
-                    display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", borderRadius: 999,
-                    background: K.inp, border: `1px solid ${K.bdr}`, color: K.t1, cursor: "pointer",
-                  }}>
-                    <TeeColorSwatch color={resolveTeeColor(tee, 0)} name={tee.name} size={11} style={{ borderRadius: 3 }} />
-                    <span style={{ fontSize: 10, fontWeight: 700 }}>{tee.name}</span>
-                    <span style={{ fontSize: 9, color: K.t3 }}>{tee.slope}/{tee.rating}</span>
-                  </button>
-                ))}
-              </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(68px, 1fr))", gap: 4, padding: "8px 14px", borderBottom: `1px solid ${K.bdr}${ALPHA.hair}` }}>
+              {[...tees].sort((a, b) => (parseFloat(b.slope) || 0) - (parseFloat(a.slope) || 0)).map(tee => (
+                <button key={tee.name} onClick={() => setAll(tee.name)} title={`Put every player on ${tee.name}`} style={{
+                  display: "flex", flexDirection: "column", alignItems: "center", gap: 2, minWidth: 0,
+                  padding: "5px 4px", borderRadius: 8,
+                  background: K.inp, border: `1px solid ${K.bdr}`, color: K.t1, cursor: "pointer",
+                }}>
+                  <span style={{ display: "flex", alignItems: "center", gap: 4, maxWidth: "100%", minWidth: 0 }}>
+                    <TeeColorSwatch color={resolveTeeColor(tee, 0)} name={tee.name} size={11} style={{ borderRadius: 3, flexShrink: 0 }} />
+                    <span style={{ fontSize: 10, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tee.name}</span>
+                  </span>
+                  <span style={{ fontSize: 9, color: K.t3, lineHeight: 1 }}>{tee.slope}/{tee.rating}</span>
+                </button>
+              ))}
             </div>
           )}
 
