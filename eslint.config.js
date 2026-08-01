@@ -36,6 +36,52 @@ export default defineConfig([
       'no-empty': ['error', { allowEmptyCatch: true }],
     },
   },
+  // ── The design scales are the only source of these numbers ──
+  // Every one of these started as a loose literal at a call site, and loose
+  // literals are how the app ended up with 19 font sizes, 15 corner radii, 29
+  // alpha washes and 7 spellings of 4 transition durations — none of which
+  // anyone chose, all of which someone typed. A 1px step is invisible on its
+  // own and indistinguishable from a mistake, so nothing in review catches it;
+  // this does.
+  //
+  // The fix is never a new number. It is the rung whose ROLE matches what you
+  // are rendering — see the comments on each scale in theme.js. If a rung
+  // genuinely does not exist for it, add one THERE, with a note on what it is
+  // for, so the next person inherits a decision instead of a digit.
+  //
+  // Two files are exempt. theme.js is where the numbers live. main.jsx is the
+  // crash boundary, and it shares NOTHING with the app on purpose — its own
+  // hexes, its own font stack, no imports past React — so that the screen
+  // shown when the app dies cannot be taken down by the module that killed it.
+  // Importing the theme into it to satisfy a lint rule would trade that away.
+  {
+    files: ['src/**/*.{js,jsx}'],
+    ignores: ['src/theme.js', 'src/main.jsx'],
+    rules: {
+      'no-restricted-syntax': ['error',
+        {
+          selector: 'Property[key.name="fontSize"] > Literal[value=type(number)]',
+          message: 'Use a rung off the FS type scale (FS.small, FS.body, …) rather than a raw px size — see theme.js.',
+        },
+        {
+          selector: 'Property[key.name="borderRadius"] > Literal[value=type(number)]',
+          message: 'Use a rung off the R radius scale (R.sm, R.md, …) rather than a raw px radius — see theme.js.',
+        },
+        {
+          // `K.acc + "40"` — a colour token with a hand-typed alpha stapled on.
+          selector: 'BinaryExpression[operator="+"] > Literal[value=/^[0-9a-fA-F]{2}$/]',
+          message: 'Use a rung off the ALPHA ladder (K.acc + ALPHA.line) rather than a hand-typed hex alpha — see theme.js.',
+        },
+        {
+          // Any transition carrying its own duration. The template-literal form
+          // (`opacity ${MOTION}`) is a TemplateLiteral, so it never matches.
+          selector: 'Property[key.name="transition"] > Literal[value=/[0-9](s|ms)\\b/]',
+          message: 'Use MOTION for the duration: transition: `opacity ${MOTION}` — see theme.js.',
+        },
+      ],
+    },
+  },
+
   // Vercel serverless handlers — Node ESM, not browser.
   {
     files: ['api/**/*.js'],
