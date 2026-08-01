@@ -21,6 +21,16 @@ export const K = {
   t1: "#e8edf5", t2: "#8b9ec2", t3: "#526484",
   bdr: "#1a2b47",
   eagle: "#3b82f6", birdie: "#22c55e", par: "#8b9ec2", bogey: "#eab308", dbl: "#ef4444",
+  // Two aliases, because the same two hexes were being typed raw at ~30 call
+  // sites to mean something that is NOT a score. Named separately so the
+  // meaning is legible at the call site and so the scoring colors could ever
+  // move without dragging every checkmark and minus sign along with them.
+  ok: "#22c55e",    // done, saved, signed, moved up — a state that is complete
+  under: "#ef4444", // ink for a number under par, the way a scorecard prints it
+  // The bottom nav bar's surface, and the dome the trophy sits in. Very
+  // slightly lighter and more opaque than `card`: it sits over scrolling
+  // content and has to stop it, which a flat `card` does not do.
+  nav: "rgba(14,24,41,0.97)",
   // The raised surface a selected segment is drawn on. Lighter than `card` so
   // a thumb reads as lifted out of the track rather than merely tinted.
   thumb: "#1c2c47",

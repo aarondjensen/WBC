@@ -2,7 +2,7 @@ import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } fr
 import { createPortal } from "react-dom";
 import { _app, _db, _auth, onAuthStateChanged, doGoogleSignIn, doAppleSignIn, doSignOut, consumeRedirectResult, deleteAccount, USERS_COLLECTION, NATIVE_APPLE_ENABLED, APPLE_PROVIDER_ENABLED, isNativePlatform, isAndroidNative, AUTH_PROVIDERS_ENABLED, TOURNAMENT_ID, getEditionSlug, getTournamentYear, isDefaultEdition } from "./firebase";
 import { readMembership, isDirectorAccount, resolveMember, joinWithCode, readAccessCode, setAccessCode, setDirector, subscribeMemberships, accountsUnreadable, membershipForPlayer, playerIsDirector } from "./lib/accounts";
-import { K, ON_ACC, FS, ALPHA, FONT, SHADOW } from "./theme";
+import { K, ON_ACC, FS, ALPHA, FONT, SHADOW, SCRIM } from "./theme";
 import { SegmentedToggle, StickyTop, SectionLabel, Card, Toast } from "./components/ui";
 import { calcCH, computeIndividualBoard, rankIndividualBoard, rankIndividualBoardIds, WD_SCORE } from "./lib/individualBoard";
 import { useConfirm } from "./lib/useConfirm";
@@ -688,7 +688,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
           </div>
           <div style={{ display: "flex", gap: 8, fontSize: 10 }}>
             <span style={{ color: K.t3 }}>Gross <strong style={{ color: K.t2 }}>{totalGross || "—"}</strong></span>
-            <span style={{ color: K.t3 }}>Net <strong style={{ color: netToPar < 0 ? "#ef4444" : K.t1 }}>{totalNet || "—"}</strong></span>
+            <span style={{ color: K.t3 }}>Net <strong style={{ color: netToPar < 0 ? K.under : K.t1 }}>{totalNet || "—"}</strong></span>
           </div>
         </div>
             {[["Front", 0, 9, rc.frontPar, rc.frontGross], ["Back", 9, 9, rc.backPar, rc.backGross]].map(([label, start, count, parT, grossT]) => (
@@ -714,7 +714,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                     const d = s ? s - rc.holePars[h] : null;
                     const st = rc.strokeMap[h] || 0;
                     const isSkin = skinWins[`${rc.r}_${h}`] === p.id;
-                    const clr = isSkin ? "#d4a843" : "#8b9ec2";
+                    const clr = isSkin ? "#d4a843" : K.t2;
                     return (
                       <div key={h} style={{
                         textAlign: "center", fontSize: 11, fontWeight: 700, padding: "1px 0",
@@ -790,8 +790,8 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
               <>
                 <style>{`@keyframes wbcLivePulse{0%,100%{opacity:1}50%{opacity:.4}}`}</style>
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 7px", borderRadius: 10, background: "#ef444418", border: "1px solid #ef444440" }}>
-                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#ef4444", animation: "wbcLivePulse 1.5s ease-in-out infinite" }} />
-                  <span style={{ fontSize: 9, fontWeight: 800, color: "#ef4444", letterSpacing: ".08em" }}>LIVE</span>
+                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: K.danger, animation: "wbcLivePulse 1.5s ease-in-out infinite" }} />
+                  <span style={{ fontSize: 9, fontWeight: 800, color: K.danger, letterSpacing: ".08em" }}>LIVE</span>
                 </span>
               </>
             );
@@ -891,7 +891,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                       {/* # */}
                       <span style={{ fontWeight: 800, fontSize: rowStyle.fontSize, color: top3 ? K.acc : K.t3, display: "flex", alignItems: "center", gap: 1 }}>
                         {pos}
-                        {mov && <span style={{ fontSize: 7, color: mov === "up" ? "#22c55e" : "#ef4444", lineHeight: 1 }}>{mov === "up" ? "▲" : "▼"}</span>}
+                        {mov && <span style={{ fontSize: 7, color: mov === "up" ? K.ok : K.danger, lineHeight: 1 }}>{mov === "up" ? "▲" : "▼"}</span>}
                       </span>
                       {/* Player */}
                       <div style={{ fontWeight: 600, fontSize: rowStyle.fontSize, display: "flex", alignItems: "center", gap: 3, overflow: "hidden" }}>
@@ -899,7 +899,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                         <span style={{ fontSize: 8, flexShrink: 0, color: isExpanded ? K.acc : K.t3, transition: "transform 0.2s", display: "inline-block", transform: isExpanded ? "rotate(180deg)" : "rotate(0)" }}>▼</span>
                       </div>
                       {/* Total */}
-                      <span style={{ textAlign: "center", fontWeight: 800, fontSize: rowStyle.fontSize + 1, color: p.isWD ? K.t3 : displayTotal != null ? (showGross || !showToPar ? K.t2 : displayTotal < 0 ? "#ef4444" : displayTotal > 0 ? K.t2 : K.t1) : K.t3 }}>
+                      <span style={{ textAlign: "center", fontWeight: 800, fontSize: rowStyle.fontSize + 1, color: p.isWD ? K.t3 : displayTotal != null ? (showGross || !showToPar ? K.t2 : displayTotal < 0 ? K.under : displayTotal > 0 ? K.t2 : K.t1) : K.t3 }}>
                         {p.isWD ? <span style={{ fontSize: rowStyle.fontSize - 1, color: K.t3, fontWeight: 700 }}>WD</span> : displayTotal != null ? (showGross || !showToPar ? displayTotal : fmtPar(displayTotal)) : "—"}
                       </span>
                       {/* Thru */}
@@ -922,7 +922,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                                 return prRd.netToPar + par2;
                               })();
                         return (
-                          <span key={r} style={{ textAlign: "center", fontSize: rowStyle.fontSize - 2, color: isWDRound ? K.t3 : prVal != null && !showGross && showToPar && prVal < 0 ? "#ef4444" : K.t3, opacity: isWDRound ? 0.5 : prVal != null ? 0.6 : 0.3 }}>
+                          <span key={r} style={{ textAlign: "center", fontSize: rowStyle.fontSize - 2, color: isWDRound ? K.t3 : prVal != null && !showGross && showToPar && prVal < 0 ? K.under : K.t3, opacity: isWDRound ? 0.5 : prVal != null ? 0.6 : 0.3 }}>
                             {isWDRound ? "WD" : prVal != null ? (showGross || !showToPar ? prVal : fmtPar(prVal)) : "—"}
                           </span>
                         );
@@ -1393,7 +1393,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
                       {isFinalized
                         ? <span style={{ fontSize: 10, fontWeight: 700, color: K.acc, background: K.accGlow, padding: "3px 8px", borderRadius: 6 }}>✓ Final</span>
                         : allComplete
-                          ? <span style={{ fontSize: 10, fontWeight: 700, color: "#fbbf24", background: "#fbbf2415", padding: "3px 8px", borderRadius: 6 }}>18 ✓ Ready</span>
+                          ? <span style={{ fontSize: 10, fontWeight: 700, color: K.warn, background: K.warn + "15", padding: "3px 8px", borderRadius: 6 }}>18 ✓ Ready</span>
                           : holesScored > 0
                             ? <span style={{ fontSize: 10, fontWeight: 600, color: K.warn }}>Thru {holesScored}</span>
                             : <span style={{ fontSize: 10, color: K.t3 }}>Not started</span>
@@ -1616,14 +1616,14 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
       {/* Completed hole confirmation overlay */}
       {!isSigned && navSource === "manual" && isHoleComplete(currentHole) && !editingCompleted && (<>
         <div style={{
-          background: "#fbbf2410", border: `1px solid #fbbf2440`, borderRadius: 12,
+          background: K.warn + "10", border: `1px solid ${K.warn}40`, borderRadius: 12,
           padding: 12, marginBottom: 8,
         }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: "#fbbf24", marginBottom: 8, textAlign: "center" }}>Hole {currentHole + 1} already complete</div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: K.warn, marginBottom: 8, textAlign: "center" }}>Hole {currentHole + 1} already complete</div>
           <div style={{ display: "flex", gap: 6 }}>
             <button onClick={() => setEditingCompleted(true)} style={{
-              flex: 1, padding: "8px 0", borderRadius: 8, background: K.card, border: `1px solid #fbbf2440`,
-              color: "#fbbf24", fontSize: 11, fontWeight: 600, cursor: "pointer",
+              flex: 1, padding: "8px 0", borderRadius: 8, background: K.card, border: `1px solid ${K.warn}40`,
+              color: K.warn, fontSize: 11, fontWeight: 600, cursor: "pointer",
             }}>Edit Scores</button>
             <button onClick={returnToPlay} style={{
               flex: 1, padding: "8px 0", borderRadius: 8, background: K.acc, border: "none",
@@ -1659,14 +1659,14 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
                   {displayScores.map(btn => {
                     const isCur = btn === s;
                     const bsd = btn - par;
-                    const bclr = bsd < 0 ? "#ef4444" : bsd === 0 ? "#94a3b8" : "#3b82f6";
+                    const bclr = bsd < 0 ? K.under : bsd === 0 ? K.t2 : K.eagle;
                     const sz = 32;
                     return (
                       <div key={btn} style={{
                         flex: 1, height: 38,
                         fontWeight: 800, fontSize: 15, textAlign: "center",
-                        background: isCur ? "#94a3b8" : "#94a3b80a",
-                        color: isCur ? K.bg : "#94a3b8",
+                        background: isCur ? K.t2 : "#94a3b80a",
+                        color: isCur ? K.bg : K.t2,
                         borderRadius: 8, position: "relative",
                         display: "flex", alignItems: "center", justifyContent: "center",
                       }}>
@@ -1732,7 +1732,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
                   {strokes > 0 && <span style={{ color: K.acc, fontSize: 11, letterSpacing: "-1px" }}>{"●".repeat(strokes)}</span>}
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  {running.thru > 0 && <span style={{ fontSize: 10, color: K.t3 }}>Thru {running.thru}: <span style={{ color: running.netToPar < 0 ? "#ef4444" : running.netToPar > 0 ? K.t2 : "#94a3b8", fontWeight: 700 }}>{fmtPar(running.netToPar)}</span></span>}
+                  {running.thru > 0 && <span style={{ fontSize: 10, color: K.t3 }}>Thru {running.thru}: <span style={{ color: running.netToPar < 0 ? K.under : running.netToPar > 0 ? K.t2 : K.t2, fontWeight: 700 }}>{fmtPar(running.netToPar)}</span></span>}
                   <button onClick={() => setWdConfirm(p.id)} title="Withdraw player" style={{ fontSize: 9, fontWeight: 700, color: K.t3, background: "transparent", border: `1px solid ${K.bdr}`, borderRadius: 6, padding: "2px 7px", cursor: "pointer", letterSpacing: 0.5, flexShrink: 0 }}>WD</button>
                 </div>
               </div>
@@ -1880,7 +1880,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
                           const st = getStrokes(p, h);
                           const shaped = sd != null && sd !== 0;
                           const dbl = sd != null && (sd <= -2 || sd >= 2);
-                          const clr = sd == null ? K.t3 : sd < 0 ? "#ef4444" : sd > 0 ? "#3b82f6" : K.t1;
+                          const clr = sd == null ? K.t3 : sd < 0 ? K.under : sd > 0 ? K.eagle : K.t1;
                           const radius = sd != null && sd < 0 ? "50%" : 4;
                           return (
                             <div key={p.id + "-" + h} style={{ ...cb, position: "relative", fontSize: 11, fontWeight: 700, color: K.t1 }}>
@@ -2158,7 +2158,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
                       <span style={{ fontSize: 12, fontWeight: 700, color: K.t1 }}>{p.name}</span>
                       <div style={{ display: "flex", gap: 8, fontSize: 12 }}>
                         <span style={{ color: K.t3 }}>Gross <strong style={{ color: K.t2 }}>{gross || "—"}</strong></span>
-                        <span style={{ color: K.t3 }}>Net <strong style={{ color: net && (net - parTotal) < 0 ? "#ef4444" : K.t1 }}>{net || "—"}</strong></span>
+                        <span style={{ color: K.t3 }}>Net <strong style={{ color: net && (net - parTotal) < 0 ? K.under : K.t1 }}>{net || "—"}</strong></span>
                       </div>
                     </div>
                     {renderHalf(0, 9, frontGross)}
@@ -2339,7 +2339,7 @@ function SkinsCtpView({ players, round, tRounds, courses, holeData, ctpData, onS
       const d = score - par;
       const isUnder = d < 0;
       const isDouble = d <= -2;
-      const circleClr = isSkin ? "#d4a843" : "#8b9ec2";
+      const circleClr = isSkin ? "#d4a843" : K.t2;
       return (
         <div style={{ width: "100%", aspectRatio: "1", display: "flex", alignItems: "center", justifyContent: "center" }}>
           <div style={{ position: "relative", width: "85%", aspectRatio: "1", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -2432,7 +2432,7 @@ function SkinsCtpView({ players, round, tRounds, courses, holeData, ctpData, onS
                     const d = s ? s - par : null;
                     const isUnder = d !== null && d < 0;
                     const isDouble = d !== null && d <= -2;
-                    const circleClr = isSkinWinner ? "#d4a843" : "#8b9ec2";
+                    const circleClr = isSkinWinner ? "#d4a843" : K.t2;
                     return (
                       <td key={i} style={{ textAlign: "center", padding: "2px 1px", borderLeft: cellBdr }}>
                         <div style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 18, height: 18, position: "relative" }}>
@@ -2986,9 +2986,9 @@ function PairingsEditor({ activePlayers, pairingsData, setPairings, tRounds, cou
         {genMsg && (
           <div style={{
             marginTop: 8, fontSize: 10, lineHeight: 1.5, padding: "6px 8px", borderRadius: 6,
-            background: (genMsg.tone === "ok" ? K.acc : "#fbbf24") + "12",
-            border: `1px solid ${(genMsg.tone === "ok" ? K.acc : "#fbbf24")}30`,
-            color: genMsg.tone === "ok" ? K.acc : "#fbbf24",
+            background: (genMsg.tone === "ok" ? K.acc : K.warn) + "12",
+            border: `1px solid ${(genMsg.tone === "ok" ? K.acc : K.warn)}30`,
+            color: genMsg.tone === "ok" ? K.acc : K.warn,
           }}>{genMsg.text}</div>
         )}
       </div>
@@ -3053,9 +3053,9 @@ function PairingsEditor({ activePlayers, pairingsData, setPairings, tRounds, cou
                   onKeyDown={e => { if (e.key === "Enter") { e.target.blur(); } }}
                   style={{
                     width: 74, padding: "2px 4px", borderRadius: 5,
-                    border: `1px solid ${teeTime ? K.acc + "40" : "#fbbf24"}`,
-                    background: teeTime ? K.acc + "08" : "#fbbf2410",
-                    color: teeTime ? K.acc : "#fbbf24",
+                    border: `1px solid ${teeTime ? K.acc + "40" : K.warn}`,
+                    background: teeTime ? K.acc + "08" : K.warn + "10",
+                    color: teeTime ? K.acc : K.warn,
                     fontSize: 9, fontWeight: 600, textAlign: "center",
                   }}
                 />
@@ -3185,9 +3185,9 @@ function TeeAssigner({ activePlayers, tRounds, courses, teeData, setTeeBulk, fin
             <div style={{ padding: "8px 14px 0" }}>
             <button onClick={() => (!isSaved || isModified) && onTeesSave && onTeesSave(editRound)} style={{
               width: "100%", padding: "8px 0", borderRadius: 8,
-              background: isModified ? "#f59e0b" : isSaved ? K.inp : K.acc,
-              border: `1px solid ${isModified ? "#f59e0b40" : isSaved ? "#22c55e40" : "transparent"}`,
-              color: isModified ? K.bg : isSaved ? "#22c55e" : K.bg,
+              background: isModified ? K.warn : isSaved ? K.inp : K.acc,
+              border: `1px solid ${isModified ? K.warn + "40" : isSaved ? K.ok + "40" : "transparent"}`,
+              color: isModified ? K.bg : isSaved ? K.ok : K.bg,
               fontSize: 11, fontWeight: 700, cursor: isSaved && !isModified ? "default" : "pointer",
               display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
               transition: "background 0.25s ease, color 0.25s ease, border-color 0.25s ease",
@@ -3215,7 +3215,7 @@ function TeeAssigner({ activePlayers, tRounds, courses, teeData, setTeeBulk, fin
                     <span style={{ fontSize: 9, color: K.t2, display: "flex", alignItems: "center", gap: 3 }}>
                       HI {p.handicap_index} · CH {ch}
                       {chDeltas[p.id] !== undefined && (
-                        <span style={{ fontSize: 9, fontWeight: 700, color: chDeltas[p.id] > 0 ? "#22c55e" : "#ef4444", display: "flex", alignItems: "center", gap: 1 }}>
+                        <span style={{ fontSize: 9, fontWeight: 700, color: chDeltas[p.id] > 0 ? K.ok : K.danger, display: "flex", alignItems: "center", gap: 1 }}>
                           {chDeltas[p.id] > 0 ? "▲" : "▼"}{Math.abs(chDeltas[p.id])}
                         </span>
                       )}
@@ -4318,7 +4318,7 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
 
       {/* Finalize round popup modal */}
       {finalizeModal && (
-        <div style={{ position: "fixed", top: 0, bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.75)", zIndex: 200, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }}>
+        <div style={{ position: "fixed", top: 0, bottom: 0, left: 0, right: 0, background: SCRIM, zIndex: 200, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }}>
           <div style={{ background: K.card, borderRadius: 16, border: `1px solid ${K.bdr}`, width: "100%", maxWidth: 420, overflow: "hidden", marginTop: "auto", marginBottom: "auto" }}>
             {/* Header */}
             <div style={{ background: "#fde04710", borderBottom: `1px solid #d4a84330`, padding: "14px 16px", display: "flex", alignItems: "center", gap: 8 }}>
@@ -4349,7 +4349,7 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
                   <div key={p.id} style={{ display: "grid", gridTemplateColumns: "32px 1fr 56px 56px", alignItems: "center", padding: "7px 12px", margin: "3px 8px", borderRadius: 8, border: `1px solid ${K.bdr}`, background: K.card }}>
                     <span style={{ fontSize: 11, fontWeight: 700, color: pos === 1 && !tiedAbove ? K.acc : K.t3 }}>{posLabel}</span>
                     <span style={{ fontSize: 12, fontWeight: 600, color: K.t1 }}>{p.name}</span>
-                    <span style={{ fontSize: 12, fontWeight: 800, textAlign: "center", color: p.netToPar < 0 ? "#ef4444" : p.netToPar > 0 ? K.t2 : K.t1 }}>
+                    <span style={{ fontSize: 12, fontWeight: 800, textAlign: "center", color: p.netToPar < 0 ? K.under : p.netToPar > 0 ? K.t2 : K.t1 }}>
                       {p.netToPar === 0 ? "E" : p.netToPar > 0 ? `+${p.netToPar}` : p.netToPar}
                     </span>
                     <span style={{ fontSize: 10, textAlign: "center", color: K.t3 }}>{p.gross > 0 ? p.gross : "—"}</span>
@@ -4458,12 +4458,12 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
                     <div key={lbl} style={{
                       display: "flex", alignItems: "center", gap: 2,
                       fontSize: 7, fontWeight: 700,
-                      color: done ? "#22c55e" : "#ef444480",
+                      color: done ? K.ok : K.danger + "80",
                     }}>
                       <div style={{
                         width: 5, height: 5, borderRadius: "50%",
-                        background: done ? "#22c55e" : "transparent",
-                        border: `1px solid ${done ? "#22c55e" : "#ef444460"}`,
+                        background: done ? K.ok : "transparent",
+                        border: `1px solid ${done ? K.ok : K.danger + "60"}`,
                       }} />
                       {lbl}
                     </div>
@@ -4666,7 +4666,7 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
         );
       })()}
       {confirmCourse && (confirmCourse.round || confirmCourse.delete) && (
-        <div style={{ position: "fixed", top: 0, bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.6)", zIndex: 500, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }} onClick={() => setConfirmCourse(null)}>
+        <div style={{ position: "fixed", top: 0, bottom: 0, left: 0, right: 0, background: SCRIM, zIndex: 500, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }} onClick={() => setConfirmCourse(null)}>
           <div onClick={e => e.stopPropagation()} style={{ background: K.card, borderRadius: 14, padding: "20px 20px 16px", width: "100%", maxWidth: 360, boxShadow: "0 16px 48px rgba(0,0,0,0.6)" }}>
             {confirmCourse.round ? (<><div style={{ fontSize: 15, fontWeight: 700, color: K.warn, marginBottom: 8 }}>Reassign Round {confirmCourse.round}?</div><div style={{ fontSize: 13, color: K.t2, marginBottom: 20, lineHeight: 1.4 }}>Move R{confirmCourse.round} to <strong style={{ color: K.t1 }}>{confirmCourse.course.name}</strong>?</div><div style={{ display: "flex", gap: 10 }}><button onClick={() => setConfirmCourse(null)} style={{ flex: 1, padding: "11px 0", borderRadius: 10, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t2, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>Cancel</button><button onClick={() => { setCourseForRound(confirmCourse.round, confirmCourse.course); setConfirmCourse(null); setPickingCourse(false); doCourseSearch(""); }} style={{ flex: 1, padding: "11px 0", borderRadius: 10, background: ac, border: "none", color: K.bg, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>Move</button></div></>) : (<><div style={{ fontSize: 15, fontWeight: 700, color: K.danger, marginBottom: 8 }}>Remove Course?</div><div style={{ fontSize: 13, color: K.t2, marginBottom: 20, lineHeight: 1.4 }}>Remove <strong style={{ color: K.t1 }}>{confirmCourse.course.name}</strong>?{confirmCourse.assignedRounds.length > 0 && <span style={{ color: K.warn }}> (unassigns R{confirmCourse.assignedRounds.join(", R")})</span>}</div><div style={{ display: "flex", gap: 10 }}><button onClick={() => setConfirmCourse(null)} style={{ flex: 1, padding: "11px 0", borderRadius: 10, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t2, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>Cancel</button><button onClick={() => { confirmCourse.assignedRounds.forEach(r => setCourseForRound(r, { id: null, name: "" })); addCourse({ _delete: true, id: confirmCourse.course.id }); setConfirmCourse(null); }} style={{ flex: 1, padding: "11px 0", borderRadius: 10, background: K.danger, border: "none", color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>Remove</button></div></>)}
           </div>
@@ -5035,7 +5035,7 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
                     };
                     return (
                       <CoursePreviewPortal>
-                      <div style={{ position: "fixed", inset: 0, background: "#00000088", zIndex: 200, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
+                      <div style={{ position: "fixed", inset: 0, background: SCRIM, zIndex: 200, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
                         <div style={{ background: K.card, borderRadius: "18px 18px 0 0", width: "100%", maxWidth: 480, maxHeight: "88vh", overflowY: "auto", padding: "20px 18px 28px" }}>
                           {/* Header */}
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
@@ -5138,7 +5138,7 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
                     const tiL = { ...ti, textAlign: "left", padding: "3px 5px" };
                     return (
                       <CoursePreviewPortal>
-                      <div style={{ position: "fixed", top: 0, bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.82)", zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+                      <div style={{ position: "fixed", top: 0, bottom: 0, left: 0, right: 0, background: SCRIM, zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
                         <div style={{ background: K.card, borderRadius: 16, border: `1px solid ${ac}40`, width: "100%", maxWidth: 420, maxHeight: "calc(100vh - 48px)", overflowY: "auto", padding: 0 }}>
 
                           {/* Header */}
@@ -5417,7 +5417,7 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
       })()}
 
       {showFinalizeModal && (
-        <div style={{ position: "fixed", top: 0, bottom: 0, left: 0, right: 0, background: "#00000090", zIndex: 200, display: "flex", alignItems: "flex-end", justifyContent: "center" }}
+        <div style={{ position: "fixed", top: 0, bottom: 0, left: 0, right: 0, background: SCRIM, zIndex: 200, display: "flex", alignItems: "flex-end", justifyContent: "center" }}
           onClick={() => setShowFinalizeModal(false)}>
           <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 480, maxHeight: "80vh", background: K.bg, borderRadius: "16px 16px 0 0", border: `1px solid ${K.bdr}`, display: "flex", flexDirection: "column", overflow: "hidden" }}>
             <div style={{ padding: "14px 16px 10px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${K.bdr}`, flexShrink: 0 }}>
@@ -5467,7 +5467,7 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
                             {isFinalized && <span style={{ marginLeft: 6, fontSize: 10, color: K.acc, fontWeight: 700 }}>✓ FINAL</span>}
                           </div>
                           <div style={{ fontSize: 11, color: K.t3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{playerNames}</div>
-                          <div style={{ fontSize: 10, color: holesComplete ? "#22c55e" : "#fbbf24", marginTop: 3 }}>
+                          <div style={{ fontSize: 10, color: holesComplete ? K.ok : K.warn, marginTop: 3 }}>
                             {holesComplete ? "All 18 holes entered" : `${holesEntered}/18 holes entered`}
                           </div>
                         </div>
@@ -7109,7 +7109,7 @@ export default function WBCApp() {
         right={<>
             <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
               <div style={{ position: "relative", width: 6, height: 6 }}>
-                <div style={{ width: 6, height: 6, borderRadius: "50%", background: syncing ? K.acc : "#22c55e" }} />
+                <div style={{ width: 6, height: 6, borderRadius: "50%", background: syncing ? K.acc : K.ok }} />
                 {syncing && <div style={{ position: "absolute", inset: 0, borderRadius: "50%", background: K.acc, animation: "syncPing 0.8s ease-out" }} />}
               </div>
             </div>
@@ -7282,7 +7282,7 @@ export default function WBCApp() {
         ))}
       </div>
 
-      <div ref={navRef} style={{ display: "flex", background: "rgba(14,24,41,0.97)", borderTop: `1px solid ${K.bdr}`, zIndex: 100, paddingBottom: NAV_BOTTOM_PAD, flexShrink: 0 }}>
+      <div ref={navRef} style={{ display: "flex", background: K.nav, borderTop: `1px solid ${K.bdr}`, zIndex: 100, paddingBottom: NAV_BOTTOM_PAD, flexShrink: 0 }}>
         {navItems.map(item => {
           // More reads active while its menu is open OR while the view it
           // leads to (Admin) is the one on screen — otherwise opening Admin
@@ -7333,7 +7333,7 @@ export default function WBCApp() {
                 <div style={{
                   position: "absolute", top: "-24px", left: "50%", transform: "translateX(-50%)",
                   width: 68, height: 34,
-                  background: "rgba(14,24,41,0.97)",
+                  background: K.nav,
                   borderRadius: "34px 34px 0 0",
                   clipPath: "inset(0 0 10px 0)",
                   borderTop: `1px solid ${K.bdr}`,
@@ -7347,8 +7347,8 @@ export default function WBCApp() {
               {item.key === "more" && ((adminActionNeeded && user.isDirector) || (notifPerm !== "granted" && !user.isGuest)) && (
                 <span style={{
                   position: "absolute", top: 6, right: "50%", marginRight: -14,
-                  width: 8, height: 8, borderRadius: "50%", background: "#ef4444",
-                  border: "2px solid rgba(14,24,41,0.97)",
+                  width: 8, height: 8, borderRadius: "50%", background: K.danger,
+                  border: `2px solid ${K.nav}`,
                 }} />
               )}
               <span style={{ fontSize: 9, fontWeight: active ? 700 : 500, color: clr }}>{isTrophy ? "" : item.label}</span>
