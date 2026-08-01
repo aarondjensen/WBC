@@ -2909,7 +2909,7 @@ function PairingsEditor({ activePlayers, pairingsData, setPairings, tRounds, cou
             {(scoringOpen || {})[editRound]
               ? <>Scoring is <strong style={{ color: K.acc }}>open now</strong> for all groups this round.</>
               : (roundDates || {})[editRound]
-                ? <>Groups can score {SCORING_LEAD_MIN} min before their tee time on <strong style={{ color: K.t2 }}>{fmtRoundDate((roundDates || {})[editRound])}</strong>.</>
+                ? <>Scoring opens {SCORING_LEAD_MIN} minutes before tee times on <strong style={{ color: K.t2 }}>{fmtRoundDate((roundDates || {})[editRound])}</strong>.</>
                 : <>Set a play date to enable automatic scoring, or flip to <strong style={{ color: K.t2 }}>Open now</strong> to allow scoring immediately.</>}
           </div>
         </div>
@@ -3168,11 +3168,18 @@ function TeeAssigner({ activePlayers, tRounds, courses, teeData, setTeeBulk, fin
               title says what tapping does for anyone who hovers. */}
           {tees.length > 0 && !finalizedRounds[editRound] && (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(68px, 1fr))", gap: 4, padding: "8px 14px", borderBottom: `1px solid ${K.bdr}${ALPHA.hair}` }}>
-              {[...tees].sort((a, b) => (parseFloat(b.slope) || 0) - (parseFloat(a.slope) || 0)).map(tee => (
+              {[...tees].sort((a, b) => (parseFloat(b.slope) || 0) - (parseFloat(a.slope) || 0)).map(tee => {
+                // In use = at least one player is on it this round, counting the
+                // default nobody has moved off. The accent edge is what tells you
+                // at a glance which boxes this round is actually played from —
+                // one on a normal round, two when somebody is moved up or back.
+                const inUse = activePlayers.some(p =>
+                  (assignments[p.id] || getDefaultTee(tees)?.name || tees[0]?.name) === tee.name);
+                return (
                 <button key={tee.name} onClick={() => setAll(tee.name)} title={`Put every player on ${tee.name}`} style={{
                   display: "flex", flexDirection: "column", alignItems: "center", gap: 2, minWidth: 0,
                   padding: "5px 4px", borderRadius: 8,
-                  background: K.inp, border: `1px solid ${K.bdr}`, color: K.t1, cursor: "pointer",
+                  background: K.inp, border: `1px solid ${inUse ? K.acc : K.bdr}`, color: K.t1, cursor: "pointer",
                 }}>
                   <span style={{ display: "flex", alignItems: "center", gap: 4, maxWidth: "100%", minWidth: 0 }}>
                     <TeeColorSwatch color={resolveTeeColor(tee, 0)} name={tee.name} size={11} style={{ borderRadius: 3, flexShrink: 0 }} />
@@ -3180,7 +3187,8 @@ function TeeAssigner({ activePlayers, tRounds, courses, teeData, setTeeBulk, fin
                   </span>
                   <span style={{ fontSize: 9, color: K.t3, lineHeight: 1 }}>{tee.slope}/{tee.rating}</span>
                 </button>
-              ))}
+                );
+              })}
             </div>
           )}
 
@@ -4752,25 +4760,25 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
                   </div>
                   {!locked && (
                     <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                      {/* Tee sign-off. Green tick = the field's tees are confirmed
-                          and unchanged since; amber = they moved and want another
-                          look; hollow = never confirmed. Tapping it confirms. */}
+                      {/* Tee sign-off. Lit while there is something to sign off —
+                          never saved, or saved and then changed — and spent once
+                          the round's tees are settled. A tick that is also a
+                          button is a status light you have to discover you can
+                          press; this says the word. */}
                       {(() => {
                         const saved = !!(teesSaved || {})[editRound];
                         const modified = !!(teesModified || {})[editRound];
-                        const ok = saved && !modified;
-                        const tone = ok ? "#22c55e" : modified ? "#f59e0b" : K.t3;
+                        const pending = !saved || modified;
                         return (
-                          <button onClick={() => (!saved || modified) && onTeesSave && onTeesSave(editRound)}
-                            title={ok ? "Tees confirmed" : modified ? "Tees changed — confirm again" : "Confirm tee selections"}
+                          <button onClick={() => pending && onTeesSave && onTeesSave(editRound)}
+                            title={pending ? "Save tee selections for this round" : "Tees saved"}
                             style={{
-                              width: 26, height: 26, borderRadius: "50%", flexShrink: 0, cursor: ok ? "default" : "pointer",
-                              display: "flex", alignItems: "center", justifyContent: "center",
-                              background: ok ? "#22c55e20" : "transparent",
-                              border: `1px solid ${tone}${ok ? "" : "70"}`,
-                              color: tone, fontSize: 12, fontWeight: 800, lineHeight: 1,
+                              flexShrink: 0, padding: "5px 12px", borderRadius: 8, cursor: pending ? "pointer" : "default",
+                              background: pending ? ac : "transparent",
+                              border: `1px solid ${pending ? "transparent" : K.bdr}`,
+                              color: pending ? ON_ACC : K.t3, fontSize: 10, fontWeight: 700,
                               transition: "background 0.25s ease, border-color 0.25s ease, color 0.25s ease",
-                            }}>✓</button>
+                            }}>{pending ? "Save" : "Saved"}</button>
                         );
                       })()}
                       {/* Pars, handicaps and tee boxes for the course this round is
