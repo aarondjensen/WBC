@@ -42,6 +42,11 @@ export const K = {
 // than a coincidence that breaks if the background ever lightens.
 export const ON_ACC = "#04121b";
 
+// The same decision for the red fill, which lands on the other side of it: the
+// danger red is dark enough to carry white, the teal is not. Written out for
+// the same reason ON_ACC is — so a filled button never has to guess its ink.
+export const ON_DANGER = "#ffffff";
+
 export const FONT = "'Montserrat', sans-serif";
 
 // ── Type scale ──

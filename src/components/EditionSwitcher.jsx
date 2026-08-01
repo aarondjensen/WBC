@@ -8,6 +8,7 @@
 // switch and the delete go through a confirmation first.
 import { useState, useEffect } from "react";
 import { K, ON_ACC } from "../theme";
+import { Btn } from "./ui";
 import { Popup, ConfirmModal } from "./Popup";
 import { getActiveTournamentId } from "../firebase";
 import {
@@ -113,14 +114,10 @@ export function EditionSwitcher({ open, onClose, notify }) {
                     <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.5, color: ON_ACC, background: K.acc, padding: "5px 10px", borderRadius: 6 }}>ACTIVE</span>
                   ) : (
                     <>
-                      <button onClick={() => setPending(e)} style={{
-                        fontSize: 11, fontWeight: 800, letterSpacing: 0.5, color: K.t2, background: K.card,
-                        border: `1px solid ${K.bdr}`, borderRadius: 8, padding: "7px 12px", cursor: "pointer",
-                      }}>Switch</button>
-                      <button onClick={() => setPendingDelete(e)} title="Delete edition" style={{
-                        fontSize: 13, fontWeight: 700, color: K.t3, background: "transparent",
-                        border: "none", borderRadius: 8, padding: "5px 6px", cursor: "pointer", flexShrink: 0, lineHeight: 1,
-                      }}>🗑</button>
+                      <Btn variant="secondary" size="sm" onClick={() => setPending(e)}
+                        style={{ letterSpacing: 0.5, color: K.t2, background: K.card }}>Switch</Btn>
+                      <Btn variant="ghost" size="sm" onClick={() => setPendingDelete(e)} title="Delete edition"
+                        style={{ color: K.t3, padding: "5px 6px", flexShrink: 0, lineHeight: 1 }}>🗑</Btn>
                     </>
                   )}
                 </div>
@@ -171,12 +168,9 @@ export function EditionSwitcher({ open, onClose, notify }) {
             <div style={{ fontSize: 11, fontWeight: 600, color: K.danger, marginBottom: 8, lineHeight: 1.45 }}>{err}</div>
           )}
 
-          <button onClick={doCreate} disabled={!canCreate} style={{
-            width: "100%", padding: 11, borderRadius: 10, border: "none",
-            cursor: canCreate ? "pointer" : "not-allowed",
-            background: canCreate ? K.acc : K.inp, color: canCreate ? ON_ACC : K.t3,
-            fontSize: 13, fontWeight: 800, letterSpacing: 0.5,
-          }}>{busy ? "Working…" : (cloneFrom ? "Clone into new edition" : "Create draft edition")}</button>
+          <Btn block disabled={!canCreate} onClick={doCreate} style={{ letterSpacing: 0.5 }}>
+            {busy ? "Working…" : (cloneFrom ? "Clone into new edition" : "Create draft edition")}
+          </Btn>
         </div>
       </Popup>
 

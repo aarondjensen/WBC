@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { _app, _db, _auth, onAuthStateChanged, doGoogleSignIn, doAppleSignIn, doSignOut, consumeRedirectResult, deleteAccount, USERS_COLLECTION, NATIVE_APPLE_ENABLED, APPLE_PROVIDER_ENABLED, isNativePlatform, isAndroidNative, AUTH_PROVIDERS_ENABLED, TOURNAMENT_ID, getEditionSlug, getTournamentYear, isDefaultEdition } from "./firebase";
 import { readMembership, isDirectorAccount, resolveMember, joinWithCode, readAccessCode, setAccessCode, setDirector, subscribeMemberships, accountsUnreadable, membershipForPlayer, playerIsDirector } from "./lib/accounts";
 import { K, ON_ACC, FS, ALPHA, FONT, SHADOW, SCRIM } from "./theme";
-import { SegmentedToggle, StickyTop, SectionLabel, Card, Toast } from "./components/ui";
+import { SegmentedToggle, StickyTop, SectionLabel, Card, Toast, Btn } from "./components/ui";
 import { calcCH, computeIndividualBoard, rankIndividualBoard, rankIndividualBoardIds, WD_SCORE } from "./lib/individualBoard";
 import { useConfirm } from "./lib/useConfirm";
 import { useDirtyForm } from "./lib/useDirtyForm";
@@ -1816,13 +1816,8 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
           if (!hole18Done) return null;
           const allComplete = groupPlayers.every(p => { for (let h = 0; h < 18; h++) { if (!((holeData[`${p.id}_${round}`] || {})[h] > 0)) return false; } return true; });
           return (
-            <button onClick={() => setShowFinalize(true)} style={{
-              width: "100%", padding: "12px 0", borderRadius: 10,
-              background: allComplete ? K.acc : K.card,
-              border: allComplete ? "none" : `1px solid ${K.bdr}`,
-              color: allComplete ? K.bg : K.t2,
-              fontSize: 14, fontWeight: 800, cursor: "pointer",
-            }}>✍️ Sign Scorecard</button>
+            <Btn variant={allComplete ? "primary" : "secondary"} block onClick={() => setShowFinalize(true)}
+              style={allComplete ? undefined : { background: K.card, color: K.t2 }}>✍️ Sign Scorecard</Btn>
           );
         })()}
       </div>
@@ -2016,17 +2011,9 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
                 </div>
               )}
 
-              <button onClick={save} disabled={!canTag} style={{
-                width: "100%", padding: 13, borderRadius: 10,
-                background: canTag ? K.acc : K.inp,
-                border: canTag ? "none" : `1px solid ${K.bdr}`,
-                color: canTag ? K.bg : K.t3,
-                fontSize: 14, fontWeight: 800, cursor: canTag ? "pointer" : "default", letterSpacing: 0.5,
-              }}>{leader ? "Tag New CTP" : "Tag CTP"}</button>
-              <button onClick={() => { tapNudge(); closeAndAdvance(); }} style={{
-                width: "100%", marginTop: 7, padding: 12, borderRadius: 10, background: "transparent",
-                border: `1px solid ${K.bdr}`, color: K.t3, fontSize: 12, fontWeight: 700, cursor: "pointer",
-              }}>{leader ? "Our group wasn't closer" : "None of us — skip"}</button>
+              <Btn block disabled={!canTag} onClick={save} style={{ letterSpacing: 0.5 }}>{leader ? "Tag New CTP" : "Tag CTP"}</Btn>
+              <Btn variant="secondary" size="sm" block onClick={() => { tapNudge(); closeAndAdvance(); }}
+                style={{ marginTop: 7, color: K.t3 }}>{leader ? "Our group wasn't closer" : "None of us — skip"}</Btn>
             </div>
           </Popup>
         );
@@ -2048,14 +2035,8 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
                 </div>
               </div>
               <div style={{ display: "flex", gap: 8, padding: "0 16px 16px" }}>
-                <button onClick={() => setWdConfirm(null)} style={{
-                  flex: 1, padding: "10px 0", borderRadius: 10, background: K.inp, border: `1px solid ${K.bdr}`,
-                  color: K.t2, fontSize: 12, fontWeight: 600, cursor: "pointer",
-                }}>Cancel</button>
-                <button onClick={() => { markPlayerWD(wdConfirm); setWdConfirm(null); }} style={{
-                  flex: 1, padding: "10px 0", borderRadius: 10, background: K.danger, border: "none",
-                  color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer",
-                }}>Confirm WD</button>
+                <Btn variant="secondary" size="sm" onClick={() => setWdConfirm(null)} style={{ flex: 1, color: K.t2 }}>Cancel</Btn>
+                <Btn variant="danger" size="sm" onClick={() => { markPlayerWD(wdConfirm); setWdConfirm(null); }} style={{ flex: 1 }}>Confirm WD</Btn>
               </div>
         </Popup>
       )}
@@ -3497,11 +3478,11 @@ function PlayerEditor({ editing, set, onClose, tPlayers, players, memberships, c
 
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderTop: `1px solid ${K.bdr}` }}>
         {!isNew && (
-          <button onClick={doDelete} title="Remove player" style={{ flexShrink: 0, padding: "9px 11px", borderRadius: 10, background: "transparent", border: `1px solid ${K.danger}${ALPHA.line}`, color: K.danger, fontSize: FS.body, fontWeight: 700, cursor: "pointer", lineHeight: 1 }}>🗑</button>
+          <Btn variant="dangerOutline" onClick={doDelete} title="Remove player" style={{ flexShrink: 0, lineHeight: 1 }}>🗑</Btn>
         )}
         <span style={{ flex: 1 }} />
-        <button onClick={onClose} style={{ padding: "10px 16px", borderRadius: 10, background: K.inp, border: `1px solid ${K.bdr}`, color: K.t2, fontSize: FS.body, fontWeight: 700, cursor: "pointer" }}>Cancel</button>
-        <button onClick={doSave} style={{ padding: "10px 20px", borderRadius: 10, background: K.acc, border: "none", color: ON_ACC, fontSize: FS.body, fontWeight: 800, cursor: "pointer" }}>{isNew ? "Add" : "Save"}</button>
+        <Btn variant="secondary" onClick={onClose} style={{ color: K.t2 }}>Cancel</Btn>
+        <Btn onClick={doSave} style={{ paddingLeft: 20, paddingRight: 20 }}>{isNew ? "Add" : "Save"}</Btn>
       </div>
     </Popup>
   );
@@ -3816,12 +3797,8 @@ function TournamentPanel({ meta, onSave, notify, confirm, scoredRounds = [] }) {
               {ROUND_CHOICES.map(n => {
                 const on = rounds === n;
                 return (
-                  <button key={n} onClick={() => set({ rounds: n })} style={{
-                    flex: 1, padding: "10px 0", borderRadius: 8, cursor: "pointer",
-                    background: on ? K.acc : K.inp,
-                    border: on ? "none" : `1px solid ${K.bdr}`,
-                    color: on ? ON_ACC : K.t2, fontSize: 14, fontWeight: 800,
-                  }}>{n}</button>
+                  <Btn key={n} variant={on ? "primary" : "secondary"} onClick={() => set({ rounds: n })}
+                    style={{ flex: 1, ...(on ? {} : { color: K.t2 }) }}>{n}</Btn>
                 );
               })}
             </div>
@@ -3957,9 +3934,9 @@ function AccessPanel({ notify, confirm }) {
               type="text" autoCapitalize="none" autoCorrect="off" spellCheck={false}
               placeholder="No password set"
               style={{ flex: 1, minWidth: 0, padding: "10px 12px", borderRadius: 10, background: K.inp, border: `1px solid ${K.bdr}`, color: K.t1, fontSize: 16, fontWeight: 700, outline: "none", fontFamily: "'Montserrat', sans-serif", boxSizing: "border-box" }} />
-            <button onClick={save} disabled={busy} style={{ flexShrink: 0, padding: "10px 16px", borderRadius: 10, border: "none", background: busy ? K.card : K.acc, color: busy ? K.t3 : "#fff", fontSize: 12, fontWeight: 800, cursor: busy ? "default" : "pointer" }}>
+            <Btn onClick={save} disabled={busy} style={{ flexShrink: 0 }}>
               {busy ? "…" : "Save"}
-            </button>
+            </Btn>
           </div>
         ) : (
           <button onClick={reveal} disabled={loading || busy} style={{ padding: "9px 16px", borderRadius: 10, background: "transparent", border: `1px solid ${K.acc}50`, color: K.acc, fontSize: 12, fontWeight: 700, cursor: loading || busy ? "default" : "pointer" }}>
@@ -4602,10 +4579,9 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
                 <div>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
                     <SectionLabel style={{ marginBottom: 0 }}>Roster ({activePlayers.length})</SectionLabel>
-                    <button onClick={() => setEditingPlayer({ isNew: true, first: "", last: "", nick: "", hi: "", dir: false })}
-                      style={{ padding: "7px 14px", borderRadius: 8, background: K.acc, border: "none", color: ON_ACC, fontSize: FS.small, fontWeight: 800, cursor: "pointer" }}>
+                    <Btn size="sm" onClick={() => setEditingPlayer({ isNew: true, first: "", last: "", nick: "", hi: "", dir: false })}>
                       + Add player
-                    </button>
+                    </Btn>
                   </div>
                   <Card pad={0} style={{ overflow: "hidden" }}>
                     {activePlayers.length === 0 && (
@@ -4654,7 +4630,7 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
       {tab === "event" && (
         <div style={{ marginTop: 16 }}>
               <div style={{ marginTop: 16, paddingTop: 12, borderTop: `1px solid ${K.bdr}30`, display: "flex", flexDirection: "column", gap: 8 }}>
-                <button onClick={async () => {
+                <Btn onClick={async () => {
                   // MUST be awaited. This was window.confirm — a synchronous
                   // boolean — until useConfirm() was introduced in this
                   // component and shadowed the global. The hook returns a
@@ -4667,11 +4643,7 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
                     destructive: true,
                   });
                   if (ok) startFresh();
-                }} style={{
-                  width: "100%", padding: "10px 0", borderRadius: 8,
-                  background: K.danger + "15", border: `1px solid ${K.danger}60`,
-                  color: K.danger, fontSize: 12, fontWeight: 700, cursor: "pointer",
-                }}>🗑 Start Fresh — Clear All Data</button>
+                }} variant="dangerOutline" block>🗑 Start Fresh — Clear All Data</Btn>
               </div>
         </div>
       )}
@@ -4682,7 +4654,7 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
         return (
           <div style={{ position: "fixed", top: 0, bottom: 0, left: 0, right: 0, background: K.bg, zIndex: 200, display: "flex", flexDirection: "column", maxWidth: 480, margin: "0 auto" }}>
             <div style={{ paddingTop: "max(14px, calc(env(safe-area-inset-top, 0px) + 14px))", paddingBottom: 10, paddingLeft: 16, paddingRight: 16, display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${K.bdr}`, flexShrink: 0, background: K.bg }}>
-              <button onClick={() => setEditingCourse(null)} style={{ background: "transparent", border: `1px solid ${K.bdr}`, borderRadius: 8, color: K.t2, fontSize: 13, fontWeight: 600, padding: "6px 14px", cursor: "pointer" }}>Cancel</button>
+              <Btn variant="secondary" size="sm" style={{ color: K.t2 }} onClick={() => setEditingCourse(null)}>Cancel</Btn>
               <span style={{ fontWeight: 700, fontSize: 14, color: K.t1 }}>Edit Course</span>
               <button onClick={saveEdit} style={{ background: ac, border: "none", borderRadius: 8, color: K.bg, fontSize: 13, fontWeight: 700, padding: "6px 18px", cursor: "pointer" }}>Save</button>
             </div>
@@ -4709,7 +4681,7 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
       {confirmCourse && (confirmCourse.round || confirmCourse.delete) && (
         <div style={{ position: "fixed", top: 0, bottom: 0, left: 0, right: 0, background: SCRIM, zIndex: 500, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }} onClick={() => setConfirmCourse(null)}>
           <div onClick={e => e.stopPropagation()} style={{ background: K.card, borderRadius: 14, padding: "20px 20px 16px", width: "100%", maxWidth: 360, boxShadow: "0 16px 48px rgba(0,0,0,0.6)" }}>
-            {confirmCourse.round ? (<><div style={{ fontSize: 15, fontWeight: 700, color: K.warn, marginBottom: 8 }}>Reassign Round {confirmCourse.round}?</div><div style={{ fontSize: 13, color: K.t2, marginBottom: 20, lineHeight: 1.4 }}>Move R{confirmCourse.round} to <strong style={{ color: K.t1 }}>{confirmCourse.course.name}</strong>?</div><div style={{ display: "flex", gap: 10 }}><button onClick={() => setConfirmCourse(null)} style={{ flex: 1, padding: "11px 0", borderRadius: 10, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t2, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>Cancel</button><button onClick={() => { setCourseForRound(confirmCourse.round, confirmCourse.course); setConfirmCourse(null); setPickingCourse(false); doCourseSearch(""); }} style={{ flex: 1, padding: "11px 0", borderRadius: 10, background: ac, border: "none", color: K.bg, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>Move</button></div></>) : (<><div style={{ fontSize: 15, fontWeight: 700, color: K.danger, marginBottom: 8 }}>Remove Course?</div><div style={{ fontSize: 13, color: K.t2, marginBottom: 20, lineHeight: 1.4 }}>Remove <strong style={{ color: K.t1 }}>{confirmCourse.course.name}</strong>?{confirmCourse.assignedRounds.length > 0 && <span style={{ color: K.warn }}> (unassigns R{confirmCourse.assignedRounds.join(", R")})</span>}</div><div style={{ display: "flex", gap: 10 }}><button onClick={() => setConfirmCourse(null)} style={{ flex: 1, padding: "11px 0", borderRadius: 10, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t2, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>Cancel</button><button onClick={() => { confirmCourse.assignedRounds.forEach(r => setCourseForRound(r, { id: null, name: "" })); addCourse({ _delete: true, id: confirmCourse.course.id }); setConfirmCourse(null); }} style={{ flex: 1, padding: "11px 0", borderRadius: 10, background: K.danger, border: "none", color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>Remove</button></div></>)}
+            {confirmCourse.round ? (<><div style={{ fontSize: 15, fontWeight: 700, color: K.warn, marginBottom: 8 }}>Reassign Round {confirmCourse.round}?</div><div style={{ fontSize: 13, color: K.t2, marginBottom: 20, lineHeight: 1.4 }}>Move R{confirmCourse.round} to <strong style={{ color: K.t1 }}>{confirmCourse.course.name}</strong>?</div><div style={{ display: "flex", gap: 10 }}><Btn variant="secondary" style={{ flex: 1, color: K.t2 }} onClick={() => setConfirmCourse(null)}>Cancel</Btn><Btn style={{ flex: 1 }} onClick={() => { setCourseForRound(confirmCourse.round, confirmCourse.course); setConfirmCourse(null); setPickingCourse(false); doCourseSearch(""); }}>Move</Btn></div></>) : (<><div style={{ fontSize: 15, fontWeight: 700, color: K.danger, marginBottom: 8 }}>Remove Course?</div><div style={{ fontSize: 13, color: K.t2, marginBottom: 20, lineHeight: 1.4 }}>Remove <strong style={{ color: K.t1 }}>{confirmCourse.course.name}</strong>?{confirmCourse.assignedRounds.length > 0 && <span style={{ color: K.warn }}> (unassigns R{confirmCourse.assignedRounds.join(", R")})</span>}</div><div style={{ display: "flex", gap: 10 }}><Btn variant="secondary" style={{ flex: 1, color: K.t2 }} onClick={() => setConfirmCourse(null)}>Cancel</Btn><Btn variant="danger" style={{ flex: 1 }} onClick={() => { confirmCourse.assignedRounds.forEach(r => setCourseForRound(r, { id: null, name: "" })); addCourse({ _delete: true, id: confirmCourse.course.id }); setConfirmCourse(null); }}>Remove</Btn></div></>)}
           </div>
         </div>
       )}
@@ -5460,7 +5432,7 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
                     <div style={{ fontSize: FS.small, fontWeight: 700, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
                     <div style={{ fontSize: FS.label, color: K.t3 }}>{holes} hole{holes === 1 ? "" : "s"} posted</div>
                   </div>
-                  <button onClick={async () => {
+                  <Btn onClick={async () => {
                     const ok = await confirm({
                       title: `Discard ${p.name}'s round ${editRound}?`,
                       message: `Deletes all ${holes} hole${holes === 1 ? "" : "s"} they have posted for this round. Their roster entry, handicap index and other rounds are untouched.\n\nThey can re-enter the round from the scoring screen afterwards.`,
@@ -5470,9 +5442,9 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
                     if (!ok) return;
                     const n = await onDiscardRoundScores(editRound, p.id);
                     notify(`Discarded ${n} hole${n === 1 ? "" : "s"} for ${p.name}`);
-                  }} style={{ flexShrink: 0, padding: "6px 11px", borderRadius: 8, background: "transparent", border: `1px solid ${K.danger}${ALPHA.line}`, color: K.danger, fontSize: FS.label, fontWeight: 700, cursor: "pointer" }}>
+                  }} variant="dangerOutline" size="sm" style={{ flexShrink: 0 }}>
                     Discard
-                  </button>
+                  </Btn>
                 </div>
               ))}
             </Card>
@@ -5541,23 +5513,14 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
                           </div>
                         </div>
                         {isFinalized ? (
-                          <button onClick={() => { onUnfinalizeRound(groupKey); notify("Round unfinalized"); }} style={{
-                            padding: "6px 10px", borderRadius: 8, fontSize: 11, fontWeight: 600,
-                            background: "transparent", border: `1px solid ${K.bdr}`,
-                            color: K.t3, cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0,
-                          }}>↩ Unfinalize</button>
+                          <Btn variant="secondary" size="sm" style={{ color: K.t3, whiteSpace: "nowrap", flexShrink: 0 }}
+                            onClick={() => { onUnfinalizeRound(groupKey); notify("Round unfinalized"); }}>↩ Unfinalize</Btn>
                         ) : (
-                          <button
+                          <Btn
+                            size="sm" style={{ whiteSpace: "nowrap", flexShrink: 0 }}
                             onClick={() => { if (!holesComplete) return; onFinalizeRound(groupKey); notify(`Group ${gi+1} Round ${rnd} finalized`); }}
                             disabled={!holesComplete}
-                            style={{
-                              padding: "6px 10px", borderRadius: 8, fontSize: 11, fontWeight: 700,
-                              background: holesComplete ? K.acc : K.card,
-                              border: holesComplete ? "none" : `1px solid ${K.bdr}`,
-                              color: holesComplete ? K.bg : K.t3,
-                              cursor: holesComplete ? "pointer" : "not-allowed", whiteSpace: "nowrap", flexShrink: 0,
-                              opacity: holesComplete ? 1 : 0.5,
-                            }}>✓ Finalize</button>
+                          >✓ Finalize</Btn>
                         )}
                       </div>
                     );
@@ -5673,16 +5636,12 @@ function GateScreen({ fbUser, onPassed, onCancel }) {
               // 16px or larger, or iOS Safari zooms the page on focus.
               fontSize: 17, fontWeight: 700, outline: "none", fontFamily: "'Montserrat', sans-serif",
             }} />
-          <button type="submit" disabled={busy} style={{
-            width: "100%", marginTop: 14, padding: "13px 0", borderRadius: 12, border: "none",
-            background: busy ? K.card : K.acc, color: busy ? K.t3 : "#fff",
-            fontSize: 15, fontWeight: 800, cursor: busy ? "default" : "pointer",
-          }}>{busy ? "Checking…" : "Continue"}</button>
+          <Btn type="submit" size="lg" block disabled={busy} style={{ marginTop: 14 }}>{busy ? "Checking…" : "Continue"}</Btn>
         </form>
         <div style={{ minHeight: 34, marginTop: 10, fontSize: 12, lineHeight: 1.4, fontWeight: 600, color: K.danger }}>{err}</div>
-        <button onClick={onCancel} disabled={busy} style={{ background: "transparent", border: "none", color: K.t3, fontSize: 12, fontWeight: 600, cursor: busy ? "default" : "pointer", opacity: busy ? 0.5 : 1 }}>
+        <Btn variant="ghost" size="sm" onClick={onCancel} disabled={busy} style={{ color: K.t3 }}>
           ← Not now, sign out
-        </button>
+        </Btn>
       </div>
     </div>
   );
@@ -7246,14 +7205,14 @@ export default function WBCApp() {
                   </div>
                 </div>
 
-                <button onClick={() => { setAccountOpen(false); handleLogout(); }} style={{ width: "100%", padding: "13px 0", borderRadius: 12, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t1, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+                <Btn variant="secondary" block onClick={() => { setAccountOpen(false); handleLogout(); }}>
                   Log out
-                </button>
+                </Btn>
 
                 {fbUser && (
-                  <button onClick={() => { setDeleteErr(""); setDeleteStage("confirm"); }} style={{ width: "100%", marginTop: 10, padding: "13px 0", borderRadius: 12, background: "transparent", border: `1px solid ${K.danger}55`, color: K.danger, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+                  <Btn variant="dangerOutline" block style={{ marginTop: 10 }} onClick={() => { setDeleteErr(""); setDeleteStage("confirm"); }}>
                     Delete account
-                  </button>
+                  </Btn>
                 )}
 
                 <div style={{ textAlign: "center", marginTop: 14 }}>
@@ -7276,20 +7235,20 @@ export default function WBCApp() {
 
                 {deleteErr && <div style={{ color: K.danger, fontSize: 12, fontWeight: 600, marginBottom: 12 }}>{deleteErr}</div>}
 
-                <button
+                <Btn
+                  variant="danger" block
                   onClick={handleDeleteAccount}
                   disabled={deleteStage === "working"}
-                  style={{ width: "100%", padding: "13px 0", borderRadius: 12, background: deleteStage === "working" ? `${K.danger}22` : K.danger, border: "none", color: "#fff", fontSize: 14, fontWeight: 700, cursor: deleteStage === "working" ? "default" : "pointer", opacity: deleteStage === "working" ? 0.7 : 1 }}
                 >
                   {deleteStage === "working" ? "Deleting…" : "Permanently delete my account"}
-                </button>
-                <button
+                </Btn>
+                <Btn
+                  variant="secondary" block style={{ marginTop: 10, color: K.t2 }}
                   onClick={() => { if (deleteStage !== "working") { setDeleteStage(null); setDeleteErr(""); } }}
                   disabled={deleteStage === "working"}
-                  style={{ width: "100%", marginTop: 10, padding: "12px 0", borderRadius: 12, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t2, fontSize: 14, fontWeight: 600, cursor: deleteStage === "working" ? "default" : "pointer" }}
                 >
                   Cancel
-                </button>
+                </Btn>
               </>
             )}
           </div>
