@@ -3516,6 +3516,125 @@ function PlayerEditor({ editing, set, onClose, tPlayers, players, memberships, c
 // the event for a new venue would otherwise have to remember two saves. An
 // empty field falls back to its constant rather than saving blank, so the
 // header can't end up with a hole in it.
+// ── DateRangeCalendar ──────────────────────────────────────────────────────
+// The event's dates, picked the way a hotel or airline picks them: tap the
+// first day, tap the last, and the days between shade in as the stay.
+//
+// This replaces two <input type="date"> fields, which could not do the two
+// things that matter here. They cannot shade anything — a four-day tournament
+// looked like two unrelated dates — and the second one opens on TODAY'S month
+// with no idea the first was just set, so picking Aug 26 then opening the end
+// field put a director in February. One calendar has no second field to
+// mis-open: after the first tap it is already on the right month, waiting for
+// the second.
+//
+// Local ISO strings ("YYYY-MM-DD") throughout, never Date objects across a
+// boundary: `new Date("2026-08-26")` parses as UTC midnight and renders as the
+// 25th anywhere west of Greenwich, which is the classic way a tournament ends
+// up a day early.
+const MAX_EVENT_DAYS = 14;
+const isoOf = (y, m, d) => `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+const isoAddDays = (iso, n) => {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(y, m - 1, d + n);
+  return isoOf(dt.getFullYear(), dt.getMonth(), dt.getDate());
+};
+function DateRangeCalendar({ start, end, onChange }) {
+  // Which end of the range the next tap sets. Starting a NEW range whenever
+  // both are set is what makes a mis-tap cheap: tap any day and you are picking
+  // a fresh range, rather than having to clear something first.
+  const [picking, setPicking] = useState(start && !end ? "end" : "start");
+  // The month shown is DERIVED from the start date plus however far the
+  // director has paged, not stored. That is what makes it follow the start date
+  // the instant it is set — the whole point of one calendar is that the second
+  // tap never has to go looking for the month — without an effect that writes
+  // state during render.
+  const [monthOffset, setMonthOffset] = useState(0);
+  const anchor = start || localDateISO();
+  const view = (() => {
+    const [ay, am] = anchor.split("-").map(Number);
+    const d = new Date(ay, am - 1 + monthOffset, 1);
+    return { y: d.getFullYear(), m: d.getMonth() };
+  })();
+
+  const maxEnd = start ? isoAddDays(start, MAX_EVENT_DAYS - 1) : null;
+  const tap = (iso) => {
+    // Paging is relative to the start date, so once a tap moves the start the
+    // offset has to go back to zero or the view jumps by however far they had
+    // paged to reach the day they just tapped.
+    setMonthOffset(0);
+    // A tap before the start is a new start, not an invalid end — the reading
+    // "actually, we begin earlier" is the common one.
+    if (picking === "start" || !start || iso < start) {
+      onChange(iso, "");
+      setPicking("end");
+      return;
+    }
+    if (maxEnd && iso > maxEnd) return;
+    onChange(start, iso);
+    setPicking("start");
+  };
+
+  const first = new Date(view.y, view.m, 1);
+  const daysInMonth = new Date(view.y, view.m + 1, 0).getDate();
+  const lead = first.getDay();
+  const cells = [
+    ...Array.from({ length: lead }, () => null),
+    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
+  ];
+  while (cells.length % 7) cells.push(null);
+  const shift = (n) => setMonthOffset(o => o + n);
+  const monthLabel = first.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  const today = localDateISO();
+
+  const navBtn = { background: "transparent", border: `1px solid ${K.bdr}`, borderRadius: 8, color: K.t2, fontSize: 14, fontWeight: 700, width: 30, height: 28, cursor: "pointer", lineHeight: 1 };
+
+  return (
+    <div style={{ background: K.inp, borderRadius: 10, border: `1px solid ${K.bdr}`, padding: "8px 10px 10px" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+        <button type="button" onClick={() => shift(-1)} style={navBtn}>‹</button>
+        <span style={{ fontSize: 12, fontWeight: 800, color: K.t1 }}>{monthLabel}</span>
+        <button type="button" onClick={() => shift(1)} style={navBtn}>›</button>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 1, marginBottom: 2 }}>
+        {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
+          <div key={i} style={{ textAlign: "center", fontSize: 9, fontWeight: 700, color: K.t3 }}>{d}</div>
+        ))}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 1 }}>
+        {cells.map((d, i) => {
+          if (!d) return <div key={i} />;
+          const iso = isoOf(view.y, view.m, d);
+          const isStart = iso === start;
+          const isEnd = iso === end;
+          const between = start && end && iso > start && iso < end;
+          const beyond = picking === "end" && start && maxEnd && iso > maxEnd;
+          const edge = isStart || isEnd;
+          return (
+            <button key={i} type="button" onClick={() => tap(iso)} disabled={beyond} style={{
+              // Square in the middle, rounded at the ends: the band reads as one
+              // stay rather than a row of separate days.
+              height: 32, padding: 0, cursor: beyond ? "default" : "pointer", position: "relative",
+              background: edge ? K.acc : between ? K.acc + "22" : "transparent",
+              color: edge ? ON_ACC : beyond ? K.t3 + "50" : between ? K.acc : K.t1,
+              border: (!edge && !between && iso === today) ? `1px solid ${K.t3}` : "1px solid transparent",
+              borderRadius: isStart && isEnd ? 8 : isStart ? "8px 0 0 8px" : isEnd ? "0 8px 8px 0" : between ? 0 : 8,
+              fontSize: 12, fontWeight: edge ? 800 : 600,
+            }}>{d}</button>
+          );
+        })}
+      </div>
+      <div style={{ marginTop: 6, fontSize: 10, color: K.t3, textAlign: "center" }}>
+        {!start
+          ? "Tap the first day of the tournament"
+          : picking === "end"
+            ? "Now tap the last day"
+            : `${fmtRoundDate(start)}${end && end !== start ? ` → ${fmtRoundDate(end)}` : ""} · ${tournamentDays(start, end).length} day${tournamentDays(start, end).length === 1 ? "" : "s"}`}
+      </div>
+    </div>
+  );
+}
+
 function TournamentPanel({ meta, onSave, notify, confirm, scoredRounds = [] }) {
   const [showEditions, setShowEditions] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -3672,26 +3791,16 @@ function TournamentPanel({ meta, onSave, notify, confirm, scoredRounds = [] }) {
             </div>
           </div>
 
-          {/* When it is played. Two dates, and Rounds turns them into the list
-              of days a round can be scheduled on — so nobody hand-types a date
-              in the wrong month, or a Tuesday nobody is at the course. */}
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ ...label, width: 58, flexShrink: 0 }}>Dates</span>
-            <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-              <input type="date" value={startDate} max={endDate || undefined}
-                onChange={e => set({ startDate: e.target.value, endDate: (endDate && e.target.value && endDate < e.target.value) ? e.target.value : endDate })}
-                style={{ ...input, fontSize: 13, colorScheme: "dark" }} />
-              <span style={{ fontSize: 11, color: K.t3, flexShrink: 0 }}>to</span>
-              <input type="date" value={endDate} min={startDate || undefined}
-                onChange={e => set({ endDate: e.target.value })}
-                style={{ ...input, fontSize: 13, colorScheme: "dark" }} />
-            </div>
+          {/* When it is played. Rounds turns these days into the list a round
+              can be scheduled on, so nobody hand-types a date in the wrong
+              month, or a Tuesday nobody is at the course. */}
+          {/* Full width, label above: squeezed into the 58px gutter the text
+              fields share, a seven-column month leaves 35px targets. */}
+          <div>
+            <div style={{ ...label, marginBottom: 6 }}>Dates</div>
+            <DateRangeCalendar start={startDate} end={endDate}
+              onChange={(s, e) => set({ startDate: s, endDate: e })} />
           </div>
-          {startDate && (
-            <div style={{ fontSize: 10, color: K.t3, paddingLeft: 66 }}>
-              {(() => { const n = tournamentDays(startDate, endDate).length; return `${n} day${n === 1 ? "" : "s"} — Rounds picks from these`; })()}
-            </div>
-          )}
         </div>
         {orphaned.length > 0 && (
           <div style={{ fontSize: 11, fontWeight: 600, color: K.warn, marginTop: 8, lineHeight: 1.4 }}>
