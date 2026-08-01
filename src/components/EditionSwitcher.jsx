@@ -7,7 +7,7 @@
 // Switching an edition reloads the app (see lib/editions.js), so both the
 // switch and the delete go through a confirmation first.
 import { useState, useEffect } from "react";
-import { K, ON_ACC } from "../theme";
+import { K, ON_ACC, FS, R } from "../theme";
 import { Btn } from "./ui";
 import { Popup, ConfirmModal } from "./Popup";
 import { getActiveTournamentId } from "../firebase";
@@ -18,10 +18,10 @@ import {
 
 const fieldStyle = (w) => ({
   width: w || "100%", flex: w ? "none" : 1, boxSizing: "border-box",
-  padding: "9px 11px", borderRadius: 8,
+  padding: "9px 11px", borderRadius: R.sm,
   background: K.inp, border: `1px solid ${K.bdr}`, color: K.t1,
   // 16px: below that, iOS zooms the page on focus and never zooms back out.
-  fontSize: 16, fontWeight: 600, outline: "none",
+  fontSize: FS.lead, fontWeight: 600, outline: "none",
 });
 
 // What a clone can copy. Scores, pairings, tee assignments, skins and
@@ -90,28 +90,28 @@ export function EditionSwitcher({ open, onClose, notify }) {
   return (
     <>
       <Popup onClose={onClose} maxWidth={400} padding={18} zIndex={3000} portal>
-        <div style={{ fontSize: 16, fontWeight: 800, color: K.t1, letterSpacing: 0.5, marginBottom: 3 }}>Editions</div>
-        <div style={{ fontSize: 11, color: K.t3, marginBottom: 14 }}>Switch the active year or start a new one.</div>
+        <div style={{ fontSize: FS.lead, fontWeight: 800, color: K.t1, letterSpacing: 0.5, marginBottom: 3 }}>Editions</div>
+        <div style={{ fontSize: FS.label, color: K.t3, marginBottom: 14 }}>Switch the active year or start a new one.</div>
 
         {loading ? (
-          <div style={{ fontSize: 12, color: K.t3, padding: "10px 0 16px" }}>Loading…</div>
+          <div style={{ fontSize: FS.small, color: K.t3, padding: "10px 0 16px" }}>Loading…</div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
             {editions.map((e) => {
               const isActive = e.id === activeId;
               return (
                 <div key={e.id} style={{
-                  display: "flex", alignItems: "center", gap: 10, padding: "11px 12px", borderRadius: 10,
+                  display: "flex", alignItems: "center", gap: 10, padding: "11px 12px", borderRadius: R.md,
                   background: K.inp, border: `1px solid ${isActive ? K.acc : K.bdr}`,
                 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 800, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.name}</div>
-                    <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: statusColor(e.status), marginTop: 2 }}>
+                    <div style={{ fontSize: FS.small, fontWeight: 800, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.name}</div>
+                    <div style={{ fontSize: FS.label, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: statusColor(e.status), marginTop: 2 }}>
                       {e.status}
                     </div>
                   </div>
                   {isActive ? (
-                    <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.5, color: ON_ACC, background: K.acc, padding: "5px 10px", borderRadius: 6 }}>ACTIVE</span>
+                    <span style={{ fontSize: FS.label, fontWeight: 800, letterSpacing: 0.5, color: ON_ACC, background: K.acc, padding: "5px 10px", borderRadius: R.sm }}>ACTIVE</span>
                   ) : (
                     <>
                       <Btn variant="secondary" size="sm" onClick={() => setPending(e)}
@@ -127,7 +127,7 @@ export function EditionSwitcher({ open, onClose, notify }) {
         )}
 
         <div style={{ borderTop: `1px solid ${K.bdr}`, paddingTop: 14 }}>
-          <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 1.5, color: K.t3, marginBottom: 9, textTransform: "uppercase" }}>New edition</div>
+          <div style={{ fontSize: FS.label, fontWeight: 800, letterSpacing: 1.5, color: K.t3, marginBottom: 9, textTransform: "uppercase" }}>New edition</div>
           <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
             <input value={year} onChange={(e) => setYear(e.target.value.replace(/\D/g, "").slice(0, 4))}
               placeholder="Year" inputMode="numeric" style={fieldStyle(84)} />
@@ -143,29 +143,29 @@ export function EditionSwitcher({ open, onClose, notify }) {
           </select>
 
           {cloneFrom && (
-            <div style={{ marginBottom: 10, background: K.inp, border: `1px solid ${K.bdr}`, borderRadius: 8, padding: "10px 12px" }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: K.t3, letterSpacing: 0.5, marginBottom: 8, textTransform: "uppercase" }}>Copy into the new edition</div>
+            <div style={{ marginBottom: 10, background: K.inp, border: `1px solid ${K.bdr}`, borderRadius: R.sm, padding: "10px 12px" }}>
+              <div style={{ fontSize: FS.label, fontWeight: 700, color: K.t3, letterSpacing: 0.5, marginBottom: 8, textTransform: "uppercase" }}>Copy into the new edition</div>
               {CLONE_ITEMS.map(({ key, label }) => (
                 <label key={key} style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 7, cursor: "pointer" }}>
                   <input type="checkbox" checked={cloneOpts[key]}
                     onChange={(e) => setCloneOpts((o) => ({ ...o, [key]: e.target.checked }))}
                     style={{ width: 16, height: 16, accentColor: K.acc, flexShrink: 0 }} />
-                  <span style={{ fontSize: 12, fontWeight: 600, color: K.t1 }}>{label}</span>
+                  <span style={{ fontSize: FS.small, fontWeight: 600, color: K.t1 }}>{label}</span>
                 </label>
               ))}
-              <div style={{ fontSize: 10, color: K.t3, marginTop: 4, lineHeight: 1.4 }}>
+              <div style={{ fontSize: FS.label, color: K.t3, marginTop: 4, lineHeight: 1.4 }}>
                 Scores, pairings, tee assignments and skins always start fresh.
               </div>
             </div>
           )}
 
           {taken && (
-            <div style={{ fontSize: 11, fontWeight: 600, color: K.warn, marginBottom: 8 }}>
+            <div style={{ fontSize: FS.label, fontWeight: 600, color: K.warn, marginBottom: 8 }}>
               There&rsquo;s already an edition for {year}.
             </div>
           )}
           {err && (
-            <div style={{ fontSize: 11, fontWeight: 600, color: K.danger, marginBottom: 8, lineHeight: 1.45 }}>{err}</div>
+            <div style={{ fontSize: FS.label, fontWeight: 600, color: K.danger, marginBottom: 8, lineHeight: 1.45 }}>{err}</div>
           )}
 
           <Btn block disabled={!canCreate} onClick={doCreate} style={{ letterSpacing: 0.5 }}>
