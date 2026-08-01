@@ -74,6 +74,21 @@ export async function readMembership(uid) {
 
 export const isDirectorAccount = (membership) => membership?.is_director === true;
 
+// Is this account through the door? `answer` is a membership read paired with
+// the uid it was made FOR — {uid, doc} — and `uid` is the account signed in
+// right now. Returns true (through), false (a definitive no) or undefined
+// (unknown: no answer yet, or the answer is about a different account).
+//
+// The pairing is the whole point. Auth resolving changes the signed-in uid one
+// render before a new read can start, so for that render the previous answer
+// is stale. Read as a plain document, the stale value for "nobody is signed
+// in" — null — is shaped exactly like "the read came back no", and the app
+// showed the event-password screen to players who were already through it,
+// for one frame, on every refresh. Comparing the uids makes that window
+// undefined, which is what callers already treat as "still in flight".
+export const resolveMember = (answer, uid) =>
+  (answer && answer.uid === (uid ?? null)) ? !!answer.doc : undefined;
+
 // Deployed rules that predate this build have no wbc_accounts rule at all,
 // so they refuse every request against it — including the read below,
 // before any password is compared. Reported as a wrong password, that sends

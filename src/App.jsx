@@ -1,7 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import { _app, _db, _auth, onAuthStateChanged, doGoogleSignIn, doAppleSignIn, doSignOut, consumeRedirectResult, deleteAccount, USERS_COLLECTION, NATIVE_APPLE_ENABLED, APPLE_PROVIDER_ENABLED, isNativePlatform, isAndroidNative, AUTH_PROVIDERS_ENABLED, TOURNAMENT_ID, getEditionSlug, getTournamentYear, isDefaultEdition } from "./firebase";
-import { readMembership, isDirectorAccount, joinWithCode, readAccessCode, setAccessCode, setDirector, subscribeMemberships, accountsUnreadable, membershipForPlayer, playerIsDirector } from "./lib/accounts";
+import { readMembership, isDirectorAccount, resolveMember, joinWithCode, readAccessCode, setAccessCode, setDirector, subscribeMemberships, accountsUnreadable, membershipForPlayer, playerIsDirector } from "./lib/accounts";
 import { K, ON_ACC, FS, ALPHA, FONT, SHADOW } from "./theme";
 import { SegmentedToggle, StickyTop, SectionLabel, Card, Toast } from "./components/ui";
 import { calcCH, computeIndividualBoard, rankIndividualBoard, rankIndividualBoardIds, WD_SCORE } from "./lib/individualBoard";
@@ -5715,8 +5715,19 @@ export default function WBCApp() {
   // to stay distinguishable from null: showing the password screen to
   // somebody who is already through it, because a read had not landed yet,
   // would be its own bug. null means signed in but not a member.
-  const [membership, setMembership] = useState(undefined);
-  const member = membership === undefined ? undefined : !!membership;
+  //
+  // The answer is stored WITH the account it is about, in one value, because
+  // the two must never disagree. Keeping only the document meant the answer
+  // for "nobody is signed in" (null) was indistinguishable from "the read came
+  // back no" — and auth resolving changes fbUser one render BEFORE the effect
+  // below can start the new read. For that one render a returning player had a
+  // truthy fbUser sitting next to a stale null, which is exactly the shape the
+  // gate below tests for, so the password screen painted at somebody who was
+  // already through it. Comparing the answer's uid against the current one
+  // makes that window read as "still in flight", which is what it is.
+  const [membershipAnswer, setMembershipAnswer] = useState({ uid: undefined, doc: null });
+  const membership = membershipAnswer.doc;
+  const member = resolveMember(membershipAnswer, fbUser?.uid);
 
   // Ask the door. A FAILED read is not a "no" — a phone coming up on bad
   // signal must not be told its password is needed again — so it retries
@@ -5736,13 +5747,14 @@ export default function WBCApp() {
   }, []);
 
   useEffect(() => {
-    if (!AUTH_PROVIDERS_ENABLED) { setMembership(null); return; }
-    if (!fbUser) { setMembership(null); return; }
+    if (!AUTH_PROVIDERS_ENABLED) { setMembershipAnswer({ uid: fbUser ? fbUser.uid : null, doc: null }); return; }
+    if (!fbUser) { setMembershipAnswer({ uid: null, doc: null }); return; }
     let live = true;
-    setMembership(undefined);
+    // No "in flight" write needed — the answer already fails the uid check
+    // above the moment fbUser changes, so it reads as unresolved for free.
     (async () => {
       const { doc: m } = await loadMembership(fbUser.uid);
-      if (live) setMembership(m);
+      if (live) setMembershipAnswer({ uid: fbUser.uid, doc: m });
     })();
     return () => { live = false; };
   }, [fbUser, loadMembership]);
@@ -5758,7 +5770,10 @@ export default function WBCApp() {
   // on top of it, and the bar's height moves with the device's bottom inset.
   const navRef = useRef(null);
   const [navH, setNavH] = useState(62);
-  useEffect(() => {
+  // Measured, so useLayoutEffect — same reason as the leaderboard's column
+  // sizing: a measure-then-restyle in useEffect paints the guessed 62px first
+  // and the real height a frame later.
+  useLayoutEffect(() => {
     const measure = () => { if (navRef.current) setNavH(navRef.current.offsetHeight); };
     measure();
     window.addEventListener("resize", measure);
@@ -6915,7 +6930,7 @@ export default function WBCApp() {
           // flag set in the console before the first sign-in would be missed
           // by a locally-invented one.
           const { doc: m } = await loadMembership(fbUser.uid);
-          setMembership(m || { uid: fbUser.uid });
+          setMembershipAnswer({ uid: fbUser.uid, doc: m || { uid: fbUser.uid } });
         }}
       />
     );
