@@ -27,7 +27,7 @@
 // answer is "off". Only the presence of a token says whether anything will
 // actually arrive.
 import { useState, useEffect } from "react";
-import { K, FONT, FS, ALPHA } from "../theme";
+import { K, FONT, FS, R, ALPHA, MOTION } from "../theme";
 import { Card, SectionLabel } from "./ui";
 import {
   registerForPush, unsubscribeFromPush, getNotificationPermissionState,
@@ -48,14 +48,14 @@ function Toggle({ on, busy, onChange }) {
   return (
     <button type="button" role="switch" aria-checked={on} onClick={onChange} disabled={busy}
       style={{
-        width: 52, height: 30, borderRadius: 15, border: "none", padding: 0,
+        width: 52, height: 30, borderRadius: R.xl, border: "none", padding: 0,
         background: on ? K.acc : K.bdr, position: "relative", flexShrink: 0,
         cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1,
-        transition: "background .2s ease",
+        transition: `background ${MOTION} ease`,
       }}>
       <span style={{
         position: "absolute", top: 3, left: on ? 25 : 3, width: 24, height: 24,
-        borderRadius: "50%", background: "#fff", transition: "left .2s ease",
+        borderRadius: "50%", background: "#fff", transition: `left ${MOTION} ease`,
         boxShadow: "0 1px 3px rgba(0,0,0,.3)",
       }} />
     </button>
@@ -209,7 +209,7 @@ export function NotificationSettings({ user, notify, onPermissionChange }) {
 
       {subscribed && (
         <button onClick={runTest} disabled={testing} style={{
-          width: "100%", padding: "10px 0", marginTop: 10, borderRadius: 8,
+          width: "100%", padding: "10px 0", marginTop: 10, borderRadius: R.sm,
           background: `${K.tourn}${ALPHA.wash}`, border: `1px solid ${K.tourn}${ALPHA.line}`,
           color: K.tourn, fontSize: FS.small, fontWeight: 800,
           cursor: testing ? "default" : "pointer", opacity: testing ? 0.6 : 1, fontFamily: FONT,

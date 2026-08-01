@@ -20,7 +20,7 @@
 // another popup.
 import { useEffect } from "react";
 import { createPortal } from "react-dom";
-import { K, SCRIM } from "../theme";
+import { K, FS, R, SCRIM } from "../theme";
 import { Btn } from "./ui";
 
 // Backdrop dismisses by default; opt out with dismissOnBackdrop={false} for
@@ -43,7 +43,7 @@ export function Popup({
     >
       <div
         onClick={e => e.stopPropagation()}
-        style={{ background: background || K.bg, border: `1px solid ${borderColor || K.bdr}`, borderRadius: 16, width: "100%", maxWidth, maxHeight: "calc(var(--app-height, 100dvh) - 90px)", overflowY: "auto", padding }}
+        style={{ background: background || K.bg, border: `1px solid ${borderColor || K.bdr}`, borderRadius: R.xl, width: "100%", maxWidth, maxHeight: "calc(var(--app-height, 100dvh) - 90px)", overflowY: "auto", padding }}
       >
         {children}
       </div>
@@ -97,15 +97,15 @@ function ConfirmModalInner({ m }) {
   return (
     <Popup onClose={handleCancel} maxWidth={340} zIndex={4000} padding={20} portal>
       {m.eyebrow && (
-        <div style={{ fontSize: 10, fontWeight: 700, color: K.acc, letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 10 }}>
+        <div style={{ fontSize: FS.label, fontWeight: 700, color: K.acc, letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 10 }}>
           {m.eyebrow}
         </div>
       )}
-      <div style={{ fontSize: 14, fontWeight: 700, color: K.t1, marginBottom: m.message ? 6 : 16 }}>
+      <div style={{ fontSize: FS.body, fontWeight: 700, color: K.t1, marginBottom: m.message ? 6 : 16 }}>
         {m.title}
       </div>
       {m.message && (
-        <div style={{ fontSize: 13, color: K.t2, lineHeight: 1.5, marginBottom: 16, whiteSpace: "pre-line" }}>
+        <div style={{ fontSize: FS.small, color: K.t2, lineHeight: 1.5, marginBottom: 16, whiteSpace: "pre-line" }}>
           {m.message}
         </div>
       )}

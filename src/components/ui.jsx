@@ -8,7 +8,7 @@
 //    • SegmentedToggle — the rounded pill tab switcher.
 //    • StickyTop       — the pinned control strip at the top of a tab.
 
-import { K, FONT, FS, ALPHA, SHADOW, ON_ACC, ON_DANGER, segThumb, segTrack } from "../theme";
+import { K, FONT, FS, R, ALPHA, SHADOW, ON_ACC, ON_DANGER, segThumb, segTrack } from "../theme";
 
 // ── Btn ──
 // The one button. WBC had 126 of them written inline and no primitive, so the
@@ -37,9 +37,9 @@ import { K, FONT, FS, ALPHA, SHADOW, ON_ACC, ON_DANGER, segThumb, segTrack } fro
 // cursor, and this collapses them to one. Anything genuinely bespoke can still
 // come through `style`, which merges last.
 const BTN_SIZES = {
-  sm: { fontSize: FS.small, padding: "7px 12px", borderRadius: 8,  gap: 5 },
-  md: { fontSize: FS.body,  padding: "10px 14px", borderRadius: 10, gap: 6 },
-  lg: { fontSize: FS.lead,  padding: "13px 16px", borderRadius: 12, gap: 8 },
+  sm: { fontSize: FS.small, padding: "7px 12px", borderRadius: R.sm,  gap: 5 },
+  md: { fontSize: FS.body,  padding: "10px 14px", borderRadius: R.md, gap: 6 },
+  lg: { fontSize: FS.lead,  padding: "13px 16px", borderRadius: R.lg, gap: 8 },
 };
 
 const BTN_VARIANTS = {
@@ -88,7 +88,7 @@ export function SegRule({ compact = false }) {
     <span style={{
       position: "absolute", left: "50%", transform: "translateX(-50%)",
       bottom: compact ? 3 : 4, width: compact ? 12 : 18, height: 2,
-      borderRadius: 1, background: K.acc,
+      borderRadius: R.xs, background: K.acc,
     }} />
   );
 }
@@ -116,7 +116,7 @@ export function SegmentedToggle({ options, value, onChange, variant = "segmented
   const track = tracked ? segTrack({ compact }) : { gap: 6 };
   const btn = (on) => (tracked
     ? segThumb(on, { compact })
-    : { ...segThumb(on, { compact, sunken: true }), borderRadius: 8, border: `1px solid ${on ? "transparent" : K.bdr}` });
+    : { ...segThumb(on, { compact, sunken: true }), borderRadius: R.sm, border: `1px solid ${on ? "transparent" : K.bdr}` });
   return (
     <div style={{ display: "flex", ...track, ...style }}>
       {options.map(([k, label, badge]) => {
@@ -197,7 +197,7 @@ export function SectionLabel({ children, color = K.t3, style }) {
 export function Card({ children, style, pad = 14 }) {
   return (
     <div style={{
-      background: K.card, borderRadius: 12, border: `1px solid ${K.bdr}`,
+      background: K.card, borderRadius: R.lg, border: `1px solid ${K.bdr}`,
       padding: pad, ...style,
     }}>{children}</div>
   );
@@ -219,7 +219,7 @@ export function Toast({ message, top = 30 }) {
       <div style={{
         position: "fixed", top, left: "50%", transform: "translateX(-50%)",
         background: K.card, border: `1px solid ${K.acc}${ALPHA.line}`,
-        color: K.t1, padding: "10px 22px", borderRadius: 12,
+        color: K.t1, padding: "10px 22px", borderRadius: R.lg,
         fontSize: FS.body, fontWeight: 700, zIndex: 5000,
         maxWidth: "80vw", textAlign: "center",
         boxShadow: `0 8px 32px ${SHADOW}`,

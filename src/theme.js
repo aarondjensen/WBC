@@ -80,6 +80,31 @@ export const FS = {
 // steppers you tap, not fields you type into, and 16px will not fit nine of
 // them across a phone.
 
+// ── Corner radius ──
+// Same story as the type scale: 15 different radii were in use, and 8/10/12
+// already accounted for two thirds of them. A radius carries no layout — it
+// cannot reflow anything — so the only thing distinguishing 6 from 8 was which
+// call site you happened to be reading.
+//
+// Six rungs, named for the SIZE of the thing being rounded, since that is what
+// actually decides it: a 12px swatch and a full-screen sheet cannot share a
+// corner and look right.
+export const R = {
+  xs:   4,  // swatches, inline marks, the tightest grid inputs
+  sm:   8,  // chips, badges, small controls
+  md:  10,  // the default — controls inside a card
+  lg:  12,  // cards and panels
+  xl:  16,  // modals and bottom sheets
+  pill: 20, // fully-rounded tracks and tags
+};
+
+// ── Motion ──
+// One duration. The app carried seven spellings of four values — "0.2s" and
+// ".2s" both appear — and nothing in the UI is doing anything different enough
+// to need its own timing. Keyframe animations (the toast, the live pulse) keep
+// their own, because those are motion with a shape rather than a state change.
+export const MOTION = "0.2s";
+
 // ── Alpha ladder ──
 // Every K token is 6-digit hex, so a wash is made by appending two more
 // characters: `K.acc + ALPHA.wash`. That freedom is why App.jsx carries a
