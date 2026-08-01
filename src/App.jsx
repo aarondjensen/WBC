@@ -2859,26 +2859,16 @@ function PairingsEditor({ activePlayers, pairingsData, setPairings, tRounds, cou
         </div>
       )}
       <div style={{ opacity: finalizedRounds[editRound] ? 0.6 : 1, pointerEvents: finalizedRounds[editRound] ? "none" : "auto" }}>
-      {/* Round scheduling — play date drives the automatic 30-min scoring gate;
-          the toggle lets a director force scoring open regardless of date/time. */}
+      {/* The scoring gate. The play-date field that used to sit beside it is
+          gone: the date lives under its round's pill now, on this tab too, and
+          two controls for one value three inches apart is how they end up
+          disagreeing. The line below still reads the date, because what the
+          gate does depends on it. */}
       {onSetRoundDate && (
         <div style={{ background: K.card, borderRadius: 12, padding: 10, marginBottom: 12, border: `1px solid ${K.bdr}` }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-              <span style={{ fontSize: 10, fontWeight: 700, color: K.t3, textTransform: "uppercase", letterSpacing: "0.06em" }}>Play date</span>
-              <input
-                type="date"
-                value={(roundDates || {})[editRound] || ""}
-                onChange={e => onSetRoundDate(editRound, e.target.value)}
-                style={{
-                  background: K.inp, border: `1px solid ${(roundDates || {})[editRound] ? K.acc + "40" : "#fbbf24"}`,
-                  borderRadius: 8, color: (roundDates || {})[editRound] ? K.acc : "#fbbf24",
-                  fontSize: 13, fontWeight: 600, padding: "6px 8px", colorScheme: "dark",
-                }}
-              />
-            </div>
+            <span style={{ fontSize: 10, fontWeight: 700, color: K.t3, textTransform: "uppercase", letterSpacing: "0.06em" }}>Scoring</span>
             <div style={{ display: "flex", flexDirection: "column", gap: 3, alignItems: "flex-end" }}>
-              <span style={{ fontSize: 10, fontWeight: 700, color: K.t3, textTransform: "uppercase", letterSpacing: "0.06em" }}>Scoring</span>
               <div onClick={() => onSetScoringOpen && onSetScoringOpen(editRound, !((scoringOpen || {})[editRound]))} style={{
                 display: "flex", alignItems: "center", cursor: "pointer", userSelect: "none",
                 background: K.bdr + "20", borderRadius: 20, padding: "2px 3px", gap: 1,
@@ -2924,12 +2914,6 @@ function PairingsEditor({ activePlayers, pairingsData, setPairings, tRounds, cou
               );
             })}
           </div>
-        </div>
-
-        <div style={{ marginTop: 8, fontSize: 10, color: K.t3, lineHeight: 1.5 }}>
-          {cfg.mode === "manual" && <>Build the foursomes by hand below. This is the usual choice for the opening round.</>}
-          {cfg.mode === "avoid_repeats" && <>Auto-groups this round so players avoid anyone from their earlier-round foursome{editRound === 2 ? "" : "s"}. You can still adjust the result by hand.</>}
-          {cfg.mode === "leaderboard" && <>Auto-groups this round by current standings. Requires an earlier round to be scored.</>}
         </div>
 
         {cfg.mode === "leaderboard" && (
@@ -4469,7 +4453,7 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
                 </div>
               )}
             </button>
-            {tab === "rounds" && onSetRoundDate && (
+            {onSetRoundDate && (
               isFinal
                 ? <div style={{ fontSize: 9, fontWeight: 700, color: K.t3, textAlign: "center", padding: "3px 0", opacity: isActive ? 1 : 0.4 }}>{rDate ? chipDate(rDate) : "—"}</div>
                 : <button onClick={() => { setEditRound(r); setDatePickRound(r); }} style={{
