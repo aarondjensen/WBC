@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import { _app, _db, _auth, onAuthStateChanged, doGoogleSignIn, doAppleSignIn, doSignOut, consumeRedirectResult, deleteAccount, USERS_COLLECTION, NATIVE_APPLE_ENABLED, APPLE_PROVIDER_ENABLED, isNativePlatform, isAndroidNative, AUTH_PROVIDERS_ENABLED, TOURNAMENT_ID, getEditionSlug, getTournamentYear, isDefaultEdition } from "./firebase";
 import { readMembership, isDirectorAccount, joinWithCode, readAccessCode, setAccessCode, setDirector, subscribeMemberships, accountsUnreadable, membershipForPlayer, playerIsDirector } from "./lib/accounts";
@@ -538,7 +538,7 @@ const getDefaultTee = (tees) => {
 const TEE_PALETTE = ["#60a5fa","#f59e0b","#a78bfa","#34d399","#fb923c","#f472b6","#38bdf8","#e879f9"];
 
 // ── LEADERBOARD ──
-function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getPlayerTee, finalizedRounds, skinWins }) {
+function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getPlayerTee, finalizedRounds, skinWins, loaded = true }) {
   const [expanded, setExpanded] = useState(null);
   const [scorecardRound, setScorecardRound] = useState(null);
   const [showGross, setShowGross] = useState(false);
@@ -550,9 +550,16 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
   const [rowStyle, setRowStyle] = useState({ padding: "6px 12px", fontSize: 12 });
   const [rowMinH, setRowMinH] = useState(0);
 
-  // Compute player column width to center Total, and align trophy to match
+  // Compute player column width to center Total, and align trophy to match.
+  //
+  // useLayoutEffect, not useEffect: this MEASURES the container and then
+  // restyles from the measurement. useEffect runs after the browser has
+  // painted, so the "auto" width below was painted first and the real width
+  // one frame later — the player column visibly jumped from ~39px to ~122px
+  // on every mount, which is what the pull-to-refresh flash was. Laying out
+  // synchronously before paint means the wrong layout is never shown.
   const [playerColW, setPlayerColW] = useState("auto");
-  useEffect(() => {
+  useLayoutEffect(() => {
     const align = () => {
       if (!containerRef.current) return;
       // Card has padding 12px each side, grid padding 12px each side
@@ -585,8 +592,11 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
     prevPositions.current = newPos;
   }, [lb.map(p => p.id).join(",")]);
 
-  // Row styles handled via CSS flex — rowStyle kept for font size only
-  useEffect(() => {
+  // Row styles handled via CSS flex — rowStyle kept for font size only.
+  // useLayoutEffect for the same reason as the column measurement above: this
+  // reads the rendered height and rewrites the row font size and padding from
+  // it, so running it after paint shows one frame at the pre-measurement size.
+  useLayoutEffect(() => {
     const calc = () => {
       if (!containerRef.current || !headerRef.current || lb.length === 0) return;
       // Use the container's own bounding rect — it already lives inside the padded content area
@@ -597,7 +607,10 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
       const perRow = Math.floor(available / lb.length);
       const clampedPerRow = Math.min(perRow, 36);
       const fSize = clampedPerRow >= 32 ? 13 : clampedPerRow >= 26 ? 12 : clampedPerRow >= 18 ? 11 : 10;
-      setRowStyle({ fontSize: fSize, lineHeight: 1 });
+      // Same object identity when the numbers have not moved, so the delayed
+      // re-measure below is free unless it actually found a different layout.
+      setRowStyle(prev => (prev.fontSize === fSize && prev.lineHeight === 1 && prev.padding === undefined)
+        ? prev : { fontSize: fSize, lineHeight: 1 });
       setRowMinH(perRow);
     };
     calc();
@@ -821,7 +834,12 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                 <span />
                 {allPriorRounds.map(r => <span key={r} style={{ textAlign: "center" }}>R{r}</span>)}
               </div>
-              {lb.length === 0 && <div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: 12 }}>No scores yet — be the first!</div>}
+              {/* Only once the round data is actually in. An empty `lb` also means
+                  "Firestore has not answered yet", and reporting that as "no scores"
+                  flashed the message up on every reload before the board arrived. */}
+              {lb.length === 0 && (loaded
+                ? <div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: 12 }}>No scores yet — be the first!</div>
+                : <div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: 12, opacity: 0.5 }}>&nbsp;</div>)}
               <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: expanded ? "auto" : "hidden" }}>
               {(() => {
                 // Pre-compute tied positions
@@ -6983,7 +7001,7 @@ export default function WBCApp() {
           right={<button onClick={handleLogout} style={{ background: "transparent", border: `1px solid ${K.bdr}`, borderRadius: 8, color: K.t3, fontSize: FS.small, fontWeight: 600, padding: "5px 12px", cursor: "pointer" }}>Exit</button>}
         />
         <div style={{ padding: "14px 20px 0 20px", flex: 1, overflowY: "hidden", overflowX: "hidden", display: "flex", flexDirection: "column", minHeight: 0, marginBottom: 8 }}>
-          <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} />
+          <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} loaded={storageLoaded} />
         </div>
       </div>
       </div>
@@ -7218,7 +7236,7 @@ export default function WBCApp() {
       )}
 
       <div className="wbc-app-body" style={{ padding: (view === "leaderboard" || view === "admin") ? "14px 20px 0 20px" : "14px 20px", flex: 1, overflowY: "auto", overflowX: "hidden", display: (view === "leaderboard" || view === "admin") ? "flex" : "block", flexDirection: "column", minHeight: 0, paddingBottom: (view === "leaderboard" || view === "admin") ? "28px" : 0 }}>
-        {view === "leaderboard" && <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} />}
+        {view === "leaderboard" && <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} loaded={storageLoaded} />}
         <div style={{ display: view === "scoring" ? "block" : "none", paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
           <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeTimesData={teeTimesData} roundDates={roundDates} scoringOpen={scoringOpen} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={async (key, signerPid, signerName, present, rnd) => { const nonSigners = (present || []).filter(pid => pid !== signerPid); const autoFinal = nonSigners.length === 0; const optimistic = { signedBy: signerPid, signedByName: signerName, attestedBy: [], present: present || [] }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: optimistic })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), tournament_id: TOURNAMENT_ID, groupKey: key, round: rnd, signedBy: signerPid, signedByName: signerName, present: present || [], attestedBy: [], signedAt: new Date().toISOString() }); if (autoFinal) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onAttestScorecard={async (key, attesterPid, nonSigners) => { const cur = scorecardSigs[key]; if (!cur) return; const attestedBy = [...new Set([...(cur.attestedBy || []), attesterPid])]; const optimistic = { ...cur, attestedBy }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: { ...prev[key], attestedBy } })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), attestedBy }); const allDone = (nonSigners || []).every(pid => attestedBy.includes(pid)); if (allDone) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onUnsignScorecard={async key => { pendingSigsRef.current.delete(key); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); if (finalizedRounds[key]) { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); pendingSigsRef.current.delete(key); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); await saveTournamentState(nf); }} onGoToAdminCourses={(rnd) => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); setAdminSettingsRound(rnd || null); }} markPlayerWD={markPlayerWD} ctpData={ctpData} onSetCtp={onSetCtp} />
         </div>
