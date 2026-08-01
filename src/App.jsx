@@ -3532,6 +3532,10 @@ function PlayerEditor({ editing, set, onClose, tPlayers, players, memberships, c
 // 25th anywhere west of Greenwich, which is the classic way a tournament ends
 // up a day early.
 const MAX_EVENT_DAYS = 14;
+// "Wed, Aug 26" -> "Wed 26". The month is the same for every day of a normal
+// event, and dropping it is what fits a date under a round pill.
+const chipDate = (iso, withMonth = false) =>
+  withMonth ? fmtRoundDate(iso) : fmtRoundDate(iso).replace(/,?\s\w+\s(\d+)$/, " $1");
 const isoOf = (y, m, d) => `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 const isoAddDays = (iso, n) => {
   const [y, m, d] = iso.split("-").map(Number);
@@ -3998,6 +4002,8 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
   const [courseStateFilter, setCourseStateFilter] = useState("MI");
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
+  // Which round has its day list open, if any — the pill's date field sets it.
+  const [datePickRound, setDatePickRound] = useState(null);
   // Is the course card showing its search instead of its course? Forced open
   // when the round has no course — there is nothing else for the card to be.
   const [pickingCourse, setPickingCourse] = useState(false);
@@ -4412,17 +4418,27 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
           );
         })()}
 
-      {/* Round cards + gear */}
-      <div style={{ display: "flex", gap: 4, marginBottom: 10, alignItems: "center" }}>
+      {/* Round pills, each with its own date under it.
+
+          The date used to be one row of every day the tournament runs, shading
+          the one this round plays: four days on screen to say one thing about
+          one round, and the same four again when you moved to the next round.
+          Now each round shows its own date and only its own — as many dates as
+          there are rounds — under the pill it belongs to. Tapping one selects
+          that round and opens the day list for it, so the full set of days is
+          on screen only while a date is actually being chosen. */}
+      <div style={{ display: "flex", gap: 4, marginBottom: 10, alignItems: "stretch" }}>
         {Array.from({ length: numRounds }, (_, i) => i + 1).map(r => {
           const st = getRoundStatus(r);
           const isFinal = st.finalized;
           const isActive = editRound === r;
           const teesDone = st.teesDone;
           const pairingsDone = st.pairingsDone;
+          const rDate = (roundDates || {})[r];
           return (
-            <button key={r} onClick={() => setEditRound(r)} style={{
-              flex: 1, padding: "7px 4px 6px", borderRadius: 10, cursor: "pointer",
+            <div key={r} style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 3 }}>
+            <button onClick={() => setEditRound(r)} style={{
+              width: "100%", padding: "7px 4px 6px", borderRadius: 10, cursor: "pointer",
               background: isActive ? acGlow : K.card,
               border: `${isActive ? "2px" : "1px"} solid ${isActive ? ac : isFinal ? K.bdr + "20" : K.bdr + "60"}`,
               color: isFinal ? K.t3 : isActive ? ac : K.t2,
@@ -4453,59 +4469,79 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
                 </div>
               )}
             </button>
+            {tab === "rounds" && onSetRoundDate && (
+              isFinal
+                ? <div style={{ fontSize: 9, fontWeight: 700, color: K.t3, textAlign: "center", padding: "3px 0", opacity: isActive ? 1 : 0.4 }}>{rDate ? chipDate(rDate) : "—"}</div>
+                : <button onClick={() => { setEditRound(r); setDatePickRound(r); }} style={{
+                    width: "100%", padding: "4px 2px", borderRadius: 8, cursor: "pointer",
+                    background: rDate ? ac + "18" : "transparent",
+                    border: `1px solid ${rDate ? ac + "40" : K.warn + "60"}`,
+                    color: rDate ? ac : K.warn,
+                    fontSize: 9, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                  }}>{rDate ? chipDate(rDate) : "+ date"}</button>
+            )}
+            </div>
           );
         })}
       </div>
 
-        {/* Which day this round is played — directly under the round pills,
-            because it belongs to the ROUND like they do, not to the course
-            card it used to sit inside. The choices are the days the tournament
-            runs, typed once in Admin → Event: every round of a four-day event
-            is one of those four days, and a free date field is how a round ends
-            up scheduled in the wrong month. No dates on the event yet: fall
-            back to a plain date field rather than an empty row nobody can act
-            on. Rounds only — the pills above are shared with Pairings, which
-            keeps its own copy of this beside the scoring-gate toggle. */}
-        {tab === "rounds" && !finalizedRounds[editRound] && onSetRoundDate && (() => {
+        {/* The day list, for ONE round, only while it is being chosen. The
+            choices are the days the tournament runs — typed once in Admin →
+            Event — because every round of a four-day event is one of those
+            four days, and a free date field is how a round ends up scheduled
+            in the wrong month. Two rounds CAN share a day: 36-hole days are
+            normal, so a day another round already uses is marked, not blocked.
+            No dates on the event yet: a plain date field, so nothing that
+            worked before stops working. */}
+        {datePickRound != null && (() => {
+          const r = datePickRound;
           const days = tournamentDays(tournamentMeta?.startDate, tournamentMeta?.endDate);
-          const mine = (roundDates || {})[editRound] || "";
-          // A date set before the event dates were (or after they moved)
-          // still shows, as its own chip — otherwise the round would look
-          // unscheduled while the leaderboard and scoring gate use it.
+          const mine = (roundDates || {})[r] || "";
+          // A date set before the event dates were (or after they moved) still
+          // shows, as its own chip — otherwise the round would look unscheduled
+          // while the leaderboard and the scoring gate use it.
           const chips = days.includes(mine) || !mine ? days : [...days, mine];
-          const oneMonth = new Set(chips.map(d => d.slice(0, 7))).size <= 1;
-          // "Wed, Aug 26" -> "Wed 26" while the whole event is in one month.
-          const chipLabel = (d) => oneMonth ? fmtRoundDate(d).replace(/,?\s\w+\s(\d+)$/, " $1") : fmtRoundDate(d);
+          const pick = (d) => { onSetRoundDate(r, d); setDatePickRound(null); };
           return (
-            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10, flexWrap: "wrap", background: K.card, borderRadius: 12, border: `1px solid ${K.bdr}`, padding: "8px 12px" }}>
-              <span style={{ fontSize: 9, fontWeight: 700, color: mine ? K.t3 : K.warn, textTransform: "uppercase", letterSpacing: "0.05em", flexShrink: 0 }}>Date</span>
+            <Popup onClose={() => setDatePickRound(null)} maxWidth={340} portal>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
+                <span style={{ fontSize: 11, fontWeight: 800, color: K.t1, textTransform: "uppercase", letterSpacing: "0.05em" }}>Round {r} · play date</span>
+                <button onClick={() => setDatePickRound(null)} style={{ background: "transparent", border: "none", color: K.t3, fontSize: 16, cursor: "pointer", lineHeight: 1 }}>✕</button>
+              </div>
               {chips.length === 0 ? (
-                <input type="date" value={mine} onChange={e => onSetRoundDate(editRound, e.target.value)}
-                  style={{ background: K.inp, border: `1px solid ${mine ? ac + "40" : K.warn}`, borderRadius: 8, color: mine ? ac : K.warn, fontSize: 12, fontWeight: 600, padding: "5px 8px", colorScheme: "dark" }} />
-              ) : chips.map(d => {
-                const on = mine === d;
-                // Two rounds on one day is a 36-hole day, not a mistake —
-                // nothing here blocks it. The marker is information: every
-                // OTHER round already on this day, listed, and shown even
-                // when this round is the one selected, so doubling up is
-                // visible while you do it rather than only before.
-                const others = Object.entries(roundDates || {})
-                  .filter(([r, v]) => v === d && Number(r) !== editRound)
-                  .map(([r]) => Number(r))
-                  .sort((a, b) => a - b);
-                return (
-                  <button key={d} onClick={() => onSetRoundDate(editRound, on ? "" : d)}
-                    title={others.length ? `Round ${others.join(" and ")} also play${others.length === 1 ? "s" : ""} this day` : undefined}
-                    style={{
-                      padding: "4px 8px", borderRadius: 999, fontSize: 10, fontWeight: 700, cursor: "pointer",
-                      background: on ? ac : "transparent", color: on ? K.bg : K.t3,
-                      border: `1px solid ${on ? ac : K.bdr}`,
-                    }}>
-                    {chipLabel(d)}{others.length ? ` · R${others.join(",R")}` : ""}
-                  </button>
-                );
-              })}
-            </div>
+                <>
+                  <input type="date" value={mine} onChange={e => pick(e.target.value)}
+                    style={{ width: "100%", background: K.inp, border: `1px solid ${ac}40`, borderRadius: 8, color: K.t1, fontSize: 16, fontWeight: 600, padding: "10px 12px", colorScheme: "dark", boxSizing: "border-box" }} />
+                  <div style={{ fontSize: 10, color: K.t3, marginTop: 8, lineHeight: 1.5 }}>
+                    Set the tournament dates in Event and this becomes a list of the days it runs.
+                  </div>
+                </>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {chips.map(d => {
+                    const on = mine === d;
+                    const others = Object.entries(roundDates || {})
+                      .filter(([rr, v]) => v === d && Number(rr) !== r)
+                      .map(([rr]) => Number(rr))
+                      .sort((a, b) => a - b);
+                    return (
+                      <button key={d} onClick={() => pick(on ? "" : d)} style={{
+                        display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
+                        padding: "10px 12px", borderRadius: 10, cursor: "pointer",
+                        background: on ? ac : K.inp,
+                        border: `1px solid ${on ? ac : K.bdr}`,
+                        color: on ? ON_ACC : K.t1, fontSize: 13, fontWeight: 700,
+                      }}>
+                        <span>{chipDate(d, true)}</span>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: on ? ON_ACC : K.t3 }}>
+                          {on ? "✓ this round" : others.length ? `also R${others.join(", R")}` : ""}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </Popup>
           );
         })()}
 
