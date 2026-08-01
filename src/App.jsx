@@ -7321,11 +7321,18 @@ export default function WBCApp() {
               marginTop: 0,
             }}>
               {isTrophy && (
+                // The dome the trophy sits in. Height matches the rise (24px
+                // above the bar's top border + the 1px the border itself
+                // occupies) and the corner radii are elliptical to match, so
+                // the widest point of the arc lands exactly ON that border.
+                // A taller circle here — say 34px — puts its widest point and
+                // the near-vertical sides 10px BELOW the line, which reads as
+                // two stubs poking down past the top of the bar.
                 <div style={{
                   position: "absolute", top: "-24px", left: "50%", transform: "translateX(-50%)",
-                  width: 68, height: 34,
+                  width: 68, height: 25,
                   background: "rgba(14,24,41,0.97)",
-                  borderRadius: "34px 34px 0 0",
+                  borderRadius: "34px 34px 0 0 / 25px 25px 0 0",
                   borderTop: `1px solid ${K.bdr}`,
                   borderLeft: `1px solid ${K.bdr}`,
                   borderRight: `1px solid ${K.bdr}`,
