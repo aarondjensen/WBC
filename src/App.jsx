@@ -767,7 +767,6 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
         </div>
         {/* Center — title */}
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <img src="/wbc-trophy.png" alt="" style={{ height: 22, width: "auto", objectFit: "contain" }} />
           <h2 style={{ fontFamily: "'Montserrat', sans-serif", fontSize: 20, margin: 0, fontWeight: 800 }}>Leaderboard</h2>
           {(() => {
             const isFinalized = finalizedRounds[round];
