@@ -4317,6 +4317,58 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
         })}
       </div>
 
+        {/* Which day this round is played — directly under the round pills,
+            because it belongs to the ROUND like they do, not to the course
+            card it used to sit inside. The choices are the days the tournament
+            runs, typed once in Admin → Event: every round of a four-day event
+            is one of those four days, and a free date field is how a round ends
+            up scheduled in the wrong month. No dates on the event yet: fall
+            back to a plain date field rather than an empty row nobody can act
+            on. Rounds only — the pills above are shared with Pairings, which
+            keeps its own copy of this beside the scoring-gate toggle. */}
+        {tab === "rounds" && !finalizedRounds[editRound] && onSetRoundDate && (() => {
+          const days = tournamentDays(tournamentMeta?.startDate, tournamentMeta?.endDate);
+          const mine = (roundDates || {})[editRound] || "";
+          // A date set before the event dates were (or after they moved)
+          // still shows, as its own chip — otherwise the round would look
+          // unscheduled while the leaderboard and scoring gate use it.
+          const chips = days.includes(mine) || !mine ? days : [...days, mine];
+          const oneMonth = new Set(chips.map(d => d.slice(0, 7))).size <= 1;
+          // "Wed, Aug 26" -> "Wed 26" while the whole event is in one month.
+          const chipLabel = (d) => oneMonth ? fmtRoundDate(d).replace(/,?\s\w+\s(\d+)$/, " $1") : fmtRoundDate(d);
+          return (
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10, flexWrap: "wrap", background: K.card, borderRadius: 12, border: `1px solid ${K.bdr}`, padding: "8px 12px" }}>
+              <span style={{ fontSize: 9, fontWeight: 700, color: mine ? K.t3 : K.warn, textTransform: "uppercase", letterSpacing: "0.05em", flexShrink: 0 }}>Date</span>
+              {chips.length === 0 ? (
+                <input type="date" value={mine} onChange={e => onSetRoundDate(editRound, e.target.value)}
+                  style={{ background: K.inp, border: `1px solid ${mine ? ac + "40" : K.warn}`, borderRadius: 8, color: mine ? ac : K.warn, fontSize: 12, fontWeight: 600, padding: "5px 8px", colorScheme: "dark" }} />
+              ) : chips.map(d => {
+                const on = mine === d;
+                // Two rounds on one day is a 36-hole day, not a mistake —
+                // nothing here blocks it. The marker is information: every
+                // OTHER round already on this day, listed, and shown even
+                // when this round is the one selected, so doubling up is
+                // visible while you do it rather than only before.
+                const others = Object.entries(roundDates || {})
+                  .filter(([r, v]) => v === d && Number(r) !== editRound)
+                  .map(([r]) => Number(r))
+                  .sort((a, b) => a - b);
+                return (
+                  <button key={d} onClick={() => onSetRoundDate(editRound, on ? "" : d)}
+                    title={others.length ? `Round ${others.join(" and ")} also play${others.length === 1 ? "s" : ""} this day` : undefined}
+                    style={{
+                      padding: "4px 8px", borderRadius: 999, fontSize: 10, fontWeight: 700, cursor: "pointer",
+                      background: on ? ac : "transparent", color: on ? K.bg : K.t3,
+                      border: `1px solid ${on ? ac : K.bdr}`,
+                    }}>
+                    {chipLabel(d)}{others.length ? ` · R${others.join(",R")}` : ""}
+                  </button>
+                );
+              })}
+            </div>
+          );
+        })()}
+
       </>)}
 
 
@@ -4416,6 +4468,18 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
               <button onClick={saveEdit} style={{ background: ac, border: "none", borderRadius: 8, color: K.bg, fontSize: 13, fontWeight: 700, padding: "6px 18px", cursor: "pointer" }}>Save</button>
             </div>
             <div style={{ flex: 1, overflowY: "auto", padding: "16px 16px 48px" }}>
+              {/* "Wrong course entirely" is a thing you discover while looking at
+                  its scorecard, so the swap is offered here rather than as a
+                  second button on the card. Only when this IS the round's
+                  course — editing one from the picker is already a swap away.
+                  Discards the draft: you are leaving to pick a different course,
+                  and saving edits to the one you are abandoning is not the ask. */}
+              {editingCourse.courseId === (tRounds.find(t => t.round_number === editRound)?.course_id) && (
+                <button onClick={() => { setEditingCourse(null); setPickingCourse(true); }}
+                  style={{ width: "100%", marginBottom: 16, padding: "10px 0", borderRadius: 8, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t2, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                  Change Round {editRound} to a different course
+                </button>
+              )}
               <div style={{ marginBottom: 16 }}><div style={{ fontSize: 10, color: K.t3, fontWeight: 600, textTransform: "uppercase", marginBottom: 4 }}>Course Name</div><input value={d.name || ""} onChange={e => setEditingCourse(prev => ({ ...prev, draft: { ...prev.draft, name: e.target.value } }))} style={{ width: "100%", padding: "9px 10px", background: K.inp, border: `1px solid ${ac}40`, borderRadius: 8, color: K.t1, fontSize: 14, boxSizing: "border-box" }} /></div>
               {[...(d.tee_boxes||[])].sort((a,b) => (parseFloat(b.slope)||0)-(parseFloat(a.slope)||0)).map((tb, tbi) => { const sortedTbs = [...(d.tee_boxes||[])].sort((a,b) => (parseFloat(b.slope)||0)-(parseFloat(a.slope)||0)); const origIdx = d.tee_boxes.indexOf(sortedTbs[tbi]); return (<div key={tbi} style={{ background: K.card, border: `1px solid ${K.bdr}`, borderRadius: 10, padding: "10px 12px", marginBottom: 8 }}><div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}><div style={{ display: "flex", alignItems: "center", gap: 8 }}><TeeColorSwatch color={tb.color} name={tb.name} size={12} /><span style={{ fontWeight: 700, fontSize: 14, color: K.t1 }}>{tb.name}</span></div><button onClick={() => setEditingCourse(prev => ({ ...prev, draft: { ...prev.draft, tee_boxes: prev.draft.tee_boxes.filter((_,i) => i !== origIdx) } }))} style={{ background: "transparent", border: "none", color: K.t3, cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 4px" }}>✕</button></div><div style={{ display: "flex", gap: 8 }}>{["rating","slope","par"].map(f => (<div key={f} style={{ flex: 1 }}><div style={{ fontSize: 9, color: K.t3, textTransform: "uppercase", marginBottom: 3 }}>{f}</div><input inputMode="decimal" value={tb[f]||""} onChange={e => setEditingCourse(prev => { const tbs = [...prev.draft.tee_boxes]; tbs[origIdx] = {...tbs[origIdx],[f]:e.target.value}; return {...prev,draft:{...prev.draft,tee_boxes:tbs}}; })} style={{ width: "100%", padding: "7px 6px", background: K.inp, border: `1px solid ${ac}30`, borderRadius: 6, color: K.t1, fontSize: 13, textAlign: "center", boxSizing: "border-box" }} /></div>))}</div></div>); })}
               {[["Front", 0, 9], ["Back", 9, 9]].map(([label, start, count]) => { const pars = (d.hole_pars||[]).slice(start, start+count); const hcps = (d.hole_handicaps||[]).slice(start, start+count); return (<div key={label} style={{ marginBottom: 8 }}><div style={{ fontSize: 10, color: K.t3, fontWeight: 600, textTransform: "uppercase", marginBottom: 4 }}>{label} 9</div><div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 32px`, gap: 2, fontSize: 9 }}><div style={{ color: K.t3, fontWeight: 600, padding: "2px 0" }}>Hole</div>{Array.from({length:count},(_,i)=><div key={i} style={{ textAlign:"center", color:K.t2, fontWeight:700, padding:"2px 0" }}>{start+i+1}</div>)}<div /></div><div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 32px`, gap: 2, background: K.inp, borderRadius: 6, padding: "2px 0", marginBottom: 2 }}><div style={{ color: K.t3, fontWeight: 600, padding: "3px 2px", fontSize: 9 }}>Par</div>{Array.from({length:count},(_,i) => (<input key={i} inputMode="numeric" value={pars[i]??""} onChange={e => setEditingCourse(prev => { const hp=[...(prev.draft.hole_pars||[])]; hp[start+i]=parseInt(e.target.value)||0; return {...prev,draft:{...prev.draft,hole_pars:hp}}; })} style={inpStyle} />))}<div style={{ textAlign:"center", color:ac, fontWeight:800, padding:"3px 0", fontSize:10 }}>{pars.reduce((a,b)=>a+(+b||0),0)}</div></div><div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 32px`, gap: 2 }}><div style={{ color: K.t3, fontWeight: 600, padding: "2px 2px", fontSize: 9 }}>HCP</div>{Array.from({length:count},(_,i) => (<input key={i} inputMode="numeric" value={hcps[i]??""} onChange={e => setEditingCourse(prev => { const hh=[...(prev.draft.hole_handicaps||[])]; hh[start+i]=parseInt(e.target.value)||0; return {...prev,draft:{...prev.draft,hole_handicaps:hh}}; })} style={{...inpStyle, color:K.t3}} />))}<div /></div></div>); })}
@@ -4475,15 +4539,11 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
                     </div>
                   </div>
                   {!locked && (
-                    <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                      <button onClick={() => setPickingCourse(true)}
-                        style={{ padding: "5px 10px", borderRadius: 8, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t2, fontSize: 10, fontWeight: 700, cursor: "pointer" }}>Change</button>
-                      {/* Edit reaches the same course editor the old Courses tab
-                          had — pars, handicaps and tee boxes — for the course
-                          this round is actually playing. */}
-                      <button onClick={() => setEditingCourse({ courseId: assigned.id, draft: { ...assigned, hole_pars: [...(assigned.hole_pars || Array(18).fill(4))], hole_handicaps: [...(assigned.hole_handicaps || Array(18).fill(0))], tee_boxes: (assigned.tee_boxes || []).map(t => ({ ...t })) } })}
-                        style={{ padding: "5px 10px", borderRadius: 8, background: "transparent", border: `1px solid ${ac}60`, color: ac, fontSize: 10, fontWeight: 700, cursor: "pointer" }}>Edit</button>
-                    </div>
+                    /* Pars, handicaps and tee boxes for the course this round is
+                       playing — and, from inside the editor, swapping the course
+                       for a different one. */
+                    <button onClick={() => setEditingCourse({ courseId: assigned.id, draft: { ...assigned, hole_pars: [...(assigned.hole_pars || Array(18).fill(4))], hole_handicaps: [...(assigned.hole_handicaps || Array(18).fill(0))], tee_boxes: (assigned.tee_boxes || []).map(t => ({ ...t })) } })}
+                      style={{ flexShrink: 0, padding: "5px 12px", borderRadius: 8, background: "transparent", border: `1px solid ${ac}60`, color: ac, fontSize: 10, fontWeight: 700, cursor: "pointer" }}>Edit</button>
                   )}
                 </div>
               )}
@@ -4511,48 +4571,6 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
                 </div>
               )}
 
-              {/* Which day this round is played. The choices are the days the
-                  tournament runs — typed once in Admin → Event — because every
-                  round of a four-day event is one of those four days, and a
-                  free date field is how a round ends up scheduled in the wrong
-                  month. It is what opens scoring for the field, so it sits in
-                  the round's own setup, not two tabs away. No dates on the
-                  event yet: fall back to a plain date field rather than showing
-                  an empty row nobody can act on. */}
-              {!locked && onSetRoundDate && (() => {
-                const days = tournamentDays(tournamentMeta?.startDate, tournamentMeta?.endDate);
-                const mine = (roundDates || {})[editRound] || "";
-                // A date set before the event dates were (or after they moved)
-                // still shows, as its own chip — otherwise the round would look
-                // unscheduled while the leaderboard and scoring gate use it.
-                const chips = days.includes(mine) || !mine ? days : [...days, mine];
-                const oneMonth = new Set(chips.map(d => d.slice(0, 7))).size <= 1;
-                // "Wed, Aug 26" -> "Wed 26" while the whole event is in one month.
-                const chipLabel = (d) => oneMonth ? fmtRoundDate(d).replace(/,?\s\w+\s(\d+)$/, " $1") : fmtRoundDate(d);
-                return (
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
-                    <span style={{ fontSize: 9, fontWeight: 700, color: mine ? K.t3 : K.warn, textTransform: "uppercase", letterSpacing: "0.05em", flexShrink: 0 }}>Date</span>
-                    {chips.length === 0 ? (
-                      <input type="date" value={mine} onChange={e => onSetRoundDate(editRound, e.target.value)}
-                        style={{ background: K.inp, border: `1px solid ${mine ? ac + "40" : K.warn}`, borderRadius: 8, color: mine ? ac : K.warn, fontSize: 12, fontWeight: 600, padding: "5px 8px", colorScheme: "dark" }} />
-                    ) : chips.map(d => {
-                      const on = mine === d;
-                      const taken = !on && Object.entries(roundDates || {}).find(([r, v]) => v === d && Number(r) !== editRound);
-                      return (
-                        <button key={d} onClick={() => onSetRoundDate(editRound, on ? "" : d)}
-                          title={taken ? `Also Round ${taken[0]}` : undefined}
-                          style={{
-                            padding: "4px 8px", borderRadius: 999, fontSize: 10, fontWeight: 700, cursor: "pointer",
-                            background: on ? ac : "transparent", color: on ? K.bg : K.t3,
-                            border: `1px solid ${on ? ac : K.bdr}`,
-                          }}>
-                          {chipLabel(d)}{taken ? ` · R${taken[0]}` : ""}
-                        </button>
-                      );
-                    })}
-                  </div>
-                );
-              })()}
             </div>
 
             {/* ── PICKING: your courses, then the API ── */}
