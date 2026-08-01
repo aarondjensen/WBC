@@ -3126,6 +3126,12 @@ function TeeAssigner({ activePlayers, tRounds, courses, teeData, setTeeBulk, fin
 
   const isSaved = teesSaved && teesSaved[editRound];
   const isModified = teesModified && teesModified[editRound];
+  // Per-player tees are folded away. Almost every field plays the tee the
+  // director set for everyone, so the list of names below the Set-all row was
+  // a page of confirmation that nothing was different — and the space it took
+  // is where this round's foursomes go now. It opens when one player needs a
+  // different box.
+  const [openTees, setOpenTees] = useState(false);
 
   // No course, nothing to assign tees from. This used to read
   // `!finalized && !course`, which let a FINALIZED round with no course
@@ -3180,7 +3186,33 @@ function TeeAssigner({ activePlayers, tRounds, courses, teeData, setTeeBulk, fin
           )}
 
           {/* Per-player tee assignment */}
-          <div style={{ overflow: "hidden", marginTop: 8 }}>
+          <button onClick={() => setOpenTees(o => !o)} style={{
+            width: "100%", marginTop: 8, padding: "8px 14px", background: "transparent", border: "none",
+            borderTop: `1px solid ${K.bdr}${ALPHA.hair}`, cursor: "pointer",
+            display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
+          }}>
+            <span style={{ fontSize: 10, fontWeight: 700, color: K.t3, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              Player tees
+            </span>
+            <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+              {/* What the list would say if it were open: one tee, or the split. */}
+              {(() => {
+                const counts = {};
+                activePlayers.forEach(p => {
+                  const t = assignments[p.id] || getDefaultTee(tees)?.name || tees[0]?.name || "—";
+                  counts[t] = (counts[t] || 0) + 1;
+                });
+                const names = Object.keys(counts);
+                return (
+                  <span style={{ fontSize: 10, fontWeight: 700, color: names.length === 1 ? K.t2 : K.acc, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {names.length === 1 ? `All ${names[0]}` : names.map(n => `${counts[n]} ${n}`).join(" · ")}
+                  </span>
+                );
+              })()}
+              <span style={{ fontSize: 10, color: K.t3 }}>{openTees ? "▲" : "▼"}</span>
+            </span>
+          </button>
+          <div style={{ overflow: "hidden", display: openTees ? "block" : "none" }}>
             <div>
             {activePlayers.map((p, i) => {
               const defaultTee = getDefaultTee(tees);
@@ -4380,7 +4412,7 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
           tab regardless of that tab's content height — see ui.jsx. */}
       <StickyTop padBottom={10}>
         <SegmentedToggle
-          options={[["players","Players"],["rounds","Rounds"],["pairings","Pairings"],["event","Event"]]}
+          options={[["players","Players"],["rounds","Rounds"],["event","Event"]]}
           value={tab}
           onChange={setTab}
         />
@@ -4389,7 +4421,7 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
       {/* The round selector belongs to the two ROUND-SCOPED tabs only.
           Players, Courses and Event act on the tournament as a whole, and a
           round picker above them would imply otherwise. */}
-      {(tab === "rounds" || tab === "pairings") && (<>
+      {tab === "rounds" && (<>
         {(() => {
           const _finalizePending = Object.entries(pairingsData || {}).some(([rnd, groups]) => {
             if (!groups.length) return false;
@@ -5350,7 +5382,11 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
         );
       })()}
 
-      {tab === "pairings" && (
+      {/* Groups and tee times for this round, under the course and tees they
+          are played on. It was its own tab, which split one job across two:
+          the round selector, the play date and the course all lived over here,
+          and the foursomes that use them lived over there. */}
+      {tab === "rounds" && (
         <PairingsEditor key={`${editRound}:${activePlayers.length}`} activePlayers={activePlayers} pairingsData={pairingsData} setPairings={setPairings} tRounds={tRounds} courses={courses} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
               setTeeTimesData(prev => {
                 const next = typeof updater === "function" ? updater(prev) : updater;
