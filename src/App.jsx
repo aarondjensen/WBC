@@ -3986,6 +3986,7 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
   const [courseStateFilter, setCourseStateFilter] = useState("MI");
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
+  const roundStripRef = useRef(null);
   // Which round has its day list open, if any — the pill's date field sets it.
   const [datePickRound, setDatePickRound] = useState(null);
   // Is the course card showing its search instead of its course? Forced open
@@ -4004,6 +4005,13 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
       return NUM_ROUNDS;
     });
   }, [JSON.stringify(finalizedRounds)]);
+  // Keep the selected round on screen when something OTHER than a tap moves it
+  // — finalizing advances the round, and scoring's "no course" link jumps to
+  // one — which matters once the strip is wide enough to scroll sideways.
+  useEffect(() => {
+    const el = roundStripRef.current?.querySelector(`[data-round="${editRound}"]`);
+    el?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [editRound]);
   useEffect(() => {
     if (!externalSettingsOpen) return;
     setTab(EXTERNAL_TAB[externalSettingsTab] || "rounds");
@@ -4411,7 +4419,15 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
           there are rounds — under the pill it belongs to. Tapping one selects
           that round and opens the day list for it, so the full set of days is
           on screen only while a date is actually being chosen. */}
-      <div style={{ display: "flex", gap: 4, marginBottom: 10, alignItems: "stretch" }}>
+      {/* Four rounds share the width evenly. Beyond that they would be too
+          narrow to read a date under, so the strip switches to fixed-width
+          columns and scrolls sideways instead — the round count is a setting,
+          and this is what happens when it grows past what a phone fits. */}
+      <div ref={roundStripRef} className={numRounds > 4 ? "wbc-hscroll" : undefined}
+        style={{
+          display: "flex", gap: 4, marginBottom: 10, alignItems: "stretch",
+          ...(numRounds > 4 ? { overflowX: "auto", overflowY: "hidden", paddingBottom: 2 } : {}),
+        }}>
         {Array.from({ length: numRounds }, (_, i) => i + 1).map(r => {
           const st = getRoundStatus(r);
           const isFinal = st.finalized;
@@ -4420,7 +4436,7 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
           const pairingsDone = st.pairingsDone;
           const rDate = (roundDates || {})[r];
           return (
-            <div key={r} style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 3 }}>
+            <div key={r} data-round={r} style={{ flex: numRounds > 4 ? "0 0 78px" : 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 3 }}>
             <button onClick={() => setEditRound(r)} style={{
               width: "100%", padding: "7px 4px 6px", borderRadius: 10, cursor: "pointer",
               background: isActive ? acGlow : K.card,
