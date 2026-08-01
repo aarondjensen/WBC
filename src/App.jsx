@@ -3638,6 +3638,11 @@ function DateRangeCalendar({ start, end, onChange }) {
 function TournamentPanel({ meta, onSave, notify, confirm, scoredRounds = [] }) {
   const [showEditions, setShowEditions] = useState(false);
   const [busy, setBusy] = useState(false);
+  // The calendar opens on a tap and closes on Save. Closing on Save rather than
+  // on the second date is deliberate: picking a range leaves the card dirty,
+  // and folding the calendar away the moment the end date lands would hide the
+  // change behind an un-tapped Save button.
+  const [datesOpen, setDatesOpen] = useState(false);
 
   // One working copy rather than three useStates plus a hand-rolled string key
   // to decide when to re-seed them. useDirtyForm (ported from Bourbon Cup)
@@ -3709,6 +3714,7 @@ function TournamentPanel({ meta, onSave, notify, confirm, scoredRounds = [] }) {
     setBusy(true);
     await commit();
     setBusy(false);
+    setDatesOpen(false);
     notify?.("Tournament details saved");
   };
 
@@ -3793,14 +3799,40 @@ function TournamentPanel({ meta, onSave, notify, confirm, scoredRounds = [] }) {
 
           {/* When it is played. Rounds turns these days into the list a round
               can be scheduled on, so nobody hand-types a date in the wrong
-              month, or a Tuesday nobody is at the course. */}
-          {/* Full width, label above: squeezed into the 58px gutter the text
-              fields share, a seven-column month leaves 35px targets. */}
-          <div>
-            <div style={{ ...label, marginBottom: 6 }}>Dates</div>
-            <DateRangeCalendar start={startDate} end={endDate}
-              onChange={(s, e) => set({ startDate: s, endDate: e })} />
-          </div>
+              month, or a Tuesday nobody is at the course.
+
+              Closed, it is a field like the two above it, sharing their 58px
+              gutter and reading back the range. Open, the label moves above and
+              the month takes the full width — squeezed into that gutter, seven
+              columns leave 35px targets. */}
+          {!datesOpen ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ ...label, width: 58, flexShrink: 0 }}>Dates</span>
+              <button type="button" onClick={() => setDatesOpen(true)} style={{
+                ...input, textAlign: "left", cursor: "pointer", fontSize: 13,
+                color: startDate ? K.t1 : K.t3,
+                display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
+              }}>
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {startDate
+                    ? `${fmtRoundDate(startDate)}${endDate && endDate !== startDate ? ` → ${fmtRoundDate(endDate)}` : ""}`
+                    : "Set the tournament dates"}
+                </span>
+                <span style={{ fontSize: 10, fontWeight: 700, color: K.t3, flexShrink: 0 }}>
+                  {startDate ? `${tournamentDays(startDate, endDate).length}d ›` : "›"}
+                </span>
+              </button>
+            </div>
+          ) : (
+            <div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
+                <span style={label}>Dates</span>
+                <button type="button" onClick={() => setDatesOpen(false)} style={{ background: "transparent", border: "none", color: K.t3, fontSize: 10, fontWeight: 700, cursor: "pointer", padding: 0 }}>Close</button>
+              </div>
+              <DateRangeCalendar start={startDate} end={endDate}
+                onChange={(s, e) => set({ startDate: s, endDate: e })} />
+            </div>
+          )}
         </div>
         {orphaned.length > 0 && (
           <div style={{ fontSize: 11, fontWeight: 600, color: K.warn, marginTop: 8, lineHeight: 1.4 }}>
