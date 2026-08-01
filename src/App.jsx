@@ -121,6 +121,25 @@ const db = {
       return data;
     } catch(e) { console.error("db.upsert error:", col, e); return null; }
   },
+  // Write many rows as ONE commit. A `for (const r of rows) await upsert(r)`
+  // loop is not just N round trips — every commit fires the collection's
+  // onSnapshot, and those handlers rebuild their state from the SERVER copy.
+  // So a bulk change lands as N repaints, each showing the rows written so
+  // far and the rest still on their old values: the change appears to crawl
+  // down the list. One batch is one snapshot, so the whole set flips at once.
+  upsertMany: async (col, rows) => {
+    const valid = (rows || []).filter(r => r && r.id);
+    if (!valid.length) return true;
+    try {
+      // 500 is Firestore's hard cap on writes per batch; 490 leaves room.
+      for (let i = 0; i < valid.length; i += 490) {
+        const batch = writeBatch(_db);
+        valid.slice(i, i + 490).forEach(r => batch.set(doc(_db, col, String(r.id)), r, { merge: true }));
+        await batch.commit();
+      }
+      return true;
+    } catch(e) { console.error("db.upsertMany error:", col, e); return null; }
+  },
   delete: async (col, filters = []) => {
     try {
       const snap = await getDocs(db._q(col, filters));
@@ -389,6 +408,22 @@ const fmtRoundDate = (iso) => {
   const [y, mo, da] = iso.split("-").map(Number);
   if (!y || !mo || !da) return "";
   return new Date(y, mo - 1, da).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+};
+// Every day the event runs, start..end inclusive, as YYYY-MM-DD. This is what
+// turns two dates typed once in Admin → Event into the only dates a round can
+// be played on. Capped at 14: a longer span is a typo (2026 for 2027), and a
+// mis-keyed year would otherwise try to render thousands of chips.
+const tournamentDays = (start, end) => {
+  if (!start) return [];
+  const parse = (iso) => { const [y, mo, da] = String(iso).split("-").map(Number); return (y && mo && da) ? new Date(y, mo - 1, da) : null; };
+  const a = parse(start);
+  const b = parse(end) || a;
+  if (!a || !b || b < a) return a ? [start] : [];
+  const out = [];
+  for (const d = new Date(a); d <= b && out.length < 14; d.setDate(d.getDate() + 1)) {
+    out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
+  }
+  return out;
 };
 // Is score entry open right now for a given round + this group's tee time?
 // Director → always open. Director "scoring open" toggle → open. Otherwise the
@@ -3108,55 +3143,60 @@ function TeeAssigner({ activePlayers, tRounds, courses, teeData, setTeeBulk, fin
   const isSaved = teesSaved && teesSaved[editRound];
   const isModified = teesModified && teesModified[editRound];
 
+  // No course, nothing to assign tees from. This used to read
+  // `!finalized && !course`, which let a FINALIZED round with no course
+  // through to `course.name` below and crashed the console.
+  if (!course) return null;
+
   return (
-    <div>
-      {/* The round-level finalized banner already says this above the course
-          box; repeating it here just pushed the tees further down. */}
-      {/* No course, nothing to assign tees from. This used to read
-          `!finalized && !course`, which let a FINALIZED round with no course
-          through to `course.name` below and crashed the console. */}
-      {!course ? null : (
-        <div style={{ opacity: finalizedRounds[editRound] ? 0.6 : 1, pointerEvents: finalizedRounds[editRound] ? "none" : "auto" }}>
-          {/* Quick-set all buttons */}
+    <div style={{ opacity: finalizedRounds[editRound] ? 0.6 : 1, pointerEvents: finalizedRounds[editRound] ? "none" : "auto" }}>
+      <div>
+        <div>
+          {/* The course's tee list, and the set-all control — one thing, not the
+              two it used to be (read-only chips on the course card, plus a stack
+              of tall buttons here). Slope/rating sits UNDER the colour and name
+              rather than beside it, which is what lets three tees share the width
+              of a phone; each tile takes an equal share and wraps past four.
+              No "Set all" label: the tiles are the only tap targets in the row,
+              they carry the same swatches as the player rows below, and the
+              title says what tapping does for anyone who hovers. */}
           {tees.length > 0 && !finalizedRounds[editRound] && (
-            <div style={{ marginBottom: 8 }}>
-              <div style={{ fontSize: 10, fontWeight: 600, color: K.t3, textTransform: "uppercase", marginBottom: 4 }}>Set all players to:</div>
-              <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
-                {[...tees].sort((a, b) => (parseFloat(b.slope) || 0) - (parseFloat(a.slope) || 0)).map(tee => (
-                  <button key={tee.name} onClick={() => setAll(tee.name)} style={{
-                    flex: 1, minWidth: 60, padding: "8px 6px", borderRadius: 8, cursor: "pointer", textAlign: "center",
-                    background: K.inp, border: `1px solid ${K.bdr}`, color: K.t1,
-                    display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
-                  }}>
-                    <TeeColorSwatch color={resolveTeeColor(tee, 0)} name={tee.name} size={18} style={{ borderRadius: 4 }} />
-                    <span style={{ fontSize: 10, fontWeight: 700 }}>{tee.name}</span>
-                    <div style={{ fontSize: 8, color: K.t3, lineHeight: 1.2 }}>{tee.slope}/{tee.rating}{tee.yardage ? <><br/>{tee.yardage.toLocaleString()}</> : ""}</div>
-                  </button>
-                ))}
-              </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(68px, 1fr))", gap: 4, padding: "8px 14px", borderBottom: `1px solid ${K.bdr}${ALPHA.hair}` }}>
+              {[...tees].sort((a, b) => (parseFloat(b.slope) || 0) - (parseFloat(a.slope) || 0)).map(tee => (
+                <button key={tee.name} onClick={() => setAll(tee.name)} title={`Put every player on ${tee.name}`} style={{
+                  display: "flex", flexDirection: "column", alignItems: "center", gap: 2, minWidth: 0,
+                  padding: "5px 4px", borderRadius: 8,
+                  background: K.inp, border: `1px solid ${K.bdr}`, color: K.t1, cursor: "pointer",
+                }}>
+                  <span style={{ display: "flex", alignItems: "center", gap: 4, maxWidth: "100%", minWidth: 0 }}>
+                    <TeeColorSwatch color={resolveTeeColor(tee, 0)} name={tee.name} size={11} style={{ borderRadius: 3, flexShrink: 0 }} />
+                    <span style={{ fontSize: 10, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tee.name}</span>
+                  </span>
+                  <span style={{ fontSize: 9, color: K.t3, lineHeight: 1 }}>{tee.slope}/{tee.rating}</span>
+                </button>
+              ))}
             </div>
           )}
 
           {/* Save confirmation button */}
           {!finalizedRounds[editRound] && (
+            <div style={{ padding: "8px 14px 0" }}>
             <button onClick={() => (!isSaved || isModified) && onTeesSave && onTeesSave(editRound)} style={{
-              width: "100%", padding: "10px 0", borderRadius: 10, marginBottom: 8,
+              width: "100%", padding: "8px 0", borderRadius: 8,
               background: isModified ? "#f59e0b" : isSaved ? K.inp : K.acc,
               border: `1px solid ${isModified ? "#f59e0b40" : isSaved ? "#22c55e40" : "transparent"}`,
               color: isModified ? K.bg : isSaved ? "#22c55e" : K.bg,
-              fontSize: 12, fontWeight: 700, cursor: isSaved && !isModified ? "default" : "pointer",
+              fontSize: 11, fontWeight: 700, cursor: isSaved && !isModified ? "default" : "pointer",
               display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
               transition: "background 0.25s ease, color 0.25s ease, border-color 0.25s ease",
             }}>
-              {isModified ? "⚠ Tee Changes — Confirm Again" : isSaved ? "✓ Tee Selections Confirmed" : "Confirm Tee Selections"}
+              {isModified ? "⚠ Tee changes — confirm again" : isSaved ? "✓ Tee selections confirmed" : "Confirm tee selections"}
             </button>
+            </div>
           )}
 
           {/* Per-player tee assignment */}
-          <div style={{ background: K.card, borderRadius: 10, border: `1px solid ${K.bdr}`, overflow: "hidden" }}>
-            <div style={{ padding: "6px 12px", fontSize: 10, fontWeight: 600, color: K.t3, textTransform: "uppercase", borderBottom: `1px solid ${K.bdr}` }}>
-              {course.name} — Tee Assignments
-            </div>
+          <div style={{ overflow: "hidden", marginTop: 8 }}>
             <div>
             {activePlayers.map((p, i) => {
               const defaultTee = getDefaultTee(tees);
@@ -3204,7 +3244,7 @@ function TeeAssigner({ activePlayers, tRounds, courses, teeData, setTeeBulk, fin
             </div>
           </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -3244,7 +3284,7 @@ const holesEntered = (holeData, pid, round) =>
 // Bourbon Cup: the previous design swapped this row for a cramped set of
 // inline inputs, which is why it could only ever expose a name and an index —
 // there is no room on a phone row for anything more.
-function PlayerRow({ player, isLast, onOpen, isDirector }) {
+function PlayerRow({ player, isLast, onOpen, isDirector, account }) {
   return (
     <button onClick={onOpen} style={{
       width: "100%", textAlign: "left", cursor: "pointer", background: "transparent",
@@ -3253,10 +3293,14 @@ function PlayerRow({ player, isLast, onOpen, isDirector }) {
     }}>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: FS.body, fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {player.name}{isDirector && " 👑"}
+          {/* 🔗 = this name is claimed by a signed-in account. It replaces the
+              "Signed in" list that used to sit in the Event tab restating the
+              roster: the question it answered — who can actually post a score —
+              is about a player, so it belongs on the player. */}
+          {player.name}{account && " 🔗"}{isDirector && " 👑"}
         </div>
         <div style={{ fontSize: FS.label, color: K.t3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {fullName(player) !== player.name ? fullName(player) : " "}
+          {account?.email || (fullName(player) !== player.name ? fullName(player) : " ")}
         </div>
       </div>
       <div style={{ flexShrink: 0, textAlign: "right" }}>
@@ -3471,9 +3515,133 @@ function PlayerEditor({ editing, set, onClose, tPlayers, players, memberships, c
 // the event for a new venue would otherwise have to remember two saves. An
 // empty field falls back to its constant rather than saving blank, so the
 // header can't end up with a hole in it.
+// ── DateRangeCalendar ──────────────────────────────────────────────────────
+// The event's dates, picked the way a hotel or airline picks them: tap the
+// first day, tap the last, and the days between shade in as the stay.
+//
+// This replaces two <input type="date"> fields, which could not do the two
+// things that matter here. They cannot shade anything — a four-day tournament
+// looked like two unrelated dates — and the second one opens on TODAY'S month
+// with no idea the first was just set, so picking Aug 26 then opening the end
+// field put a director in February. One calendar has no second field to
+// mis-open: after the first tap it is already on the right month, waiting for
+// the second.
+//
+// Local ISO strings ("YYYY-MM-DD") throughout, never Date objects across a
+// boundary: `new Date("2026-08-26")` parses as UTC midnight and renders as the
+// 25th anywhere west of Greenwich, which is the classic way a tournament ends
+// up a day early.
+const MAX_EVENT_DAYS = 14;
+const isoOf = (y, m, d) => `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+const isoAddDays = (iso, n) => {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(y, m - 1, d + n);
+  return isoOf(dt.getFullYear(), dt.getMonth(), dt.getDate());
+};
+function DateRangeCalendar({ start, end, onChange }) {
+  // Which end of the range the next tap sets. Starting a NEW range whenever
+  // both are set is what makes a mis-tap cheap: tap any day and you are picking
+  // a fresh range, rather than having to clear something first.
+  const [picking, setPicking] = useState(start && !end ? "end" : "start");
+  // The month shown is DERIVED from the start date plus however far the
+  // director has paged, not stored. That is what makes it follow the start date
+  // the instant it is set — the whole point of one calendar is that the second
+  // tap never has to go looking for the month — without an effect that writes
+  // state during render.
+  const [monthOffset, setMonthOffset] = useState(0);
+  const anchor = start || localDateISO();
+  const view = (() => {
+    const [ay, am] = anchor.split("-").map(Number);
+    const d = new Date(ay, am - 1 + monthOffset, 1);
+    return { y: d.getFullYear(), m: d.getMonth() };
+  })();
+
+  const maxEnd = start ? isoAddDays(start, MAX_EVENT_DAYS - 1) : null;
+  const tap = (iso) => {
+    // Paging is relative to the start date, so once a tap moves the start the
+    // offset has to go back to zero or the view jumps by however far they had
+    // paged to reach the day they just tapped.
+    setMonthOffset(0);
+    // A tap before the start is a new start, not an invalid end — the reading
+    // "actually, we begin earlier" is the common one.
+    if (picking === "start" || !start || iso < start) {
+      onChange(iso, "");
+      setPicking("end");
+      return;
+    }
+    if (maxEnd && iso > maxEnd) return;
+    onChange(start, iso);
+    setPicking("start");
+  };
+
+  const first = new Date(view.y, view.m, 1);
+  const daysInMonth = new Date(view.y, view.m + 1, 0).getDate();
+  const lead = first.getDay();
+  const cells = [
+    ...Array.from({ length: lead }, () => null),
+    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
+  ];
+  while (cells.length % 7) cells.push(null);
+  const shift = (n) => setMonthOffset(o => o + n);
+  const monthLabel = first.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  const today = localDateISO();
+
+  const navBtn = { background: "transparent", border: `1px solid ${K.bdr}`, borderRadius: 8, color: K.t2, fontSize: 14, fontWeight: 700, width: 30, height: 28, cursor: "pointer", lineHeight: 1 };
+
+  return (
+    <div style={{ background: K.inp, borderRadius: 10, border: `1px solid ${K.bdr}`, padding: "8px 10px 10px" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+        <button type="button" onClick={() => shift(-1)} style={navBtn}>‹</button>
+        <span style={{ fontSize: 12, fontWeight: 800, color: K.t1 }}>{monthLabel}</span>
+        <button type="button" onClick={() => shift(1)} style={navBtn}>›</button>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 1, marginBottom: 2 }}>
+        {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
+          <div key={i} style={{ textAlign: "center", fontSize: 9, fontWeight: 700, color: K.t3 }}>{d}</div>
+        ))}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 1 }}>
+        {cells.map((d, i) => {
+          if (!d) return <div key={i} />;
+          const iso = isoOf(view.y, view.m, d);
+          const isStart = iso === start;
+          const isEnd = iso === end;
+          const between = start && end && iso > start && iso < end;
+          const beyond = picking === "end" && start && maxEnd && iso > maxEnd;
+          const edge = isStart || isEnd;
+          return (
+            <button key={i} type="button" onClick={() => tap(iso)} disabled={beyond} style={{
+              // Square in the middle, rounded at the ends: the band reads as one
+              // stay rather than a row of separate days.
+              height: 32, padding: 0, cursor: beyond ? "default" : "pointer", position: "relative",
+              background: edge ? K.acc : between ? K.acc + "22" : "transparent",
+              color: edge ? ON_ACC : beyond ? K.t3 + "50" : between ? K.acc : K.t1,
+              border: (!edge && !between && iso === today) ? `1px solid ${K.t3}` : "1px solid transparent",
+              borderRadius: isStart && isEnd ? 8 : isStart ? "8px 0 0 8px" : isEnd ? "0 8px 8px 0" : between ? 0 : 8,
+              fontSize: 12, fontWeight: edge ? 800 : 600,
+            }}>{d}</button>
+          );
+        })}
+      </div>
+      <div style={{ marginTop: 6, fontSize: 10, color: K.t3, textAlign: "center" }}>
+        {!start
+          ? "Tap the first day of the tournament"
+          : picking === "end"
+            ? "Now tap the last day"
+            : `${fmtRoundDate(start)}${end && end !== start ? ` → ${fmtRoundDate(end)}` : ""} · ${tournamentDays(start, end).length} day${tournamentDays(start, end).length === 1 ? "" : "s"}`}
+      </div>
+    </div>
+  );
+}
+
 function TournamentPanel({ meta, onSave, notify, confirm, scoredRounds = [] }) {
   const [showEditions, setShowEditions] = useState(false);
   const [busy, setBusy] = useState(false);
+  // The calendar opens on a tap and closes on Save. Closing on Save rather than
+  // on the second date is deliberate: picking a range leaves the card dirty,
+  // and folding the calendar away the moment the end date lands would hide the
+  // change behind an un-tapped Save button.
+  const [datesOpen, setDatesOpen] = useState(false);
 
   // One working copy rather than three useStates plus a hand-rolled string key
   // to decide when to re-seed them. useDirtyForm (ported from Bourbon Cup)
@@ -3485,7 +3653,12 @@ function TournamentPanel({ meta, onSave, notify, confirm, scoredRounds = [] }) {
     name: meta?.name || "",
     location: meta?.location || "",
     rounds: clampRounds(meta?.rounds),
-  }), [meta?.name, meta?.location, meta?.rounds]);
+    // The days the event runs. Typed once here and nowhere else: Rounds offers
+    // exactly these days when a round is scheduled, so a round can only ever
+    // land on a day the tournament is actually being played.
+    startDate: meta?.startDate || "",
+    endDate: meta?.endDate || "",
+  }), [meta?.name, meta?.location, meta?.rounds, meta?.startDate, meta?.endDate]);
 
   // The hook's own save is what reconciles its clean snapshot. Routing the
   // panel's Save through it — rather than calling onSave directly and leaving
@@ -3497,10 +3670,15 @@ function TournamentPanel({ meta, onSave, notify, confirm, scoredRounds = [] }) {
       name: (v.name || "").trim() || TOURNAMENT.name,
       location: (v.location || "").trim(),
       rounds: v.rounds,
+      startDate: v.startDate || "",
+      // An end before the start is a half-typed range, not a range — keep the
+      // start and let them finish, rather than saving something that yields no
+      // days at all.
+      endDate: (v.endDate && v.startDate && v.endDate < v.startDate) ? v.startDate : (v.endDate || ""),
     }),
   });
   const set = (patch) => setForm(prev => ({ ...prev, ...patch }));
-  const { name, location, rounds } = form;
+  const { name, location, rounds, startDate, endDate } = form;
 
   const pendingName = (name || "").trim() || TOURNAMENT.name;
   const pendingLocation = (location || "").trim();
@@ -3511,7 +3689,9 @@ function TournamentPanel({ meta, onSave, notify, confirm, scoredRounds = [] }) {
   // the identical document.
   const dirty = pendingName !== (meta?.name || TOURNAMENT.name)
     || pendingLocation !== (meta?.location || "")
-    || rounds !== clampRounds(meta?.rounds);
+    || rounds !== clampRounds(meta?.rounds)
+    || (startDate || "") !== (meta?.startDate || "")
+    || (endDate || "") !== (meta?.endDate || "");
 
   // Rounds that already carry a score and would fall off the end of a shorter
   // tournament. Dropping to three does not DELETE round four — the holes stay
@@ -3533,6 +3713,7 @@ function TournamentPanel({ meta, onSave, notify, confirm, scoredRounds = [] }) {
     setBusy(true);
     await commit();
     setBusy(false);
+    setDatesOpen(false);
     notify?.("Tournament details saved");
   };
 
@@ -3614,12 +3795,43 @@ function TournamentPanel({ meta, onSave, notify, confirm, scoredRounds = [] }) {
               })}
             </div>
           </div>
-        </div>
-        <div style={{ fontSize: 11, color: K.t3, marginTop: 8, lineHeight: 1.4 }}>
-          Name and location show in the app header and on the sign-in screen; leave the name
-          blank to fall back to &ldquo;{TOURNAMENT.name}&rdquo;. Rounds sets how many the
-          leaderboard, pairings and scoring screens count — usually four, three when the
-          schedule loses a day.
+
+          {/* When it is played. Rounds turns these days into the list a round
+              can be scheduled on, so nobody hand-types a date in the wrong
+              month, or a Tuesday nobody is at the course.
+
+              Closed, it is a field like the two above it, sharing their 58px
+              gutter and reading back the range. Open, the label moves above and
+              the month takes the full width — squeezed into that gutter, seven
+              columns leave 35px targets. */}
+          {!datesOpen ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ ...label, width: 58, flexShrink: 0 }}>Dates</span>
+              <button type="button" onClick={() => setDatesOpen(true)} style={{
+                ...input, textAlign: "left", cursor: "pointer", fontSize: 13,
+                color: startDate ? K.t1 : K.t3,
+                display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
+              }}>
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {startDate
+                    ? `${fmtRoundDate(startDate)}${endDate && endDate !== startDate ? ` → ${fmtRoundDate(endDate)}` : ""}`
+                    : "Set the tournament dates"}
+                </span>
+                <span style={{ fontSize: 10, fontWeight: 700, color: K.t3, flexShrink: 0 }}>
+                  {startDate ? `${tournamentDays(startDate, endDate).length}d ›` : "›"}
+                </span>
+              </button>
+            </div>
+          ) : (
+            <div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
+                <span style={label}>Dates</span>
+                <button type="button" onClick={() => setDatesOpen(false)} style={{ background: "transparent", border: "none", color: K.t3, fontSize: 10, fontWeight: 700, cursor: "pointer", padding: 0 }}>Close</button>
+              </div>
+              <DateRangeCalendar start={startDate} end={endDate}
+                onChange={(s, e) => set({ startDate: s, endDate: e })} />
+            </div>
+          )}
         </div>
         {orphaned.length > 0 && (
           <div style={{ fontSize: 11, fontWeight: 600, color: K.warn, marginTop: 8, lineHeight: 1.4 }}>
@@ -3632,7 +3844,7 @@ function TournamentPanel({ meta, onSave, notify, confirm, scoredRounds = [] }) {
   );
 }
 
-function AccessPanel({ memberships, onSetDirector, claims, players, authUid, notify, confirm }) {
+function AccessPanel({ notify, confirm }) {
   const [code, setCode] = useState("");
   const [revealed, setRevealed] = useState(false);
   // Distinct from `busy`: `loading` is the ONE read that happens on open, and
@@ -3641,7 +3853,6 @@ function AccessPanel({ memberships, onSetDirector, claims, players, authUid, not
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const [dirBusy, setDirBusy] = useState(null);
 
   const reveal = async () => {
     setBusy(true); setErr("");
@@ -3702,23 +3913,6 @@ function AccessPanel({ memberships, onSetDirector, claims, players, authUid, not
     notify?.(next ? "Password saved" : "Password cleared — anyone can sign in");
   };
 
-  const toggleDirector = async (uid, on) => {
-    setDirBusy(uid); setErr("");
-    const res = await onSetDirector(uid, on);
-    setDirBusy(null);
-    if (!res.ok) { setErr(res.error); return; }
-    notify?.(on ? "Director added" : "Director removed");
-  };
-
-  // A membership carries an email; the name comes from the claim it made.
-  const nameFor = (m) => {
-    const pid = claims?.[m.id] ?? claims?.[m.uid];
-    return (players || []).find(p => p.id === pid)?.name || null;
-  };
-
-  const rows = [...(memberships || [])].sort((a, b) =>
-    (nameFor(a) || a.email || a.id).localeCompare(nameFor(b) || b.email || b.id));
-
   const label = { fontSize: 10, fontWeight: 700, color: K.t3, textTransform: "uppercase", letterSpacing: "0.06em" };
 
   return (
@@ -3726,12 +3920,6 @@ function AccessPanel({ memberships, onSetDirector, claims, players, authUid, not
       {/* The password */}
       <div style={{ background: K.card, borderRadius: 12, border: `1px solid ${K.bdr}`, padding: "12px 14px" }}>
         <div style={{ ...label, marginBottom: 8 }}>Event password</div>
-        <p style={{ fontSize: 11, color: K.t3, lineHeight: 1.5, margin: "0 0 10px" }}>
-          One password for the whole event, not one per player. Everyone types it once, after
-          signing in with Google or Apple, and until they do they can&rsquo;t claim a name off
-          the roster or post a score. It&rsquo;s checked by the database, not the app, so it holds
-          even against someone skipping the app entirely. Leave it blank to let anyone in.
-        </p>
         {revealed ? (
           <div style={{ display: "flex", gap: 8 }}>
             <input value={code} onChange={e => { setCode(e.target.value); if (err) setErr(""); }}
@@ -3754,51 +3942,12 @@ function AccessPanel({ memberships, onSetDirector, claims, players, authUid, not
         )}
       </div>
 
-      {/* Who's through the door */}
-      <div style={{ background: K.card, borderRadius: 12, border: `1px solid ${K.bdr}`, overflow: "hidden" }}>
-        <div style={{ padding: "10px 14px", borderBottom: `1px solid ${K.bdr}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span style={label}>Signed in ({rows.length})</span>
-          <span style={{ fontSize: 10, color: K.t3 }}>👑 = director</span>
-        </div>
-        {rows.length === 0 ? (
-          <p style={{ fontSize: 11, color: K.t3, lineHeight: 1.5, margin: 0, padding: "14px" }}>
-            {/* A director can always read their own membership, so an empty list
-                means the read was refused — which in practice means one thing. */}
-            {accountsUnreadable(memberships)
-              ? "Can't read this — the rules deployed to Firebase are older than this app. Re-publish firestore.rules."
-              : "Nobody has signed in yet."}
-          </p>
-        ) : rows.map((m, i) => {
-          const isSelf = m.id === authUid || m.uid === authUid;
-          const on = m.is_director === true;
-          const nm = nameFor(m);
-          return (
-            <div key={m.id} style={{ padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, borderBottom: i < rows.length - 1 ? `1px solid ${K.bdr}30` : "none" }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {nm || m.email || m.id}{on && " 👑"}
-                </div>
-                <div style={{ fontSize: 10, color: K.t3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {nm ? (m.email || "no email") : "hasn't claimed a name yet"}
-                </div>
-              </div>
-              {/* Your own crown is not yours to change — see the note above. */}
-              <button onClick={() => !isSelf && toggleDirector(m.id, !on)} disabled={isSelf || dirBusy === m.id}
-                title={isSelf ? "You can't change your own — that's a console edit" : on ? "Remove director" : "Make director"}
-                style={{ flexShrink: 0, padding: "6px 10px", borderRadius: 8, background: "transparent", border: `1px solid ${on ? K.acc + "50" : K.bdr}`, color: isSelf ? K.t3 : on ? K.acc : K.t2, fontSize: 11, fontWeight: 700, cursor: isSelf ? "default" : "pointer", opacity: isSelf ? 0.4 : 1 }}>
-                {dirBusy === m.id ? "…" : on ? "Director" : "Make director"}
-              </button>
-            </div>
-          );
-        })}
-      </div>
-
       {err && <div style={{ fontSize: 11, fontWeight: 600, color: K.danger, lineHeight: 1.5 }}>{err}</div>}
     </div>
   );
 }
 
-function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, roundDates, onSetRoundDate, scoringOpen, onSetScoringOpen, pairingStrategy, onSetPairingStrategy, leaderboard, holeData, finalizedRounds, onFinalizeRound, onUnfinalizeRound, onDiscardRoundScores, notify, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, externalSettingsRound, onExternalSettingsHandled, teesSaved, onTeesSave, teesModified, onTeesModify, memberships, onSetDirector, claims, authUid, tournamentMeta, onSaveTournamentMeta }) {
+function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, roundDates, onSetRoundDate, scoringOpen, onSetScoringOpen, pairingStrategy, onSetPairingStrategy, leaderboard, holeData, finalizedRounds, onFinalizeRound, onUnfinalizeRound, onDiscardRoundScores, notify, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, externalSettingsRound, onExternalSettingsHandled, teesSaved, onTeesSave, teesModified, onTeesModify, memberships, onSetDirector, claims, authUid, tournamentMeta, onSaveTournamentMeta }) {
   const [tab, setTab] = useState("rounds");
   // Themed confirmations (see lib/useConfirm). The host <ConfirmModal/> is
   // rendered once at the bottom of this view; `confirm(...)` returns a
@@ -3849,7 +3998,9 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
   const [courseStateFilter, setCourseStateFilter] = useState("MI");
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
-  const [expandedCourse, setExpandedCourse] = useState(null);
+  // Is the course card showing its search instead of its course? Forced open
+  // when the round has no course — there is nothing else for the card to be.
+  const [pickingCourse, setPickingCourse] = useState(false);
   const [editingCourse, setEditingCourse] = useState(null); // { courseId, draft: {...} }
   const [manualCourse, setManualCourse] = useState(null); // null | draft object when manually adding
   const [coursePreview, setCoursePreview] = useState(null); // course to preview before confirming add
@@ -4122,6 +4273,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
     const roundTaken = !!tRounds.find(t => t.round_number === editRound && t.course_id);
     if (!roundTaken && !finalizedRounds[editRound]) {
       setCourseForRound(editRound, c);
+      setPickingCourse(false);
       notify(`${c.name} added — Round ${editRound} is set`);
     } else {
       notify(`${c.name} added to your courses`);
@@ -4154,7 +4306,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+    <div style={{ display: "flex", flexDirection: "column", flex: "1 0 auto" }}>
 
       {/* Finalize round popup modal */}
       {finalizeModal && (
@@ -4305,6 +4457,58 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
         })}
       </div>
 
+        {/* Which day this round is played — directly under the round pills,
+            because it belongs to the ROUND like they do, not to the course
+            card it used to sit inside. The choices are the days the tournament
+            runs, typed once in Admin → Event: every round of a four-day event
+            is one of those four days, and a free date field is how a round ends
+            up scheduled in the wrong month. No dates on the event yet: fall
+            back to a plain date field rather than an empty row nobody can act
+            on. Rounds only — the pills above are shared with Pairings, which
+            keeps its own copy of this beside the scoring-gate toggle. */}
+        {tab === "rounds" && !finalizedRounds[editRound] && onSetRoundDate && (() => {
+          const days = tournamentDays(tournamentMeta?.startDate, tournamentMeta?.endDate);
+          const mine = (roundDates || {})[editRound] || "";
+          // A date set before the event dates were (or after they moved)
+          // still shows, as its own chip — otherwise the round would look
+          // unscheduled while the leaderboard and scoring gate use it.
+          const chips = days.includes(mine) || !mine ? days : [...days, mine];
+          const oneMonth = new Set(chips.map(d => d.slice(0, 7))).size <= 1;
+          // "Wed, Aug 26" -> "Wed 26" while the whole event is in one month.
+          const chipLabel = (d) => oneMonth ? fmtRoundDate(d).replace(/,?\s\w+\s(\d+)$/, " $1") : fmtRoundDate(d);
+          return (
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10, flexWrap: "wrap", background: K.card, borderRadius: 12, border: `1px solid ${K.bdr}`, padding: "8px 12px" }}>
+              <span style={{ fontSize: 9, fontWeight: 700, color: mine ? K.t3 : K.warn, textTransform: "uppercase", letterSpacing: "0.05em", flexShrink: 0 }}>Date</span>
+              {chips.length === 0 ? (
+                <input type="date" value={mine} onChange={e => onSetRoundDate(editRound, e.target.value)}
+                  style={{ background: K.inp, border: `1px solid ${mine ? ac + "40" : K.warn}`, borderRadius: 8, color: mine ? ac : K.warn, fontSize: 12, fontWeight: 600, padding: "5px 8px", colorScheme: "dark" }} />
+              ) : chips.map(d => {
+                const on = mine === d;
+                // Two rounds on one day is a 36-hole day, not a mistake —
+                // nothing here blocks it. The marker is information: every
+                // OTHER round already on this day, listed, and shown even
+                // when this round is the one selected, so doubling up is
+                // visible while you do it rather than only before.
+                const others = Object.entries(roundDates || {})
+                  .filter(([r, v]) => v === d && Number(r) !== editRound)
+                  .map(([r]) => Number(r))
+                  .sort((a, b) => a - b);
+                return (
+                  <button key={d} onClick={() => onSetRoundDate(editRound, on ? "" : d)}
+                    title={others.length ? `Round ${others.join(" and ")} also play${others.length === 1 ? "s" : ""} this day` : undefined}
+                    style={{
+                      padding: "4px 8px", borderRadius: 999, fontSize: 10, fontWeight: 700, cursor: "pointer",
+                      background: on ? ac : "transparent", color: on ? K.bg : K.t3,
+                      border: `1px solid ${on ? ac : K.bdr}`,
+                    }}>
+                    {chipLabel(d)}{others.length ? ` · R${others.join(",R")}` : ""}
+                  </button>
+                );
+              })}
+            </div>
+          );
+        })()}
+
       </>)}
 
 
@@ -4312,8 +4516,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                 <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                   <TournamentPanel meta={tournamentMeta} onSave={onSaveTournamentMeta} notify={notify}
                     confirm={confirm} scoredRounds={scoredRounds} />
-                  <AccessPanel memberships={memberships} onSetDirector={onSetDirector}
-                    claims={claims} players={players} authUid={authUid} notify={notify} confirm={confirm} />
+                  <AccessPanel notify={notify} confirm={confirm} />
                 </div>
               )}
               {tab === "players" && (
@@ -4338,6 +4541,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                         player={p}
                         isLast={i === activePlayers.length - 1}
                         isDirector={playerIsDirector(memberships, claims, p.id)}
+                        account={membershipForPlayer(memberships, claims, p.id)}
                         onOpen={() => {
                           const parts = splitName(p);
                           setEditingPlayer({
@@ -4354,6 +4558,16 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
                       />
                     ))}
                   </Card>
+                  {(() => {
+                    const claimed = new Set(Object.values(claims || {}));
+                    const waiting = (memberships || []).filter(m => !claimed.has(claims?.[m.id] ?? claims?.[m.uid]) || !(claims?.[m.id] ?? claims?.[m.uid]));
+                    if (!waiting.length) return null;
+                    return (
+                      <div style={{ fontSize: FS.label, color: K.t3, marginTop: 8, lineHeight: 1.5 }}>
+                        {waiting.length} signed in without claiming a name yet — they appear here once they do.
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
 
@@ -4384,7 +4598,7 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
       )}
       {editingCourse && (() => {
         const d = editingCourse.draft;
-        const saveEdit = () => { addCourse({ ...editingCourse.draft }); setEditingCourse(null); setExpandedCourse(null); };
+        const saveEdit = () => { addCourse({ ...editingCourse.draft }); setEditingCourse(null); };
         const inpStyle = { background: K.inp, border: `1px solid ${ac}40`, borderRadius: 4, color: K.t1, fontSize: 9, textAlign: "center", width: "100%", padding: "2px 0", boxSizing: "border-box" };
         return (
           <div style={{ position: "fixed", top: 0, bottom: 0, left: 0, right: 0, background: K.bg, zIndex: 200, display: "flex", flexDirection: "column", maxWidth: 480, margin: "0 auto" }}>
@@ -4394,6 +4608,18 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
               <button onClick={saveEdit} style={{ background: ac, border: "none", borderRadius: 8, color: K.bg, fontSize: 13, fontWeight: 700, padding: "6px 18px", cursor: "pointer" }}>Save</button>
             </div>
             <div style={{ flex: 1, overflowY: "auto", padding: "16px 16px 48px" }}>
+              {/* "Wrong course entirely" is a thing you discover while looking at
+                  its scorecard, so the swap is offered here rather than as a
+                  second button on the card. Only when this IS the round's
+                  course — editing one from the picker is already a swap away.
+                  Discards the draft: you are leaving to pick a different course,
+                  and saving edits to the one you are abandoning is not the ask. */}
+              {editingCourse.courseId === (tRounds.find(t => t.round_number === editRound)?.course_id) && (
+                <button onClick={() => { setEditingCourse(null); setPickingCourse(true); }}
+                  style={{ width: "100%", marginBottom: 16, padding: "10px 0", borderRadius: 8, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t2, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                  Change Round {editRound} to a different course
+                </button>
+              )}
               <div style={{ marginBottom: 16 }}><div style={{ fontSize: 10, color: K.t3, fontWeight: 600, textTransform: "uppercase", marginBottom: 4 }}>Course Name</div><input value={d.name || ""} onChange={e => setEditingCourse(prev => ({ ...prev, draft: { ...prev.draft, name: e.target.value } }))} style={{ width: "100%", padding: "9px 10px", background: K.inp, border: `1px solid ${ac}40`, borderRadius: 8, color: K.t1, fontSize: 14, boxSizing: "border-box" }} /></div>
               {[...(d.tee_boxes||[])].sort((a,b) => (parseFloat(b.slope)||0)-(parseFloat(a.slope)||0)).map((tb, tbi) => { const sortedTbs = [...(d.tee_boxes||[])].sort((a,b) => (parseFloat(b.slope)||0)-(parseFloat(a.slope)||0)); const origIdx = d.tee_boxes.indexOf(sortedTbs[tbi]); return (<div key={tbi} style={{ background: K.card, border: `1px solid ${K.bdr}`, borderRadius: 10, padding: "10px 12px", marginBottom: 8 }}><div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}><div style={{ display: "flex", alignItems: "center", gap: 8 }}><TeeColorSwatch color={tb.color} name={tb.name} size={12} /><span style={{ fontWeight: 700, fontSize: 14, color: K.t1 }}>{tb.name}</span></div><button onClick={() => setEditingCourse(prev => ({ ...prev, draft: { ...prev.draft, tee_boxes: prev.draft.tee_boxes.filter((_,i) => i !== origIdx) } }))} style={{ background: "transparent", border: "none", color: K.t3, cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 4px" }}>✕</button></div><div style={{ display: "flex", gap: 8 }}>{["rating","slope","par"].map(f => (<div key={f} style={{ flex: 1 }}><div style={{ fontSize: 9, color: K.t3, textTransform: "uppercase", marginBottom: 3 }}>{f}</div><input inputMode="decimal" value={tb[f]||""} onChange={e => setEditingCourse(prev => { const tbs = [...prev.draft.tee_boxes]; tbs[origIdx] = {...tbs[origIdx],[f]:e.target.value}; return {...prev,draft:{...prev.draft,tee_boxes:tbs}}; })} style={{ width: "100%", padding: "7px 6px", background: K.inp, border: `1px solid ${ac}30`, borderRadius: 6, color: K.t1, fontSize: 13, textAlign: "center", boxSizing: "border-box" }} /></div>))}</div></div>); })}
               {[["Front", 0, 9], ["Back", 9, 9]].map(([label, start, count]) => { const pars = (d.hole_pars||[]).slice(start, start+count); const hcps = (d.hole_handicaps||[]).slice(start, start+count); return (<div key={label} style={{ marginBottom: 8 }}><div style={{ fontSize: 10, color: K.t3, fontWeight: 600, textTransform: "uppercase", marginBottom: 4 }}>{label} 9</div><div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 32px`, gap: 2, fontSize: 9 }}><div style={{ color: K.t3, fontWeight: 600, padding: "2px 0" }}>Hole</div>{Array.from({length:count},(_,i)=><div key={i} style={{ textAlign:"center", color:K.t2, fontWeight:700, padding:"2px 0" }}>{start+i+1}</div>)}<div /></div><div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 32px`, gap: 2, background: K.inp, borderRadius: 6, padding: "2px 0", marginBottom: 2 }}><div style={{ color: K.t3, fontWeight: 600, padding: "3px 2px", fontSize: 9 }}>Par</div>{Array.from({length:count},(_,i) => (<input key={i} inputMode="numeric" value={pars[i]??""} onChange={e => setEditingCourse(prev => { const hp=[...(prev.draft.hole_pars||[])]; hp[start+i]=parseInt(e.target.value)||0; return {...prev,draft:{...prev.draft,hole_pars:hp}}; })} style={inpStyle} />))}<div style={{ textAlign:"center", color:ac, fontWeight:800, padding:"3px 0", fontSize:10 }}>{pars.reduce((a,b)=>a+(+b||0),0)}</div></div><div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 32px`, gap: 2 }}><div style={{ color: K.t3, fontWeight: 600, padding: "2px 2px", fontSize: 9 }}>HCP</div>{Array.from({length:count},(_,i) => (<input key={i} inputMode="numeric" value={hcps[i]??""} onChange={e => setEditingCourse(prev => { const hh=[...(prev.draft.hole_handicaps||[])]; hh[start+i]=parseInt(e.target.value)||0; return {...prev,draft:{...prev.draft,hole_handicaps:hh}}; })} style={{...inpStyle, color:K.t3}} />))}<div /></div></div>); })}
@@ -4404,730 +4630,685 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
       {confirmCourse && (confirmCourse.round || confirmCourse.delete) && (
         <div style={{ position: "fixed", top: 0, bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.6)", zIndex: 500, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }} onClick={() => setConfirmCourse(null)}>
           <div onClick={e => e.stopPropagation()} style={{ background: K.card, borderRadius: 14, padding: "20px 20px 16px", width: "100%", maxWidth: 360, boxShadow: "0 16px 48px rgba(0,0,0,0.6)" }}>
-            {confirmCourse.round ? (<><div style={{ fontSize: 15, fontWeight: 700, color: K.warn, marginBottom: 8 }}>Reassign Round {confirmCourse.round}?</div><div style={{ fontSize: 13, color: K.t2, marginBottom: 20, lineHeight: 1.4 }}>Move R{confirmCourse.round} to <strong style={{ color: K.t1 }}>{confirmCourse.course.name}</strong>?</div><div style={{ display: "flex", gap: 10 }}><button onClick={() => setConfirmCourse(null)} style={{ flex: 1, padding: "11px 0", borderRadius: 10, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t2, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>Cancel</button><button onClick={() => { setCourseForRound(confirmCourse.round, confirmCourse.course); setConfirmCourse(null); }} style={{ flex: 1, padding: "11px 0", borderRadius: 10, background: ac, border: "none", color: K.bg, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>Move</button></div></>) : (<><div style={{ fontSize: 15, fontWeight: 700, color: K.danger, marginBottom: 8 }}>Remove Course?</div><div style={{ fontSize: 13, color: K.t2, marginBottom: 20, lineHeight: 1.4 }}>Remove <strong style={{ color: K.t1 }}>{confirmCourse.course.name}</strong>?{confirmCourse.assignedRounds.length > 0 && <span style={{ color: K.warn }}> (unassigns R{confirmCourse.assignedRounds.join(", R")})</span>}</div><div style={{ display: "flex", gap: 10 }}><button onClick={() => setConfirmCourse(null)} style={{ flex: 1, padding: "11px 0", borderRadius: 10, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t2, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>Cancel</button><button onClick={() => { confirmCourse.assignedRounds.forEach(r => setCourseForRound(r, { id: null, name: "" })); addCourse({ _delete: true, id: confirmCourse.course.id }); setConfirmCourse(null); }} style={{ flex: 1, padding: "11px 0", borderRadius: 10, background: K.danger, border: "none", color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>Remove</button></div></>)}
+            {confirmCourse.round ? (<><div style={{ fontSize: 15, fontWeight: 700, color: K.warn, marginBottom: 8 }}>Reassign Round {confirmCourse.round}?</div><div style={{ fontSize: 13, color: K.t2, marginBottom: 20, lineHeight: 1.4 }}>Move R{confirmCourse.round} to <strong style={{ color: K.t1 }}>{confirmCourse.course.name}</strong>?</div><div style={{ display: "flex", gap: 10 }}><button onClick={() => setConfirmCourse(null)} style={{ flex: 1, padding: "11px 0", borderRadius: 10, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t2, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>Cancel</button><button onClick={() => { setCourseForRound(confirmCourse.round, confirmCourse.course); setConfirmCourse(null); setPickingCourse(false); doCourseSearch(""); }} style={{ flex: 1, padding: "11px 0", borderRadius: 10, background: ac, border: "none", color: K.bg, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>Move</button></div></>) : (<><div style={{ fontSize: 15, fontWeight: 700, color: K.danger, marginBottom: 8 }}>Remove Course?</div><div style={{ fontSize: 13, color: K.t2, marginBottom: 20, lineHeight: 1.4 }}>Remove <strong style={{ color: K.t1 }}>{confirmCourse.course.name}</strong>?{confirmCourse.assignedRounds.length > 0 && <span style={{ color: K.warn }}> (unassigns R{confirmCourse.assignedRounds.join(", R")})</span>}</div><div style={{ display: "flex", gap: 10 }}><button onClick={() => setConfirmCourse(null)} style={{ flex: 1, padding: "11px 0", borderRadius: 10, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t2, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>Cancel</button><button onClick={() => { confirmCourse.assignedRounds.forEach(r => setCourseForRound(r, { id: null, name: "" })); addCourse({ _delete: true, id: confirmCourse.course.id }); setConfirmCourse(null); }} style={{ flex: 1, padding: "11px 0", borderRadius: 10, background: K.danger, border: "none", color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>Remove</button></div></>)}
           </div>
         </div>
       )}
-      {/* Rounds tab — course assignment for the selected round */}
+      {/* ── Round N: ONE card for the course and its tees ────────────────
+          There used to be three stacked boxes here — an assigned-course
+          summary, a course library/search box, and a tee card — each with its
+          own header and padding, which is most of a phone screen before you
+          reach a single player. They are one card now, because they are one
+          decision: the round plays one course, off one set of tees.
+
+          The card has two states. With a course assigned it shows that course
+          and goes straight into tee assignment; the search is folded away
+          behind "Change", since a round that already has a course does not
+          need a search box parked under it. With no course (or after tapping
+          Change) the same card IS the search.
+
+          Cross-round assignment chips are gone with the old library grid: one
+          course per round, picked in the round it belongs to. Using the same
+          course twice is switching the round selector above and picking it
+          again. */}
       {tab === "rounds" && (() => {
         const st = getRoundStatus(editRound);
         const assigned = st.course;
         const locked = st.finalized;
+        const picking = !locked && (!assigned || pickingCourse);
+        const closePicker = () => { setPickingCourse(false); doCourseSearch(""); setManualCourse(null); };
+        const unassignedRounds = Array.from({ length: numRounds }, (_, ri) => ri + 1).filter(r => !tRounds.find(t => t.round_number === r && t.course_id));
         return (
-          <div>
-            {locked && (
-              <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", background: K.bdr + "15", borderRadius: 8, marginBottom: 10, border: `1px solid ${K.bdr}30` }}>
-                <span style={{ fontSize: 12 }}>🔒</span>
-                <span style={{ fontSize: 11, color: K.t3, fontWeight: 600 }}>Round {editRound} is finalized — view only</span>
-              </div>
-            )}
-            {/* Assigned course summary */}
-            {assigned ? (
-              <div style={{ background: K.card, borderRadius: 12, border: `1px solid ${K.acc}40`, padding: "12px 14px", marginBottom: 12 }}>
+          <div style={{ background: K.card, borderRadius: 12, border: `1px solid ${assigned ? ac + "40" : K.bdr}`, overflow: "hidden" }}>
+
+            {/* Header: what round, what course, and the way out of both states */}
+            <div style={{ padding: "10px 14px", borderBottom: `1px solid ${K.bdr}` }}>
+              {assigned && !picking && (
                 <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 15, fontWeight: 700, color: K.t1 }}>{assigned.name}</div>
-                    <div style={{ fontSize: 11, color: K.t3 }}>{assigned.city}{assigned.city && assigned.state ? ", " : ""}{assigned.state}</div>
+                    <div style={{ fontSize: 10, color: K.t3 }}>
+                      {assigned.city}{assigned.city && assigned.state ? ", " : ""}{assigned.state}
+                      {assigned.par ? ` · Par ${assigned.par}` : ""}
+                      {/* Which rounds still have no course is the one thing the
+                          round pills above do NOT show (their dots are tees and
+                          pairings), so it rides along on this line rather than
+                          claiming a row of its own. */}
+                      {locked && <span style={{ color: K.t3, fontWeight: 700 }}> · finalized</span>}
+                      {!locked && unassignedRounds.length > 0 && <span style={{ color: K.warn, fontWeight: 700 }}> · R{unassignedRounds.join(", R")} unset</span>}
+                    </div>
                   </div>
                   {!locked && (
-                    <button onClick={() => setCourseForRound(editRound, { id: null, name: "" })} style={{ background: "transparent", border: `1px solid ${K.bdr}`, borderRadius: 8, color: K.t3, fontSize: 10, fontWeight: 600, cursor: "pointer", padding: "5px 10px", flexShrink: 0 }}>Unassign</button>
+                    /* Pars, handicaps and tee boxes for the course this round is
+                       playing — and, from inside the editor, swapping the course
+                       for a different one. */
+                    <button onClick={() => setEditingCourse({ courseId: assigned.id, draft: { ...assigned, hole_pars: [...(assigned.hole_pars || Array(18).fill(4))], hole_handicaps: [...(assigned.hole_handicaps || Array(18).fill(0))], tee_boxes: (assigned.tee_boxes || []).map(t => ({ ...t })) } })}
+                      style={{ flexShrink: 0, padding: "5px 12px", borderRadius: 8, background: "transparent", border: `1px solid ${ac}60`, color: ac, fontSize: 10, fontWeight: 700, cursor: "pointer" }}>Edit</button>
                   )}
                 </div>
-                {(assigned.tee_boxes || []).length > 0 && (
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10, paddingTop: 10, borderTop: `1px solid ${K.bdr}30` }}>
-                    {[...(assigned.tee_boxes || [])].sort((a,b) => (parseFloat(b.slope)||0)-(parseFloat(a.slope)||0)).map((tb, ti) => (
-                      <div key={ti} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 9 }}>
-                        <TeeColorSwatch color={tb.color} name={tb.name} size={10} />
-                        <span style={{ color: K.t2, fontWeight: 600 }}>{tb.name}</span>
-                        <span style={{ color: K.t3 }}>{tb.slope}/{tb.rating}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div style={{ background: K.card, borderRadius: 12, border: `1px dashed ${K.warn}50`, padding: "18px 14px", marginBottom: 12, textAlign: "center" }}>
-                <div style={{ fontSize: 22, marginBottom: 4 }}>⛳️</div>
-                <div style={{ fontSize: 13, fontWeight: 700, color: K.t1, marginBottom: 2 }}>No course assigned to Round {editRound}</div>
-                <div style={{ fontSize: 11, color: K.t3 }}>{courses.length > 0 ? "Pick one below, or search for a new one." : "Search below to add one."}</div>
-              </div>
-            )}
+              )}
 
-            {/* ── Course: your library + live search, in one box ────────
-                This was a separate top-level "Courses" tab. Picking a course is
-                a ROUND decision, so it now lives in the round it acts on: the
-                old flow made you leave the round you were setting up, work a
-                grid of R1..R4 chips against a flat course list, and navigate
-                back — and the "+ Add / manage" button that got you there
-                pointed at a tab that no longer exists.
+              {/* A finalized round with no course is a dead end by design — there
+                  is nothing to set and nothing to play. Say that rather than
+                  leaving an empty card. */}
+              {locked && !assigned && (
+                <div style={{ fontSize: 11, color: K.t3 }}>Round {editRound} is finalized, and no course was ever set for it.</div>
+              )}
 
-                One search box covers both halves. It filters the courses you
-                already have AND queries the 35,000-course API, because the
-                first question ("do I already have this one?") and the second
-                ("can I find it?") are the same typing. It is always open
-                rather than behind an "+ Add" toggle: an empty library has
-                nothing to browse, and a full one still needs the next course
-                added without hunting for the control.
-
-                Nothing the Courses tab could do was dropped — search, add
-                manually, edit, remove, and assign to ANY round (not just this
-                one) all live in the row and its expanded detail. */}
-            {!locked && (
-              <div style={{ background: K.card, borderRadius: 12, border: `1px solid ${K.bdr}`, overflow: "hidden" }}>
-                <div style={{ padding: "10px 14px", borderBottom: `1px solid ${K.bdr}` }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
-                    <span style={{ fontSize: 10, fontWeight: 600, color: K.t3, textTransform: "uppercase", letterSpacing: "0.04em" }}>Course for Round {editRound}</span>
-                    {(() => {
-                      const unassigned = Array.from({ length: numRounds }, (_, ri) => ri + 1).filter(r => !tRounds.find(t => t.round_number === r && t.course_id));
-                      return unassigned.length === 0
-                        ? <span style={{ fontSize: 10, fontWeight: 700, color: ac }}>✓ All rounds assigned</span>
-                        : <span style={{ fontSize: 10, fontWeight: 600, color: K.warn }}>R{unassigned.join(", R")} unassigned</span>;
-                    })()}
-                  </div>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <select value={courseStateFilter} onChange={e => { setCourseStateFilter(e.target.value); if (courseSearch.trim().length >= 2) doCourseSearch(courseSearch, e.target.value); }}
-                      style={{ width: 66, padding: "9px 6px", background: K.inp, border: `1px solid ${ac}40`, borderRadius: 8, color: K.t1, fontSize: 12, flexShrink: 0 }}>
-                      <option value="">All</option>
-                      {["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"].map(s => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                    <input value={courseSearch} onChange={e => doCourseSearch(e.target.value)} placeholder="Search courses by name or city…"
-                      style={{ flex: 1, minWidth: 0, padding: "9px 12px", background: K.inp, border: `1px solid ${ac}40`, borderRadius: 8, color: K.t1, fontSize: 13, boxSizing: "border-box" }} />
-                    {courseSearch !== "" && (
-                      <button onClick={() => { doCourseSearch(""); setManualCourse(null); }} style={{ flexShrink: 0, padding: "0 10px", borderRadius: 8, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t3, fontSize: 13, cursor: "pointer" }}>✕</button>
-                    )}
-                  </div>
+              {picking && (
+                <div style={{ display: "flex", gap: 6 }}>
+                  <select value={courseStateFilter} onChange={e => { setCourseStateFilter(e.target.value); if (courseSearch.trim().length >= 2) doCourseSearch(courseSearch, e.target.value); }}
+                    style={{ width: 62, padding: "8px 5px", background: K.inp, border: `1px solid ${ac}40`, borderRadius: 8, color: K.t1, fontSize: 12, flexShrink: 0 }}>
+                    <option value="">All</option>
+                    {["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"].map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                  <input value={courseSearch} onChange={e => doCourseSearch(e.target.value)} placeholder={`Search courses for Round ${editRound}…`}
+                    style={{ flex: 1, minWidth: 0, padding: "8px 11px", background: K.inp, border: `1px solid ${ac}40`, borderRadius: 8, color: K.t1, fontSize: 13, boxSizing: "border-box" }} />
+                  {/* Cancel only exists when there is something to go back to. */}
+                  {assigned
+                    ? <button onClick={closePicker} style={{ flexShrink: 0, padding: "0 10px", borderRadius: 8, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t3, fontSize: 11, fontWeight: 700, cursor: "pointer" }}>Cancel</button>
+                    : courseSearch !== "" && <button onClick={() => { doCourseSearch(""); setManualCourse(null); }} style={{ flexShrink: 0, padding: "0 10px", borderRadius: 8, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t3, fontSize: 13, cursor: "pointer" }}>✕</button>}
                 </div>
+              )}
 
-                {/* Your courses — the same query filters them, so an already-saved
-                    course surfaces above the API results instead of being re-added. */}
-                {(() => {
-                  const q = courseSearch.trim().toLowerCase();
-                  const searching = q.length >= 2;
-                  const lib = searching
-                    ? courses.filter(c => (c.name || "").toLowerCase().includes(q) || (c.city || "").toLowerCase().includes(q))
-                    : courses;
-                  if (courses.length === 0) {
-                    return <div style={{ padding: 16, textAlign: "center", color: K.t3, fontSize: 11, lineHeight: 1.5 }}>No courses yet — search above to pull one from GolfCourseAPI, or add it by hand.</div>;
-                  }
-                  if (lib.length === 0) {
-                    return <div style={{ padding: "10px 14px", color: K.t3, fontSize: 10 }}>Nothing in your courses matches “{courseSearch.trim()}”.</div>;
-                  }
-                  return (
+            </div>
+
+            {/* ── PICKING: your courses, then the API ── */}
+            {picking && (() => {
+              const q = courseSearch.trim().toLowerCase();
+              const searching = q.length >= 2;
+              const lib = searching
+                ? courses.filter(c => (c.name || "").toLowerCase().includes(q) || (c.city || "").toLowerCase().includes(q))
+                : courses;
+              const use = (c) => { setCourseForRound(editRound, c); closePicker(); };
+              return (
+                <>
+                  {courses.length === 0 && (
+                    <div style={{ padding: 14, textAlign: "center", color: K.t3, fontSize: 11, lineHeight: 1.5 }}>No courses yet — search above to pull one from GolfCourseAPI, or add it by hand.</div>
+                  )}
+                  {courses.length > 0 && lib.length === 0 && (
+                    <div style={{ padding: "9px 14px", color: K.t3, fontSize: 10 }}>Nothing you have saved matches “{courseSearch.trim()}”.</div>
+                  )}
+                  {lib.length > 0 && (
                     <>
-                      {searching && <div style={{ padding: "8px 14px 2px", fontSize: 9, fontWeight: 700, color: K.t3, textTransform: "uppercase", letterSpacing: "0.05em" }}>Your courses</div>}
+                      <div style={{ padding: "7px 14px 3px", fontSize: 9, fontWeight: 700, color: K.t3, textTransform: "uppercase", letterSpacing: "0.05em" }}>Your courses</div>
                       {lib.map((c, i) => {
                         const isAssigned = assigned && assigned.id === c.id;
                         const otherRounds = Array.from({ length: numRounds }, (_, ri) => ri + 1).filter(r => r !== editRound && tRounds.find(t => t.round_number === r && t.course_id === c.id));
-                        const open = expandedCourse === c.id;
                         return (
-                          <div key={c.id} style={{ borderBottom: i < lib.length - 1 ? `1px solid ${K.bdr}10` : "none", background: isAssigned ? ac + "10" : "transparent" }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px" }}>
-                              <button onClick={() => setExpandedCourse(open ? null : c.id)} style={{ flex: 1, minWidth: 0, background: "transparent", border: "none", padding: 0, textAlign: "left", cursor: "pointer" }}>
-                                <div style={{ fontSize: 13, fontWeight: 600, color: K.t1 }}>{c.name}</div>
-                                <div style={{ fontSize: 10, color: K.t3 }}>{c.city}{c.city && c.state ? ", " : ""}{c.state}{otherRounds.length > 0 ? ` · also R${otherRounds.join(", R")}` : ""}</div>
-                              </button>
-                              {isAssigned ? (
-                                <span style={{ fontSize: 10, fontWeight: 700, color: ac, flexShrink: 0 }}>✓ Round {editRound}</span>
-                              ) : (
-                                /* Replacing a course a director already picked asks first;
-                                   filling an empty round just does it. */
-                                <button onClick={() => { if (assigned) setConfirmCourse({ course: c, round: editRound }); else setCourseForRound(editRound, c); }}
-                                  style={{ flexShrink: 0, fontSize: 11, fontWeight: 700, color: K.t2, background: "transparent", border: `1px solid ${K.bdr}`, borderRadius: 6, padding: "4px 10px", cursor: "pointer" }}>Assign</button>
-                              )}
-                              <button onClick={() => setExpandedCourse(open ? null : c.id)} style={{ flexShrink: 0, background: "transparent", border: "none", color: K.t3, fontSize: 11, cursor: "pointer", padding: "2px 2px", lineHeight: 1 }}>{open ? "▲" : "▼"}</button>
-                            </div>
-                            {open && (
-                              <div style={{ padding: "0 14px 12px", background: ac + "04" }}>
-                                {(c.tee_boxes || []).length > 0 && (
-                                  <div style={{ marginBottom: 10 }}>
-                                    {[...(c.tee_boxes || [])].sort((a, b) => (parseFloat(b.slope) || 0) - (parseFloat(a.slope) || 0)).map((tb, tbi) => (
-                                      <div key={tbi} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 3, fontSize: 9 }}>
-                                        <TeeColorSwatch color={tb.color} name={tb.name} size={10} />
-                                        <span style={{ color: K.t2, fontWeight: 600, width: 44 }}>{tb.name}</span>
-                                        {["rating", "slope", "par"].map(f => (
-                                          <div key={f} style={{ display: "flex", alignItems: "center", gap: 2 }}>
-                                            <span style={{ color: K.t3, fontSize: 8 }}>{f[0].toUpperCase() + f.slice(1)}:</span>
-                                            <span style={{ color: K.t2 }}>{tb[f]}</span>
-                                          </div>
-                                        ))}
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
-                                {/* Cross-round assignment, carried over from the old Courses
-                                    tab: one course often covers two rounds, and this is the
-                                    only way to say so without switching rounds first. A
-                                    finalized round is not offered — its course is history. */}
-                                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
-                                  <span style={{ fontSize: 9, color: K.t3, fontWeight: 600, textTransform: "uppercase" }}>Rounds</span>
-                                  {Array.from({ length: numRounds }, (_, ri) => ri + 1).map(r => {
-                                    const chipOn = !!tRounds.find(t => t.round_number === r && t.course_id === c.id);
-                                    const rLocked = !!finalizedRounds[r];
-                                    const tr = tRounds.find(t => t.round_number === r);
-                                    const trCourseId = tr?.course_id;
-                                    const otherCourse = trCourseId && trCourseId !== "null" && trCourseId !== "undefined" && String(trCourseId).trim() !== "" && trCourseId !== c.id && courses.find(x => x.id === trCourseId);
-                                    return (
-                                      <button key={r} disabled={rLocked} onClick={() => {
-                                        if (chipOn) setCourseForRound(r, { id: null, name: "" });
-                                        else if (otherCourse) setConfirmCourse({ course: c, round: r });
-                                        else setCourseForRound(r, c);
-                                      }} style={{
-                                        padding: "4px 7px", borderRadius: 4, fontSize: 9, fontWeight: 700, minWidth: 26, textAlign: "center",
-                                        cursor: rLocked ? "default" : "pointer", opacity: rLocked ? 0.35 : 1,
-                                        background: chipOn ? ac : "transparent",
-                                        color: chipOn ? K.bg : K.t3,
-                                        border: `1px solid ${chipOn ? ac : K.bdr}`,
-                                      }}>{rLocked ? "🔒" : ""}R{r}</button>
-                                    );
-                                  })}
-                                </div>
-                                <div style={{ display: "flex", gap: 8 }}>
-                                  <button onClick={() => setEditingCourse({ courseId: c.id, draft: { ...c, hole_pars: [...(c.hole_pars || Array(18).fill(4))], hole_handicaps: [...(c.hole_handicaps || Array(18).fill(0))], tee_boxes: (c.tee_boxes || []).map(t => ({ ...t })) } })}
-                                    style={{ padding: "6px 14px", borderRadius: 8, background: "transparent", border: `1px solid ${ac}60`, color: ac, fontSize: 11, fontWeight: 700, cursor: "pointer" }}>Edit</button>
-                                  <button onClick={() => setConfirmCourse({ course: c, delete: true, assignedRounds: Array.from({ length: numRounds }, (_, ri) => ri + 1).filter(r => tRounds.find(t => t.round_number === r && t.course_id === c.id)) })}
-                                    style={{ padding: "6px 14px", borderRadius: 8, background: "transparent", border: `1px solid ${K.danger}50`, color: K.danger, fontSize: 11, fontWeight: 700, cursor: "pointer" }}>Remove</button>
-                                </div>
+                          <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderBottom: i < lib.length - 1 ? `1px solid ${K.bdr}10` : "none", background: isAssigned ? ac + "10" : "transparent" }}>
+                            {/* The whole row picks the course — the button beside
+                                it is a label for what tapping does, not the only
+                                place you may tap. */}
+                            <button onClick={() => { if (!isAssigned) use(c); }} style={{ flex: 1, minWidth: 0, background: "transparent", border: "none", padding: 0, textAlign: "left", cursor: isAssigned ? "default" : "pointer" }}>
+                              <div style={{ fontSize: 12, fontWeight: 600, color: K.t1 }}>{c.name}</div>
+                              <div style={{ fontSize: 9, color: K.t3 }}>
+                                {c.city}{c.city && c.state ? ", " : ""}{c.state}
+                                {(c.tee_boxes || []).length ? ` · ${c.tee_boxes.length} tee${c.tee_boxes.length === 1 ? "" : "s"}` : ""}
+                                {otherRounds.length > 0 ? ` · R${otherRounds.join(", R")}` : ""}
                               </div>
-                            )}
+                            </button>
+                            {isAssigned
+                              ? <span style={{ fontSize: 9, fontWeight: 700, color: ac, flexShrink: 0 }}>✓ this round</span>
+                              : <button onClick={() => use(c)} style={{ flexShrink: 0, fontSize: 10, fontWeight: 700, color: K.t2, background: "transparent", border: `1px solid ${K.bdr}`, borderRadius: 6, padding: "3px 9px", cursor: "pointer" }}>Use</button>}
+                            <button title="Edit course" onClick={() => setEditingCourse({ courseId: c.id, draft: { ...c, hole_pars: [...(c.hole_pars || Array(18).fill(4))], hole_handicaps: [...(c.hole_handicaps || Array(18).fill(0))], tee_boxes: (c.tee_boxes || []).map(t => ({ ...t })) } })}
+                              style={{ flexShrink: 0, background: "transparent", border: "none", color: ac, fontSize: 10, fontWeight: 700, cursor: "pointer", padding: "2px 2px" }}>Edit</button>
+                            <button title="Remove from your courses" onClick={() => setConfirmCourse({ course: c, delete: true, assignedRounds: Array.from({ length: numRounds }, (_, ri) => ri + 1).filter(r => tRounds.find(t => t.round_number === r && t.course_id === c.id)) })}
+                              style={{ flexShrink: 0, background: "transparent", border: "none", color: K.t3, fontSize: 12, cursor: "pointer", padding: "2px 2px", lineHeight: 1 }}>✕</button>
                           </div>
                         );
                       })}
                     </>
-                  );
-                })()}
+                  )}
 
-                {/* API results — only once the query is worth sending. */}
-                {courseSearch.trim().length >= 2 && (
-                  <div style={{ padding: 14, borderTop: `1px solid ${K.bdr}` }}>
-                    <div style={{ fontSize: 9, fontWeight: 700, color: K.t3, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>Search results</div>
-                      {searchLoading && <div style={{ textAlign: "center", padding: 12, color: K.t3, fontSize: 11 }}>Searching GolfCourseAPI...</div>}
-                      {!searchLoading && courseSearch.trim().length >= 2 && searchResults.length === 0 && !manualCourse && (
-                        <div style={{ textAlign: "center", padding: "10px 0" }}>
-                          <div style={{ color: K.t3, fontSize: 11, marginBottom: 8 }}>No courses found</div>
-                          <button onClick={() => setManualCourse({
-                            id: `manual_${Date.now()}`,
-                            name: courseSearch.trim(),
-                            city: "", state: courseStateFilter || "",
-                            par: 72, slope: 113, rating: 72.0,
-                            hole_pars: Array(18).fill(4),
-                            hole_handicaps: Array(18).fill(0).map((_,i)=>i+1),
-                            tee_boxes: [
-                              { name: "Black", color: "#222222", rating: 74.0, slope: 130, par: 72, yardage: 6800 },
-                              { name: "Blue",  color: "#1a56db", rating: 72.0, slope: 120, par: 72, yardage: 6400 },
-                              { name: "White", color: "#e5e7eb", rating: 70.0, slope: 113, par: 72, yardage: 6000 },
-                              { name: "Red",   color: "#e02424", rating: 68.0, slope: 108, par: 72, yardage: 5400 },
-                            ],
-                          })} style={{ padding: "7px 16px", borderRadius: 8, background: "transparent", border: `1px solid ${ac}`, color: ac, fontSize: 11, fontWeight: 700, cursor: "pointer" }}>
-                            + Add Course Manually
-                          </button>
+                  {/* API results — only once the query is worth sending. */}
+                  {searching && (
+                    <div style={{ padding: 14, borderTop: `1px solid ${K.bdr}` }}>
+                      <div style={{ fontSize: 9, fontWeight: 700, color: K.t3, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>Search results</div>
+                  {searchLoading && <div style={{ textAlign: "center", padding: 12, color: K.t3, fontSize: 11 }}>Searching GolfCourseAPI...</div>}
+                  {!searchLoading && courseSearch.trim().length >= 2 && searchResults.length === 0 && !manualCourse && (
+                    <div style={{ textAlign: "center", padding: "10px 0" }}>
+                      <div style={{ color: K.t3, fontSize: 11, marginBottom: 8 }}>No courses found</div>
+                      <button onClick={() => setManualCourse({
+                        id: `manual_${Date.now()}`,
+                        name: courseSearch.trim(),
+                        city: "", state: courseStateFilter || "",
+                        par: 72, slope: 113, rating: 72.0,
+                        hole_pars: Array(18).fill(4),
+                        hole_handicaps: Array(18).fill(0).map((_,i)=>i+1),
+                        tee_boxes: [
+                          { name: "Black", color: "#222222", rating: 74.0, slope: 130, par: 72, yardage: 6800 },
+                          { name: "Blue",  color: "#1a56db", rating: 72.0, slope: 120, par: 72, yardage: 6400 },
+                          { name: "White", color: "#e5e7eb", rating: 70.0, slope: 113, par: 72, yardage: 6000 },
+                          { name: "Red",   color: "#e02424", rating: 68.0, slope: 108, par: 72, yardage: 5400 },
+                        ],
+                      })} style={{ padding: "7px 16px", borderRadius: 8, background: "transparent", border: `1px solid ${ac}`, color: ac, fontSize: 11, fontWeight: 700, cursor: "pointer" }}>
+                        + Add Course Manually
+                      </button>
+                    </div>
+                  )}
+                  {!searchLoading && manualCourse && (() => {
+                    const mc = manualCourse;
+                    const setMc = fn => setManualCourse(prev => fn(prev));
+                    const inpBase = { background: K.inp, border: `1px solid ${ac}40`, borderRadius: 6, color: K.t1, padding: "6px 8px", fontSize: 12, boxSizing: "border-box" };
+                    const tinyInp = { background: K.inp, border: `1px solid ${ac}30`, borderRadius: 4, color: K.t1, fontSize: 9, textAlign: "center", width: "100%", padding: "2px 1px", boxSizing: "border-box" };
+                    const label = (txt) => <div style={{ fontSize: 9, color: K.t3, fontWeight: 600, marginBottom: 2, textTransform: "uppercase" }}>{txt}</div>;
+                    const canSave = mc.name.trim().length > 1;
+                    return (
+                      <div style={{ background: K.card, border: `1px solid ${ac}30`, borderRadius: 10, padding: 14, marginBottom: 8 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                          <span style={{ fontSize: 12, fontWeight: 800, color: K.t1 }}>Manual Course Entry</span>
+                          <button onClick={() => setManualCourse(null)} style={{ background: "transparent", border: "none", color: K.t3, fontSize: 16, cursor: "pointer", lineHeight: 1 }}>✕</button>
                         </div>
-                      )}
-                      {!searchLoading && manualCourse && (() => {
-                        const mc = manualCourse;
-                        const setMc = fn => setManualCourse(prev => fn(prev));
-                        const inpBase = { background: K.inp, border: `1px solid ${ac}40`, borderRadius: 6, color: K.t1, padding: "6px 8px", fontSize: 12, boxSizing: "border-box" };
-                        const tinyInp = { background: K.inp, border: `1px solid ${ac}30`, borderRadius: 4, color: K.t1, fontSize: 9, textAlign: "center", width: "100%", padding: "2px 1px", boxSizing: "border-box" };
-                        const label = (txt) => <div style={{ fontSize: 9, color: K.t3, fontWeight: 600, marginBottom: 2, textTransform: "uppercase" }}>{txt}</div>;
-                        const canSave = mc.name.trim().length > 1;
-                        return (
-                          <div style={{ background: K.card, border: `1px solid ${ac}30`, borderRadius: 10, padding: 14, marginBottom: 8 }}>
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                              <span style={{ fontSize: 12, fontWeight: 800, color: K.t1 }}>Manual Course Entry</span>
-                              <button onClick={() => setManualCourse(null)} style={{ background: "transparent", border: "none", color: K.t3, fontSize: 16, cursor: "pointer", lineHeight: 1 }}>✕</button>
-                            </div>
 
-                            {/* Name / City / State */}
-                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 60px", gap: 6, marginBottom: 8 }}>
-                              <div>
-                                {label("Course Name")}
-                                <input value={mc.name} onChange={e => setMc(p=>({...p,name:e.target.value}))} style={{...inpBase, width:"100%"}} placeholder="e.g. Treetops Resort" />
-                              </div>
-                              <div>
-                                {label("City")}
-                                <input value={mc.city} onChange={e => setMc(p=>({...p,city:e.target.value}))} style={{...inpBase, width:"100%"}} placeholder="e.g. Gaylord" />
-                              </div>
-                              <div>
-                                {label("State")}
-                                <select value={mc.state} onChange={e => setMc(p=>({...p,state:e.target.value}))} style={{...inpBase, width:"100%"}}>
-                                  <option value="">—</option>
-                                  {["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"].map(s=><option key={s} value={s}>{s}</option>)}
+                        {/* Name / City / State */}
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 60px", gap: 6, marginBottom: 8 }}>
+                          <div>
+                            {label("Course Name")}
+                            <input value={mc.name} onChange={e => setMc(p=>({...p,name:e.target.value}))} style={{...inpBase, width:"100%"}} placeholder="e.g. Treetops Resort" />
+                          </div>
+                          <div>
+                            {label("City")}
+                            <input value={mc.city} onChange={e => setMc(p=>({...p,city:e.target.value}))} style={{...inpBase, width:"100%"}} placeholder="e.g. Gaylord" />
+                          </div>
+                          <div>
+                            {label("State")}
+                            <select value={mc.state} onChange={e => setMc(p=>({...p,state:e.target.value}))} style={{...inpBase, width:"100%"}}>
+                              <option value="">—</option>
+                              {["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"].map(s=><option key={s} value={s}>{s}</option>)}
+                            </select>
+                          </div>
+                        </div>
+
+                        {/* Tee Boxes */}
+                        <div style={{ marginBottom: 8 }}>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                            {label("Tee Boxes")}
+                            <button onClick={() => setMc(p=>({...p, tee_boxes:[...p.tee_boxes, {name:"", color:"#888888", rating:72.0, slope:113, par:72, yardage:0}]}))}
+                              style={{ fontSize: 9, padding: "1px 6px", borderRadius: 4, background: "transparent", border: `1px solid ${ac}60`, color: ac, cursor: "pointer", fontWeight: 700 }}>+ Tee</button>
+                          </div>
+                          <div style={{ display: "grid", gridTemplateColumns: "12px 70px 50px 44px 32px 32px 40px 20px", gap: 3, fontSize: 8, color: K.t3, fontWeight: 600, marginBottom: 2, paddingLeft: 2 }}>
+                            <div/>
+                            <div>Name</div><div>Color</div><div>Rating</div><div>Slope</div><div>Par</div><div>Yards</div><div/>
+                          </div>
+                          {mc.tee_boxes.map((tb, tbi) => (
+                            <div key={tbi} style={{ display: "grid", gridTemplateColumns: "12px 70px 50px 44px 32px 32px 40px 20px", gap: 3, marginBottom: 3, alignItems: "center" }}>
+                              <TeeColorSwatch color={tb.color} name={tb.name} size={10} />
+                              <input value={tb.name} onChange={e => setMc(p=>{const t=[...p.tee_boxes]; t[tbi]={...t[tbi],name:e.target.value}; return {...p,tee_boxes:t};})} style={{...tinyInp, textAlign:"left", padding:"2px 4px"}} placeholder="Name" />
+                              <div style={{ position:"relative", width:"100%", height:22, flexShrink:0 }}>
+                                <div style={{ position:"absolute", inset:0, borderRadius:3, background:tb.color||"#888", border:"1px solid #ffffff25", pointerEvents:"none" }} />
+                                <select value={Object.entries(TEE_COLOR_MAP).find(([,v])=>v===(tb.color||""))?.[0] || "black"}
+                                  onChange={e => { const clr = TEE_COLOR_MAP[e.target.value] || tb.color || "#888888"; setMc(p=>{const t=[...p.tee_boxes]; t[tbi]={...t[tbi],color:clr}; return {...p,tee_boxes:t};}); }}
+                                  style={{ position:"absolute", inset:0, width:"100%", height:"100%", opacity:0, cursor:"pointer", fontSize:12 }}>
+                                  {[["Black","#2c2c2c"],["Blue","#2d8fd4"],["White","#e8e8e8"],["Gold","#d4a843"],["Red","#9b2335"],["Green","#2d8a4e"],["Silver","#a8b2bd"],["Yellow","#e6c619"],["Orange","#e67e22"],["Purple","#7b2d8b"],["Maroon","#6b1c2a"],["Teal","#1a8a7a"],["Platinum","#c0c0c0"]].map(([n])=><option key={n} value={n.toLowerCase()}>{n}</option>)}
                                 </select>
                               </div>
+                              <input value={tb.rating} onChange={e => setMc(p=>{const t=[...p.tee_boxes]; t[tbi]={...t[tbi],rating:e.target.value}; return {...p,tee_boxes:t};})} style={tinyInp} />
+                              <input value={tb.slope} onChange={e => setMc(p=>{const t=[...p.tee_boxes]; t[tbi]={...t[tbi],slope:e.target.value}; return {...p,tee_boxes:t};})} style={tinyInp} />
+                              <input value={tb.par} onChange={e => setMc(p=>{const t=[...p.tee_boxes]; t[tbi]={...t[tbi],par:e.target.value}; return {...p,tee_boxes:t};})} style={tinyInp} />
+                              <input value={tb.yardage} onChange={e => setMc(p=>{const t=[...p.tee_boxes]; t[tbi]={...t[tbi],yardage:e.target.value}; return {...p,tee_boxes:t};})} style={tinyInp} />
+                              <button onClick={() => setMc(p=>({...p,tee_boxes:p.tee_boxes.filter((_,i)=>i!==tbi)}))} style={{ background:"transparent", border:"none", color:K.t3, fontSize:11, cursor:"pointer", padding:0, lineHeight:1 }}>✕</button>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Hole Pars & Handicaps */}
+                        {[["Front 9", 0, 9], ["Back 9", 9, 9]].map(([label9, start, count]) => (
+                          <div key={label9} style={{ marginBottom: 6 }}>
+                            <div style={{ fontSize: 9, color: K.t3, fontWeight: 600, marginBottom: 3, textTransform: "uppercase" }}>{label9}</div>
+                            <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8 }}>
+                              <div style={{ color: K.t3, fontWeight: 600, padding: "2px 0" }}>Hole</div>
+                              {Array.from({length:count},(_,i) => <div key={i} style={{ textAlign:"center", color:K.t2, fontWeight:700, padding:"2px 0" }}>{start+i+1}</div>)}
+                              <div />
+                            </div>
+                            <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8, background: K.inp, borderRadius: 3, marginBottom: 2 }}>
+                              <div style={{ color: K.t3, fontWeight: 600, padding: "3px 2px" }}>Par</div>
+                              {Array.from({length:count},(_,i) => (
+                                <input key={i} value={mc.hole_pars[start+i]??""} onChange={e => setMc(p=>{const hp=[...p.hole_pars]; hp[start+i]=e.target.value; return {...p,hole_pars:hp};})}
+                                  style={{ background:"transparent", border:"none", color:K.t1, fontSize:9, fontWeight:700, textAlign:"center", width:"100%", padding:"3px 0" }} />
+                              ))}
+                              <div style={{ textAlign:"center", color:ac, fontWeight:800, padding:"3px 0", fontSize:9 }}>
+                                {mc.hole_pars.slice(start,start+count).reduce((a,b)=>a+(parseInt(b)||0),0)}
+                              </div>
+                            </div>
+                            <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8 }}>
+                              <div style={{ color: K.t3, fontWeight: 600, padding: "2px 2px" }}>HCP</div>
+                              {Array.from({length:count},(_,i) => (
+                                <input key={i} value={mc.hole_handicaps[start+i]??""} onChange={e => setMc(p=>{const hh=[...p.hole_handicaps]; hh[start+i]=e.target.value; return {...p,hole_handicaps:hh};})}
+                                  style={{ background:"transparent", border:"none", color:K.t3, fontSize:9, textAlign:"center", width:"100%", padding:"2px 0" }} />
+                              ))}
+                              <div />
+                            </div>
+                          </div>
+                        ))}
+
+                        {/* Save button */}
+                        <button onClick={() => {
+                          const firstTee = mc.tee_boxes[0];
+                          const course = {
+                            ...mc,
+                            par: parseInt(firstTee?.par) || 72,
+                            slope: parseInt(firstTee?.slope) || 113,
+                            rating: parseFloat(firstTee?.rating) || 72.0,
+                            hole_pars: mc.hole_pars.map(v=>parseInt(v)||4),
+                            hole_handicaps: mc.hole_handicaps.map(v=>parseInt(v)||0),
+                            tee_boxes: mc.tee_boxes.map(tb=>({...tb, rating:parseFloat(tb.rating)||72.0, slope:parseInt(tb.slope)||113, par:parseInt(tb.par)||72, yardage:parseInt(tb.yardage)||0})),
+                          };
+                          addCourseToLibrary(course);
+                          setManualCourse(null);
+                        }} disabled={!canSave} style={{ width:"100%", padding:"10px 0", borderRadius:8, background: canSave ? ac : K.bdr, border:"none", color: canSave ? K.bg : K.t3, fontSize:13, fontWeight:700, cursor: canSave ? "pointer" : "default", marginTop:4 }}>
+                          ✓ Add Course
+                        </button>
+                      </div>
+                    );
+                  })()}
+                  {!searchLoading && searchResults.filter(c => !courses.find(ex => ex.id === c.id)).map(c => (
+                    <button key={c.id} onClick={() => {
+                      const sbVer = c._sbVersion || (c.updated_at ? c : null);
+                      const hasLocalData = !!(sbVer && (sbVer.updated_at || c.updated_at));
+                      if (hasLocalData) {
+                        // Course exists in local DB — prompt user to use local or fetch fresh
+                        const localCourse = sbVer || c;
+                        setLocalDbPrompt({ sbCourse: localCourse, apiCourse: c._apiVersion || null, fullCourse: c });
+                      } else if (c._apiVersion) {
+                        if (c._apiHasReal && !c._sbHasReal) {
+                          const { _apiVersion, _sbHasReal, _apiHasReal, ...sbBase } = c;
+                          setCoursePreview({ ...sbBase, ...c._apiVersion, _apiVersion: c._apiVersion, _apiHasReal: true, _sbHasReal: false });
+                        } else {
+                          setCoursePreview(c);
+                        }
+                      } else {
+                        setCoursePreview(c);
+                      }
+                    }} style={{ display: "block", width: "100%", background: K.inp, border: `1px solid ${K.bdr}`, borderRadius: 10, padding: "10px 14px", cursor: "pointer", textAlign: "left", color: K.t1, marginBottom: 6 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <div style={{ fontWeight: 600, fontSize: 13 }}>{c.name}</div>
+                            {c._incompleteData && <span style={{ fontSize: 8, background: "#d4584520", border: "1px solid #d4584540", color: "#d45845", borderRadius: 4, padding: "1px 5px", fontWeight: 700 }}>⚠ incomplete data</span>}
+                            {!c._incompleteData && (c.tee_boxes?.length || 0) < 2 && <span style={{ fontSize: 8, background: "#d4a84320", border: "1px solid #d4a84340", color: "#d4a843", borderRadius: 4, padding: "1px 5px", fontWeight: 700 }}>⚠ 1 tee</span>}
+                            {c._source && c._source !== "WBC History" && <span style={{ fontSize: 8, background: `${ac}15`, border: `1px solid ${ac}30`, color: ac, borderRadius: 4, padding: "1px 5px", fontWeight: 600 }}>{c._source}</span>}
+                            {c.updated_at && (() => {
+                              const d = new Date(c.updated_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+                              return (
+                                <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 8, background: "#2d8a4e20", border: "1px solid #2d8a4e40", color: "#2d8a4e", borderRadius: 4, padding: "1px 5px", fontWeight: 600 }}>
+                                  <img src={TROPHY_SVG_URL} alt="" style={{ width: 9, height: 9, filter: "brightness(0) saturate(100%) invert(42%) sepia(73%) saturate(400%) hue-rotate(100deg) brightness(95%)" }} />
+                                  {d}{c.updated_by && c.updated_by !== "Unknown" ? ` · ${c.updated_by}` : ""}
+                                </span>
+                              );
+                            })()}
+                          </div>
+                          <div style={{ fontSize: 10, color: K.t3 }}>{c.city}{c.state ? `, ${c.state}` : ""}{c.par ? ` · Par ${c.par}` : ""}{(() => { const realTbSlope = (c.tee_boxes || []).find(t => parseInt(t.slope) !== 113)?.slope; const displaySlope = realTbSlope || (c.slope && parseInt(c.slope) !== 113 ? c.slope : null); return displaySlope ? ` · Slope ${displaySlope}` : ""; })()}</div>
+                        </div>
+                        <span style={{ color: ac, fontSize: 11, fontWeight: 700 }}>Preview →</span>
+                      </div>
+                    </button>
+                  ))}
+                  {/* Local DB prompt modal */}
+                  {localDbPrompt && (() => {
+                    const { sbCourse } = localDbPrompt;
+                    const tbs = sbCourse.tee_boxes || [];
+                    const updatedAt = sbCourse.updated_at;
+                    const updatedBy = sbCourse.updated_by || "Unknown";
+                    const formattedDate = updatedAt ? new Date(updatedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : null;
+                    const ScorecardPreview = ({ course }) => {
+                      const hp = course.hole_pars || [];
+                      const hh = course.hole_handicaps || [];
+                      if (!hp.length) return <div style={{ fontSize: 10, color: K.t3, fontStyle: "italic", marginBottom: 8 }}>No hole data available</div>;
+                      return (
+                        <div style={{ marginBottom: 10 }}>
+                          {[["Front", 0, 9], ["Back", 9, 9]].map(([lbl, start, count]) => {
+                            const pars = hp.slice(start, start + count);
+                            const hcps = hh.slice(start, start + count);
+                            const firstTee = (course.tee_boxes || [])[0];
+                            const yds = (firstTee?.hole_yards || []).slice(start, start + count);
+                            const hasYds = yds.some(y => y > 0);
+                            return (
+                              <div key={lbl} style={{ marginBottom: 4 }}>
+                                <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8 }}>
+                                  <div style={{ color: K.t3, fontWeight: 600, padding: "2px 0" }}>Hole</div>
+                                  {Array.from({length: count}, (_, i) => <div key={i} style={{ textAlign: "center", color: K.t2, fontWeight: 700, padding: "2px 0" }}>{start + i + 1}</div>)}
+                                  <div style={{ textAlign: "center", color: K.t3, fontSize: 7, padding: "2px 0" }}>Tot</div>
+                                </div>
+                                <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8, background: K.inp, borderRadius: 3, marginBottom: 1 }}>
+                                  <div style={{ color: K.t3, fontWeight: 600, padding: "3px 2px" }}>Par</div>
+                                  {pars.map((p, i) => <div key={i} style={{ textAlign: "center", color: K.t1, fontWeight: 700, padding: "3px 0" }}>{p || "–"}</div>)}
+                                  <div style={{ textAlign: "center", color: ac, fontWeight: 800, padding: "3px 0", fontSize: 9 }}>{pars.reduce((a, b) => a + (parseInt(b) || 0), 0)}</div>
+                                </div>
+                                {hcps.some(h => h > 0) && (
+                                  <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8, marginBottom: 1 }}>
+                                    <div style={{ color: K.t3, fontWeight: 600, padding: "2px 2px" }}>HCP</div>
+                                    {hcps.map((h, i) => <div key={i} style={{ textAlign: "center", color: K.t3, padding: "2px 0" }}>{h || "–"}</div>)}
+                                    <div />
+                                  </div>
+                                )}
+                                {hasYds && (
+                                  <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8 }}>
+                                    <div style={{ color: K.t3, fontWeight: 600, padding: "2px 2px" }}>Yds</div>
+                                    {yds.map((y, i) => <div key={i} style={{ textAlign: "center", color: K.t3, padding: "2px 0" }}>{y || "–"}</div>)}
+                                    <div style={{ textAlign: "center", color: K.t3, padding: "2px 0" }}>{yds.reduce((a, b) => a + (parseInt(b) || 0), 0) || ""}</div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    };
+                    return (
+                      <CoursePreviewPortal>
+                      <div style={{ position: "fixed", inset: 0, background: "#00000088", zIndex: 200, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
+                        <div style={{ background: K.card, borderRadius: "18px 18px 0 0", width: "100%", maxWidth: 480, maxHeight: "88vh", overflowY: "auto", padding: "20px 18px 28px" }}>
+                          {/* Header */}
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
+                            <div>
+                              <div style={{ fontWeight: 700, fontSize: 16, color: K.t1, marginBottom: 2 }}>{sbCourse.name}</div>
+                              <div style={{ fontSize: 11, color: K.t3 }}>{[sbCourse.city, sbCourse.state].filter(Boolean).join(", ")} · Par {sbCourse.par} · Slope {sbCourse.slope}</div>
+                            </div>
+                            <span onClick={() => setLocalDbPrompt(null)} style={{ fontSize: 20, color: K.t3, cursor: "pointer", lineHeight: 1, padding: "0 4px" }}>✕</span>
+                          </div>
+
+                          {/* Local DB notice */}
+                          <div style={{ background: `${ac}12`, border: `1px solid ${ac}35`, borderRadius: 10, padding: "10px 14px", marginBottom: 16 }}>
+                            <div style={{ fontWeight: 700, fontSize: 12, color: ac, marginBottom: 4 }}>📁 Course exists in local database</div>
+                            <div style={{ fontSize: 11, color: K.t2 }}>
+                              Last saved {formattedDate ? `on ${formattedDate}` : ""} by <strong>{updatedBy}</strong>
+                            </div>
+                            <div style={{ fontSize: 10, color: K.t3, marginTop: 2 }}>
+                              {tbs.length} tee {tbs.length === 1 ? "box" : "boxes"}{tbs.length > 0 ? ` — ${tbs.map(t => t.name).join(", ")}` : ""}
+                            </div>
+                          </div>
+
+                          {/* Tee boxes preview */}
+                          {tbs.length > 0 && (
+                            <div style={{ marginBottom: 14 }}>
+                              <div style={{ fontSize: 9, color: K.t3, fontWeight: 700, textTransform: "uppercase", marginBottom: 6 }}>Tee Boxes</div>
+                              <div style={{ display: "grid", gridTemplateColumns: "14px 1fr 44px 38px 30px 46px", gap: "3px 4px", fontSize: 8, color: K.t3, fontWeight: 600, marginBottom: 3, paddingLeft: 2 }}>
+                                <div/><div>Name</div><div style={{textAlign:"center"}}>Rating</div><div style={{textAlign:"center"}}>Slope</div><div style={{textAlign:"center"}}>Par</div><div style={{textAlign:"center"}}>Yards</div>
+                              </div>
+                              {tbs.map((tb, i) => (
+                                <div key={i} style={{ display: "grid", gridTemplateColumns: "14px 1fr 44px 38px 30px 46px", gap: "3px 4px", marginBottom: 3, alignItems: "center", fontSize: 11 }}>
+                                  <TeeColorSwatch color={tb.color} name={tb.name} size={12} />
+                                  <div style={{ color: K.t1, fontWeight: 600 }}>{tb.name}</div>
+                                  <div style={{ textAlign: "center", color: K.t2 }}>{tb.rating}</div>
+                                  <div style={{ textAlign: "center", color: K.t2 }}>{tb.slope}</div>
+                                  <div style={{ textAlign: "center", color: K.t2 }}>{tb.par}</div>
+                                  <div style={{ textAlign: "center", color: K.t2 }}>{tb.yardage ? tb.yardage.toLocaleString() : "–"}</div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Scorecard preview */}
+                          <div style={{ marginBottom: 16 }}>
+                            <div style={{ fontSize: 9, color: K.t3, fontWeight: 700, textTransform: "uppercase", marginBottom: 6 }}>Scorecard</div>
+                            <ScorecardPreview course={sbCourse} />
+                          </div>
+
+                          {/* Action buttons */}
+                          <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+                            <button onClick={() => {
+                              // Use local data — open preview with Firestore course
+                              setLocalDbPrompt(null);
+                              setCoursePreview({ ...sbCourse, _source: "WBC History" });
+                            }} style={{ flex: 1, padding: "12px 0", borderRadius: 10, background: ac, border: "none", color: "#0a1628", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+                              ✓ Use Local Data
+                            </button>
+                            <button onClick={async () => {
+                              // Fetch fresh from API — run search and open preview with API data
+                              setLocalDbPrompt(null);
+                              setSearchLoading(true);
+                              try {
+                                const q = sbCourse.name;
+                                const stateParam = sbCourse.state ? `&state=${encodeURIComponent(sbCourse.state)}` : "";
+                                const [r1, r2] = await Promise.allSettled([
+                                  fetch(`/api/courses2?search=${encodeURIComponent(q)}${stateParam}`).then(r => r.json()),
+                                  fetch(`/api/courses?search=${encodeURIComponent(q)}`).then(r => r.json()),
+                                ]);
+                                const rapidRaw = r1.status === "fulfilled" ? r1.value : [];
+                                const gcRaw = r2.status === "fulfilled" ? r2.value : [];
+                                // Simple: find best match by name
+                                const allApi = [...(Array.isArray(rapidRaw) ? rapidRaw : rapidRaw.courses || []), ...(Array.isArray(gcRaw) ? gcRaw : gcRaw.courses || [])];
+                                const match = allApi.find(c => (c.name || c.club_name || "").toLowerCase().includes(q.toLowerCase().split(" ")[0]));
+                                if (match) {
+                                  setCoursePreview({ ...sbCourse, ...match, id: sbCourse.id, _source: match.source || "API", _freshFetch: true });
+                                } else {
+                                  // No API match — fall back to local
+                                  setCoursePreview({ ...sbCourse, _source: "WBC History" });
+                                }
+                              } catch {
+                                setCoursePreview({ ...sbCourse, _source: "WBC History" });
+                              }
+                              setSearchLoading(false);
+                            }} style={{ flex: 1, padding: "12px 0", borderRadius: 10, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t2, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+                              🔄 Fetch Fresh
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                      </CoursePreviewPortal>
+                    );
+                  })()}
+
+                  {/* Course preview/confirm modal */}
+                  {coursePreview && (() => {
+                    const draft = coursePreview;
+                    const setDraft = fn => setCoursePreview(prev => fn(prev));
+                    const tbs = draft.tee_boxes || [];
+                    const hasConflict = !!draft._apiVersion;
+                    const ti = { background: K.bg, border: `1px solid ${ac}30`, borderRadius: 4, color: K.t1, fontSize: 9, textAlign: "center", width: "100%", padding: "3px 2px", boxSizing: "border-box" };
+                    const tiL = { ...ti, textAlign: "left", padding: "3px 5px" };
+                    return (
+                      <CoursePreviewPortal>
+                      <div style={{ position: "fixed", top: 0, bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.82)", zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+                        <div style={{ background: K.card, borderRadius: 16, border: `1px solid ${ac}40`, width: "100%", maxWidth: 420, maxHeight: "calc(100vh - 48px)", overflowY: "auto", padding: 0 }}>
+
+                          {/* Header */}
+                          <div style={{ padding: "14px 16px 10px", borderBottom: `1px solid ${K.bdr}`, position: "sticky", top: 0, background: K.card, zIndex: 1 }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                              <div style={{ flex: 1, marginRight: 8 }}>
+                                <input value={draft.name} onChange={e => setDraft(p => ({...p, name: e.target.value}))}
+                                  style={{ background: "transparent", border: "none", borderBottom: `1px solid ${ac}40`, color: K.t1, fontSize: 14, fontWeight: 800, width: "100%", padding: "2px 0" }} />
+                                <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+                                  <input value={draft.city} onChange={e => setDraft(p => ({...p, city: e.target.value}))} placeholder="City"
+                                    style={{ ...tiL, fontSize: 10, flex: 1 }} />
+                                  <select value={draft.state} onChange={e => setDraft(p => ({...p, state: e.target.value}))}
+                                    style={{ ...ti, fontSize: 10, width: 52 }}>
+                                    <option value="">—</option>
+                                    {["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"].map(s => <option key={s} value={s}>{s}</option>)}
+                                  </select>
+                                </div>
+                              </div>
+                              <button onClick={() => setCoursePreview(null)} style={{ background: "transparent", border: "none", color: K.t3, fontSize: 18, cursor: "pointer", lineHeight: 1 }}>✕</button>
                             </div>
 
-                            {/* Tee Boxes */}
-                            <div style={{ marginBottom: 8 }}>
-                              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-                                {label("Tee Boxes")}
-                                <button onClick={() => setMc(p=>({...p, tee_boxes:[...p.tee_boxes, {name:"", color:"#888888", rating:72.0, slope:113, par:72, yardage:0}]}))}
-                                  style={{ fontSize: 9, padding: "1px 6px", borderRadius: 4, background: "transparent", border: `1px solid ${ac}60`, color: ac, cursor: "pointer", fontWeight: 700 }}>+ Tee</button>
+                            {/* Source conflict banner */}
+                            {hasConflict && (() => {
+                              const sbHasReal = draft._sbHasReal;
+                              const apiHasReal = draft._apiHasReal;
+                              const sbSlope = draft.tee_boxes?.find(t => parseInt(t.slope) !== 113)?.slope || draft.slope;
+                              const apiSlope = draft._apiVersion?.tee_boxes?.find(t => parseInt(t.slope) !== 113)?.slope || draft._apiVersion?.slope;
+                              const bothReal = sbHasReal && apiHasReal;
+                              const bannerColor = bothReal ? "#d4a843" : "#5b9bd5";
+                              const bannerMsg = bothReal
+                                ? "⚡ Both sources have real slope data — review each and pick the most accurate:"
+                                : "ℹ️ One source has real slope data — selecting the better one:";
+                              return (
+                                <div style={{ marginTop: 8, padding: "8px 10px", background: `${bannerColor}10`, border: `1px solid ${bannerColor}40`, borderRadius: 8 }}>
+                                  <div style={{ fontSize: 9, color: bannerColor, fontWeight: 700, marginBottom: 6 }}>{bannerMsg}</div>
+                                  <div style={{ display: "flex", gap: 6 }}>
+                                    <button onClick={() => setDraft(p => { const {_apiVersion, _sbHasReal, _apiHasReal, ...sb} = p; return sb; })}
+                                      style={{ flex: 1, padding: "6px 4px", borderRadius: 6, background: sbHasReal ? ac+"22" : "transparent", border: `1px solid ${sbHasReal ? ac : K.bdr}`, color: sbHasReal ? ac : K.t3, fontSize: 9, fontWeight: 700, cursor: "pointer", textAlign: "center" }}>
+                                      📦 WBC History
+                                      <div style={{ fontSize: 8, fontWeight: 400, color: K.t3, marginTop: 2 }}>{draft.tee_boxes?.length || 0} tees · Slope {sbSlope || "?"}</div>
+                                      {sbHasReal && <div style={{ fontSize: 7, color: ac, marginTop: 1 }}>✓ real data</div>}
+                                      {!sbHasReal && <div style={{ fontSize: 7, color: "#d4584580", marginTop: 1 }}>placeholder</div>}
+                                    </button>
+                                    <button onClick={() => setDraft(p => { const api = p._apiVersion; return { ...p, par: api.par, slope: api.slope, rating: api.rating, hole_pars: api.hole_pars, hole_handicaps: api.hole_handicaps, tee_boxes: api.tee_boxes, _apiVersion: undefined, _sbHasReal: undefined, _apiHasReal: undefined }; })}
+                                      style={{ flex: 1, padding: "6px 4px", borderRadius: 6, background: apiHasReal && !sbHasReal ? ac+"22" : "transparent", border: `1px solid ${apiHasReal ? ac : K.bdr}`, color: apiHasReal ? ac : K.t3, fontSize: 9, fontWeight: 700, cursor: "pointer", textAlign: "center" }}>
+                                      🌐 API (Fresh)
+                                      <div style={{ fontSize: 8, fontWeight: 400, color: K.t3, marginTop: 2 }}>{draft._apiVersion?.tee_boxes?.length || 0} tees · Slope {apiSlope || "?"}</div>
+                                      {apiHasReal && <div style={{ fontSize: 7, color: ac, marginTop: 1 }}>✓ real data</div>}
+                                      {!apiHasReal && <div style={{ fontSize: 7, color: "#d4584580", marginTop: 1 }}>placeholder</div>}
+                                    </button>
+                                  </div>
+                                  <div style={{ fontSize: 8, color: K.t3, marginTop: 5, fontStyle: "italic" }}>You can edit any field after selecting a source</div>
+                                </div>
+                              );
+                            })()}
+                            {!hasConflict && draft._incompleteData && (
+                              <div style={{ marginTop: 8, padding: "8px 10px", background: "#d4584510", border: "1px solid #d4584540", borderRadius: 8, fontSize: 9, color: "#d45845" }}>
+                                ⚠ Neither API has complete data for this course. Slope, rating, and tee boxes may be missing or inaccurate — please enter them manually before adding.
                               </div>
-                              <div style={{ display: "grid", gridTemplateColumns: "12px 70px 50px 44px 32px 32px 40px 20px", gap: 3, fontSize: 8, color: K.t3, fontWeight: 600, marginBottom: 2, paddingLeft: 2 }}>
-                                <div/>
-                                <div>Name</div><div>Color</div><div>Rating</div><div>Slope</div><div>Par</div><div>Yards</div><div/>
+                            )}
+                            {!hasConflict && !draft._incompleteData && (draft.tee_boxes?.length || 0) < 2 && (
+                              <div style={{ marginTop: 8, padding: "8px 10px", background: "#d4a84310", border: "1px solid #d4a84340", borderRadius: 8, fontSize: 9, color: "#d4a843" }}>
+                                ⚠ Only {draft.tee_boxes?.length || 0} tee box found — most courses have multiple tees. Tap <strong>+ Tee</strong> above to add Black, Blue, White, Red etc. with their ratings and slopes.
                               </div>
-                              {mc.tee_boxes.map((tb, tbi) => (
-                                <div key={tbi} style={{ display: "grid", gridTemplateColumns: "12px 70px 50px 44px 32px 32px 40px 20px", gap: 3, marginBottom: 3, alignItems: "center" }}>
-                                  <TeeColorSwatch color={tb.color} name={tb.name} size={10} />
-                                  <input value={tb.name} onChange={e => setMc(p=>{const t=[...p.tee_boxes]; t[tbi]={...t[tbi],name:e.target.value}; return {...p,tee_boxes:t};})} style={{...tinyInp, textAlign:"left", padding:"2px 4px"}} placeholder="Name" />
-                                  <div style={{ position:"relative", width:"100%", height:22, flexShrink:0 }}>
-                                    <div style={{ position:"absolute", inset:0, borderRadius:3, background:tb.color||"#888", border:"1px solid #ffffff25", pointerEvents:"none" }} />
+                            )}
+                            {!hasConflict && !draft._incompleteData && (draft.tee_boxes?.length || 0) >= 2 && (
+                              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 6 }}>
+                                <div style={{ fontSize: 9, color: K.t3, fontStyle: "italic" }}>Review and edit before adding — tap any field to change it</div>
+                                {draft._source && <span style={{ fontSize: 8, background: `${ac}15`, border: `1px solid ${ac}30`, color: ac, borderRadius: 4, padding: "1px 6px", fontWeight: 600, flexShrink: 0 }}>{draft._source}</span>}
+                                {!draft._source && <span style={{ fontSize: 8, background: "#88888815", border: "1px solid #88888830", color: K.t3, borderRadius: 4, padding: "1px 6px", fontWeight: 600, flexShrink: 0 }}>WBC History</span>}
+                              </div>
+                            )}
+                          </div>
+
+                          <div style={{ padding: "12px 16px" }}>
+
+                            {/* Tee Boxes — fully editable */}
+                            <div style={{ marginBottom: 14 }}>
+                              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                                <div style={{ fontSize: 9, color: K.t3, fontWeight: 700, textTransform: "uppercase" }}>Tee Boxes</div>
+                                <button onClick={() => setDraft(p => ({ ...p, tee_boxes: [...(p.tee_boxes||[]), { name: "", color: "#888888", rating: 72.0, slope: 113, par: 72, yardage: 0 }] }))}
+                                  style={{ fontSize: 9, padding: "2px 7px", borderRadius: 4, background: "transparent", border: `1px solid ${ac}60`, color: ac, cursor: "pointer", fontWeight: 700 }}>+ Tee</button>
+                              </div>
+                              {tbs.length === 0 && <div style={{ fontSize: 10, color: K.warn, marginBottom: 8, fontStyle: "italic" }}>⚠ No tees from API — add them manually below</div>}
+                              {/* Column headers */}
+                              <div style={{ display: "grid", gridTemplateColumns: "18px 1fr 44px 38px 30px 46px 18px", gap: "3px 4px", fontSize: 8, color: K.t3, fontWeight: 600, marginBottom: 3, paddingLeft: 2 }}>
+                                <div/><div>Name</div><div style={{textAlign:"center"}}>Rating</div><div style={{textAlign:"center"}}>Slope</div><div style={{textAlign:"center"}}>Par</div><div style={{textAlign:"center"}}>Yards</div><div/>
+                              </div>
+                              {tbs.map((tb, i) => (
+                                <div key={i} style={{ display: "grid", gridTemplateColumns: "18px 1fr 44px 38px 30px 46px 18px", gap: "3px 4px", marginBottom: 4, alignItems: "center" }}>
+                                  <div style={{ position:"relative", width:18, height:18, flexShrink:0 }}>
+                                    <div style={{ position:"absolute", inset:0, pointerEvents:"none" }}><TeeColorSwatch color={tb.color} name={tb.name} size={18} style={{ borderRadius:3, width:"100%", height:"100%" }} /></div>
                                     <select value={Object.entries(TEE_COLOR_MAP).find(([,v])=>v===(tb.color||""))?.[0] || "black"}
-                                      onChange={e => { const clr = TEE_COLOR_MAP[e.target.value] || tb.color || "#888888"; setMc(p=>{const t=[...p.tee_boxes]; t[tbi]={...t[tbi],color:clr}; return {...p,tee_boxes:t};}); }}
+                                      onChange={e => { const clr = TEE_COLOR_MAP[e.target.value] || "#888888"; setDraft(p => { const t=[...p.tee_boxes]; t[i]={...t[i],color:clr,name:t[i].name||e.target.value.charAt(0).toUpperCase()+e.target.value.slice(1)}; return {...p,tee_boxes:t}; }); }}
                                       style={{ position:"absolute", inset:0, width:"100%", height:"100%", opacity:0, cursor:"pointer", fontSize:12 }}>
                                       {[["Black","#2c2c2c"],["Blue","#2d8fd4"],["White","#e8e8e8"],["Gold","#d4a843"],["Red","#9b2335"],["Green","#2d8a4e"],["Silver","#a8b2bd"],["Yellow","#e6c619"],["Orange","#e67e22"],["Purple","#7b2d8b"],["Maroon","#6b1c2a"],["Teal","#1a8a7a"],["Platinum","#c0c0c0"]].map(([n])=><option key={n} value={n.toLowerCase()}>{n}</option>)}
                                     </select>
                                   </div>
-                                  <input value={tb.rating} onChange={e => setMc(p=>{const t=[...p.tee_boxes]; t[tbi]={...t[tbi],rating:e.target.value}; return {...p,tee_boxes:t};})} style={tinyInp} />
-                                  <input value={tb.slope} onChange={e => setMc(p=>{const t=[...p.tee_boxes]; t[tbi]={...t[tbi],slope:e.target.value}; return {...p,tee_boxes:t};})} style={tinyInp} />
-                                  <input value={tb.par} onChange={e => setMc(p=>{const t=[...p.tee_boxes]; t[tbi]={...t[tbi],par:e.target.value}; return {...p,tee_boxes:t};})} style={tinyInp} />
-                                  <input value={tb.yardage} onChange={e => setMc(p=>{const t=[...p.tee_boxes]; t[tbi]={...t[tbi],yardage:e.target.value}; return {...p,tee_boxes:t};})} style={tinyInp} />
-                                  <button onClick={() => setMc(p=>({...p,tee_boxes:p.tee_boxes.filter((_,i)=>i!==tbi)}))} style={{ background:"transparent", border:"none", color:K.t3, fontSize:11, cursor:"pointer", padding:0, lineHeight:1 }}>✕</button>
+                                  <input value={tb.name} onChange={e => setDraft(p => { const t=[...p.tee_boxes]; t[i]={...t[i],name:e.target.value}; return {...p,tee_boxes:t}; })}
+                                    style={tiL} placeholder="Name" />
+                                  <input value={tb.rating} onChange={e => setDraft(p => { const t=[...p.tee_boxes]; t[i]={...t[i],rating:e.target.value}; return {...p,tee_boxes:t}; })}
+                                    style={ti} />
+                                  <input value={tb.slope} onChange={e => setDraft(p => { const t=[...p.tee_boxes]; t[i]={...t[i],slope:e.target.value}; return {...p,tee_boxes:t}; })}
+                                    style={ti} />
+                                  <input value={tb.par} onChange={e => setDraft(p => { const t=[...p.tee_boxes]; t[i]={...t[i],par:e.target.value}; return {...p,tee_boxes:t}; })}
+                                    style={ti} />
+                                  <input value={tb.yardage} onChange={e => setDraft(p => { const t=[...p.tee_boxes]; t[i]={...t[i],yardage:e.target.value}; return {...p,tee_boxes:t}; })}
+                                    style={ti} />
+                                  <button onClick={() => setDraft(p => ({...p, tee_boxes: p.tee_boxes.filter((_,j) => j!==i)}))}
+                                    style={{ background: "transparent", border: "none", color: K.t3, fontSize: 11, cursor: "pointer", padding: 0, lineHeight: 1 }}>✕</button>
                                 </div>
                               ))}
                             </div>
 
-                            {/* Hole Pars & Handicaps */}
-                            {[["Front 9", 0, 9], ["Back 9", 9, 9]].map(([label9, start, count]) => (
-                              <div key={label9} style={{ marginBottom: 6 }}>
-                                <div style={{ fontSize: 9, color: K.t3, fontWeight: 600, marginBottom: 3, textTransform: "uppercase" }}>{label9}</div>
-                                <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8 }}>
-                                  <div style={{ color: K.t3, fontWeight: 600, padding: "2px 0" }}>Hole</div>
-                                  {Array.from({length:count},(_,i) => <div key={i} style={{ textAlign:"center", color:K.t2, fontWeight:700, padding:"2px 0" }}>{start+i+1}</div>)}
-                                  <div />
-                                </div>
-                                <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8, background: K.inp, borderRadius: 3, marginBottom: 2 }}>
-                                  <div style={{ color: K.t3, fontWeight: 600, padding: "3px 2px" }}>Par</div>
-                                  {Array.from({length:count},(_,i) => (
-                                    <input key={i} value={mc.hole_pars[start+i]??""} onChange={e => setMc(p=>{const hp=[...p.hole_pars]; hp[start+i]=e.target.value; return {...p,hole_pars:hp};})}
-                                      style={{ background:"transparent", border:"none", color:K.t1, fontSize:9, fontWeight:700, textAlign:"center", width:"100%", padding:"3px 0" }} />
-                                  ))}
-                                  <div style={{ textAlign:"center", color:ac, fontWeight:800, padding:"3px 0", fontSize:9 }}>
-                                    {mc.hole_pars.slice(start,start+count).reduce((a,b)=>a+(parseInt(b)||0),0)}
-                                  </div>
-                                </div>
-                                <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8 }}>
-                                  <div style={{ color: K.t3, fontWeight: 600, padding: "2px 2px" }}>HCP</div>
-                                  {Array.from({length:count},(_,i) => (
-                                    <input key={i} value={mc.hole_handicaps[start+i]??""} onChange={e => setMc(p=>{const hh=[...p.hole_handicaps]; hh[start+i]=e.target.value; return {...p,hole_handicaps:hh};})}
-                                      style={{ background:"transparent", border:"none", color:K.t3, fontSize:9, textAlign:"center", width:"100%", padding:"2px 0" }} />
-                                  ))}
-                                  <div />
-                                </div>
-                              </div>
-                            ))}
-
-                            {/* Save button */}
-                            <button onClick={() => {
-                              const firstTee = mc.tee_boxes[0];
-                              const course = {
-                                ...mc,
-                                par: parseInt(firstTee?.par) || 72,
-                                slope: parseInt(firstTee?.slope) || 113,
-                                rating: parseFloat(firstTee?.rating) || 72.0,
-                                hole_pars: mc.hole_pars.map(v=>parseInt(v)||4),
-                                hole_handicaps: mc.hole_handicaps.map(v=>parseInt(v)||0),
-                                tee_boxes: mc.tee_boxes.map(tb=>({...tb, rating:parseFloat(tb.rating)||72.0, slope:parseInt(tb.slope)||113, par:parseInt(tb.par)||72, yardage:parseInt(tb.yardage)||0})),
-                              };
-                              addCourseToLibrary(course);
-                              setManualCourse(null);
-                            }} disabled={!canSave} style={{ width:"100%", padding:"10px 0", borderRadius:8, background: canSave ? ac : K.bdr, border:"none", color: canSave ? K.bg : K.t3, fontSize:13, fontWeight:700, cursor: canSave ? "pointer" : "default", marginTop:4 }}>
-                              ✓ Add Course
-                            </button>
-                          </div>
-                        );
-                      })()}
-                      {!searchLoading && searchResults.filter(c => !courses.find(ex => ex.id === c.id)).map(c => (
-                        <button key={c.id} onClick={() => {
-                          const sbVer = c._sbVersion || (c.updated_at ? c : null);
-                          const hasLocalData = !!(sbVer && (sbVer.updated_at || c.updated_at));
-                          if (hasLocalData) {
-                            // Course exists in local DB — prompt user to use local or fetch fresh
-                            const localCourse = sbVer || c;
-                            setLocalDbPrompt({ sbCourse: localCourse, apiCourse: c._apiVersion || null, fullCourse: c });
-                          } else if (c._apiVersion) {
-                            if (c._apiHasReal && !c._sbHasReal) {
-                              const { _apiVersion, _sbHasReal, _apiHasReal, ...sbBase } = c;
-                              setCoursePreview({ ...sbBase, ...c._apiVersion, _apiVersion: c._apiVersion, _apiHasReal: true, _sbHasReal: false });
-                            } else {
-                              setCoursePreview(c);
-                            }
-                          } else {
-                            setCoursePreview(c);
-                          }
-                        }} style={{ display: "block", width: "100%", background: K.inp, border: `1px solid ${K.bdr}`, borderRadius: 10, padding: "10px 14px", cursor: "pointer", textAlign: "left", color: K.t1, marginBottom: 6 }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                            <div>
-                              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                                <div style={{ fontWeight: 600, fontSize: 13 }}>{c.name}</div>
-                                {c._incompleteData && <span style={{ fontSize: 8, background: "#d4584520", border: "1px solid #d4584540", color: "#d45845", borderRadius: 4, padding: "1px 5px", fontWeight: 700 }}>⚠ incomplete data</span>}
-                                {!c._incompleteData && (c.tee_boxes?.length || 0) < 2 && <span style={{ fontSize: 8, background: "#d4a84320", border: "1px solid #d4a84340", color: "#d4a843", borderRadius: 4, padding: "1px 5px", fontWeight: 700 }}>⚠ 1 tee</span>}
-                                {c._source && c._source !== "WBC History" && <span style={{ fontSize: 8, background: `${ac}15`, border: `1px solid ${ac}30`, color: ac, borderRadius: 4, padding: "1px 5px", fontWeight: 600 }}>{c._source}</span>}
-                                {c.updated_at && (() => {
-                                  const d = new Date(c.updated_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-                                  return (
-                                    <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 8, background: "#2d8a4e20", border: "1px solid #2d8a4e40", color: "#2d8a4e", borderRadius: 4, padding: "1px 5px", fontWeight: 600 }}>
-                                      <img src={TROPHY_SVG_URL} alt="" style={{ width: 9, height: 9, filter: "brightness(0) saturate(100%) invert(42%) sepia(73%) saturate(400%) hue-rotate(100deg) brightness(95%)" }} />
-                                      {d}{c.updated_by && c.updated_by !== "Unknown" ? ` · ${c.updated_by}` : ""}
-                                    </span>
-                                  );
-                                })()}
-                              </div>
-                              <div style={{ fontSize: 10, color: K.t3 }}>{c.city}{c.state ? `, ${c.state}` : ""}{c.par ? ` · Par ${c.par}` : ""}{(() => { const realTbSlope = (c.tee_boxes || []).find(t => parseInt(t.slope) !== 113)?.slope; const displaySlope = realTbSlope || (c.slope && parseInt(c.slope) !== 113 ? c.slope : null); return displaySlope ? ` · Slope ${displaySlope}` : ""; })()}</div>
-                            </div>
-                            <span style={{ color: ac, fontSize: 11, fontWeight: 700 }}>Preview →</span>
-                          </div>
-                        </button>
-                      ))}
-                      {/* Local DB prompt modal */}
-                      {localDbPrompt && (() => {
-                        const { sbCourse } = localDbPrompt;
-                        const tbs = sbCourse.tee_boxes || [];
-                        const updatedAt = sbCourse.updated_at;
-                        const updatedBy = sbCourse.updated_by || "Unknown";
-                        const formattedDate = updatedAt ? new Date(updatedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : null;
-                        const ScorecardPreview = ({ course }) => {
-                          const hp = course.hole_pars || [];
-                          const hh = course.hole_handicaps || [];
-                          if (!hp.length) return <div style={{ fontSize: 10, color: K.t3, fontStyle: "italic", marginBottom: 8 }}>No hole data available</div>;
-                          return (
-                            <div style={{ marginBottom: 10 }}>
+                            {/* Scorecard — editable pars & handicaps */}
+                            <div style={{ marginBottom: 14 }}>
+                              <div style={{ fontSize: 9, color: K.t3, fontWeight: 700, textTransform: "uppercase", marginBottom: 6 }}>Scorecard</div>
+                              {(draft.hole_pars?.length === 0) && <div style={{ fontSize: 10, color: K.warn, marginBottom: 6, fontStyle: "italic" }}>⚠ No hole data from API — enter pars below</div>}
                               {[["Front", 0, 9], ["Back", 9, 9]].map(([lbl, start, count]) => {
-                                const pars = hp.slice(start, start + count);
-                                const hcps = hh.slice(start, start + count);
-                                const firstTee = (course.tee_boxes || [])[0];
-                                const yds = (firstTee?.hole_yards || []).slice(start, start + count);
-                                const hasYds = yds.some(y => y > 0);
+                                const pars = (draft.hole_pars || Array(18).fill(4)).slice(start, start+count);
+                                const hcps = (draft.hole_handicaps || Array(18).fill(0)).slice(start, start+count);
                                 return (
-                                  <div key={lbl} style={{ marginBottom: 4 }}>
+                                  <div key={lbl} style={{ marginBottom: 6 }}>
                                     <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8 }}>
                                       <div style={{ color: K.t3, fontWeight: 600, padding: "2px 0" }}>Hole</div>
-                                      {Array.from({length: count}, (_, i) => <div key={i} style={{ textAlign: "center", color: K.t2, fontWeight: 700, padding: "2px 0" }}>{start + i + 1}</div>)}
-                                      <div style={{ textAlign: "center", color: K.t3, fontSize: 7, padding: "2px 0" }}>Tot</div>
+                                      {Array.from({length:count},(_,i) => <div key={i} style={{ textAlign:"center", color:K.t2, fontWeight:700, padding:"2px 0" }}>{start+i+1}</div>)}
+                                      <div style={{ textAlign:"center", color:K.t3, fontSize:7, padding:"2px 0" }}>Tot</div>
                                     </div>
                                     <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8, background: K.inp, borderRadius: 3, marginBottom: 1 }}>
                                       <div style={{ color: K.t3, fontWeight: 600, padding: "3px 2px" }}>Par</div>
-                                      {pars.map((p, i) => <div key={i} style={{ textAlign: "center", color: K.t1, fontWeight: 700, padding: "3px 0" }}>{p || "–"}</div>)}
-                                      <div style={{ textAlign: "center", color: ac, fontWeight: 800, padding: "3px 0", fontSize: 9 }}>{pars.reduce((a, b) => a + (parseInt(b) || 0), 0)}</div>
+                                      {Array.from({length:count},(_,i) => (
+                                        <input key={i} value={pars[i] ?? ""} onChange={e => setDraft(p => { const hp=[...(p.hole_pars||Array(18).fill(4))]; hp[start+i]=e.target.value; return {...p,hole_pars:hp}; })}
+                                          style={{ background:"transparent", border:"none", color:K.t1, fontSize:9, fontWeight:700, textAlign:"center", width:"100%", padding:"3px 0" }} />
+                                      ))}
+                                      <div style={{ textAlign:"center", color:ac, fontWeight:800, padding:"3px 0", fontSize:9 }}>{pars.reduce((a,b)=>a+(parseInt(b)||0),0)}</div>
                                     </div>
-                                    {hcps.some(h => h > 0) && (
-                                      <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8, marginBottom: 1 }}>
-                                        <div style={{ color: K.t3, fontWeight: 600, padding: "2px 2px" }}>HCP</div>
-                                        {hcps.map((h, i) => <div key={i} style={{ textAlign: "center", color: K.t3, padding: "2px 0" }}>{h || "–"}</div>)}
-                                        <div />
-                                      </div>
-                                    )}
-                                    {hasYds && (
-                                      <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8 }}>
-                                        <div style={{ color: K.t3, fontWeight: 600, padding: "2px 2px" }}>Yds</div>
-                                        {yds.map((y, i) => <div key={i} style={{ textAlign: "center", color: K.t3, padding: "2px 0" }}>{y || "–"}</div>)}
-                                        <div style={{ textAlign: "center", color: K.t3, padding: "2px 0" }}>{yds.reduce((a, b) => a + (parseInt(b) || 0), 0) || ""}</div>
-                                      </div>
-                                    )}
+                                    <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8 }}>
+                                      <div style={{ color: K.t3, fontWeight: 600, padding: "2px 2px" }}>HCP</div>
+                                      {Array.from({length:count},(_,i) => (
+                                        <input key={i} value={hcps[i] ?? ""} onChange={e => setDraft(p => { const hh=[...(p.hole_handicaps||Array(18).fill(0))]; hh[start+i]=e.target.value; return {...p,hole_handicaps:hh}; })}
+                                          style={{ background:"transparent", border:"none", color:K.t3, fontSize:9, textAlign:"center", width:"100%", padding:"2px 0" }} />
+                                      ))}
+                                      <div />
+                                    </div>
+                                    {(() => {
+                                      const activeTee = (draft.tee_boxes || [])[0];
+                                      const hy = activeTee?.hole_yards || [];
+                                      if (!hy.some(y => y > 0)) return null;
+                                      const yds = hy.slice(start, start+count);
+                                      const tot = yds.reduce((a,b) => a+(parseInt(b)||0), 0);
+                                      return (
+                                        <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8 }}>
+                                          <div style={{ color: K.t3, fontWeight: 600, padding: "2px 2px" }}>Yds</div>
+                                          {yds.map((y, i) => <div key={i} style={{ textAlign: "center", color: K.t3, padding: "2px 0", fontSize: 8 }}>{y || "–"}</div>)}
+                                          <div style={{ textAlign: "center", color: K.t3, padding: "2px 0", fontSize: 8 }}>{tot || ""}</div>
+                                        </div>
+                                      );
+                                    })()}
                                   </div>
                                 );
                               })}
                             </div>
-                          );
-                        };
-                        return (
-                          <CoursePreviewPortal>
-                          <div style={{ position: "fixed", inset: 0, background: "#00000088", zIndex: 200, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
-                            <div style={{ background: K.card, borderRadius: "18px 18px 0 0", width: "100%", maxWidth: 480, maxHeight: "88vh", overflowY: "auto", padding: "20px 18px 28px" }}>
-                              {/* Header */}
-                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
-                                <div>
-                                  <div style={{ fontWeight: 700, fontSize: 16, color: K.t1, marginBottom: 2 }}>{sbCourse.name}</div>
-                                  <div style={{ fontSize: 11, color: K.t3 }}>{[sbCourse.city, sbCourse.state].filter(Boolean).join(", ")} · Par {sbCourse.par} · Slope {sbCourse.slope}</div>
-                                </div>
-                                <span onClick={() => setLocalDbPrompt(null)} style={{ fontSize: 20, color: K.t3, cursor: "pointer", lineHeight: 1, padding: "0 4px" }}>✕</span>
-                              </div>
 
-                              {/* Local DB notice */}
-                              <div style={{ background: `${ac}12`, border: `1px solid ${ac}35`, borderRadius: 10, padding: "10px 14px", marginBottom: 16 }}>
-                                <div style={{ fontWeight: 700, fontSize: 12, color: ac, marginBottom: 4 }}>📁 Course exists in local database</div>
-                                <div style={{ fontSize: 11, color: K.t2 }}>
-                                  Last saved {formattedDate ? `on ${formattedDate}` : ""} by <strong>{updatedBy}</strong>
-                                </div>
-                                <div style={{ fontSize: 10, color: K.t3, marginTop: 2 }}>
-                                  {tbs.length} tee {tbs.length === 1 ? "box" : "boxes"}{tbs.length > 0 ? ` — ${tbs.map(t => t.name).join(", ")}` : ""}
-                                </div>
-                              </div>
-
-                              {/* Tee boxes preview */}
-                              {tbs.length > 0 && (
-                                <div style={{ marginBottom: 14 }}>
-                                  <div style={{ fontSize: 9, color: K.t3, fontWeight: 700, textTransform: "uppercase", marginBottom: 6 }}>Tee Boxes</div>
-                                  <div style={{ display: "grid", gridTemplateColumns: "14px 1fr 44px 38px 30px 46px", gap: "3px 4px", fontSize: 8, color: K.t3, fontWeight: 600, marginBottom: 3, paddingLeft: 2 }}>
-                                    <div/><div>Name</div><div style={{textAlign:"center"}}>Rating</div><div style={{textAlign:"center"}}>Slope</div><div style={{textAlign:"center"}}>Par</div><div style={{textAlign:"center"}}>Yards</div>
-                                  </div>
-                                  {tbs.map((tb, i) => (
-                                    <div key={i} style={{ display: "grid", gridTemplateColumns: "14px 1fr 44px 38px 30px 46px", gap: "3px 4px", marginBottom: 3, alignItems: "center", fontSize: 11 }}>
-                                      <TeeColorSwatch color={tb.color} name={tb.name} size={12} />
-                                      <div style={{ color: K.t1, fontWeight: 600 }}>{tb.name}</div>
-                                      <div style={{ textAlign: "center", color: K.t2 }}>{tb.rating}</div>
-                                      <div style={{ textAlign: "center", color: K.t2 }}>{tb.slope}</div>
-                                      <div style={{ textAlign: "center", color: K.t2 }}>{tb.par}</div>
-                                      <div style={{ textAlign: "center", color: K.t2 }}>{tb.yardage ? tb.yardage.toLocaleString() : "–"}</div>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-
-                              {/* Scorecard preview */}
-                              <div style={{ marginBottom: 16 }}>
-                                <div style={{ fontSize: 9, color: K.t3, fontWeight: 700, textTransform: "uppercase", marginBottom: 6 }}>Scorecard</div>
-                                <ScorecardPreview course={sbCourse} />
-                              </div>
-
-                              {/* Action buttons */}
-                              <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
-                                <button onClick={() => {
-                                  // Use local data — open preview with Firestore course
-                                  setLocalDbPrompt(null);
-                                  setCoursePreview({ ...sbCourse, _source: "WBC History" });
-                                }} style={{ flex: 1, padding: "12px 0", borderRadius: 10, background: ac, border: "none", color: "#0a1628", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
-                                  ✓ Use Local Data
-                                </button>
-                                <button onClick={async () => {
-                                  // Fetch fresh from API — run search and open preview with API data
-                                  setLocalDbPrompt(null);
-                                  setSearchLoading(true);
-                                  try {
-                                    const q = sbCourse.name;
-                                    const stateParam = sbCourse.state ? `&state=${encodeURIComponent(sbCourse.state)}` : "";
-                                    const [r1, r2] = await Promise.allSettled([
-                                      fetch(`/api/courses2?search=${encodeURIComponent(q)}${stateParam}`).then(r => r.json()),
-                                      fetch(`/api/courses?search=${encodeURIComponent(q)}`).then(r => r.json()),
-                                    ]);
-                                    const rapidRaw = r1.status === "fulfilled" ? r1.value : [];
-                                    const gcRaw = r2.status === "fulfilled" ? r2.value : [];
-                                    // Simple: find best match by name
-                                    const allApi = [...(Array.isArray(rapidRaw) ? rapidRaw : rapidRaw.courses || []), ...(Array.isArray(gcRaw) ? gcRaw : gcRaw.courses || [])];
-                                    const match = allApi.find(c => (c.name || c.club_name || "").toLowerCase().includes(q.toLowerCase().split(" ")[0]));
-                                    if (match) {
-                                      setCoursePreview({ ...sbCourse, ...match, id: sbCourse.id, _source: match.source || "API", _freshFetch: true });
-                                    } else {
-                                      // No API match — fall back to local
-                                      setCoursePreview({ ...sbCourse, _source: "WBC History" });
-                                    }
-                                  } catch {
-                                    setCoursePreview({ ...sbCourse, _source: "WBC History" });
-                                  }
-                                  setSearchLoading(false);
-                                }} style={{ flex: 1, padding: "12px 0", borderRadius: 10, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t2, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
-                                  🔄 Fetch Fresh
-                                </button>
-                              </div>
+                            {/* Action buttons */}
+                            <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+                              <button onClick={() => setCoursePreview(null)} style={{ flex: 1, padding: "10px 0", borderRadius: 8, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t3, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
+                              <button onClick={() => {
+                                const firstTee = draft.tee_boxes?.[0];
+                                const finalCourse = {
+                                  ...draft,
+                                  par: parseInt(firstTee?.par) || draft.par || 72,
+                                  slope: parseInt(firstTee?.slope) || draft.slope || 113,
+                                  rating: parseFloat(firstTee?.rating) || draft.rating || 72.0,
+                                  hole_pars: (draft.hole_pars||[]).map(v => parseInt(v)||4),
+                                  hole_handicaps: (draft.hole_handicaps||[]).map(v => parseInt(v)||0),
+                                  tee_boxes: (draft.tee_boxes||[]).map(tb => ({...tb, rating:parseFloat(tb.rating)||72.0, slope:parseInt(tb.slope)||113, par:parseInt(tb.par)||72, yardage:parseInt(tb.yardage)||0})),
+                                };
+                                addCourseToLibrary(finalCourse);
+                                setSearchResults(prev => prev.filter(r => r.id !== draft.id));
+                                setCoursePreview(null);
+                              }} style={{ flex: 2, padding: "10px 0", borderRadius: 8, background: ac, border: "none", color: K.bg, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>✓ Add Course</button>
                             </div>
                           </div>
-                          </CoursePreviewPortal>
-                        );
-                      })()}
+                        </div>
+                      </div>
+                      </CoursePreviewPortal>
+                    );
+                  })()}
+                <div style={{ fontSize: 9, color: K.t3, textAlign: "center", marginTop: 6 }}>Powered by GolfCourseAPI.com · 35,000+ courses</div>
+                    </div>
+                  )}
 
-                      {/* Course preview/confirm modal */}
-                      {coursePreview && (() => {
-                        const draft = coursePreview;
-                        const setDraft = fn => setCoursePreview(prev => fn(prev));
-                        const tbs = draft.tee_boxes || [];
-                        const hasConflict = !!draft._apiVersion;
-                        const ti = { background: K.bg, border: `1px solid ${ac}30`, borderRadius: 4, color: K.t1, fontSize: 9, textAlign: "center", width: "100%", padding: "3px 2px", boxSizing: "border-box" };
-                        const tiL = { ...ti, textAlign: "left", padding: "3px 5px" };
-                        return (
-                          <CoursePreviewPortal>
-                          <div style={{ position: "fixed", top: 0, bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.82)", zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-                            <div style={{ background: K.card, borderRadius: 16, border: `1px solid ${ac}40`, width: "100%", maxWidth: 420, maxHeight: "calc(100vh - 48px)", overflowY: "auto", padding: 0 }}>
+                  {/* Clearing the round is not the same as changing it, and it is
+                      rare — it lives at the bottom of the picker rather than
+                      taking a button slot next to Change and Edit. */}
+                  {assigned && (
+                    <button onClick={() => { setCourseForRound(editRound, { id: null, name: "" }); closePicker(); }}
+                      style={{ width: "100%", padding: "9px 0", background: "transparent", border: "none", borderTop: `1px solid ${K.bdr}`, color: K.t3, fontSize: 10, fontWeight: 700, cursor: "pointer" }}>
+                      Clear the course for Round {editRound}
+                    </button>
+                  )}
+                </>
+              );
+            })()}
 
-                              {/* Header */}
-                              <div style={{ padding: "14px 16px 10px", borderBottom: `1px solid ${K.bdr}`, position: "sticky", top: 0, background: K.card, zIndex: 1 }}>
-                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                                  <div style={{ flex: 1, marginRight: 8 }}>
-                                    <input value={draft.name} onChange={e => setDraft(p => ({...p, name: e.target.value}))}
-                                      style={{ background: "transparent", border: "none", borderBottom: `1px solid ${ac}40`, color: K.t1, fontSize: 14, fontWeight: 800, width: "100%", padding: "2px 0" }} />
-                                    <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
-                                      <input value={draft.city} onChange={e => setDraft(p => ({...p, city: e.target.value}))} placeholder="City"
-                                        style={{ ...tiL, fontSize: 10, flex: 1 }} />
-                                      <select value={draft.state} onChange={e => setDraft(p => ({...p, state: e.target.value}))}
-                                        style={{ ...ti, fontSize: 10, width: 52 }}>
-                                        <option value="">—</option>
-                                        {["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"].map(s => <option key={s} value={s}>{s}</option>)}
-                                      </select>
-                                    </div>
-                                  </div>
-                                  <button onClick={() => setCoursePreview(null)} style={{ background: "transparent", border: "none", color: K.t3, fontSize: 18, cursor: "pointer", lineHeight: 1 }}>✕</button>
-                                </div>
-
-                                {/* Source conflict banner */}
-                                {hasConflict && (() => {
-                                  const sbHasReal = draft._sbHasReal;
-                                  const apiHasReal = draft._apiHasReal;
-                                  const sbSlope = draft.tee_boxes?.find(t => parseInt(t.slope) !== 113)?.slope || draft.slope;
-                                  const apiSlope = draft._apiVersion?.tee_boxes?.find(t => parseInt(t.slope) !== 113)?.slope || draft._apiVersion?.slope;
-                                  const bothReal = sbHasReal && apiHasReal;
-                                  const bannerColor = bothReal ? "#d4a843" : "#5b9bd5";
-                                  const bannerMsg = bothReal
-                                    ? "⚡ Both sources have real slope data — review each and pick the most accurate:"
-                                    : "ℹ️ One source has real slope data — selecting the better one:";
-                                  return (
-                                    <div style={{ marginTop: 8, padding: "8px 10px", background: `${bannerColor}10`, border: `1px solid ${bannerColor}40`, borderRadius: 8 }}>
-                                      <div style={{ fontSize: 9, color: bannerColor, fontWeight: 700, marginBottom: 6 }}>{bannerMsg}</div>
-                                      <div style={{ display: "flex", gap: 6 }}>
-                                        <button onClick={() => setDraft(p => { const {_apiVersion, _sbHasReal, _apiHasReal, ...sb} = p; return sb; })}
-                                          style={{ flex: 1, padding: "6px 4px", borderRadius: 6, background: sbHasReal ? ac+"22" : "transparent", border: `1px solid ${sbHasReal ? ac : K.bdr}`, color: sbHasReal ? ac : K.t3, fontSize: 9, fontWeight: 700, cursor: "pointer", textAlign: "center" }}>
-                                          📦 WBC History
-                                          <div style={{ fontSize: 8, fontWeight: 400, color: K.t3, marginTop: 2 }}>{draft.tee_boxes?.length || 0} tees · Slope {sbSlope || "?"}</div>
-                                          {sbHasReal && <div style={{ fontSize: 7, color: ac, marginTop: 1 }}>✓ real data</div>}
-                                          {!sbHasReal && <div style={{ fontSize: 7, color: "#d4584580", marginTop: 1 }}>placeholder</div>}
-                                        </button>
-                                        <button onClick={() => setDraft(p => { const api = p._apiVersion; return { ...p, par: api.par, slope: api.slope, rating: api.rating, hole_pars: api.hole_pars, hole_handicaps: api.hole_handicaps, tee_boxes: api.tee_boxes, _apiVersion: undefined, _sbHasReal: undefined, _apiHasReal: undefined }; })}
-                                          style={{ flex: 1, padding: "6px 4px", borderRadius: 6, background: apiHasReal && !sbHasReal ? ac+"22" : "transparent", border: `1px solid ${apiHasReal ? ac : K.bdr}`, color: apiHasReal ? ac : K.t3, fontSize: 9, fontWeight: 700, cursor: "pointer", textAlign: "center" }}>
-                                          🌐 API (Fresh)
-                                          <div style={{ fontSize: 8, fontWeight: 400, color: K.t3, marginTop: 2 }}>{draft._apiVersion?.tee_boxes?.length || 0} tees · Slope {apiSlope || "?"}</div>
-                                          {apiHasReal && <div style={{ fontSize: 7, color: ac, marginTop: 1 }}>✓ real data</div>}
-                                          {!apiHasReal && <div style={{ fontSize: 7, color: "#d4584580", marginTop: 1 }}>placeholder</div>}
-                                        </button>
-                                      </div>
-                                      <div style={{ fontSize: 8, color: K.t3, marginTop: 5, fontStyle: "italic" }}>You can edit any field after selecting a source</div>
-                                    </div>
-                                  );
-                                })()}
-                                {!hasConflict && draft._incompleteData && (
-                                  <div style={{ marginTop: 8, padding: "8px 10px", background: "#d4584510", border: "1px solid #d4584540", borderRadius: 8, fontSize: 9, color: "#d45845" }}>
-                                    ⚠ Neither API has complete data for this course. Slope, rating, and tee boxes may be missing or inaccurate — please enter them manually before adding.
-                                  </div>
-                                )}
-                                {!hasConflict && !draft._incompleteData && (draft.tee_boxes?.length || 0) < 2 && (
-                                  <div style={{ marginTop: 8, padding: "8px 10px", background: "#d4a84310", border: "1px solid #d4a84340", borderRadius: 8, fontSize: 9, color: "#d4a843" }}>
-                                    ⚠ Only {draft.tee_boxes?.length || 0} tee box found — most courses have multiple tees. Tap <strong>+ Tee</strong> above to add Black, Blue, White, Red etc. with their ratings and slopes.
-                                  </div>
-                                )}
-                                {!hasConflict && !draft._incompleteData && (draft.tee_boxes?.length || 0) >= 2 && (
-                                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 6 }}>
-                                    <div style={{ fontSize: 9, color: K.t3, fontStyle: "italic" }}>Review and edit before adding — tap any field to change it</div>
-                                    {draft._source && <span style={{ fontSize: 8, background: `${ac}15`, border: `1px solid ${ac}30`, color: ac, borderRadius: 4, padding: "1px 6px", fontWeight: 600, flexShrink: 0 }}>{draft._source}</span>}
-                                    {!draft._source && <span style={{ fontSize: 8, background: "#88888815", border: "1px solid #88888830", color: K.t3, borderRadius: 4, padding: "1px 6px", fontWeight: 600, flexShrink: 0 }}>WBC History</span>}
-                                  </div>
-                                )}
-                              </div>
-
-                              <div style={{ padding: "12px 16px" }}>
-
-                                {/* Tee Boxes — fully editable */}
-                                <div style={{ marginBottom: 14 }}>
-                                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                                    <div style={{ fontSize: 9, color: K.t3, fontWeight: 700, textTransform: "uppercase" }}>Tee Boxes</div>
-                                    <button onClick={() => setDraft(p => ({ ...p, tee_boxes: [...(p.tee_boxes||[]), { name: "", color: "#888888", rating: 72.0, slope: 113, par: 72, yardage: 0 }] }))}
-                                      style={{ fontSize: 9, padding: "2px 7px", borderRadius: 4, background: "transparent", border: `1px solid ${ac}60`, color: ac, cursor: "pointer", fontWeight: 700 }}>+ Tee</button>
-                                  </div>
-                                  {tbs.length === 0 && <div style={{ fontSize: 10, color: K.warn, marginBottom: 8, fontStyle: "italic" }}>⚠ No tees from API — add them manually below</div>}
-                                  {/* Column headers */}
-                                  <div style={{ display: "grid", gridTemplateColumns: "18px 1fr 44px 38px 30px 46px 18px", gap: "3px 4px", fontSize: 8, color: K.t3, fontWeight: 600, marginBottom: 3, paddingLeft: 2 }}>
-                                    <div/><div>Name</div><div style={{textAlign:"center"}}>Rating</div><div style={{textAlign:"center"}}>Slope</div><div style={{textAlign:"center"}}>Par</div><div style={{textAlign:"center"}}>Yards</div><div/>
-                                  </div>
-                                  {tbs.map((tb, i) => (
-                                    <div key={i} style={{ display: "grid", gridTemplateColumns: "18px 1fr 44px 38px 30px 46px 18px", gap: "3px 4px", marginBottom: 4, alignItems: "center" }}>
-                                      <div style={{ position:"relative", width:18, height:18, flexShrink:0 }}>
-                                        <div style={{ position:"absolute", inset:0, pointerEvents:"none" }}><TeeColorSwatch color={tb.color} name={tb.name} size={18} style={{ borderRadius:3, width:"100%", height:"100%" }} /></div>
-                                        <select value={Object.entries(TEE_COLOR_MAP).find(([,v])=>v===(tb.color||""))?.[0] || "black"}
-                                          onChange={e => { const clr = TEE_COLOR_MAP[e.target.value] || "#888888"; setDraft(p => { const t=[...p.tee_boxes]; t[i]={...t[i],color:clr,name:t[i].name||e.target.value.charAt(0).toUpperCase()+e.target.value.slice(1)}; return {...p,tee_boxes:t}; }); }}
-                                          style={{ position:"absolute", inset:0, width:"100%", height:"100%", opacity:0, cursor:"pointer", fontSize:12 }}>
-                                          {[["Black","#2c2c2c"],["Blue","#2d8fd4"],["White","#e8e8e8"],["Gold","#d4a843"],["Red","#9b2335"],["Green","#2d8a4e"],["Silver","#a8b2bd"],["Yellow","#e6c619"],["Orange","#e67e22"],["Purple","#7b2d8b"],["Maroon","#6b1c2a"],["Teal","#1a8a7a"],["Platinum","#c0c0c0"]].map(([n])=><option key={n} value={n.toLowerCase()}>{n}</option>)}
-                                        </select>
-                                      </div>
-                                      <input value={tb.name} onChange={e => setDraft(p => { const t=[...p.tee_boxes]; t[i]={...t[i],name:e.target.value}; return {...p,tee_boxes:t}; })}
-                                        style={tiL} placeholder="Name" />
-                                      <input value={tb.rating} onChange={e => setDraft(p => { const t=[...p.tee_boxes]; t[i]={...t[i],rating:e.target.value}; return {...p,tee_boxes:t}; })}
-                                        style={ti} />
-                                      <input value={tb.slope} onChange={e => setDraft(p => { const t=[...p.tee_boxes]; t[i]={...t[i],slope:e.target.value}; return {...p,tee_boxes:t}; })}
-                                        style={ti} />
-                                      <input value={tb.par} onChange={e => setDraft(p => { const t=[...p.tee_boxes]; t[i]={...t[i],par:e.target.value}; return {...p,tee_boxes:t}; })}
-                                        style={ti} />
-                                      <input value={tb.yardage} onChange={e => setDraft(p => { const t=[...p.tee_boxes]; t[i]={...t[i],yardage:e.target.value}; return {...p,tee_boxes:t}; })}
-                                        style={ti} />
-                                      <button onClick={() => setDraft(p => ({...p, tee_boxes: p.tee_boxes.filter((_,j) => j!==i)}))}
-                                        style={{ background: "transparent", border: "none", color: K.t3, fontSize: 11, cursor: "pointer", padding: 0, lineHeight: 1 }}>✕</button>
-                                    </div>
-                                  ))}
-                                </div>
-
-                                {/* Scorecard — editable pars & handicaps */}
-                                <div style={{ marginBottom: 14 }}>
-                                  <div style={{ fontSize: 9, color: K.t3, fontWeight: 700, textTransform: "uppercase", marginBottom: 6 }}>Scorecard</div>
-                                  {(draft.hole_pars?.length === 0) && <div style={{ fontSize: 10, color: K.warn, marginBottom: 6, fontStyle: "italic" }}>⚠ No hole data from API — enter pars below</div>}
-                                  {[["Front", 0, 9], ["Back", 9, 9]].map(([lbl, start, count]) => {
-                                    const pars = (draft.hole_pars || Array(18).fill(4)).slice(start, start+count);
-                                    const hcps = (draft.hole_handicaps || Array(18).fill(0)).slice(start, start+count);
-                                    return (
-                                      <div key={lbl} style={{ marginBottom: 6 }}>
-                                        <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8 }}>
-                                          <div style={{ color: K.t3, fontWeight: 600, padding: "2px 0" }}>Hole</div>
-                                          {Array.from({length:count},(_,i) => <div key={i} style={{ textAlign:"center", color:K.t2, fontWeight:700, padding:"2px 0" }}>{start+i+1}</div>)}
-                                          <div style={{ textAlign:"center", color:K.t3, fontSize:7, padding:"2px 0" }}>Tot</div>
-                                        </div>
-                                        <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8, background: K.inp, borderRadius: 3, marginBottom: 1 }}>
-                                          <div style={{ color: K.t3, fontWeight: 600, padding: "3px 2px" }}>Par</div>
-                                          {Array.from({length:count},(_,i) => (
-                                            <input key={i} value={pars[i] ?? ""} onChange={e => setDraft(p => { const hp=[...(p.hole_pars||Array(18).fill(4))]; hp[start+i]=e.target.value; return {...p,hole_pars:hp}; })}
-                                              style={{ background:"transparent", border:"none", color:K.t1, fontSize:9, fontWeight:700, textAlign:"center", width:"100%", padding:"3px 0" }} />
-                                          ))}
-                                          <div style={{ textAlign:"center", color:ac, fontWeight:800, padding:"3px 0", fontSize:9 }}>{pars.reduce((a,b)=>a+(parseInt(b)||0),0)}</div>
-                                        </div>
-                                        <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8 }}>
-                                          <div style={{ color: K.t3, fontWeight: 600, padding: "2px 2px" }}>HCP</div>
-                                          {Array.from({length:count},(_,i) => (
-                                            <input key={i} value={hcps[i] ?? ""} onChange={e => setDraft(p => { const hh=[...(p.hole_handicaps||Array(18).fill(0))]; hh[start+i]=e.target.value; return {...p,hole_handicaps:hh}; })}
-                                              style={{ background:"transparent", border:"none", color:K.t3, fontSize:9, textAlign:"center", width:"100%", padding:"2px 0" }} />
-                                          ))}
-                                          <div />
-                                        </div>
-                                        {(() => {
-                                          const activeTee = (draft.tee_boxes || [])[0];
-                                          const hy = activeTee?.hole_yards || [];
-                                          if (!hy.some(y => y > 0)) return null;
-                                          const yds = hy.slice(start, start+count);
-                                          const tot = yds.reduce((a,b) => a+(parseInt(b)||0), 0);
-                                          return (
-                                            <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 30px`, gap: 1, fontSize: 8 }}>
-                                              <div style={{ color: K.t3, fontWeight: 600, padding: "2px 2px" }}>Yds</div>
-                                              {yds.map((y, i) => <div key={i} style={{ textAlign: "center", color: K.t3, padding: "2px 0", fontSize: 8 }}>{y || "–"}</div>)}
-                                              <div style={{ textAlign: "center", color: K.t3, padding: "2px 0", fontSize: 8 }}>{tot || ""}</div>
-                                            </div>
-                                          );
-                                        })()}
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-
-                                {/* Action buttons */}
-                                <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-                                  <button onClick={() => setCoursePreview(null)} style={{ flex: 1, padding: "10px 0", borderRadius: 8, background: "transparent", border: `1px solid ${K.bdr}`, color: K.t3, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
-                                  <button onClick={() => {
-                                    const firstTee = draft.tee_boxes?.[0];
-                                    const finalCourse = {
-                                      ...draft,
-                                      par: parseInt(firstTee?.par) || draft.par || 72,
-                                      slope: parseInt(firstTee?.slope) || draft.slope || 113,
-                                      rating: parseFloat(firstTee?.rating) || draft.rating || 72.0,
-                                      hole_pars: (draft.hole_pars||[]).map(v => parseInt(v)||4),
-                                      hole_handicaps: (draft.hole_handicaps||[]).map(v => parseInt(v)||0),
-                                      tee_boxes: (draft.tee_boxes||[]).map(tb => ({...tb, rating:parseFloat(tb.rating)||72.0, slope:parseInt(tb.slope)||113, par:parseInt(tb.par)||72, yardage:parseInt(tb.yardage)||0})),
-                                    };
-                                    addCourseToLibrary(finalCourse);
-                                    setSearchResults(prev => prev.filter(r => r.id !== draft.id));
-                                    setCoursePreview(null);
-                                  }} style={{ flex: 2, padding: "10px 0", borderRadius: 8, background: ac, border: "none", color: K.bg, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>✓ Add Course</button>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                          </CoursePreviewPortal>
-                        );
-                      })()}
-                    <div style={{ fontSize: 9, color: K.t3, textAlign: "center", marginTop: 6 }}>Powered by GolfCourseAPI.com · 35,000+ courses</div>
-                  </div>
-                )}
-              </div>
+            {/* ── ASSIGNED: tees, in the same card as the course they belong to ── */}
+            {assigned && !picking && (
+              <TeeAssigner activePlayers={activePlayers} tRounds={tRounds} courses={courses} teeData={teeData} setTeeBulk={setTeeBulk} finalizedRounds={finalizedRounds} editRound={editRound} teesSaved={teesSaved} onTeesSave={onTeesSave} teesModified={teesModified} onTeesModify={onTeesModify} />
             )}
           </div>
         );
@@ -5196,12 +5377,6 @@ function AdminView({ players, activePlayers, tournament, tPlayers, tRounds, cour
           </div>
         );
       })()}
-
-      {tab === "rounds" && (
-        <div style={{ marginTop: 14 }}>
-        <TeeAssigner activePlayers={activePlayers} tRounds={tRounds} courses={courses} teeData={teeData} setTeeBulk={setTeeBulk} finalizedRounds={finalizedRounds} editRound={editRound} teesSaved={teesSaved} onTeesSave={onTeesSave} teesModified={teesModified} onTeesModify={onTeesModify} />
-        </div>
-      )}
 
       {showFinalizeModal && (
         <div style={{ position: "fixed", top: 0, bottom: 0, left: 0, right: 0, background: "#00000090", zIndex: 200, display: "flex", alignItems: "flex-end", justifyContent: "center" }}
@@ -6406,7 +6581,7 @@ export default function WBCApp() {
         activePlayers.forEach(p => { bulk[p.id] = defaultTee.name; });
         setTeeData(prev => ({ ...prev, [rnd]: bulk }));
         const rows = activePlayers.map(p => ({ id: docIds.teeAssignment(_e(), rnd, p.id), tournament_id: TOURNAMENT_ID, round_number: rnd, player_id: p.id, tee_name: defaultTee.name }));
-        for (const row of rows) await db.upsert("tee_assignments", row);
+        await db.upsertMany("tee_assignments", rows);
       }
     }
   };
@@ -6646,7 +6821,7 @@ export default function WBCApp() {
   const setTeeBulk = async (rnd, assignments) => {
     setTeeData(prev => ({ ...prev, [rnd]: { ...(prev[rnd] || {}), ...assignments } }));
     const rows = Object.entries(assignments).map(([pid, teeName]) => ({ id: docIds.teeAssignment(_e(), rnd, pid), tournament_id: TOURNAMENT_ID, round_number: rnd, player_id: pid, tee_name: teeName }));
-    for (const row of rows) await db.upsert("tee_assignments", row);
+    await db.upsertMany("tee_assignments", rows);
   };
 
   // ── LOGIN ──
@@ -7022,14 +7197,14 @@ export default function WBCApp() {
       </div>
       )}
 
-      <div className="wbc-app-body" style={{ padding: (view === "leaderboard" || view === "admin") ? "14px 20px 0 20px" : "14px 20px", flex: 1, overflowY: "auto", overflowX: "hidden", display: (view === "leaderboard" || view === "admin") ? "flex" : "block", flexDirection: "column", minHeight: 0, paddingBottom: view === "leaderboard" ? "28px" : 0 }}>
+      <div className="wbc-app-body" style={{ padding: (view === "leaderboard" || view === "admin") ? "14px 20px 0 20px" : "14px 20px", flex: 1, overflowY: "auto", overflowX: "hidden", display: (view === "leaderboard" || view === "admin") ? "flex" : "block", flexDirection: "column", minHeight: 0, paddingBottom: (view === "leaderboard" || view === "admin") ? "28px" : 0 }}>
         {view === "leaderboard" && <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} />}
         <div style={{ display: view === "scoring" ? "block" : "none", paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
           <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeTimesData={teeTimesData} roundDates={roundDates} scoringOpen={scoringOpen} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={async (key, signerPid, signerName, present, rnd) => { const nonSigners = (present || []).filter(pid => pid !== signerPid); const autoFinal = nonSigners.length === 0; const optimistic = { signedBy: signerPid, signedByName: signerName, attestedBy: [], present: present || [] }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: optimistic })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), tournament_id: TOURNAMENT_ID, groupKey: key, round: rnd, signedBy: signerPid, signedByName: signerName, present: present || [], attestedBy: [], signedAt: new Date().toISOString() }); if (autoFinal) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onAttestScorecard={async (key, attesterPid, nonSigners) => { const cur = scorecardSigs[key]; if (!cur) return; const attestedBy = [...new Set([...(cur.attestedBy || []), attesterPid])]; const optimistic = { ...cur, attestedBy }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: { ...prev[key], attestedBy } })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), attestedBy }); const allDone = (nonSigners || []).every(pid => attestedBy.includes(pid)); if (allDone) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onUnsignScorecard={async key => { pendingSigsRef.current.delete(key); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); if (finalizedRounds[key]) { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); pendingSigsRef.current.delete(key); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); await saveTournamentState(nf); }} onGoToAdminCourses={(rnd) => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); setAdminSettingsRound(rnd || null); }} markPlayerWD={markPlayerWD} ctpData={ctpData} onSetCtp={onSetCtp} />
         </div>
         {view === "skins" && <SkinsCtpView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} />}
         {view === "groups" && <GroupsView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} pairingsData={pairingsData} teeTimesData={teeTimesData} getPlayerTee={getPlayerTee} user={user} />}
-        {view === "admin" && (user.isDirector ? <AdminView players={DEMO_PLAYERS} activePlayers={activePlayers} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
+        {view === "admin" && (user.isDirector ? <AdminView activePlayers={activePlayers} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
               setTeeTimesData(prev => {
                 const next = typeof updater === "function" ? updater(prev) : updater;
                 // Fire-and-forget: update tee times on pairings rows in Firestore
