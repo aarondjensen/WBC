@@ -194,9 +194,15 @@ export function SectionLabel({ children, color = K.t3, style }) {
 
 // ── Card ──
 // The standard bordered surface every admin panel is built from.
-export function Card({ children, style, pad = 14 }) {
+//
+// `ref` is taken as an ordinary prop and passed to the surface, which React 19
+// allows without forwardRef. It exists because a caller occasionally has to
+// bring a card into view — the Betting tab's director scrolls back to the
+// market book after picking a player's name out of a list further down — and
+// the alternative is wrapping the card in a bare div at each such call site.
+export function Card({ children, style, pad = 14, ref }) {
   return (
-    <div style={{
+    <div ref={ref} style={{
       background: K.card, borderRadius: R.lg, border: `1px solid ${K.bdr}`,
       padding: pad, ...style,
     }}>{children}</div>

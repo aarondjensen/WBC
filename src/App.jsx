@@ -2497,6 +2497,10 @@ function BettingView({
   const [bookWindow, setBookWindow] = useState(null);
   const [draft, setDraft] = useState(null);
   const [openHolder, setOpenHolder] = useState(null);
+  // The book lives above the holders list, so a director who taps Edit five
+  // rows down has to be taken back to it — otherwise the selector changes off
+  // screen and the tap looks like it did nothing.
+  const bookRef = useRef(null);
 
   // ── Who is playing for what ──
   const skinsField = fieldFor(sideGames?.skins?.in, players);
@@ -2587,6 +2591,19 @@ function BettingView({
   // ── The market tab ──
   const windows = marketWindows({ holeData, players, numRounds });
   const eventComplete = roundList.length > 0 && roundList.every(r => roundComplete(holeData, players, r));
+  // ── The market is SEALED until the tournament is over ──
+  // Everything a player could read another player's hand off — the board, the
+  // holders, the standing payout — is held back until every round is in.
+  //
+  // This is not modesty. The second window exists to let somebody buy a
+  // correction with two rounds of evidence, and being able to see the field's
+  // book before placing turns that into copying the consensus, or worse, into
+  // a coordinated block on the leader. A blind market is the game.
+  //
+  // The DIRECTOR sees it throughout, because somebody has to be able to fix a
+  // fat-fingered allocation and settle the thing at the end. What they see is
+  // marked as sealed so they know it is not what the field is looking at.
+  const sealed = !eventComplete && !user?.isDirector;
   // The leader, and whether that is a RESULT or a snapshot. Only a finished
   // event pays out; until then the same board is a projection and says so.
   const leader = (leaderboard || []).find(p => !p.isWD && !p.withdrew && p.roundsPlayed > 0) || null;
@@ -3144,7 +3161,7 @@ function BettingView({
               {bookPid === myPid ? "You are not in the market game." : "That player is not in the market game."}
             </Card>
           ) : (
-            <Card style={{ marginBottom: 10 }}>
+            <Card style={{ marginBottom: 10 }} ref={bookRef}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                 <SectionLabel style={{ marginBottom: 0, flex: 1 }}>
                   {bookPid === myPid ? "Your book" : `${players.find(p => p.id === bookPid)?.name || bookPid}'s book`}
@@ -3158,13 +3175,32 @@ function BettingView({
                   that died before the bell, and the only way a shut window can
                   still be written to. */}
               {user?.isDirector && (
-                <select
-                  value={bookPid}
-                  onChange={e => { setBookFor(e.target.value); setDraft(null); }}
-                  style={{ width: "100%", padding: "8px 12px", background: K.inp, border: `1px solid ${K.bdr}`, borderRadius: R.sm, color: K.t1, fontSize: FS.small, marginBottom: 8 }}
-                >
-                  {marketField.map(p => <option key={p.id} value={p.id}>{p.name}{p.id === myPid ? " (you)" : ""}</option>)}
-                </select>
+                <>
+                  <select
+                    value={bookPid}
+                    onChange={e => { setBookFor(e.target.value); setDraft(null); }}
+                    style={{ width: "100%", padding: "8px 12px", background: K.inp, border: `1px solid ${K.bdr}`, borderRadius: R.sm, color: K.t1, fontSize: FS.small, marginBottom: 8 }}
+                  >
+                    {marketField.map(p => <option key={p.id} value={p.id}>{p.name}{p.id === myPid ? " (you)" : ""}</option>)}
+                  </select>
+                  {/* A director editing somebody else's bet is a real act with
+                      real money behind it, so the screen says whose book is
+                      open rather than letting a changed dropdown be the only
+                      sign of it. */}
+                  {bookPid !== myPid && (
+                    <div style={{ fontSize: FS.label, color: K.warn, marginBottom: 8, lineHeight: 1.5 }}>
+                      Editing {players.find(p => p.id === bookPid)?.name || bookPid}&apos;s shares as director.
+                    </div>
+                  )}
+                  {/* And placing into a window the field can no longer touch is
+                      a second thing again — worth saying out loud, because it
+                      is the one edit nobody else could have made. */}
+                  {!win.open && (
+                    <div style={{ fontSize: FS.label, color: K.warn, marginBottom: 8, lineHeight: 1.5 }}>
+                      This window is shut to the field. You are placing on the director&apos;s override.
+                    </div>
+                  )}
+                </>
               )}
 
               {windows.mid.exists !== false && (
@@ -3233,10 +3269,23 @@ function BettingView({
           {/* ── The market ── */}
           {board.length === 0
             ? empty("📈", "Nothing placed yet", `Everybody in gets ${MARKET_OPENING_SHARES} shares before the tournament starts, and ${MARKET_MID_SHARES} more once the halfway round is in. The pot splits between whoever is holding the winner.`)
-            : (
+            : sealed ? (
+              // What is safe to show through the seal: how big the market is,
+              // never how it is positioned. A player can see that the field
+              // has bet, and their own book above it, and nothing else.
+              <Card style={{ marginBottom: 10, textAlign: "center", padding: "28px 20px" }}>
+                <div style={{ fontSize: FS.display, marginBottom: 10, opacity: 0.5 }}>🔒</div>
+                <div style={{ fontSize: FS.lead, fontWeight: 700, color: K.t1, marginBottom: 6 }}>The book is sealed</div>
+                <div style={{ fontSize: FS.small, color: K.t3, maxWidth: 300, lineHeight: 1.5, margin: "0 auto" }}>
+                  {board.reduce((a, b) => a + b.shares, 0)} shares are placed across {holders.length} {holders.length === 1 ? "player" : "players"}.
+                  Who is holding whom opens when the tournament is over — betting blind is the game.
+                </div>
+              </Card>
+            ) : (
               <div style={{ background: K.card, borderRadius: R.lg, border: `1px solid ${K.bdr}`, marginBottom: 10, overflow: "hidden" }}>
                 <div style={{ display: "flex", padding: "8px 14px", borderBottom: `1px solid ${K.bdr}`, fontSize: FS.label, fontWeight: 700, color: K.gold, letterSpacing: 1 }}>
                   <span style={{ flex: 1 }}>THE MARKET</span>
+                  {!eventComplete && <span style={{ color: K.warn, marginRight: 8 }}>🔒 SEALED</span>}
                   <span style={{ color: K.t3 }}>SHARES · IF THEY WIN</span>
                 </div>
                 {board.map(r => {
@@ -3261,7 +3310,9 @@ function BettingView({
             )}
 
           {/* ── The payout ── */}
-          {winnerId && board.length > 0 && (
+          {/* Names and share counts, so it is sealed on the same terms as the
+              board — a standing payout is the board read backwards. */}
+          {winnerId && board.length > 0 && !sealed && (
             <div style={{ background: K.card, borderRadius: R.lg, border: `1px solid ${eventComplete ? K.gold + ALPHA.line : K.bdr}`, marginBottom: 10, overflow: "hidden" }}>
               <div style={{ padding: "8px 14px", borderBottom: `1px solid ${K.bdr}`, fontSize: FS.label, fontWeight: 700, color: K.gold, letterSpacing: 1 }}>
                 {eventComplete ? "PAYOUT" : "IF IT ENDED NOW"}
@@ -3287,7 +3338,7 @@ function BettingView({
           )}
 
           {/* ── Who is holding what ── */}
-          {holders.length > 0 && (
+          {holders.length > 0 && !sealed && (
             <Card style={{ marginBottom: 10 }}>
               <SectionLabel style={{ marginBottom: 8 }}>Holders</SectionLabel>
               {holders.map(h => {
@@ -3310,6 +3361,20 @@ function BettingView({
                             <span style={{ fontWeight: 700, color: K.t1 }}>{l.shares}</span>
                           </div>
                         ))}
+                        {/* The correction path, at the point the mistake is
+                            spotted. Reading a wrong allocation and then having
+                            to scroll back up and find the name in a dropdown
+                            is how the wrong man gets edited. */}
+                        {user?.isDirector && (
+                          <Btn variant="secondary" size="sm" style={{ marginTop: 6 }}
+                            onClick={() => {
+                              setBookFor(h.pid);
+                              setBookWindow(null);
+                              setDraft(null);
+                              bookRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                            }}
+                          >Edit these shares</Btn>
+                        )}
                       </div>
                     )}
                   </div>
