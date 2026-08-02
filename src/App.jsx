@@ -5,7 +5,7 @@ import { readMembership, isDirectorAccount, resolveMember, joinWithCode, readAcc
 import { K, ON_ACC, FS, fsStep, R, ALPHA, MOTION, FONT, SHADOW, SCRIM } from "./theme";
 import { SegmentedToggle, StickyTop, SectionLabel, Card, Toast, Btn } from "./components/ui";
 import { calcCH, buildStrokesMap, computeIndividualBoard, rankIndividualBoard, rankIndividualBoardIds, WD_SCORE } from "./lib/individualBoard";
-import { fieldFor, potFor, computeSkins, allSkins, skinCounts } from "./lib/sideGames";
+import { fieldFor, potFor, perUnit, computeSkins, allSkins, skinCounts } from "./lib/sideGames";
 import {
   MARKET_OPENING_SHARES, MARKET_MID_SHARES, marketWindows, normalizeLots, totalShares,
   sharesOn, setLotShares, lotsFor, allLots, marketBoard, marketHoldings, marketPayouts, roundComplete,
@@ -2561,7 +2561,7 @@ function BettingView({
   const won = allSkins({ players: skinsField, holeData, rounds: roundList, roundSetup: skinsSetup });
   const skinTotals = skinCounts(won);
   const totalSkinsWon = won.length;
-  const perSkin = totalSkinsWon > 0 ? skinsPot / totalSkinsWon : 0;
+  const perSkin = perUnit(skinsPot, totalSkinsWon);
   const shownSkins = computeSkins({ players: skinsField, holeData, round: shownRound, ...skinsSetup(shownRound) });
 
   // ── The CTP tab ──
@@ -2587,6 +2587,12 @@ function BettingView({
     // players would use themselves.
     .sort((a, b) => b.count - a.count || (a.best ?? Infinity) - (b.best ?? Infinity));
   const noPar3s = roundList.every(r => par3sFor(r).length === 0);
+  // Every par 3 in the tournament, which is what the pot divides by — see
+  // perUnit. It counts the holes on the courses as they are ASSIGNED, so a
+  // round with no course yet contributes nothing and the per-pin figure
+  // settles as the schedule fills in.
+  const par3Count = roundList.reduce((n, r) => n + par3sFor(r).length, 0);
+  const perPin = perUnit(ctpPot, par3Count);
 
   // ── The market tab ──
   const windows = marketWindows({ holeData, players, numRounds });
@@ -3008,8 +3014,8 @@ function BettingView({
                 {(ctpPot > 0 || user?.isDirector) && potCard({
                   label: "CTP POT", pot: ctpPot,
                   summary: `${ctpField.length} IN${(sideGames?.ctp?.amount || 0) > 0 ? ` · $${sideGames.ctp.amount} EACH` : ""}`,
-                  rightTop: `${ctpTags.length} pin${ctpTags.length !== 1 ? "s" : ""} taken`,
-                  rightBottom: `${money(ctpTags.length > 0 ? ctpPot / ctpTags.length : 0)} / pin`,
+                  rightTop: `${ctpTags.length} of ${par3Count} pin${par3Count !== 1 ? "s" : ""} taken`,
+                  rightBottom: `${money(perPin)} / pin`,
                 })}
 
                 {/* Where skins print money, this prints the closest the player
@@ -3017,8 +3023,11 @@ function BettingView({
                 {leadersCard("CTP LEADERS", ctpLeaders.map(({ pid, count, best }) => ({
                   key: pid,
                   name: players.find(p => p.id === pid)?.name || pid,
-                  mid: `${count} CTP${count !== 1 ? "s" : ""}`,
-                  right: best != null ? `${best} ft` : "—",
+                  // The closest shot all week rides with the count rather than
+                  // in its own column: it is the tiebreak between two men on
+                  // the same number of pins, so it belongs beside that number.
+                  mid: `${count} CTP${count !== 1 ? "s" : ""}${best != null ? ` · ${best} ft` : ""}`,
+                  right: money(count * perPin),
                 })))}
 
                 {roundPills(ctpShownRound, setCtpRound)}

@@ -34,6 +34,24 @@ export const fieldFor = (ids, players) =>
 export const potFor = ({ amount, count, typed = 0 }) =>
   (amount || 0) > 0 ? (amount || 0) * (count || 0) : (typed || 0);
 
+// What one unit of a pot is worth. Zero units is the empty pot, not a
+// division by zero.
+//
+// The subtlety is entirely in what the caller passes as `units`, and the two
+// side games answer it differently on purpose:
+//
+//   SKINS divide by the skins actually WON, because that number cannot be
+//   known in advance — every tie pushes a hole out of the count, so the value
+//   of a skin moves all week and is only final when the last card is in.
+//
+//   CTP divides by the par 3s that EXIST. The holes are on the scorecard
+//   before anybody tees off, so the value of a pin is fixed from the start
+//   and a hole nobody claims is simply a pin nobody won. Dividing by the pins
+//   TAKEN would have made every unclaimed hole quietly inflate the others,
+//   so a player who won a pin on Friday would find it worth less each time
+//   somebody else took one.
+export const perUnit = (pot, units) => ((units || 0) > 0 ? (pot || 0) / units : 0);
+
 // ── The collection sheet ───────────────────────────────────────────
 // One table instead of one panel per game. The director's actual job on a
 // Friday morning is not "configure the skins game" — it is standing in a car
