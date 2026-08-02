@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { fieldFor, potFor, computeSkins, allSkins, skinCounts } from "./sideGames";
+import { fieldFor, potFor, computeSkins, allSkins, skinCounts, buyInSheet, toggleIn } from "./sideGames";
 import { WD_SCORE } from "./individualBoard";
 
 const players = [
@@ -106,5 +106,74 @@ describe("allSkins / skinCounts", () => {
 
   it("counts nothing before anybody plays", () => {
     expect(skinCounts(allSkins({ players, holeData: {}, rounds: [1], roundSetup }))).toEqual({});
+  });
+});
+
+describe("buyInSheet", () => {
+  const games = [
+    { key: "skins", amount: 20, ids: null },
+    { key: "ctp", amount: 10, ids: null },
+    { key: "market", amount: 25, ids: ["a", "b"] },
+    { key: "rebuy", amount: 25, ids: ["a"] },
+  ];
+
+  it("adds up what each man owes across every buy-in", () => {
+    const { rows } = buyInSheet({ players, games });
+    expect(rows.map(r => [r.name, r.owes])).toEqual([["Aaron", 80], ["Brad", 55], ["Cole", 30]]);
+  });
+
+  it("says which games each player is in", () => {
+    const { rows } = buyInSheet({ players, games });
+    expect(rows[2].games).toEqual({ skins: true, ctp: true, market: false, rebuy: false });
+  });
+
+  it("totals each game's count and money", () => {
+    const { totals } = buyInSheet({ players, games });
+    expect(totals.skins).toMatchObject({ count: 3, amount: 60, all: true, none: false });
+    expect(totals.rebuy).toMatchObject({ count: 1, amount: 25, all: false, none: false });
+  });
+
+  it("reads a never-configured list as everybody, not as an empty column", () => {
+    const { totals } = buyInSheet({ players, games: [{ key: "skins", amount: 20, ids: null }] });
+    expect(totals.skins.all).toBe(true);
+  });
+
+  it("reads an empty list as nobody", () => {
+    const { totals, grand } = buyInSheet({ players, games: [{ key: "skins", amount: 20, ids: [] }] });
+    expect(totals.skins).toMatchObject({ count: 0, all: false, none: true });
+    expect(grand).toBe(0);
+  });
+
+  it("gives the grand total the director counts cash against", () => {
+    expect(buyInSheet({ players, games }).grand).toBe(165);
+  });
+
+  it("survives a game with no price set", () => {
+    const { rows, grand } = buyInSheet({ players, games: [{ key: "skins", ids: null }] });
+    expect(rows[0].owes).toBe(0);
+    expect(grand).toBe(0);
+  });
+
+  it("is empty with no roster", () => {
+    expect(buyInSheet({ players: [], games }).rows).toEqual([]);
+    expect(buyInSheet({ players: [], games }).totals.skins.all).toBe(false);
+  });
+});
+
+describe("toggleIn", () => {
+  it("materialises a never-configured list before removing anybody", () => {
+    // The trap this exists to avoid: returning [] here would read straight
+    // back as "nobody configured it, so everybody is in" — putting the player
+    // back into the game they were just taken out of.
+    expect(toggleIn(null, players, "b")).toEqual(["a", "c"]);
+  });
+  it("adds a player who is out", () => {
+    expect(toggleIn(["a"], players, "c")).toEqual(["a", "c"]);
+  });
+  it("removes a player who is in", () => {
+    expect(toggleIn(["a", "c"], players, "a")).toEqual(["c"]);
+  });
+  it("can empty a list completely", () => {
+    expect(toggleIn(["a"], players, "a")).toEqual([]);
   });
 });

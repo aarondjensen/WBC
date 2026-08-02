@@ -9,8 +9,9 @@ import { fieldFor, potFor, computeSkins, allSkins, skinCounts } from "./lib/side
 import {
   MARKET_OPENING_SHARES, MARKET_MID_SHARES, marketWindows, normalizeLots, totalShares,
   sharesOn, setLotShares, lotsFor, allLots, marketBoard, marketHoldings, marketPayouts, roundComplete,
+  eligibleBets,
 } from "./lib/market";
-import { BuyInEditor } from "./components/BuyIns";
+import { BuyInTracker } from "./components/BuyIns";
 import { useConfirm } from "./lib/useConfirm";
 import { useDirtyForm } from "./lib/useDirtyForm";
 import { usePullToRefresh, hasNewBundle } from "./lib/usePullToRefresh";
@@ -393,7 +394,22 @@ const rowsToMarket = (rows) =>
 // present whether or not the document carries it. `in` stays NULLISH when it
 // has never been set — that is what "everybody" is — so this fills in the
 // shape and deliberately does not fill in that answer.
-const SIDE_GAME_KEYS = ["skins", "ctp", "market"];
+//
+// `rebuy` is the market's halfway window, and it is a BUY-IN of its own
+// rather than a free top-up on the market seat: about half the field takes
+// it, its money goes into the same market pot, and its ten shares only exist
+// for the players who paid. Keeping it as a fourth game is what lets the
+// collection sheet ask about it in a column instead of the director holding
+// "and also these six rebought" in their head.
+const SIDE_GAME_KEYS = ["skins", "ctp", "market", "rebuy"];
+// The order and the wording the Betting tab's collection sheet uses. `short`
+// has to fit a 38px column on a phone.
+const SIDE_GAME_LABELS = {
+  skins:  { label: "Skins",           short: "SKIN" },
+  ctp:    { label: "Closest to Pin",  short: "CTP" },
+  market: { label: "Market",          short: "MKT" },
+  rebuy:  { label: "Market rebuy",    short: "RE" },
+};
 const mergeSideGames = (raw) => {
   const out = {};
   SIDE_GAME_KEYS.forEach(k => {
@@ -2461,7 +2477,11 @@ function BettingView({
   // mean opening one tab silently rearranged the other.
   const [skinsRound, setSkinsRound] = useState(null);
   const [ctpRound, setCtpRound] = useState(null);
-  const [editBuyIns, setEditBuyIns] = useState(null); // "skins" | "ctp" | "market" | null
+  // ONE buy-in sheet, opened from any of the three pot cards. It used to be a
+  // drawer per game, which meant the director's real job — working out what
+  // each man owes across all four buy-ins — was four panels and a running
+  // total held in their head.
+  const [showBuyIns, setShowBuyIns] = useState(false);
   const [editPot, setEditPot] = useState(false);
   const [potInput, setPotInput] = useState("");
   // Director CTP override — hole currently being edited, plus the pending winner/feet.
@@ -2480,13 +2500,23 @@ function BettingView({
   const skinsField = fieldFor(sideGames?.skins?.in, players);
   const ctpField = fieldFor(sideGames?.ctp?.in, players);
   const marketField = fieldFor(sideGames?.market?.in, players);
+  // The halfway rebuy is its own buy-in — see SIDE_GAME_KEYS. A player can
+  // only rebuy into a game they are in, so the field is the intersection:
+  // "everybody rebought" cannot quietly let somebody who never bought a
+  // market seat in the first place hold ten shares.
+  const rebuyField = fieldFor(sideGames?.rebuy?.in, marketField);
   const ctpInSet = new Set(ctpField.map(p => p.id));
   const marketInSet = new Set(marketField.map(p => p.id));
+  const rebuyInSet = new Set(rebuyField.map(p => p.id));
 
   const skinsCounted = (sideGames?.skins?.amount || 0) > 0;
   const skinsPot = potFor({ amount: sideGames?.skins?.amount, count: skinsField.length, typed: sideGames?.skins?.pot });
   const ctpPot = potFor({ amount: sideGames?.ctp?.amount, count: ctpField.length });
-  const marketPot = potFor({ amount: sideGames?.market?.amount, count: marketField.length });
+  // Both buy-ins land in ONE pot. The rebuy is more money on the same game,
+  // not a second game — which is exactly why the ten shares it buys dilute
+  // the twenty everybody already holds.
+  const marketPot = potFor({ amount: sideGames?.market?.amount, count: marketField.length })
+    + potFor({ amount: sideGames?.rebuy?.amount, count: rebuyField.length });
 
   // ── Which round a tab lands on ──
   // The most recent round anybody has actually played, which is not the same
@@ -2570,7 +2600,12 @@ function BettingView({
   // event pays out; until then the same board is a projection and says so.
   const leader = (leaderboard || []).find(p => !p.isWD && !p.withdrew && p.roundsPlayed > 0) || null;
   const winnerId = leader?.id || null;
-  const bets = marketBets.filter(b => marketInSet.has(b.pid));
+  // Mid lots only count for the players who rebought — see eligibleBets.
+  const bets = eligibleBets({
+    bets: marketBets,
+    inMarket: pid => marketInSet.has(pid),
+    inRebuy: pid => rebuyInSet.has(pid),
+  });
   const board = marketBoard({ bets, players, pot: marketPot });
   const holders = marketHoldings({ bets, players });
   const payouts = marketPayouts({ bets, winnerId, pot: marketPot });
@@ -2586,8 +2621,14 @@ function BettingView({
   const activeWindow = bookWindow
     || (windows.opening.open ? "opening" : windows.mid.open ? "mid" : "opening");
   const win = activeWindow === "mid" ? windows.mid : windows.opening;
+  // The halfway ten belong to whoever paid for them. Somebody who did not
+  // rebuy sees the window and what it would have cost them, and cannot place
+  // into it — including the director, whose override is over the CLOCK, not
+  // over who has handed money across.
+  const rebought = !!bookPid && rebuyInSet.has(bookPid);
+  const paidFor = activeWindow === "mid" ? rebought : true;
   // The director can place into a shut window; nobody else can.
-  const canPlace = !!bookPid && marketInSet.has(bookPid) && (win.open || !!user?.isDirector);
+  const canPlace = !!bookPid && marketInSet.has(bookPid) && paidFor && (win.open || !!user?.isDirector);
   const draftLots = draft && draft.pid === bookPid && draft.window === activeWindow
     ? draft.lots
     : lotsFor(bookBet, activeWindow);
@@ -2628,13 +2669,17 @@ function BettingView({
 
   // ── The pot card ──
   // The same card for all three games: what is in the pot on the left, what a
-  // unit of it is worth on the right, and the director's buy-in drawer under
+  // unit of it is worth on the right, and the way into the buy-in sheet under
   // it. `typed` opts skins into its inline pot editor — it is the only game
   // with a hand-entered pot to preserve, because it is the one WBC was already
   // playing before any of this existed.
-  const potCard = ({ game, label, pot, rightTop, rightBottom, field, typed = false }) => (
+  //
+  // All three cards open the SAME sheet. The buy-ins were never really three
+  // lists; they were one table the director was being made to read a column
+  // at a time.
+  const potCard = ({ label, pot, rightTop, rightBottom, summary, typed = false }) => (
     <>
-      <div style={{ background: K.card, borderRadius: R.lg, marginBottom: editBuyIns === game ? 0 : 10, border: `1px solid ${K.bdr}`, overflow: "hidden" }}>
+      <div style={{ background: K.card, borderRadius: R.lg, marginBottom: showBuyIns ? 0 : 10, border: `1px solid ${K.bdr}`, overflow: "hidden" }}>
         <div style={{ padding: "12px 14px", display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: FS.label, color: K.t3, fontWeight: 700, letterSpacing: 1 }}>{label}</div>
@@ -2668,24 +2713,27 @@ function BettingView({
         </div>
         {user?.isDirector && (
           <div
-            onClick={() => setEditBuyIns(v => (v === game ? null : game))}
+            onClick={() => setShowBuyIns(v => !v)}
             style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "8px 14px", borderTop: `1px solid ${K.bdr}` }}
           >
             <span style={{ flex: 1, fontSize: FS.label, fontWeight: 700, color: K.t3, letterSpacing: 0.6 }}>
-              {field.length} IN{(sideGames?.[game]?.amount || 0) > 0 ? ` · $${sideGames[game].amount} EACH` : ""}
+              {summary}
             </span>
             <span style={{ fontSize: FS.label, fontWeight: 700, color: K.acc, letterSpacing: 0.6 }}>
-              BUY-INS {editBuyIns === game ? "▾" : "▸"}
+              BUY-INS {showBuyIns ? "▾" : "▸"}
             </span>
           </div>
         )}
       </div>
-      {user?.isDirector && editBuyIns === game && (
-        <BuyInEditor
+      {user?.isDirector && showBuyIns && (
+        <BuyInTracker
           players={players}
-          amount={sideGames?.[game]?.amount || 0}
-          ids={sideGames?.[game]?.in ?? null}
-          onChange={patch => onUpdateSideGames(game, "amount" in patch ? { amount: patch.amount } : { in: patch.ids })}
+          games={SIDE_GAME_KEYS.map(k => ({
+            key: k, ...SIDE_GAME_LABELS[k],
+            amount: sideGames?.[k]?.amount || 0,
+            ids: sideGames?.[k]?.in ?? null,
+          }))}
+          onChange={onUpdateSideGames}
         />
       )}
     </>
@@ -2872,7 +2920,8 @@ function BettingView({
       {tab === "skins" && (
         <div>
           {potCard({
-            game: "skins", label: "SKINS POT", pot: skinsPot, field: skinsField, typed: true,
+            label: "SKINS POT", pot: skinsPot, typed: true,
+            summary: `${skinsField.length} IN${skinsCounted ? ` · $${sideGames.skins.amount} EACH` : ""}`,
             rightTop: `${totalSkinsWon} skin${totalSkinsWon !== 1 ? "s" : ""} won`,
             rightBottom: `${money(perSkin)} / skin`,
           })}
@@ -2931,7 +2980,8 @@ function BettingView({
                     a tournament whose director has not set a CTP buy-in. The
                     director keeps it either way; it is where they set one. */}
                 {(ctpPot > 0 || user?.isDirector) && potCard({
-                  game: "ctp", label: "CTP POT", pot: ctpPot, field: ctpField,
+                  label: "CTP POT", pot: ctpPot,
+                  summary: `${ctpField.length} IN${(sideGames?.ctp?.amount || 0) > 0 ? ` · $${sideGames.ctp.amount} EACH` : ""}`,
                   rightTop: `${ctpTags.length} pin${ctpTags.length !== 1 ? "s" : ""} taken`,
                   rightBottom: `${money(ctpTags.length > 0 ? ctpPot / ctpTags.length : 0)} / pin`,
                 })}
@@ -3041,7 +3091,10 @@ function BettingView({
       {tab === "market" && (
         <div>
           {potCard({
-            game: "market", label: "MARKET POT", pot: marketPot, field: marketField,
+            label: "MARKET POT", pot: marketPot,
+            // Two buy-ins in one pot, so the summary names both counts — the
+            // rebuy is the one the director is still chasing at the turn.
+            summary: `${marketField.length} IN · ${rebuyField.length} REBOUGHT`,
             rightTop: `${board.reduce((a, b) => a + b.shares, 0)} share${board.reduce((a, b) => a + b.shares, 0) !== 1 ? "s" : ""} placed`,
             rightBottom: `${holders.length} holder${holders.length !== 1 ? "s" : ""}`,
           })}
@@ -3061,6 +3114,15 @@ function BettingView({
                 </div>
                 <div style={{ fontSize: FS.small, fontWeight: 700, color: K.t1, marginTop: 2 }}>{w.label}</div>
                 <div style={{ fontSize: FS.label, color: w.open ? K.acc : K.t3, marginTop: 2, lineHeight: 1.4 }}>{w.note}</div>
+                {/* The halfway window is a second buy-in, so its chip says how
+                    many people are actually in it. Without that line it reads
+                    as ten free shares for the field. */}
+                {w.key === "mid" && (
+                  <div style={{ fontSize: FS.label, color: K.t3, marginTop: 4, lineHeight: 1.4 }}>
+                    {rebuyField.length} of {marketField.length} rebought
+                    {(sideGames?.rebuy?.amount || 0) > 0 ? ` · $${sideGames.rebuy.amount}` : ""}
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -3076,8 +3138,11 @@ function BettingView({
                 <SectionLabel style={{ marginBottom: 0, flex: 1 }}>
                   {bookPid === myPid ? "Your book" : `${players.find(p => p.id === bookPid)?.name || bookPid}'s book`}
                 </SectionLabel>
-                <span style={{ fontSize: FS.small, fontWeight: 800, color: remaining > 0 ? K.acc : K.t3 }}>
-                  {remaining} of {win.shares} left
+                {/* Shares left to place — but not on a window that was never
+                    bought: "10 of 10 left" reads as an invitation, and this
+                    one is not one. */}
+                <span style={{ fontSize: FS.small, fontWeight: 800, color: !paidFor ? K.t3 : remaining > 0 ? K.acc : K.t3 }}>
+                  {!paidFor ? "not bought" : `${remaining} of ${win.shares} left`}
                 </span>
               </div>
 
@@ -3099,14 +3164,23 @@ function BettingView({
                   compact
                   style={{ marginBottom: 8 }}
                   options={[["opening", `Opening · ${totalShares(lotsFor(bookBet, "opening"))}/${MARKET_OPENING_SHARES}`],
-                            ["mid", `${windows.mid.label} · ${totalShares(lotsFor(bookBet, "mid"))}/${MARKET_MID_SHARES}`]]}
+                            ["mid", rebought
+                              ? `${windows.mid.label} · ${totalShares(lotsFor(bookBet, "mid"))}/${MARKET_MID_SHARES}`
+                              : `${windows.mid.label} · no rebuy`]]}
                   value={activeWindow}
                   onChange={k => { setBookWindow(k); setDraft(null); }}
                 />
               )}
 
+              {/* Two different reasons this can be read-only, and they need
+                  different sentences: the window is shut (wait, or you missed
+                  it), or the rebuy was never paid (this is not your window). */}
               {!canPlace && (
-                <div style={{ fontSize: FS.label, color: K.t3, marginBottom: 8, lineHeight: 1.5 }}>{win.note}</div>
+                <div style={{ fontSize: FS.label, color: K.t3, marginBottom: 8, lineHeight: 1.5 }}>
+                  {!paidFor
+                    ? `${bookPid === myPid ? "You did" : "They did"} not buy back in${(sideGames?.rebuy?.amount || 0) > 0 ? ` ($${sideGames.rebuy.amount})` : ""}, so these ${MARKET_MID_SHARES} are not ${bookPid === myPid ? "yours" : "theirs"} to place. The opening ${MARKET_OPENING_SHARES} still stand.`
+                    : win.note}
+                </div>
               )}
 
               <div style={{ display: "flex", flexDirection: "column" }}>
@@ -6721,6 +6795,7 @@ export default function WBCApp() {
     skins: { amount: 0, in: null, pot: 0 },
     ctp: { amount: 0, in: null },
     market: { amount: 0, in: null },
+    rebuy: { amount: 0, in: null },
   });
   const [pairingsData, setPairingsData] = useState({});
   const [teeData, setTeeData] = useState({});
@@ -7673,19 +7748,27 @@ export default function WBCApp() {
   };
 
   // ── The side games' money ────────────────────────────────────────
-  // A MERGE of only the named game, deliberately: writing the whole shape
+  // A MERGE of only the named fields, deliberately: writing the whole shape
   // every time would materialise `in: null` as a stored field and destroy the
   // distinction between "never configured" (everybody) and "nobody in".
   // Firestore's setDoc(merge:true) merges maps field by field, so patching
   // { skins: { in: [...] } } leaves the skins buy-in price alone.
   //
+  // Takes a PATCH SET keyed by game — { skins: {...}, ctp: {...} } — because
+  // the collection sheet's row toggle changes all four games at once, and
+  // four writes for one tap is four chances for half of them to land.
+  //
   // Applied locally first so sixteen taps down a roster feel immediate.
-  const onUpdateSideGames = async (game, patch) => {
-    setSideGames(prev => ({ ...prev, [game]: { ...prev[game], ...patch } }));
+  const onUpdateSideGames = async (patchByGame) => {
+    setSideGames(prev => {
+      const next = { ...prev };
+      Object.entries(patchByGame).forEach(([k, patch]) => { next[k] = { ...next[k], ...patch }; });
+      return next;
+    });
     await db.upsert("tournament_state", {
       id: `ts_${TOURNAMENT_ID}`,
       tournament_id: TOURNAMENT_ID,
-      side_games: { [game]: patch },
+      side_games: patchByGame,
       updated_at: new Date().toISOString(),
     });
   };

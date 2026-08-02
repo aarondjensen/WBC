@@ -3,7 +3,7 @@ import {
   MARKET_OPENING_SHARES, MARKET_MID_SHARES, midRoundFor,
   normalizeLots, totalShares, sharesOn, setLotShares,
   roundStarted, roundComplete, marketWindows,
-  lotsFor, allLots, marketBoard, marketHoldings, marketPayouts,
+  lotsFor, allLots, marketBoard, marketHoldings, marketPayouts, eligibleBets,
 } from "./market";
 
 const players = [
@@ -237,5 +237,41 @@ describe("marketPayouts", () => {
 
   it("is not 'unclaimed' merely because the tournament has no winner yet", () => {
     expect(marketPayouts({ bets, winnerId: null, pot: 300 }).unclaimed).toBe(false);
+  });
+});
+
+describe("eligibleBets", () => {
+  const bets = [
+    { pid: "aaron_j", opening: [{ pid: "cole_m", shares: 20 }], mid: [{ pid: "cole_m", shares: 10 }] },
+    { pid: "brad_k", opening: [{ pid: "brad_k", shares: 20 }], mid: [{ pid: "brad_k", shares: 10 }] },
+    { pid: "cole_m", opening: [{ pid: "cole_m", shares: 20 }], mid: [] },
+  ];
+  const all = () => true;
+
+  it("keeps the opening twenty of somebody who did not rebuy, and drops their ten", () => {
+    const out = eligibleBets({ bets, inMarket: all, inRebuy: pid => pid === "aaron_j" });
+    expect(out.find(b => b.pid === "brad_k")).toEqual({ pid: "brad_k", opening: [{ pid: "brad_k", shares: 20 }], mid: [] });
+    expect(out.find(b => b.pid === "aaron_j").mid).toEqual([{ pid: "cole_m", shares: 10 }]);
+  });
+
+  it("drops a bettor who is not in the market game at all", () => {
+    const out = eligibleBets({ bets, inMarket: pid => pid !== "cole_m", inRebuy: all });
+    expect(out.map(b => b.pid)).toEqual(["aaron_j", "brad_k"]);
+  });
+
+  it("leaves the stored bet untouched — the prune is a read, not a write", () => {
+    eligibleBets({ bets, inMarket: all, inRebuy: () => false });
+    expect(bets[0].mid).toEqual([{ pid: "cole_m", shares: 10 }]);
+  });
+
+  it("un-tagging a rebuy takes those shares off the board and out of the payout", () => {
+    const withRebuy = eligibleBets({ bets, inMarket: all, inRebuy: all });
+    const without = eligibleBets({ bets, inMarket: all, inRebuy: pid => pid !== "brad_k" });
+    expect(marketBoard({ bets: withRebuy, players, pot: 0 }).find(r => r.pid === "brad_k").shares).toBe(30);
+    expect(marketBoard({ bets: without, players, pot: 0 }).find(r => r.pid === "brad_k").shares).toBe(20);
+    // And the pot follows: 30 shares on the winner at a 300 pot is 10 each,
+    // 20 is 15 each.
+    expect(marketPayouts({ bets: withRebuy, winnerId: "brad_k", pot: 300 }).perShare).toBe(10);
+    expect(marketPayouts({ bets: without, winnerId: "brad_k", pot: 300 }).perShare).toBe(15);
   });
 });

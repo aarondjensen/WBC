@@ -168,6 +168,27 @@ export function marketWindows({ holeData, players, numRounds }) {
 export const lotsFor = (bet, key) => normalizeLots(key === "mid" ? bet?.mid : bet?.opening);
 export const allLots = (bet) => normalizeLots([...(bet?.opening || []), ...(bet?.mid || [])]);
 
+// ── Who the halfway shares belong to ───────────────────────────────
+// The second window is a SECOND BUY-IN, not a free top-up: about half the
+// field takes it. So the ten shares are only real if that player paid for
+// them, and a bet from somebody who did not rebuy keeps its opening twenty
+// with the mid lots dropped rather than being thrown out entirely.
+//
+// This runs on every read rather than at write time on purpose. A director
+// who un-tags a rebuy after the fact — the cash never turned up, or it was
+// entered against the wrong name — has to see those ten shares leave the
+// board and the payout immediately, because the pot no longer contains that
+// money. Pruning the document instead would leave the two disagreeing until
+// somebody noticed.
+//
+// `inMarket` and `inRebuy` are predicates so the caller keeps the
+// null-means-everybody rule in one place (see lib/sideGames fieldFor).
+export function eligibleBets({ bets, inMarket, inRebuy }) {
+  return (bets || [])
+    .filter(b => inMarket(b.pid))
+    .map(b => (inRebuy(b.pid) ? b : { ...b, mid: [] }));
+}
+
 // ── The board ──────────────────────────────────────────────────────
 // Every golfer anybody holds shares in, richest first. `perShare` is what a
 // share in that golfer pays IF they win — the pot divided by the shares on
