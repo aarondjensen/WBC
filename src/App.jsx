@@ -3108,6 +3108,133 @@ function PairingsEditor({ activePlayers, pairingsData, setPairings, tRounds, cou
   );
 }
 
+// ── Course-API parsing ─────────────────────────────────────────────────────
+// Hoisted out of doCourseSearch so the course EDITOR can reach the same two
+// APIs with the same parsing. Refetching a course's tees and searching for a
+// new course have to agree about what a tee box is, and the only way to be
+// sure of that is for them to run the same code.
+const STATE_NAMES = { AL:"Alabama",AK:"Alaska",AZ:"Arizona",AR:"Arkansas",CA:"California",CO:"Colorado",CT:"Connecticut",DE:"Delaware",FL:"Florida",GA:"Georgia",HI:"Hawaii",ID:"Idaho",IL:"Illinois",IN:"Indiana",IA:"Iowa",KS:"Kansas",KY:"Kentucky",LA:"Louisiana",ME:"Maine",MD:"Maryland",MA:"Massachusetts",MI:"Michigan",MN:"Minnesota",MS:"Mississippi",MO:"Missouri",MT:"Montana",NE:"Nebraska",NV:"Nevada",NH:"New Hampshire",NJ:"New Jersey",NM:"New Mexico",NY:"New York",NC:"North Carolina",ND:"North Dakota",OH:"Ohio",OK:"Oklahoma",OR:"Oregon",PA:"Pennsylvania",RI:"Rhode Island",SC:"South Carolina",SD:"South Dakota",TN:"Tennessee",TX:"Texas",UT:"Utah",VT:"Vermont",VA:"Virginia",WA:"Washington",WV:"West Virginia",WI:"Wisconsin",WY:"Wyoming" };
+const STATE_ABBREVS = Object.fromEntries(Object.entries(STATE_NAMES).map(([k,v]) => [v.toUpperCase(), k]));
+const stateMatches = (courseState, filter) => {
+  if (!filter || !courseState) return true;
+  const cs = courseState.trim().toUpperCase();
+  const f = filter.trim().toUpperCase();
+  if (cs === f) return true; // exact match (MI === MI)
+  if (STATE_NAMES[f] && cs === STATE_NAMES[f].toUpperCase()) return true; // MI → Michigan
+  if (STATE_ABBREVS[cs] && STATE_ABBREVS[cs] === f) return true; // Michigan → MI
+  return false;
+};
+
+const decodeHtml = (str) => str ? str.replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"').replace(/&#39;/g,"'") : str;
+const hasRealSlope = (c) => (c.tee_boxes || []).some(tb => parseInt(tb.slope) !== 113) || (parseInt(c.slope) !== 113 && !!c.slope);
+
+const parseRapidAPI = (rawCourses, stateFilter) => rawCourses
+  .filter(c => stateMatches(c.state, stateFilter))
+  .map((c, ci) => {
+    // This API: top-level courseRating/slopeRating, scorecard[].tees.teeBox1/teeBox2...
+    const sc = Array.isArray(c.scorecard) ? c.scorecard : [];
+    const hole_pars = sc.map(h => parseInt(h.Par) || 4);
+    const hole_handicaps = sc.map(h => parseInt(h.Handicap) || 0);
+    const par = hole_pars.reduce((a, b) => a + b, 0) || 72;
+    // Collect all tee box keys across all holes
+    const teeKeys = [...new Set(sc.flatMap(h => h.tees ? Object.keys(h.tees) : []))];
+    const tees = teeKeys.length ? teeKeys.map((key, ti) => {
+      const sample = sc.find(h => h.tees?.[key]);
+      const color = sample?.tees?.[key]?.color || key;
+      const yardage = sc.reduce((a, h) => a + (parseInt(h.tees?.[key]?.yards) || 0), 0);
+      const hole_yards = sc.map(h => parseInt(h.tees?.[key]?.yards) || 0);
+      return {
+        name: color || key,
+        color: resolveTeeColor({ name: color || key, color: color || "" }, ti),
+        slope: parseInt(c.slopeRating) || 113,
+        rating: parseFloat(c.courseRating) || 72.0,
+        par, yardage, hole_yards,
+      };
+    }) : [{
+      name: "Default",
+      color: resolveTeeColor({ name: "Default", color: "" }, 0),
+      slope: parseInt(c.slopeRating) || 113,
+      rating: parseFloat(c.courseRating) || 72.0,
+      par, yardage: 0, hole_yards: [],
+    }];
+    return {
+      id: `rapid_${c._id || ci}`,
+      name: decodeHtml(c.name) || "Unknown",
+      city: c.city || "", state: c.state || "",
+      par, slope: parseInt(c.slopeRating) || 113,
+      rating: parseFloat(c.courseRating) || 72.0,
+      hole_pars, hole_handicaps, tee_boxes: tees,
+      _source: "RapidAPI",
+    };
+  });
+
+const parseGolfCourseAPI = (rawCourses) => {
+  const arr = Array.isArray(rawCourses) ? rawCourses : (rawCourses.courses || []);
+  return arr.map((c, ci) => {
+    const teesObj = c.tees || {};
+    const allTees = Array.isArray(teesObj.male) && teesObj.male.length ? teesObj.male : (teesObj.female || []);
+    const tees = allTees.map((t, ti) => ({
+      name: t.tee_name || "Default",
+      color: resolveTeeColor({ name: t.tee_name || "", color: "" }, ti),
+      rating: parseFloat(t.course_rating) || 72.0,
+      slope: parseInt(t.slope_rating) || 113,
+      par: parseInt(t.par_total) || 72,
+      yardage: parseInt(t.total_yards) || 0,
+      hole_yards: (t.holes || []).map(h => parseInt(h.yardage) || 0),
+    }));
+    const firstTee = allTees[0]; const holes = firstTee?.holes || [];
+    return {
+      id: `gc_${c.id || ci}`,
+      name: decodeHtml([c.club_name, c.course_name].filter(Boolean).join(" – ") || c.name || "Unknown"),
+      city: c.location?.city || c.city || "", state: c.location?.state || c.state || "",
+      par: parseInt(firstTee?.par_total) || 72,
+      slope: parseInt(firstTee?.slope_rating) || 113,
+      rating: parseFloat(firstTee?.course_rating) || 72.0,
+      hole_pars: holes.map(h => parseInt(h.par) || 4),
+      hole_handicaps: holes.map(h => parseInt(h.handicap) || 0),
+      tee_boxes: tees,
+      _source: "GolfCourseAPI",
+    };
+  });
+};
+
+// ── fetchCourseTees ────────────────────────────────────────────────────────
+// Ask the course APIs again for ONE course's tee boxes. Both endpoints, same
+// parsing as the search, best name match wins.
+//
+// Why the editor needs this: a course arrives with whatever tees the API had
+// that day, and the editor can delete them. Delete the wrong one — or find the
+// course was imported with a single "Default" tee when it really has five —
+// and the only way back used to be removing the course and searching for it
+// again, which loses every hand edit and every round already assigned to it.
+const fetchCourseTees = async (name, state) => {
+  const q = (name || "").trim();
+  if (q.length < 2) return [];
+  const stateParam = state ? `&state=${encodeURIComponent(state)}` : "";
+  const found = [];
+  try {
+    const r = await fetch(`/api/courses2?search=${encodeURIComponent(q)}${stateParam}`);
+    if (r.ok) {
+      const raw = await r.json();
+      found.push(...parseRapidAPI(Array.isArray(raw) ? raw : (raw.courses || []), state));
+    }
+  } catch (e) { console.log("[refetch/RapidAPI] failed:", e); }
+  try {
+    const r2 = await fetch(`/api/courses?search=${encodeURIComponent(q)}${stateParam}`);
+    if (r2.ok) found.push(...parseGolfCourseAPI(await r2.json()));
+  } catch (e) { console.log("[refetch/GolfCourseAPI] failed:", e); }
+  if (!found.length) return [];
+  // Exact name first, then anything containing it, then whatever came back —
+  // and among equals prefer the one carrying real ratings over a row of 113s.
+  const lc = q.toLowerCase();
+  const rank = (c) => {
+    const n = (c.name || "").toLowerCase();
+    return (n === lc ? 0 : n.includes(lc) || lc.includes(n) ? 1 : 2) * 2 + (hasRealSlope(c) ? 0 : 1);
+  };
+  const best = [...found].sort((a, b) => rank(a) - rank(b))[0];
+  return best?.tee_boxes || [];
+};
+
 // ── TEE ASSIGNER ──
 function TeeAssigner({ activePlayers, tRounds, courses, teeData, setTeeBulk, finalizedRounds, editRound, teesSaved, onTeesModify }) {
 
@@ -4030,6 +4157,8 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const roundStripRef = useRef(null);
+  // Course-editor refetch: { busy, msg }.
+  const [refetch, setRefetch] = useState({ busy: false, msg: "" });
   // Which round has its day list open, if any — the pill's date field sets it.
   const [datePickRound, setDatePickRound] = useState(null);
   // Is the course card showing its search instead of its course? Forced open
@@ -4135,90 +4264,6 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
         const stateParam = stateFilter ? `&state=${encodeURIComponent(stateFilter)}` : "";
         let results = [];
 
-        const STATE_NAMES = { AL:"Alabama",AK:"Alaska",AZ:"Arizona",AR:"Arkansas",CA:"California",CO:"Colorado",CT:"Connecticut",DE:"Delaware",FL:"Florida",GA:"Georgia",HI:"Hawaii",ID:"Idaho",IL:"Illinois",IN:"Indiana",IA:"Iowa",KS:"Kansas",KY:"Kentucky",LA:"Louisiana",ME:"Maine",MD:"Maryland",MA:"Massachusetts",MI:"Michigan",MN:"Minnesota",MS:"Mississippi",MO:"Missouri",MT:"Montana",NE:"Nebraska",NV:"Nevada",NH:"New Hampshire",NJ:"New Jersey",NM:"New Mexico",NY:"New York",NC:"North Carolina",ND:"North Dakota",OH:"Ohio",OK:"Oklahoma",OR:"Oregon",PA:"Pennsylvania",RI:"Rhode Island",SC:"South Carolina",SD:"South Dakota",TN:"Tennessee",TX:"Texas",UT:"Utah",VT:"Vermont",VA:"Virginia",WA:"Washington",WV:"West Virginia",WI:"Wisconsin",WY:"Wyoming" };
-        const STATE_ABBREVS = Object.fromEntries(Object.entries(STATE_NAMES).map(([k,v]) => [v.toUpperCase(), k]));
-        const stateMatches = (courseState, filter) => {
-          if (!filter || !courseState) return true;
-          const cs = courseState.trim().toUpperCase();
-          const f = filter.trim().toUpperCase();
-          if (cs === f) return true; // exact match (MI === MI)
-          if (STATE_NAMES[f] && cs === STATE_NAMES[f].toUpperCase()) return true; // MI → Michigan
-          if (STATE_ABBREVS[cs] && STATE_ABBREVS[cs] === f) return true; // Michigan → MI
-          return false;
-        };
-
-        const decodeHtml = (str) => str ? str.replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"').replace(/&#39;/g,"'") : str;
-        const hasRealSlope = (c) => (c.tee_boxes || []).some(tb => parseInt(tb.slope) !== 113) || (parseInt(c.slope) !== 113 && !!c.slope);
-
-        const parseRapidAPI = (rawCourses, stateFilter) => rawCourses
-          .filter(c => stateMatches(c.state, stateFilter))
-          .map((c, ci) => {
-            // This API: top-level courseRating/slopeRating, scorecard[].tees.teeBox1/teeBox2...
-            const sc = Array.isArray(c.scorecard) ? c.scorecard : [];
-            const hole_pars = sc.map(h => parseInt(h.Par) || 4);
-            const hole_handicaps = sc.map(h => parseInt(h.Handicap) || 0);
-            const par = hole_pars.reduce((a, b) => a + b, 0) || 72;
-            // Collect all tee box keys across all holes
-            const teeKeys = [...new Set(sc.flatMap(h => h.tees ? Object.keys(h.tees) : []))];
-            const tees = teeKeys.length ? teeKeys.map((key, ti) => {
-              const sample = sc.find(h => h.tees?.[key]);
-              const color = sample?.tees?.[key]?.color || key;
-              const yardage = sc.reduce((a, h) => a + (parseInt(h.tees?.[key]?.yards) || 0), 0);
-              const hole_yards = sc.map(h => parseInt(h.tees?.[key]?.yards) || 0);
-              return {
-                name: color || key,
-                color: resolveTeeColor({ name: color || key, color: color || "" }, ti),
-                slope: parseInt(c.slopeRating) || 113,
-                rating: parseFloat(c.courseRating) || 72.0,
-                par, yardage, hole_yards,
-              };
-            }) : [{
-              name: "Default",
-              color: resolveTeeColor({ name: "Default", color: "" }, 0),
-              slope: parseInt(c.slopeRating) || 113,
-              rating: parseFloat(c.courseRating) || 72.0,
-              par, yardage: 0, hole_yards: [],
-            }];
-            return {
-              id: `rapid_${c._id || ci}`,
-              name: decodeHtml(c.name) || "Unknown",
-              city: c.city || "", state: c.state || "",
-              par, slope: parseInt(c.slopeRating) || 113,
-              rating: parseFloat(c.courseRating) || 72.0,
-              hole_pars, hole_handicaps, tee_boxes: tees,
-              _source: "RapidAPI",
-            };
-          });
-
-        const parseGolfCourseAPI = (rawCourses) => {
-          const arr = Array.isArray(rawCourses) ? rawCourses : (rawCourses.courses || []);
-          return arr.map((c, ci) => {
-            const teesObj = c.tees || {};
-            const allTees = Array.isArray(teesObj.male) && teesObj.male.length ? teesObj.male : (teesObj.female || []);
-            const tees = allTees.map((t, ti) => ({
-              name: t.tee_name || "Default",
-              color: resolveTeeColor({ name: t.tee_name || "", color: "" }, ti),
-              rating: parseFloat(t.course_rating) || 72.0,
-              slope: parseInt(t.slope_rating) || 113,
-              par: parseInt(t.par_total) || 72,
-              yardage: parseInt(t.total_yards) || 0,
-              hole_yards: (t.holes || []).map(h => parseInt(h.yardage) || 0),
-            }));
-            const firstTee = allTees[0]; const holes = firstTee?.holes || [];
-            return {
-              id: `gc_${c.id || ci}`,
-              name: decodeHtml([c.club_name, c.course_name].filter(Boolean).join(" – ") || c.name || "Unknown"),
-              city: c.location?.city || c.city || "", state: c.location?.state || c.state || "",
-              par: parseInt(firstTee?.par_total) || 72,
-              slope: parseInt(firstTee?.slope_rating) || 113,
-              rating: parseFloat(firstTee?.course_rating) || 72.0,
-              hole_pars: holes.map(h => parseInt(h.par) || 4),
-              hole_handicaps: holes.map(h => parseInt(h.handicap) || 0),
-              tee_boxes: tees,
-              _source: "GolfCourseAPI",
-            };
-          });
-        };
 
         // 1. Firestore FIRST — local WBC history takes priority
         let sbCourseNames = new Set();
@@ -4678,6 +4723,25 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
       {editingCourse && (() => {
         const d = editingCourse.draft;
         const saveEdit = () => { addCourse({ ...editingCourse.draft }); setEditingCourse(null); };
+        const refetchTees = async () => {
+          setRefetch({ busy: true, msg: "" });
+          const tees = await fetchCourseTees(d.name, d.state);
+          if (!tees.length) { setRefetch({ busy: false, msg: "Nothing came back for that name" }); return; }
+          // Add what is missing, leave what is there. A tee already in the
+          // draft may have been corrected by hand — a refetch is for filling
+          // gaps, not for overwriting the director.
+          const have = new Set((d.tee_boxes || []).map(t => (t.name || "").toLowerCase()));
+          const added = tees.filter(t => !have.has((t.name || "").toLowerCase()));
+          if (added.length) {
+            setEditingCourse(prev => ({ ...prev, draft: { ...prev.draft, tee_boxes: [...(prev.draft.tee_boxes || []), ...added] } }));
+          }
+          setRefetch({
+            busy: false,
+            msg: added.length
+              ? `Added ${added.length} tee${added.length === 1 ? "" : "s"} — Save to keep`
+              : `All ${tees.length} tee${tees.length === 1 ? "" : "s"} already here`,
+          });
+        };
         const inpStyle = { background: K.inp, border: `1px solid ${ac}40`, borderRadius: 4, color: K.t1, fontSize: 9, textAlign: "center", width: "100%", padding: "2px 0", boxSizing: "border-box" };
         return (
           <div style={{ position: "fixed", top: 0, bottom: 0, left: 0, right: 0, background: K.bg, zIndex: 200, display: "flex", flexDirection: "column", maxWidth: 480, margin: "0 auto" }}>
@@ -4700,6 +4764,19 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
                 </button>
               )}
               <div style={{ marginBottom: 16 }}><div style={{ fontSize: 10, color: K.t3, fontWeight: 600, textTransform: "uppercase", marginBottom: 4 }}>Course Name</div><input value={d.name || ""} onChange={e => setEditingCourse(prev => ({ ...prev, draft: { ...prev.draft, name: e.target.value } }))} style={{ width: "100%", padding: "9px 10px", background: K.inp, border: `1px solid ${ac}40`, borderRadius: 8, color: K.t1, fontSize: 14, boxSizing: "border-box" }} /></div>
+              {/* Pull the tees again. Sits with the tee boxes it refills, under
+                  the name it searches on — edit the name first if the import
+                  got it wrong, and this finds the right course. */}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
+                <span style={{ fontSize: 10, color: K.t3, fontWeight: 600, textTransform: "uppercase" }}>Tee boxes</span>
+                <button onClick={refetchTees} disabled={refetch.busy}
+                  style={{ padding: "5px 12px", borderRadius: 8, background: "transparent", border: `1px solid ${ac}60`, color: ac, fontSize: 11, fontWeight: 700, cursor: refetch.busy ? "default" : "pointer", opacity: refetch.busy ? 0.6 : 1 }}>
+                  {refetch.busy ? "Fetching…" : "Refetch tees"}
+                </button>
+              </div>
+              {refetch.msg && (
+                <div style={{ fontSize: 10, color: K.t3, marginBottom: 8 }}>{refetch.msg}</div>
+              )}
               {[...(d.tee_boxes||[])].sort((a,b) => (parseFloat(b.slope)||0)-(parseFloat(a.slope)||0)).map((tb, tbi) => { const sortedTbs = [...(d.tee_boxes||[])].sort((a,b) => (parseFloat(b.slope)||0)-(parseFloat(a.slope)||0)); const origIdx = d.tee_boxes.indexOf(sortedTbs[tbi]); return (<div key={tbi} style={{ background: K.card, border: `1px solid ${K.bdr}`, borderRadius: 10, padding: "10px 12px", marginBottom: 8 }}><div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}><div style={{ display: "flex", alignItems: "center", gap: 8 }}><TeeColorSwatch color={tb.color} name={tb.name} size={12} /><span style={{ fontWeight: 700, fontSize: 14, color: K.t1 }}>{tb.name}</span></div><button onClick={() => setEditingCourse(prev => ({ ...prev, draft: { ...prev.draft, tee_boxes: prev.draft.tee_boxes.filter((_,i) => i !== origIdx) } }))} style={{ background: "transparent", border: "none", color: K.t3, cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 4px" }}>✕</button></div><div style={{ display: "flex", gap: 8 }}>{["rating","slope","par"].map(f => (<div key={f} style={{ flex: 1 }}><div style={{ fontSize: 9, color: K.t3, textTransform: "uppercase", marginBottom: 3 }}>{f}</div><input inputMode="decimal" value={tb[f]||""} onChange={e => setEditingCourse(prev => { const tbs = [...prev.draft.tee_boxes]; tbs[origIdx] = {...tbs[origIdx],[f]:e.target.value}; return {...prev,draft:{...prev.draft,tee_boxes:tbs}}; })} style={{ width: "100%", padding: "7px 6px", background: K.inp, border: `1px solid ${ac}30`, borderRadius: 6, color: K.t1, fontSize: 13, textAlign: "center", boxSizing: "border-box" }} /></div>))}</div></div>); })}
               {[["Front", 0, 9], ["Back", 9, 9]].map(([label, start, count]) => { const pars = (d.hole_pars||[]).slice(start, start+count); const hcps = (d.hole_handicaps||[]).slice(start, start+count); return (<div key={label} style={{ marginBottom: 8 }}><div style={{ fontSize: 10, color: K.t3, fontWeight: 600, textTransform: "uppercase", marginBottom: 4 }}>{label} 9</div><div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 32px`, gap: 2, fontSize: 9 }}><div style={{ color: K.t3, fontWeight: 600, padding: "2px 0" }}>Hole</div>{Array.from({length:count},(_,i)=><div key={i} style={{ textAlign:"center", color:K.t2, fontWeight:700, padding:"2px 0" }}>{start+i+1}</div>)}<div /></div><div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 32px`, gap: 2, background: K.inp, borderRadius: 6, padding: "2px 0", marginBottom: 2 }}><div style={{ color: K.t3, fontWeight: 600, padding: "3px 2px", fontSize: 9 }}>Par</div>{Array.from({length:count},(_,i) => (<input key={i} inputMode="numeric" value={pars[i]??""} onChange={e => setEditingCourse(prev => { const hp=[...(prev.draft.hole_pars||[])]; hp[start+i]=parseInt(e.target.value)||0; return {...prev,draft:{...prev.draft,hole_pars:hp}}; })} style={inpStyle} />))}<div style={{ textAlign:"center", color:ac, fontWeight:800, padding:"3px 0", fontSize:10 }}>{pars.reduce((a,b)=>a+(+b||0),0)}</div></div><div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 32px`, gap: 2 }}><div style={{ color: K.t3, fontWeight: 600, padding: "2px 2px", fontSize: 9 }}>HCP</div>{Array.from({length:count},(_,i) => (<input key={i} inputMode="numeric" value={hcps[i]??""} onChange={e => setEditingCourse(prev => { const hh=[...(prev.draft.hole_handicaps||[])]; hh[start+i]=parseInt(e.target.value)||0; return {...prev,draft:{...prev.draft,hole_handicaps:hh}}; })} style={{...inpStyle, color:K.t3}} />))}<div /></div></div>); })}
             </div>
@@ -4784,7 +4861,7 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
                       {/* Pars, handicaps and tee boxes for the course this round is
                           playing — and, from inside the editor, swapping the course
                           for a different one. */}
-                      <button onClick={() => setEditingCourse({ courseId: assigned.id, draft: { ...assigned, hole_pars: [...(assigned.hole_pars || Array(18).fill(4))], hole_handicaps: [...(assigned.hole_handicaps || Array(18).fill(0))], tee_boxes: (assigned.tee_boxes || []).map(t => ({ ...t })) } })}
+                      <button onClick={() => { setRefetch({ busy: false, msg: "" }); setEditingCourse({ courseId: assigned.id, draft: { ...assigned, hole_pars: [...(assigned.hole_pars || Array(18).fill(4))], hole_handicaps: [...(assigned.hole_handicaps || Array(18).fill(0))], tee_boxes: (assigned.tee_boxes || []).map(t => ({ ...t })) } }); }}
                         style={{ flexShrink: 0, padding: "5px 12px", borderRadius: 8, background: "transparent", border: `1px solid ${ac}60`, color: ac, fontSize: 10, fontWeight: 700, cursor: "pointer" }}>Edit</button>
                     </div>
                   )}
