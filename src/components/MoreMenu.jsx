@@ -20,7 +20,7 @@
 // where a thumb already is — a downward flick is the gesture that hand
 // expects, and the alternative is reaching for a backdrop.
 import { useRef, useState } from "react";
-import { K, FONT, FS, ALPHA, SHADOW } from "../theme";
+import { K, FONT, FS, R, ALPHA, SHADOW } from "../theme";
 
 export function MoreMenu({ open, onClose, onSelect, isDirector, adminFlag, notifFlag, navH = 62 }) {
   const startYRef = useRef(null);
@@ -70,7 +70,7 @@ export function MoreMenu({ open, onClose, onSelect, isDirector, adminFlag, notif
           transition: dragY === 0 ? "transform 0.2s ease" : "none",
           width: 220,
           background: K.card,
-          borderRadius: 12,
+          borderRadius: R.lg,
           border: `1px solid ${K.bdr}`,
           boxShadow: `0 -4px 24px ${SHADOW}`,
           zIndex: 201,

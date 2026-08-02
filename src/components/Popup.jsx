@@ -20,7 +20,8 @@
 // another popup.
 import { useEffect } from "react";
 import { createPortal } from "react-dom";
-import { K, ON_ACC } from "../theme";
+import { K, FS, R, SCRIM } from "../theme";
+import { Btn } from "./ui";
 
 // Backdrop dismisses by default; opt out with dismissOnBackdrop={false} for
 // destructive/blocking modals. Card height caps at (--app-height - 90px) so
@@ -38,11 +39,11 @@ export function Popup({
       // page's pull-to-refresh fighting a scrolling modal, without the app
       // having to keep a "is any popup open" ref in sync by hand.
       data-popup="1"
-      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.82)", zIndex, display: "flex", alignItems: "center", justifyContent: "center", padding: overlayPadding }}
+      style={{ position: "fixed", inset: 0, background: SCRIM, zIndex, display: "flex", alignItems: "center", justifyContent: "center", padding: overlayPadding }}
     >
       <div
         onClick={e => e.stopPropagation()}
-        style={{ background: background || K.bg, border: `1px solid ${borderColor || K.bdr}`, borderRadius: 16, width: "100%", maxWidth, maxHeight: "calc(var(--app-height, 100dvh) - 90px)", overflowY: "auto", padding }}
+        style={{ background: background || K.bg, border: `1px solid ${borderColor || K.bdr}`, borderRadius: R.xl, width: "100%", maxWidth, maxHeight: "calc(var(--app-height, 100dvh) - 90px)", overflowY: "auto", padding }}
       >
         {children}
       </div>
@@ -96,40 +97,31 @@ function ConfirmModalInner({ m }) {
   return (
     <Popup onClose={handleCancel} maxWidth={340} zIndex={4000} padding={20} portal>
       {m.eyebrow && (
-        <div style={{ fontSize: 10, fontWeight: 700, color: K.acc, letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 10 }}>
+        <div style={{ fontSize: FS.label, fontWeight: 700, color: K.acc, letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 10 }}>
           {m.eyebrow}
         </div>
       )}
-      <div style={{ fontSize: 14, fontWeight: 700, color: K.t1, marginBottom: m.message ? 6 : 16 }}>
+      <div style={{ fontSize: FS.body, fontWeight: 700, color: K.t1, marginBottom: m.message ? 6 : 16 }}>
         {m.title}
       </div>
       {m.message && (
-        <div style={{ fontSize: 13, color: K.t2, lineHeight: 1.5, marginBottom: 16, whiteSpace: "pre-line" }}>
+        <div style={{ fontSize: FS.small, color: K.t2, lineHeight: 1.5, marginBottom: 16, whiteSpace: "pre-line" }}>
           {m.message}
         </div>
       )}
       <div style={{ display: "flex", gap: 8 }}>
         {!m.alert && (
-          <button
-            onClick={handleCancel}
-            style={{ flex: 1, padding: 12, borderRadius: 10, background: K.inp, border: `1px solid ${K.bdr}`, color: K.t2, fontSize: 13, fontWeight: 700, cursor: "pointer" }}
-          >
+          <Btn variant="secondary" onClick={handleCancel} style={{ flex: 1, color: K.t2 }}>
             {m.cancelLabel || "Cancel"}
-          </button>
+          </Btn>
         )}
-        <button
-          onClick={m.onConfirm}
-          style={{
-            flex: 1, padding: 12, borderRadius: 10, border: "none", cursor: "pointer",
-            background: isDanger ? K.danger : K.acc,
-            // Which ink a filled button takes is decided by the fill: the red
-            // is dark enough for white, the teal is not.
-            color: isDanger ? "#fff" : ON_ACC,
-            fontSize: 13, fontWeight: 700,
-          }}
-        >
+        {/* Which ink a filled button takes is decided by the fill — the red is
+            dark enough for white, the teal is not — and Btn owns that pairing
+            now, so `danger` carries its own ink rather than the call site
+            remembering to hand it one. */}
+        <Btn variant={isDanger ? "danger" : "primary"} onClick={m.onConfirm} style={{ flex: 1 }}>
           {m.confirmLabel || (m.alert ? "OK" : "Confirm")}
-        </button>
+        </Btn>
       </div>
     </Popup>
   );

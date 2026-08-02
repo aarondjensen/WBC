@@ -21,6 +21,24 @@ export const K = {
   t1: "#e8edf5", t2: "#8b9ec2", t3: "#526484",
   bdr: "#1a2b47",
   eagle: "#3b82f6", birdie: "#22c55e", par: "#8b9ec2", bogey: "#eab308", dbl: "#ef4444",
+  // Two aliases, because the same two hexes were being typed raw at ~30 call
+  // sites to mean something that is NOT a score. Named separately so the
+  // meaning is legible at the call site and so the scoring colors could ever
+  // move without dragging every checkmark and minus sign along with them.
+  ok: "#22c55e",    // done, saved, signed, moved up — a state that is complete
+  under: "#ef4444", // ink for a number under par, the way a scorecard prints it
+  // Won something. Skins, the round-complete header, your own name in a list.
+  // This hex was borrowed from the tee-colour map — it is the gold TEE marker —
+  // and typed raw at 11 call sites, which put a third warm tone on screen
+  // beside `warn` (amber, 38°) and a stray lemon (50°) with nothing naming
+  // which was which. The map keeps its own copy: a physical gold tee marker
+  // and an achievement colour are the same hex today by coincidence, and
+  // repainting one should never drag the other along.
+  gold: "#d4a843",
+  // The bottom nav bar's surface, and the dome the trophy sits in. Very
+  // slightly lighter and more opaque than `card`: it sits over scrolling
+  // content and has to stop it, which a flat `card` does not do.
+  nav: "rgba(14,24,41,0.97)",
   // The raised surface a selected segment is drawn on. Lighter than `card` so
   // a thumb reads as lifted out of the track rather than merely tinted.
   thumb: "#1c2c47",
@@ -31,6 +49,11 @@ export const K = {
 // spelling it out separately keeps that a deliberate contrast choice rather
 // than a coincidence that breaks if the background ever lightens.
 export const ON_ACC = "#04121b";
+
+// The same decision for the red fill, which lands on the other side of it: the
+// danger red is dark enough to carry white, the teal is not. Written out for
+// the same reason ON_ACC is — so a filled button never has to guess its ink.
+export const ON_DANGER = "#ffffff";
 
 export const FONT = "'Montserrat', sans-serif";
 
@@ -57,6 +80,19 @@ export const FS = {
   display: 32, // large empty-state icons, headline totals
   jumbo:   40, // full-screen empty-state icons
 };
+// The rungs in order, for the one case the scale cannot express as a constant:
+// a size that is COMPUTED. The leaderboard fits its rows to whatever height it
+// has, and inside a row the total column sits a step above the player's name.
+// Written as `rowStyle.fontSize + 1` that arithmetic lands between rungs — a
+// 12 becomes a 13 — which is the exact drift the scale exists to stop. Stepping
+// the ladder cannot: it returns a rung or it returns what you gave it.
+export const FS_RUNGS = [FS.micro, FS.label, FS.small, FS.body, FS.lead, FS.title, FS.hero, FS.display, FS.jumbo];
+export const fsStep = (size, n) => {
+  const i = FS_RUNGS.indexOf(size);
+  if (i === -1) return size;
+  return FS_RUNGS[Math.min(FS_RUNGS.length - 1, Math.max(0, i + n))];
+};
+
 // One functional constraint rides on this scale: a text input below 16px makes
 // iOS Safari zoom the page on focus and never zoom back out. Every field the
 // director types free text into is therefore at FS.lead and stays there —
@@ -64,6 +100,31 @@ export const FS = {
 // cells in the dense tee/pairing grids are the deliberate exception: they are
 // steppers you tap, not fields you type into, and 16px will not fit nine of
 // them across a phone.
+
+// ── Corner radius ──
+// Same story as the type scale: 15 different radii were in use, and 8/10/12
+// already accounted for two thirds of them. A radius carries no layout — it
+// cannot reflow anything — so the only thing distinguishing 6 from 8 was which
+// call site you happened to be reading.
+//
+// Six rungs, named for the SIZE of the thing being rounded, since that is what
+// actually decides it: a 12px swatch and a full-screen sheet cannot share a
+// corner and look right.
+export const R = {
+  xs:   4,  // swatches, inline marks, the tightest grid inputs
+  sm:   8,  // chips, badges, small controls
+  md:  10,  // the default — controls inside a card
+  lg:  12,  // cards and panels
+  xl:  16,  // modals and bottom sheets
+  pill: 20, // fully-rounded tracks and tags
+};
+
+// ── Motion ──
+// One duration. The app carried seven spellings of four values — "0.2s" and
+// ".2s" both appear — and nothing in the UI is doing anything different enough
+// to need its own timing. Keyframe animations (the toast, the live pulse) keep
+// their own, because those are motion with a shape rather than a state change.
+export const MOTION = "0.2s";
 
 // ── Alpha ladder ──
 // Every K token is 6-digit hex, so a wash is made by appending two more

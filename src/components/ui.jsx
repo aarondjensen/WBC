@@ -8,7 +8,77 @@
 //    • SegmentedToggle — the rounded pill tab switcher.
 //    • StickyTop       — the pinned control strip at the top of a tab.
 
-import { K, FONT, FS, ALPHA, SHADOW, segThumb, segTrack } from "../theme";
+import { K, FONT, FS, R, ALPHA, SHADOW, ON_ACC, ON_DANGER, segThumb, segTrack } from "../theme";
+
+// ── Btn ──
+// The one button. WBC had 126 of them written inline and no primitive, so the
+// SAME control — "this is the action" — came out at four radii, six sizes and
+// five different inks depending on which panel it was in. The 29 accent-filled
+// ones alone carried three inks: ON_ACC (which exists for exactly this), K.bg
+// (the hand-rolled version of ON_ACC) and a raw "#fff".
+//
+// Three sizes, picked to land where the existing values already cluster
+// rather than to impose a new rhythm — 8/10/12 covered 86 of the 103 buttons
+// that set a radius, so those stay the radii and the type comes off FS.
+//
+//   sm   a control inside a row: chips, inline edit, per-hole actions
+//   md   the default. Card actions, modal buttons, admin panel controls
+//   lg   a screen's one CTA — sign in, join, start the round
+//
+// Five variants, because a button's job is one of five things:
+//   primary        the action. Filled accent.
+//   secondary      an action that isn't THE action. Sunken fill, bordered.
+//   danger         a destructive action, filled — the confirm in a confirm.
+//   dangerOutline  a destructive action offered in passing, not yet confirmed.
+//   ghost          chrome you can tap: close, back, expand.
+//
+// `disabled` is the component's, not the call site's: every hand-rolled
+// version of it picked its own combination of dimmed ink, dimmed fill and
+// cursor, and this collapses them to one. Anything genuinely bespoke can still
+// come through `style`, which merges last.
+const BTN_SIZES = {
+  sm: { fontSize: FS.small, padding: "7px 12px", borderRadius: R.sm,  gap: 5 },
+  md: { fontSize: FS.body,  padding: "10px 14px", borderRadius: R.md, gap: 6 },
+  lg: { fontSize: FS.lead,  padding: "13px 16px", borderRadius: R.lg, gap: 8 },
+};
+
+const BTN_VARIANTS = {
+  primary:       { background: K.acc,  color: ON_ACC,    border: "1px solid transparent" },
+  secondary:     { background: K.inp,  color: K.t1,      border: `1px solid ${K.bdr}` },
+  danger:        { background: K.danger, color: ON_DANGER, border: "1px solid transparent" },
+  dangerOutline: { background: "transparent", color: K.danger, border: `1px solid ${K.danger}${ALPHA.line}` },
+  ghost:         { background: "transparent", color: K.t2, border: "1px solid transparent" },
+};
+
+export function Btn({
+  variant = "primary", size = "md", block = false, disabled = false,
+  children, style, ...rest
+}) {
+  const v = disabled
+    ? { background: K.inp, color: K.t3, border: `1px solid ${K.bdr}` }
+    : BTN_VARIANTS[variant] || BTN_VARIANTS.primary;
+  return (
+    <button
+      disabled={disabled}
+      style={{
+        ...BTN_SIZES[size] || BTN_SIZES.md,
+        ...v,
+        fontWeight: 700,
+        fontFamily: FONT,
+        cursor: disabled ? "default" : "pointer",
+        display: block ? "flex" : "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: block ? "100%" : undefined,
+        minWidth: 0,
+        ...style,
+      }}
+      {...rest}
+    >
+      {children}
+    </button>
+  );
+}
 
 // The rule that marks the thumb. A child rather than a border because it is
 // shorter than the pill: an edge-to-edge line reads as a second border on the
@@ -18,7 +88,7 @@ export function SegRule({ compact = false }) {
     <span style={{
       position: "absolute", left: "50%", transform: "translateX(-50%)",
       bottom: compact ? 3 : 4, width: compact ? 12 : 18, height: 2,
-      borderRadius: 1, background: K.acc,
+      borderRadius: R.xs, background: K.acc,
     }} />
   );
 }
@@ -46,7 +116,7 @@ export function SegmentedToggle({ options, value, onChange, variant = "segmented
   const track = tracked ? segTrack({ compact }) : { gap: 6 };
   const btn = (on) => (tracked
     ? segThumb(on, { compact })
-    : { ...segThumb(on, { compact, sunken: true }), borderRadius: 8, border: `1px solid ${on ? "transparent" : K.bdr}` });
+    : { ...segThumb(on, { compact, sunken: true }), borderRadius: R.sm, border: `1px solid ${on ? "transparent" : K.bdr}` });
   return (
     <div style={{ display: "flex", ...track, ...style }}>
       {options.map(([k, label, badge]) => {
@@ -127,7 +197,7 @@ export function SectionLabel({ children, color = K.t3, style }) {
 export function Card({ children, style, pad = 14 }) {
   return (
     <div style={{
-      background: K.card, borderRadius: 12, border: `1px solid ${K.bdr}`,
+      background: K.card, borderRadius: R.lg, border: `1px solid ${K.bdr}`,
       padding: pad, ...style,
     }}>{children}</div>
   );
@@ -149,7 +219,7 @@ export function Toast({ message, top = 30 }) {
       <div style={{
         position: "fixed", top, left: "50%", transform: "translateX(-50%)",
         background: K.card, border: `1px solid ${K.acc}${ALPHA.line}`,
-        color: K.t1, padding: "10px 22px", borderRadius: 12,
+        color: K.t1, padding: "10px 22px", borderRadius: R.lg,
         fontSize: FS.body, fontWeight: 700, zIndex: 5000,
         maxWidth: "80vw", textAlign: "center",
         boxShadow: `0 8px 32px ${SHADOW}`,
