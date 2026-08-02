@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { fieldFor, potFor, computeSkins, allSkins, skinCounts, buyInSheet, toggleIn } from "./sideGames";
+import { fieldFor, potFor, perUnit, computeSkins, allSkins, skinCounts, buyInSheet, toggleIn } from "./sideGames";
 import { WD_SCORE } from "./individualBoard";
 
 const players = [
@@ -33,6 +33,41 @@ describe("potFor", () => {
   });
   it("is zero when there is neither", () => {
     expect(potFor({})).toBe(0);
+  });
+});
+
+describe("perUnit", () => {
+  it("splits a pot evenly", () => {
+    expect(perUnit(320, 16)).toBe(20);
+    expect(perUnit(100, 3)).toBeCloseTo(33.333);
+  });
+
+  it("is zero rather than Infinity when there is nothing to divide by", () => {
+    expect(perUnit(320, 0)).toBe(0);
+    expect(perUnit(320, undefined)).toBe(0);
+    expect(perUnit(320, null)).toBe(0);
+  });
+
+  it("is zero on an empty pot", () => {
+    expect(perUnit(0, 12)).toBe(0);
+    expect(perUnit(undefined, 12)).toBe(0);
+  });
+
+  // The CTP rule the divisor exists for: a pin is worth the same whether or
+  // not the other holes get claimed. Dividing by pins TAKEN would make an
+  // early winner's pin shrink every time somebody else took one.
+  it("holds a CTP pin's value steady as other pins are taken", () => {
+    const PAR_3S = 8, POT = 160;
+    expect(perUnit(POT, PAR_3S)).toBe(20);
+    // Two more pins claimed later in the week — same divisor, same value.
+    expect(perUnit(POT, PAR_3S)).toBe(20);
+  });
+
+  // And the skins rule, which genuinely does move: ties push holes out of
+  // the count, so the value of a skin is only final when the cards are in.
+  it("lets a skin's value move as more are won", () => {
+    expect(perUnit(120, 4)).toBe(30);
+    expect(perUnit(120, 8)).toBe(15);
   });
 });
 
