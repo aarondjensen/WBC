@@ -4,7 +4,13 @@ import { _app, _db, _auth, onAuthStateChanged, doGoogleSignIn, doAppleSignIn, do
 import { readMembership, isDirectorAccount, resolveMember, joinWithCode, readAccessCode, setAccessCode, setDirector, subscribeMemberships, accountsUnreadable, membershipForPlayer, playerIsDirector } from "./lib/accounts";
 import { K, ON_ACC, FS, fsStep, R, ALPHA, MOTION, FONT, SHADOW, SCRIM } from "./theme";
 import { SegmentedToggle, StickyTop, SectionLabel, Card, Toast, Btn } from "./components/ui";
-import { calcCH, computeIndividualBoard, rankIndividualBoard, rankIndividualBoardIds, WD_SCORE } from "./lib/individualBoard";
+import { calcCH, buildStrokesMap, computeIndividualBoard, rankIndividualBoard, rankIndividualBoardIds, WD_SCORE } from "./lib/individualBoard";
+import { fieldFor, potFor, computeSkins, allSkins, skinCounts } from "./lib/sideGames";
+import {
+  MARKET_OPENING_SHARES, MARKET_MID_SHARES, marketWindows, normalizeLots, totalShares,
+  sharesOn, setLotShares, lotsFor, allLots, marketBoard, marketHoldings, marketPayouts, roundComplete,
+} from "./lib/market";
+import { BuyInEditor } from "./components/BuyIns";
 import { useConfirm } from "./lib/useConfirm";
 import { useDirtyForm } from "./lib/useDirtyForm";
 import { usePullToRefresh, hasNewBundle } from "./lib/usePullToRefresh";
@@ -359,6 +365,48 @@ const rowsToCtp = (rows) => {
     };
   });
   return cd;
+};
+
+// Convert market rows (skin_type "market") → [{ pid, opening: [{pid,shares}], mid: [...] }]
+//
+// The market rides in `skins` alongside the CTP tags rather than in a
+// collection of its own, and that is a deliberate trade: `skins` is already
+// subscribed, already scoped by tournament_id, already cleared by Start Fresh,
+// and already member-writable in firestore.rules — which the market needs,
+// because the person placing a bet is a player, not the director. A new
+// collection would have been tidier and would have been inert until somebody
+// deployed a rules change.
+//
+// Lots are normalised on the way in so a hand-edited document, a document
+// written by an older bundle and a freshly saved one all read the same.
+const rowsToMarket = (rows) =>
+  (rows || [])
+    .filter(r => r.skin_type === "market" && r.player_id)
+    .map(r => ({
+      pid: r.player_id,
+      opening: normalizeLots(r.opening),
+      mid: normalizeLots(r.mid),
+    }))
+    .sort((a, b) => String(a.pid).localeCompare(String(b.pid)));
+
+// The side games' money, off tournament_state.side_games, with every field
+// present whether or not the document carries it. `in` stays NULLISH when it
+// has never been set — that is what "everybody" is — so this fills in the
+// shape and deliberately does not fill in that answer.
+const SIDE_GAME_KEYS = ["skins", "ctp", "market"];
+const mergeSideGames = (raw) => {
+  const out = {};
+  SIDE_GAME_KEYS.forEach(k => {
+    const g = (raw || {})[k] || {};
+    out[k] = {
+      amount: Number(g.amount) || 0,
+      in: Array.isArray(g.in) ? g.in : null,
+      // Skins is the only one with a hand-typed pot to preserve: it is the
+      // game WBC was already playing before any of this existed.
+      ...(k === "skins" ? { pot: Number(g.pot) || 0 } : {}),
+    };
+  });
+  return out;
 };
 
 // Convert tee times rows → teeTimesData { round: [time, time, ...] }
@@ -2380,74 +2428,300 @@ function GroupSetup({ user, players, onStart, presetGroup }) {
   );
 }
 
-function SkinsCtpView({ players, round, tRounds, courses, holeData, ctpData, onSetCtp, user }) {
+// ── BETTING ──
+//
+// The three side games that run across the whole tournament rather than
+// inside any one round. They are built on three different principles, and the
+// difference is the point:
+//
+//   SKINS ARE DERIVED, never stored. Low score on a hole takes it, a tie
+//   pushes it, and the pot divides by however many were won. There is no
+//   skins editor anywhere in the app on purpose — a stored winner is a second
+//   answer that can disagree with the card, and the card is the one the group
+//   signed. See lib/sideGames.
+//
+//   CTP IS CAPTURED, because it is the one thing here the card does not
+//   record. Groups tag their own par 3s from the Scoring tab as they walk off
+//   the green, and the director settles each hole from this screen.
+//
+//   THE MARKET IS BET. Twenty shares before the tournament starts, ten more
+//   once the halfway round is complete, spread across any golfers you like;
+//   the pot divides by the shares held on whoever wins. See lib/market.
+//
+// What all three share is the money: a director tags who bought in and what a
+// seat costs, and every pot on this screen is counted from that.
+function BettingView({
+  players, round, tRounds, courses, holeData, ctpData, onSetCtp, user, numRounds,
+  getPlayerTee, sideGames, onUpdateSideGames, marketBets, onSaveMarketBet, leaderboard,
+}) {
   const [tab, setTab] = useState("skins");
   const [expandedPlayer, setExpandedPlayer] = useState(null);
+  const [grossMode, setGrossMode] = useState(true);
+  // Each tab keeps its OWN round and its own open drawer. Sharing them would
+  // mean opening one tab silently rearranged the other.
+  const [skinsRound, setSkinsRound] = useState(null);
+  const [ctpRound, setCtpRound] = useState(null);
+  const [editBuyIns, setEditBuyIns] = useState(null); // "skins" | "ctp" | "market" | null
+  const [editPot, setEditPot] = useState(false);
+  const [potInput, setPotInput] = useState("");
   // Director CTP override — hole currently being edited, plus the pending winner/feet.
   const [editCtpHole, setEditCtpHole] = useState(null);
   const [editCtpPlayer, setEditCtpPlayer] = useState("");
   const [editCtpFeet, setEditCtpFeet] = useState("");
-  const tr = tRounds.find(t => t.round_number === round);
-  const course = tr ? courses.find(c => c.id === tr.course_id) : null;
+  // The market: whose book is on screen, which window is being placed, and the
+  // unsaved draft. A bet is not auto-saved the way a buy-in toggle is — moving
+  // shares between two golfers is two taps that are only correct together.
+  const [bookFor, setBookFor] = useState(null);
+  const [bookWindow, setBookWindow] = useState(null);
+  const [draft, setDraft] = useState(null);
+  const [openHolder, setOpenHolder] = useState(null);
 
-  if (!course) return (
-    <div>
-      <div style={{ background: K.card, borderRadius: R.xl, border: `1px dashed ${K.warn}${ALPHA.hair}`, padding: 32, textAlign: "center", color: K.warn }}>No course set for Round {round}</div>
+  // ── Who is playing for what ──
+  const skinsField = fieldFor(sideGames?.skins?.in, players);
+  const ctpField = fieldFor(sideGames?.ctp?.in, players);
+  const marketField = fieldFor(sideGames?.market?.in, players);
+  const ctpInSet = new Set(ctpField.map(p => p.id));
+  const marketInSet = new Set(marketField.map(p => p.id));
+
+  const skinsCounted = (sideGames?.skins?.amount || 0) > 0;
+  const skinsPot = potFor({ amount: sideGames?.skins?.amount, count: skinsField.length, typed: sideGames?.skins?.pot });
+  const ctpPot = potFor({ amount: sideGames?.ctp?.amount, count: ctpField.length });
+  const marketPot = potFor({ amount: sideGames?.market?.amount, count: marketField.length });
+
+  // ── Which round a tab lands on ──
+  // The most recent round anybody has actually played, which is not the same
+  // question as which round the app is ON: on the morning of Round 2 the app
+  // points at a round with nothing in it while Round 1's results sit one tap
+  // away. It follows the play on its own until somebody taps a round, and from
+  // then on that choice stands.
+  const roundList = Array.from({ length: numRounds }, (_, i) => i + 1);
+  const playedRounds = roundList.filter(r =>
+    players.some(p => Object.values(holeData[`${p.id}_${r}`] || {}).some(v => v > 0)));
+  const defaultRound = playedRounds.length ? playedRounds[playedRounds.length - 1] : (roundList.includes(round) ? round : roundList[0]);
+  const shownRound = roundList.includes(skinsRound) ? skinsRound : defaultRound;
+  const ctpShownRound = roundList.includes(ctpRound) ? ctpRound : defaultRound;
+
+  // A round's course and its two hole tables, resolved once.
+  const roundSetup = (r) => {
+    const tr = tRounds.find(t => t.round_number === r);
+    const course = tr ? courses.find(c => c.id === tr.course_id) : null;
+    return { tr, course, pars: course?.hole_pars || [], hcps: course?.hole_handicaps || [] };
+  };
+
+  // Every player's stroke allocation for a round, plus the signed course
+  // handicap it came from — a plus player gives strokes back, so the sign has
+  // to travel with the map. Gross mode needs neither.
+  const strokesFor = (r) => {
+    const { course } = roundSetup(r);
+    const maps = {}; const chs = {};
+    skinsField.forEach(p => {
+      const tee = course ? getPlayerTee(r, p.id, course) : null;
+      const ch = course
+        ? calcCH(p.handicap_index, tee?.slope || course.slope, tee?.rating || course.rating, tee?.par || course.par)
+        : 0;
+      chs[p.id] = ch;
+      maps[p.id] = buildStrokesMap(ch, course?.hole_handicaps || []);
+    });
+    return { maps, chs };
+  };
+
+  // What computeSkins needs for a round, in the mode currently selected.
+  const skinsSetup = (r) => {
+    const { pars } = roundSetup(r);
+    if (grossMode) return { pars };
+    const { maps, chs } = strokesFor(r);
+    return { pars, strokeMaps: maps, chFor: (pid) => chs[pid] || 0 };
+  };
+
+  const won = allSkins({ players: skinsField, holeData, rounds: roundList, roundSetup: skinsSetup });
+  const skinTotals = skinCounts(won);
+  const totalSkinsWon = won.length;
+  const perSkin = totalSkinsWon > 0 ? skinsPot / totalSkinsWon : 0;
+  const shownSkins = computeSkins({ players: skinsField, holeData, round: shownRound, ...skinsSetup(shownRound) });
+
+  // ── The CTP tab ──
+  // Read through each round's OWN par table rather than straight off ctpData:
+  // a record left on a hole that is no longer a par 3 — a course re-pointed
+  // after the fact — would otherwise keep counting on a hole the tab no longer
+  // shows. A tag naming somebody who is not in the CTP game does not score; it
+  // still shows on its hole, because the document is the hole's answer, but
+  // the board and the payout are for the players who bought in.
+  const par3sFor = (r) => (roundSetup(r).pars || []).map((p, i) => (p === 3 ? i + 1 : null)).filter(Boolean);
+  const ctpTags = roundList.flatMap(r =>
+    par3sFor(r).flatMap(hole => {
+      const rec = (ctpData[r] || {})[hole];
+      return rec?.playerId && ctpInSet.has(rec.playerId) ? [{ round: r, hole, ...rec }] : [];
+    }));
+  const ctpLeaders = Object.values(ctpTags.reduce((acc, t) => {
+    const e = acc[t.playerId] || (acc[t.playerId] = { pid: t.playerId, count: 0, best: null });
+    e.count += 1;
+    if (t.distanceFt != null && (e.best == null || t.distanceFt < e.best)) e.best = t.distanceFt;
+    return acc;
+  }, {}))
+    // Most pins, then the closest single shot among equals — the tiebreak the
+    // players would use themselves.
+    .sort((a, b) => b.count - a.count || (a.best ?? Infinity) - (b.best ?? Infinity));
+  const noPar3s = roundList.every(r => par3sFor(r).length === 0);
+
+  // ── The market tab ──
+  const windows = marketWindows({ holeData, players, numRounds });
+  const eventComplete = roundList.length > 0 && roundList.every(r => roundComplete(holeData, players, r));
+  // The leader, and whether that is a RESULT or a snapshot. Only a finished
+  // event pays out; until then the same board is a projection and says so.
+  const leader = (leaderboard || []).find(p => !p.isWD && !p.withdrew && p.roundsPlayed > 0) || null;
+  const winnerId = leader?.id || null;
+  const bets = marketBets.filter(b => marketInSet.has(b.pid));
+  const board = marketBoard({ bets, players, pot: marketPot });
+  const holders = marketHoldings({ bets, players });
+  const payouts = marketPayouts({ bets, winnerId, pot: marketPot });
+
+  // Whose book the editor is pointed at. A player only ever edits their own;
+  // the director can point it anywhere, which is the path for the phone that
+  // died before the bell.
+  const myPid = user?.id || null;
+  const bookPid = (user?.isDirector && bookFor) ? bookFor : myPid;
+  const bookBet = bets.find(b => b.pid === bookPid) || marketBets.find(b => b.pid === bookPid) || { pid: bookPid, opening: [], mid: [] };
+  // Which window the editor is placing into: the open one, unless the person
+  // has picked. Both closed → the opening window, read-only.
+  const activeWindow = bookWindow
+    || (windows.opening.open ? "opening" : windows.mid.open ? "mid" : "opening");
+  const win = activeWindow === "mid" ? windows.mid : windows.opening;
+  // The director can place into a shut window; nobody else can.
+  const canPlace = !!bookPid && marketInSet.has(bookPid) && (win.open || !!user?.isDirector);
+  const draftLots = draft && draft.pid === bookPid && draft.window === activeWindow
+    ? draft.lots
+    : lotsFor(bookBet, activeWindow);
+  const placed = totalShares(draftLots);
+  const remaining = win.shares - placed;
+  const dirty = !!draft && draft.pid === bookPid && draft.window === activeWindow
+    && JSON.stringify(draft.lots) !== JSON.stringify(lotsFor(bookBet, activeWindow));
+
+  const bump = (pid, delta) => {
+    const next = setLotShares(draftLots, pid, sharesOn(draftLots, pid) + delta, win.shares);
+    setDraft({ pid: bookPid, window: activeWindow, lots: next });
+  };
+  const commitBook = async () => {
+    const lots = activeWindow === "mid"
+      ? { opening: bookBet.opening, mid: draftLots }
+      : { opening: draftLots, mid: bookBet.mid };
+    await onSaveMarketBet(bookPid, lots);
+    setDraft(null);
+  };
+
+  // One commit path for the typed pot, reached by blur — Enter just blurs the
+  // field. Committing on both fired two Firestore writes for one edit.
+  const commitPot = () => {
+    setEditPot(false);
+    const amt = parseFloat(potInput);
+    onUpdateSideGames("skins", { pot: Number.isFinite(amt) && amt > 0 ? amt : 0 });
+  };
+
+  const money = (n) => `$${(n || 0).toFixed(2)}`;
+
+  const empty = (icon, title, sub) => (
+    <Card style={{ padding: "48px 20px", textAlign: "center" }}>
+      <div style={{ fontSize: FS.jumbo, marginBottom: 12, opacity: 0.4 }}>{icon}</div>
+      <div style={{ fontSize: FS.lead, fontWeight: 700, color: K.t1, marginBottom: 6 }}>{title}</div>
+      <div style={{ fontSize: FS.small, color: K.t3, maxWidth: 280, lineHeight: 1.5, margin: "0 auto" }}>{sub}</div>
+    </Card>
+  );
+
+  // ── The pot card ──
+  // The same card for all three games: what is in the pot on the left, what a
+  // unit of it is worth on the right, and the director's buy-in drawer under
+  // it. `typed` opts skins into its inline pot editor — it is the only game
+  // with a hand-entered pot to preserve, because it is the one WBC was already
+  // playing before any of this existed.
+  const potCard = ({ game, label, pot, rightTop, rightBottom, field, typed = false }) => (
+    <>
+      <div style={{ background: K.card, borderRadius: R.lg, marginBottom: editBuyIns === game ? 0 : 10, border: `1px solid ${K.bdr}`, overflow: "hidden" }}>
+        <div style={{ padding: "12px 14px", display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: FS.label, color: K.t3, fontWeight: 700, letterSpacing: 1 }}>{label}</div>
+            {/* Once a buy-in price is set the pot is COUNTED, not typed, so the
+                inline editor gives way — the way to change it is to change who
+                is in. */}
+            {(!typed || skinsCounted) ? (
+              <div style={{ fontSize: FS.title, fontWeight: 800, color: K.gold }}>{money(pot)}</div>
+            ) : editPot ? (
+              <input autoFocus type="number" inputMode="decimal" value={potInput}
+                onChange={e => setPotInput(e.target.value)}
+                onBlur={commitPot}
+                onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                style={{ fontSize: FS.title, fontWeight: 800, color: K.gold, background: "transparent", border: "none", borderBottom: `1px solid ${K.acc}`, outline: "none", width: 110, fontFamily: FONT }} />
+            ) : (
+              // Seed the field from the LIVE pot at the moment editing opens,
+              // not at mount: the value arrives from Firestore after the first
+              // render, and another director can change it while this screen is
+              // open. Seeding at mount meant a director who tapped in and
+              // straight back out saved a stale pot over the real one.
+              <div onClick={() => { if (user?.isDirector) { setPotInput(String(sideGames?.skins?.pot || 0)); setEditPot(true); } }}
+                style={{ fontSize: FS.title, fontWeight: 800, color: K.gold, cursor: user?.isDirector ? "pointer" : "default" }}>
+                {money(pot)}
+              </div>
+            )}
+          </div>
+          <div style={{ textAlign: "right", flexShrink: 0 }}>
+            <div style={{ fontSize: FS.label, color: K.t3 }}>{rightTop}</div>
+            <div style={{ fontSize: FS.body, fontWeight: 700, color: K.acc }}>{rightBottom}</div>
+          </div>
+        </div>
+        {user?.isDirector && (
+          <div
+            onClick={() => setEditBuyIns(v => (v === game ? null : game))}
+            style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "8px 14px", borderTop: `1px solid ${K.bdr}` }}
+          >
+            <span style={{ flex: 1, fontSize: FS.label, fontWeight: 700, color: K.t3, letterSpacing: 0.6 }}>
+              {field.length} IN{(sideGames?.[game]?.amount || 0) > 0 ? ` · $${sideGames[game].amount} EACH` : ""}
+            </span>
+            <span style={{ fontSize: FS.label, fontWeight: 700, color: K.acc, letterSpacing: 0.6 }}>
+              BUY-INS {editBuyIns === game ? "▾" : "▸"}
+            </span>
+          </div>
+        )}
+      </div>
+      {user?.isDirector && editBuyIns === game && (
+        <BuyInEditor
+          players={players}
+          amount={sideGames?.[game]?.amount || 0}
+          ids={sideGames?.[game]?.in ?? null}
+          onChange={patch => onUpdateSideGames(game, "amount" in patch ? { amount: patch.amount } : { in: patch.ids })}
+        />
+      )}
+    </>
+  );
+
+  // A leaders card — the same row in all three games, only the trailing
+  // numbers differ.
+  const leadersCard = (title, rows) => rows.length === 0 ? null : (
+    <div style={{ background: K.card, borderRadius: R.lg, border: `1px solid ${K.bdr}`, marginBottom: 10, overflow: "hidden" }}>
+      <div style={{ padding: "8px 14px", borderBottom: `1px solid ${K.bdr}`, fontSize: FS.label, fontWeight: 700, color: K.gold, letterSpacing: 1 }}>{title}</div>
+      {rows.map(r => (
+        <div key={r.key} style={{ display: "flex", alignItems: "center", padding: "8px 14px", borderBottom: `1px solid ${K.bdr}${ALPHA.hair}`, gap: 8 }}>
+          <span style={{ flex: 1, minWidth: 0, fontSize: FS.body, fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</span>
+          <span style={{ fontSize: FS.body, fontWeight: 700, color: K.acc, flexShrink: 0 }}>{r.mid}</span>
+          <span style={{ fontSize: FS.small, color: K.t3, flexShrink: 0, minWidth: 54, textAlign: "right" }}>{r.right}</span>
+        </div>
+      ))}
     </div>
   );
 
-  const holePars = course.hole_pars || [];
-  // No-carryover GROSS skins across all rounds: each hole = 1 skin, ties = no skin
-  const calcAllSkins = () => {
-    const allResults = [];
-    for (let r = 1; r <= NUM_ROUNDS; r++) {
-      const tr = tRounds.find(t => t.round_number === r);
-      if (!tr) continue;
-      const rCourse = courses.find(c => c.id === tr.course_id);
-      if (!rCourse) continue;
-      for (let hole = 0; hole < 18; hole++) {
-        const scores = [];
-        players.forEach(p => {
-          const s = holeData[`${p.id}_${r}`]?.[hole];
-          if (s) scores.push({ playerId: p.id, name: p.name, gross: s });
-        });
-        if (scores.length < 2) { allResults.push({ round: r, hole: hole + 1, winner: null }); continue; }
-        const minGross = Math.min(...scores.map(s => s.gross));
-        const winners = scores.filter(s => s.gross === minGross);
-        allResults.push(winners.length === 1
-          ? { round: r, hole: hole + 1, winner: winners[0].name, winnerId: winners[0].playerId, gross: minGross }
-          : { round: r, hole: hole + 1, winner: null, tied: true }
-        );
-      }
-    }
-    return allResults;
-  };
+  // ── Scorecards ──
+  // Both renderers highlight the holes the SELECTED mode won, so a gold circle
+  // on a card is always the skin the tab is currently paying for.
+  const skinHolesFor = (pid) => new Set(won.filter(s => s.winner.pid === pid).map(s => `${s.round}_${s.hole}`));
 
-  const allSkinResults = calcAllSkins();
-  const skinTotals = {};
-  allSkinResults.filter(s => s.winner).forEach(s => { skinTotals[s.winner] = (skinTotals[s.winner] || 0) + 1; });
-  const totalSkinsWon = Object.values(skinTotals).reduce((a, b) => a + b, 0);
-  // Filter for current round view
-  const roundSkinResults = allSkinResults.filter(s => s.round === round);
-  const par3s = holePars.map((p, i) => p === 3 ? i + 1 : null).filter(Boolean);
-  const roundCtps = ctpData[round] || {};
-
-  // Inline scorecard renderer — used for expanded player rows
   const renderInlineScorecard = (playerId) => {
     const p = players.find(pl => pl.id === playerId);
     if (!p) return null;
+    const skinSet = skinHolesFor(playerId);
     const rows = [];
-    for (let r = 1; r <= NUM_ROUNDS; r++) {
-      const tr2 = tRounds.find(t => t.round_number === r);
-      if (!tr2) continue;
-      const rCourse = courses.find(c => c.id === tr2.course_id);
-      if (!rCourse) continue;
+    for (const r of roundList) {
+      const { course } = roundSetup(r);
+      if (!course) continue;
       const scores = holeData[`${p.id}_${r}`] || {};
-      const hasAny = Object.values(scores).some(v => v > 0);
-      if (!hasAny) continue;
-      const pars = rCourse.hole_pars || [];
-      const skinHolesSet = new Set(allSkinResults.filter(s => s.round === r && s.winnerId === p.id).map(s => s.hole));
-      rows.push({ r, rCourse, scores, pars, skinHolesSet });
+      if (!Object.values(scores).some(v => v > 0)) continue;
+      rows.push({ r, scores, pars: course.hole_pars || [] });
     }
     // Circles for under par only; gold number + single circle for skin winners; plain number otherwise
     const ScoreCell = ({ score, par, isSkin }) => {
@@ -2468,7 +2742,7 @@ function SkinsCtpView({ players, round, tRounds, courses, holeData, ctpData, onS
     };
     return (
       <div style={{ padding: "8px 10px 6px", borderTop: `1px solid ${K.bdr}${ALPHA.tint}` }}>
-        {rows.map(({ r, scores, pars, skinHolesSet }) => {
+        {rows.map(({ r, scores, pars }) => {
           const front9 = Array.from({length: 9}, (_, i) => i);
           const back9  = Array.from({length: 9}, (_, i) => i + 9);
           const HalfGrid = ({ holes }) => (
@@ -2476,7 +2750,7 @@ function SkinsCtpView({ players, round, tRounds, courses, holeData, ctpData, onS
               <div style={{ display: "grid", gridTemplateColumns: "repeat(9, 1fr)", gap: 2 }}>
                 {holes.map(i => <div key={i} style={{ textAlign: "center", fontSize: FS.micro, fontWeight: 600, color: K.t2 }}>{i + 1}</div>)}
                 {holes.map(i => <div key={i} style={{ textAlign: "center", fontSize: FS.micro, color: K.t3, opacity: 0.45 }}>{pars[i] || ""}</div>)}
-                {holes.map(i => <ScoreCell key={i} score={scores[i]} par={pars[i] || 0} isSkin={skinHolesSet.has(i + 1)} />)}
+                {holes.map(i => <ScoreCell key={i} score={scores[i]} par={pars[i] || 0} isSkin={skinSet.has(`${r}_${i}`)} />)}
               </div>
             </div>
           );
@@ -2491,29 +2765,25 @@ function SkinsCtpView({ players, round, tRounds, courses, holeData, ctpData, onS
     );
   };
 
-  // Full round scorecard grid — all players, skins highlighted
+  // Full round scorecard grid — everybody in the skins game, skins highlighted.
   const renderRoundScorecard = () => {
-    const tr2 = tRounds.find(t => t.round_number === round);
-    if (!tr2) return null;
-    const rCourse = courses.find(c => c.id === tr2.course_id);
-    if (!rCourse) return null;
-    const pars = rCourse.hole_pars || [];
-    // skin winners for this round keyed by hole index (0-based)
+    const { course } = roundSetup(shownRound);
+    if (!course) return (
+      <Card style={{ padding: 20, textAlign: "center", color: K.t3, fontSize: FS.small }}>No course set for Round {shownRound}</Card>
+    );
+    const pars = course.hole_pars || [];
     const skinByHole = {};
-    roundSkinResults.forEach(s => { skinByHole[s.hole - 1] = s; }); // hole is 1-based in results
+    shownSkins.filter(s => s.winner).forEach(s => { skinByHole[s.hole] = s; });
     const allHoles = Array.from({length: 18}, (_, i) => i);
     const front9 = allHoles.slice(0, 9);
     const back9  = allHoles.slice(9);
-    const activePlayers = players.filter(p => {
-      const s = holeData[`${p.id}_${round}`] || {};
-      return Object.values(s).some(v => v > 0);
-    });
-    if (activePlayers.length === 0) return (
-      <div style={{ background: K.card, borderRadius: R.lg, border: `1px solid ${K.bdr}`, padding: 20, textAlign: "center", color: K.t3, fontSize: FS.small }}>No scores yet this round</div>
+    const posted = skinsField.filter(p => Object.values(holeData[`${p.id}_${shownRound}`] || {}).some(v => v > 0));
+    if (posted.length === 0) return (
+      <Card style={{ padding: 20, textAlign: "center", color: K.t3, fontSize: FS.small }}>No scores yet this round</Card>
     );
     const cellBdr = `1px solid ${K.bdr}${ALPHA.tint}`;
     const HalfTable = ({ holes }) => (
-      <div style={{ marginBottom: holes[0] === 0 ? 0 : 0, paddingBottom: holes[0] === 0 ? 8 : 0, borderBottom: holes[0] === 0 ? `1px solid ${K.bdr}` : "none" }}>
+      <div style={{ paddingBottom: holes[0] === 0 ? 8 : 0, borderBottom: holes[0] === 0 ? `1px solid ${K.bdr}` : "none" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
           <colgroup>
             <col style={{ width: "20%" }} />
@@ -2523,7 +2793,7 @@ function SkinsCtpView({ players, round, tRounds, courses, holeData, ctpData, onS
             <tr style={{ borderBottom: cellBdr }}>
               <td style={{ fontSize: FS.micro, fontWeight: 700, color: K.t2, padding: "4px 6px", borderBottom: cellBdr }}>Hole</td>
               {holes.map(i => (
-                <td key={i} style={{ textAlign: "center", fontSize: skinByHole[i]?.winner ? FS.label : FS.micro, fontWeight: skinByHole[i]?.winner ? 800 : 700, color: skinByHole[i]?.winner ? K.gold : K.t1, padding: "4px 1px", borderLeft: cellBdr }}>
+                <td key={i} style={{ textAlign: "center", fontSize: skinByHole[i] ? FS.label : FS.micro, fontWeight: skinByHole[i] ? 800 : 700, color: skinByHole[i] ? K.gold : K.t1, padding: "4px 1px", borderLeft: cellBdr }}>
                   {i + 1}
                 </td>
               ))}
@@ -2534,8 +2804,8 @@ function SkinsCtpView({ players, round, tRounds, courses, holeData, ctpData, onS
             </tr>
           </thead>
           <tbody>
-            {activePlayers.map((p, pi) => {
-              const scores = holeData[`${p.id}_${round}`] || {};
+            {posted.map((p, pi) => {
+              const scores = holeData[`${p.id}_${shownRound}`] || {};
               return (
                 <tr key={p.id} style={{ borderTop: cellBdr, background: pi % 2 === 1 ? `${K.bdr}${ALPHA.wash}` : "transparent" }}>
                   <td style={{ fontSize: FS.label, fontWeight: 600, color: K.t1, padding: "3px 4px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
@@ -2544,7 +2814,7 @@ function SkinsCtpView({ players, round, tRounds, courses, holeData, ctpData, onS
                   {holes.map(i => {
                     const s = scores[i];
                     const par = pars[i] || 0;
-                    const isSkinWinner = skinByHole[i]?.winnerId === p.id;
+                    const isSkinWinner = skinByHole[i]?.winner?.pid === p.id;
                     const d = s ? s - par : null;
                     const isUnder = d !== null && d < 0;
                     const isDouble = d !== null && d <= -2;
@@ -2567,120 +2837,396 @@ function SkinsCtpView({ players, round, tRounds, courses, holeData, ctpData, onS
       </div>
     );
     return (
-      <div style={{ background: K.card, borderRadius: R.lg, border: `1px solid ${K.bdr}`, padding: "10px 10px" }}>
+      <Card pad={10}>
         <HalfTable holes={front9} />
         <HalfTable holes={back9} />
-      </div>
+      </Card>
     );
   };
 
+  // The round pills. The card below is always open, so these pick which round
+  // it shows rather than whether there is one — and the selected pill doubles
+  // as the label saying which round is on screen.
+  const roundPills = (value, onChange) => (
+    <SegmentedToggle
+      variant="pills"
+      style={{ marginBottom: 8 }}
+      options={roundList.map(r => [r, `Rd ${r}`])}
+      value={value}
+      onChange={onChange}
+    />
+  );
+
   return (
     <div>
-      <div style={{ display: "flex", gap: 4, marginBottom: 12 }}>
-        {[["skins","💰 Skins"],["ctp","🎯 Closest to Pin"]].map(([k,l]) => (
-          <button key={k} onClick={() => setTab(k)} style={{ flex: 1, padding: "10px 0", borderRadius: R.md, fontSize: FS.small, fontWeight: tab === k ? 700 : 500, background: tab === k ? K.accGlow : K.card, color: tab === k ? K.acc : K.t2, border: `1px solid ${tab === k ? K.acc : K.bdr}`, cursor: "pointer" }}>{l}</button>
-        ))}
-      </div>
+      {/* Pinned so this tab's lead control sits exactly where every other
+          tab's does, and so the lists scroll under it rather than taking it
+          away. */}
+      <StickyTop>
+        <SegmentedToggle
+          options={[["skins", "💰 Skins"], ["ctp", "🎯 CTP"], ["market", "📈 Market"]]}
+          value={tab} onChange={setTab}
+        />
+      </StickyTop>
 
       {tab === "skins" && (
         <div>
-          {/* Tournament skins leaderboard — inline expanding scorecard */}
+          {potCard({
+            game: "skins", label: "SKINS POT", pot: skinsPot, field: skinsField, typed: true,
+            rightTop: `${totalSkinsWon} skin${totalSkinsWon !== 1 ? "s" : ""} won`,
+            rightBottom: `${money(perSkin)} / skin`,
+          })}
+
+          {/* Net or gross. Gross is the default because it is the game WBC has
+              always played here; net is what the leaderboard ranks on, and a
+              field with a 20-shot spread wants to see both. */}
+          <SegmentedToggle
+            options={[[true, "Gross"], [false, "Net"]]}
+            value={grossMode}
+            onChange={setGrossMode}
+            style={{ marginBottom: 10, width: 160 }}
+          />
+
+          {/* SKINS LEADERS, with each row opening that player's own cards.
+              One list rather than two: the money and the holes it was won on
+              are the same question, and a second card repeating the same six
+              names underneath was just a longer way to ask it. */}
           {Object.keys(skinTotals).length > 0 && (
-            <div style={{ background: K.card, borderRadius: R.lg, border: `1px solid ${K.bdr}`, padding: 14, marginBottom: 10 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                <div style={{ fontSize: FS.label, fontWeight: 600, color: K.t3, textTransform: "uppercase" }}>Tournament Skins</div>
-                <span style={{ fontSize: FS.label, color: K.t3 }}>{totalSkinsWon} of {allSkinResults.length} holes won</span>
-              </div>
-              {Object.entries(skinTotals).sort((a,b) => b[1]-a[1]).map(([name, count]) => {
-                const p = players.find(pl => pl.name === name);
-                const isExpanded = expandedPlayer === p?.id;
+            <div style={{ background: K.card, borderRadius: R.lg, border: `1px solid ${K.bdr}`, marginBottom: 10, overflow: "hidden" }}>
+              <div style={{ padding: "8px 14px", borderBottom: `1px solid ${K.bdr}`, fontSize: FS.label, fontWeight: 700, color: K.gold, letterSpacing: 1 }}>SKINS LEADERS</div>
+              {Object.entries(skinTotals).sort((a, b) => b[1] - a[1]).map(([pid, count]) => {
+                const isExpanded = expandedPlayer === pid;
                 return (
-                  <div key={name} style={{ borderBottom: `1px solid ${K.bdr}${ALPHA.wash}`, borderRadius: R.sm, overflow: "hidden" }}>
-                    <div onClick={() => p && setExpandedPlayer(isExpanded ? null : p.id)}
-                      style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 4px", cursor: p ? "pointer" : "default" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <span style={{ fontSize: FS.micro, color: isExpanded ? K.acc : K.t3, transition: `transform ${MOTION}`, display: "inline-block", transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)" }}>▶</span>
-                        <span style={{ fontWeight: 600, color: K.t1 }}>{name}</span>
-                      </div>
-                      <span style={{ color: K.acc, fontWeight: 800 }}>{count} skin{count !== 1 ? "s" : ""} 💰</span>
+                  <div key={pid} style={{ borderBottom: `1px solid ${K.bdr}${ALPHA.hair}` }}>
+                    <div onClick={() => setExpandedPlayer(isExpanded ? null : pid)}
+                      style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", cursor: "pointer" }}>
+                      <span style={{ fontSize: FS.micro, color: isExpanded ? K.acc : K.t3, transition: `transform ${MOTION}`, display: "inline-block", transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)", flexShrink: 0 }}>▶</span>
+                      <span style={{ flex: 1, minWidth: 0, fontSize: FS.body, fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {players.find(p => p.id === pid)?.name || pid}
+                      </span>
+                      <span style={{ fontSize: FS.body, fontWeight: 700, color: K.acc, flexShrink: 0 }}>{count} skin{count !== 1 ? "s" : ""}</span>
+                      <span style={{ fontSize: FS.small, color: K.t3, flexShrink: 0, minWidth: 56, textAlign: "right" }}>{money(count * perSkin)}</span>
                     </div>
-                    {isExpanded && renderInlineScorecard(p.id)}
+                    {isExpanded && renderInlineScorecard(pid)}
                   </div>
                 );
               })}
             </div>
           )}
 
-          {/* Full round scorecard with skins */}
+          {roundPills(shownRound, setSkinsRound)}
           {renderRoundScorecard()}
         </div>
       )}
 
-            {tab === "ctp" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {par3s.length === 0 ? <div style={{ background: K.card, borderRadius: R.lg, padding: 32, textAlign: "center", color: K.t3 }}>No par 3s</div> :
-          par3s.map(hole => {
-            const rec = roundCtps[hole];
-            const winner = rec ? players.find(p => p.id === rec.playerId) : null;
-            const dist = rec ? (rec.distanceFt ? `${rec.distanceFt} ft` : (rec.distance || "")) : "";
-            const isEd = editCtpHole === hole;
-            return (
-              <div key={hole} style={{ background: K.card, borderRadius: R.lg, border: `1px solid ${K.bdr}`, padding: 14 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-                  <div><span style={{ fontSize: FS.body, fontWeight: 700 }}>Hole {hole}</span><span style={{ fontSize: FS.small, color: K.t3, marginLeft: 8 }}>Par 3</span></div>
-                  {winner ? (
-                    <span style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
-                      <span style={{ fontSize: FS.body, fontWeight: 700, color: K.acc, whiteSpace: "nowrap" }}>🎯 {winner.name}</span>
-                      {dist && <span style={{ fontSize: FS.small, fontWeight: 800, color: K.warn }}>{dist}</span>}
-                    </span>
-                  ) : <span style={{ fontSize: FS.small, color: K.t3 }}>No winner yet</span>}
-                </div>
+      {tab === "ctp" && (
+        <div>
+          {noPar3s
+            ? empty("🎯", "No par 3s yet", "Closest-to-the-pin holes come from the course. They appear here once a round has a course with a par 3 on it.")
+            : (
+              <>
+                {/* CTP never had a hand-entered pot to preserve, so it is
+                    counted from the buy-ins or it is nothing. Hidden from
+                    players until there IS one — "$0.00" is not worth a row on
+                    a tournament whose director has not set a CTP buy-in. The
+                    director keeps it either way; it is where they set one. */}
+                {(ctpPot > 0 || user?.isDirector) && potCard({
+                  game: "ctp", label: "CTP POT", pot: ctpPot, field: ctpField,
+                  rightTop: `${ctpTags.length} pin${ctpTags.length !== 1 ? "s" : ""} taken`,
+                  rightBottom: `${money(ctpTags.length > 0 ? ctpPot / ctpTags.length : 0)} / pin`,
+                })}
 
-                {/* Tagged-by line — CTP is claimed on-course by whichever group was closest,
-                    so it's worth showing who recorded it when a director is reconciling. */}
-                {rec?.taggedByName && !isEd && (
-                  <div style={{ fontSize: FS.label, color: K.t3, marginTop: 4 }}>Tagged by {rec.taggedByName}</div>
-                )}
+                {/* Where skins print money, this prints the closest the player
+                    has been all week — the only other number a CTP has. */}
+                {leadersCard("CTP LEADERS", ctpLeaders.map(({ pid, count, best }) => ({
+                  key: pid,
+                  name: players.find(p => p.id === pid)?.name || pid,
+                  mid: `${count} CTP${count !== 1 ? "s" : ""}`,
+                  right: best != null ? `${best} ft` : "—",
+                })))}
 
-                {/* Director override — available whether or not a tag exists. This is the
-                    correction path for a mis-tagged winner or a mis-scrolled distance. */}
-                {user.isDirector && !isEd && (
-                  <button onClick={() => { setEditCtpHole(hole); setEditCtpPlayer(rec?.playerId || ""); setEditCtpFeet(rec?.distanceFt ? String(rec.distanceFt) : ""); }} style={{
-                    width: "100%", marginTop: 10, padding: "8px 0", borderRadius: R.sm, background: K.inp,
-                    border: `1px solid ${K.bdr}`, color: K.t2, fontSize: FS.small, fontWeight: 700, cursor: "pointer",
-                  }}>{winner ? "Edit CTP" : "Set CTP winner"}</button>
-                )}
-                {user.isDirector && isEd && (
-                  <div style={{ marginTop: 10 }}>
-                    <select value={editCtpPlayer} onChange={e => setEditCtpPlayer(e.target.value)} style={{ width: "100%", padding: "8px 12px", background: K.inp, border: `1px solid ${K.bdr}`, borderRadius: R.sm, color: K.t1, fontSize: FS.small, marginBottom: 6 }}>
-                      <option value="">Select CTP winner...</option>
-                      {players.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                    </select>
-                    <input
-                      type="number" inputMode="numeric" min="1" max={CTP_MAX_FT}
-                      placeholder="Distance (ft)"
-                      value={editCtpFeet}
-                      onChange={e => setEditCtpFeet(e.target.value)}
-                      style={{ width: "100%", padding: "8px 12px", background: K.inp, border: `1px solid ${K.bdr}`, borderRadius: R.sm, color: K.t1, fontSize: FS.small, marginBottom: 8, boxSizing: "border-box" }}
-                    />
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <button
-                        onClick={async () => {
-                          if (!editCtpPlayer) return;
-                          const ft = editCtpFeet === "" ? null : Math.max(1, Math.min(CTP_MAX_FT, parseInt(editCtpFeet, 10) || 0)) || null;
-                          await onSetCtp(round, hole, editCtpPlayer, ft);
-                          setEditCtpHole(null);
-                        }}
-                        disabled={!editCtpPlayer}
-                        style={{ flex: 1, padding: 9, borderRadius: R.sm, background: editCtpPlayer ? K.acc : K.inp, border: editCtpPlayer ? "none" : `1px solid ${K.bdr}`, color: editCtpPlayer ? K.bg : K.t3, fontSize: FS.small, fontWeight: 800, cursor: editCtpPlayer ? "pointer" : "default" }}
-                      >Save</button>
-                      <button onClick={() => setEditCtpHole(null)} style={{ flex: 1, padding: 9, borderRadius: R.sm, background: K.inp, border: `1px solid ${K.bdr}`, color: K.t2, fontSize: FS.small, fontWeight: 700, cursor: "pointer" }}>Cancel</button>
+                {roundPills(ctpShownRound, setCtpRound)}
+
+                {(() => {
+                  const { course } = roundSetup(ctpShownRound);
+                  const par3s = par3sFor(ctpShownRound);
+                  if (par3s.length === 0) return (
+                    <Card style={{ padding: 14, textAlign: "center", color: K.t3, fontSize: FS.small }}>
+                      No par 3s on {course?.name || "this course"}.
+                    </Card>
+                  );
+                  return (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      <SectionLabel style={{ marginBottom: 0, marginTop: 4 }}>{course?.name || "TBD"}</SectionLabel>
+                      {par3s.map(hole => {
+                        const rec = (ctpData[ctpShownRound] || {})[hole];
+                        const winner = rec ? players.find(p => p.id === rec.playerId) : null;
+                        const dist = rec ? (rec.distanceFt ? `${rec.distanceFt} ft` : (rec.distance || "")) : "";
+                        const isEd = editCtpHole === hole;
+                        return (
+                          <Card key={hole} style={{ border: `1px solid ${winner ? K.acc + ALPHA.line : K.bdr}` }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                              <div><span style={{ fontSize: FS.body, fontWeight: 700 }}>Hole {hole}</span><span style={{ fontSize: FS.small, color: K.t3, marginLeft: 8 }}>Par 3</span></div>
+                              {winner ? (
+                                <span style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
+                                  <span style={{ fontSize: FS.body, fontWeight: 700, color: K.acc, whiteSpace: "nowrap" }}>🎯 {winner.name}</span>
+                                  {dist && <span style={{ fontSize: FS.small, fontWeight: 800, color: K.warn }}>{dist}</span>}
+                                </span>
+                              ) : <span style={{ fontSize: FS.small, color: K.t3 }}>No winner yet</span>}
+                            </div>
+
+                            {/* A tag naming somebody who is not in the CTP game
+                                still shows — the document is the hole's answer —
+                                but it wins no money, and saying so here is
+                                cheaper than a director wondering why the board
+                                disagrees with the hole. */}
+                            {rec?.playerId && !ctpInSet.has(rec.playerId) && (
+                              <div style={{ fontSize: FS.label, color: K.warn, marginTop: 4 }}>Not in the CTP game — this pin pays nothing</div>
+                            )}
+
+                            {/* Tagged-by line — CTP is claimed on-course by whichever group was closest,
+                                so it's worth showing who recorded it when a director is reconciling. */}
+                            {rec?.taggedByName && !isEd && (
+                              <div style={{ fontSize: FS.label, color: K.t3, marginTop: 4 }}>Tagged by {rec.taggedByName}</div>
+                            )}
+
+                            {/* Director override — available whether or not a tag exists. This is the
+                                correction path for a mis-tagged winner or a mis-scrolled distance. */}
+                            {user.isDirector && !isEd && (
+                              <Btn variant="secondary" size="sm" block style={{ marginTop: 10 }}
+                                onClick={() => { setEditCtpHole(hole); setEditCtpPlayer(rec?.playerId || ""); setEditCtpFeet(rec?.distanceFt ? String(rec.distanceFt) : ""); }}
+                              >{winner ? "Edit CTP" : "Set CTP winner"}</Btn>
+                            )}
+                            {user.isDirector && isEd && (
+                              <div style={{ marginTop: 10 }}>
+                                {/* Only players who bought into CTP are offered. A hole
+                                    already tagged to somebody since taken out still shows
+                                    their name above — that is what the document says — but
+                                    they cannot be picked again. */}
+                                <select value={editCtpPlayer} onChange={e => setEditCtpPlayer(e.target.value)} style={{ width: "100%", padding: "8px 12px", background: K.inp, border: `1px solid ${K.bdr}`, borderRadius: R.sm, color: K.t1, fontSize: FS.small, marginBottom: 6 }}>
+                                  <option value="">Select CTP winner...</option>
+                                  {ctpField.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                                </select>
+                                <input
+                                  type="number" inputMode="numeric" min="1" max={CTP_MAX_FT}
+                                  placeholder="Distance (ft)"
+                                  value={editCtpFeet}
+                                  onChange={e => setEditCtpFeet(e.target.value)}
+                                  style={{ width: "100%", padding: "8px 12px", background: K.inp, border: `1px solid ${K.bdr}`, borderRadius: R.sm, color: K.t1, fontSize: FS.small, marginBottom: 8, boxSizing: "border-box" }}
+                                />
+                                <div style={{ display: "flex", gap: 6 }}>
+                                  <Btn size="sm" block disabled={!editCtpPlayer}
+                                    onClick={async () => {
+                                      if (!editCtpPlayer) return;
+                                      const ft = editCtpFeet === "" ? null : Math.max(1, Math.min(CTP_MAX_FT, parseInt(editCtpFeet, 10) || 0)) || null;
+                                      await onSetCtp(ctpShownRound, hole, editCtpPlayer, ft);
+                                      setEditCtpHole(null);
+                                    }}
+                                  >Save</Btn>
+                                  <Btn variant="secondary" size="sm" block onClick={() => setEditCtpHole(null)}>Cancel</Btn>
+                                </div>
+                              </div>
+                            )}
+                          </Card>
+                        );
+                      })}
                     </div>
-                  </div>
-                )}
-              </div>
-            );
+                  );
+                })()}
+              </>
+            )}
+        </div>
+      )}
+
+      {tab === "market" && (
+        <div>
+          {potCard({
+            game: "market", label: "MARKET POT", pot: marketPot, field: marketField,
+            rightTop: `${board.reduce((a, b) => a + b.shares, 0)} share${board.reduce((a, b) => a + b.shares, 0) !== 1 ? "s" : ""} placed`,
+            rightBottom: `${holders.length} holder${holders.length !== 1 ? "s" : ""}`,
           })}
+
+          {/* The two windows, and where the tournament is relative to them.
+              A player with unspent shares needs to know whether they are early
+              or late, and those are very different messages. */}
+          <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+            {[windows.opening, windows.mid].filter(w => w.exists !== false).map(w => (
+              <div key={w.key} style={{
+                flex: 1, background: K.card, borderRadius: R.lg, padding: "10px 12px",
+                border: `1px solid ${w.open ? K.acc + ALPHA.line : K.bdr}`,
+              }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                  <span style={{ fontSize: FS.lead, fontWeight: 800, color: w.open ? K.acc : K.t2 }}>{w.shares}</span>
+                  <span style={{ fontSize: FS.label, fontWeight: 700, color: K.t3, letterSpacing: 0.5 }}>SHARES</span>
+                </div>
+                <div style={{ fontSize: FS.small, fontWeight: 700, color: K.t1, marginTop: 2 }}>{w.label}</div>
+                <div style={{ fontSize: FS.label, color: w.open ? K.acc : K.t3, marginTop: 2, lineHeight: 1.4 }}>{w.note}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* ── Your book ── */}
+          {!bookPid ? null : !marketInSet.has(bookPid) ? (
+            <Card style={{ marginBottom: 10, color: K.t3, fontSize: FS.small }}>
+              {bookPid === myPid ? "You are not in the market game." : "That player is not in the market game."}
+            </Card>
+          ) : (
+            <Card style={{ marginBottom: 10 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                <SectionLabel style={{ marginBottom: 0, flex: 1 }}>
+                  {bookPid === myPid ? "Your book" : `${players.find(p => p.id === bookPid)?.name || bookPid}'s book`}
+                </SectionLabel>
+                <span style={{ fontSize: FS.small, fontWeight: 800, color: remaining > 0 ? K.acc : K.t3 }}>
+                  {remaining} of {win.shares} left
+                </span>
+              </div>
+
+              {/* The director places for somebody else — the path for the phone
+                  that died before the bell, and the only way a shut window can
+                  still be written to. */}
+              {user?.isDirector && (
+                <select
+                  value={bookPid}
+                  onChange={e => { setBookFor(e.target.value); setDraft(null); }}
+                  style={{ width: "100%", padding: "8px 12px", background: K.inp, border: `1px solid ${K.bdr}`, borderRadius: R.sm, color: K.t1, fontSize: FS.small, marginBottom: 8 }}
+                >
+                  {marketField.map(p => <option key={p.id} value={p.id}>{p.name}{p.id === myPid ? " (you)" : ""}</option>)}
+                </select>
+              )}
+
+              {windows.mid.exists !== false && (
+                <SegmentedToggle
+                  compact
+                  style={{ marginBottom: 8 }}
+                  options={[["opening", `Opening · ${totalShares(lotsFor(bookBet, "opening"))}/${MARKET_OPENING_SHARES}`],
+                            ["mid", `${windows.mid.label} · ${totalShares(lotsFor(bookBet, "mid"))}/${MARKET_MID_SHARES}`]]}
+                  value={activeWindow}
+                  onChange={k => { setBookWindow(k); setDraft(null); }}
+                />
+              )}
+
+              {!canPlace && (
+                <div style={{ fontSize: FS.label, color: K.t3, marginBottom: 8, lineHeight: 1.5 }}>{win.note}</div>
+              )}
+
+              <div style={{ display: "flex", flexDirection: "column" }}>
+                {players.map(p => {
+                  const n = sharesOn(draftLots, p.id);
+                  const held = sharesOn(allLots(bookBet), p.id);
+                  return (
+                    <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: `1px solid ${K.bdr}${ALPHA.hair}` }}>
+                      <span style={{ flex: 1, minWidth: 0, fontSize: FS.small, fontWeight: 600, color: n > 0 ? K.t1 : K.t3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {p.name}
+                        {held > 0 && <span style={{ color: K.t3, fontWeight: 600 }}> · {held} held</span>}
+                      </span>
+                      <Btn variant="secondary" size="sm" disabled={!canPlace || n <= 0}
+                        style={{ padding: "3px 10px", minWidth: 32 }}
+                        onClick={() => bump(p.id, -1)}>−</Btn>
+                      <span style={{ width: 24, textAlign: "center", fontSize: FS.body, fontWeight: 800, color: n > 0 ? K.acc : K.t3 }}>{n}</span>
+                      <Btn variant="secondary" size="sm" disabled={!canPlace || remaining <= 0}
+                        style={{ padding: "3px 10px", minWidth: 32 }}
+                        onClick={() => bump(p.id, 1)}>+</Btn>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {canPlace && (
+                <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                  <Btn block disabled={!dirty} onClick={commitBook}>{dirty ? "Place shares" : "Placed"}</Btn>
+                  <Btn variant="secondary" block disabled={!dirty} onClick={() => setDraft(null)}>Reset</Btn>
+                </div>
+              )}
+            </Card>
+          )}
+
+          {/* ── The market ── */}
+          {board.length === 0
+            ? empty("📈", "Nothing placed yet", `Everybody in gets ${MARKET_OPENING_SHARES} shares before the tournament starts, and ${MARKET_MID_SHARES} more once the halfway round is in. The pot splits between whoever is holding the winner.`)
+            : (
+              <div style={{ background: K.card, borderRadius: R.lg, border: `1px solid ${K.bdr}`, marginBottom: 10, overflow: "hidden" }}>
+                <div style={{ display: "flex", padding: "8px 14px", borderBottom: `1px solid ${K.bdr}`, fontSize: FS.label, fontWeight: 700, color: K.gold, letterSpacing: 1 }}>
+                  <span style={{ flex: 1 }}>THE MARKET</span>
+                  <span style={{ color: K.t3 }}>SHARES · IF THEY WIN</span>
+                </div>
+                {board.map(r => {
+                  const isLeader = r.pid === winnerId;
+                  return (
+                    <div key={r.pid} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", borderBottom: `1px solid ${K.bdr}${ALPHA.hair}`, background: isLeader ? K.accGlow : "transparent" }}>
+                      <span style={{ flex: 1, minWidth: 0, fontSize: FS.body, fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {isLeader && <span style={{ color: K.gold }}>🏆 </span>}{r.name}
+                      </span>
+                      {/* The share of the market, as a bar rather than a second
+                          number — this is the one thing on the screen that is
+                          easier to read as a length than as a percentage. */}
+                      <span style={{ width: 44, height: 4, borderRadius: R.xs, background: `${K.bdr}`, overflow: "hidden", flexShrink: 0 }}>
+                        <span style={{ display: "block", width: `${Math.round(r.pct)}%`, height: "100%", background: K.acc }} />
+                      </span>
+                      <span style={{ fontSize: FS.body, fontWeight: 800, color: K.acc, width: 28, textAlign: "right", flexShrink: 0 }}>{r.shares}</span>
+                      <span style={{ fontSize: FS.small, color: K.t3, width: 56, textAlign: "right", flexShrink: 0 }}>{money(r.perShare)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+          {/* ── The payout ── */}
+          {winnerId && board.length > 0 && (
+            <div style={{ background: K.card, borderRadius: R.lg, border: `1px solid ${eventComplete ? K.gold + ALPHA.line : K.bdr}`, marginBottom: 10, overflow: "hidden" }}>
+              <div style={{ padding: "8px 14px", borderBottom: `1px solid ${K.bdr}`, fontSize: FS.label, fontWeight: 700, color: K.gold, letterSpacing: 1 }}>
+                {eventComplete ? "PAYOUT" : "IF IT ENDED NOW"}
+              </div>
+              <div style={{ padding: "8px 14px", fontSize: FS.small, color: K.t3, borderBottom: `1px solid ${K.bdr}${ALPHA.hair}` }}>
+                {leader?.name} · {payouts.totalShares} share{payouts.totalShares !== 1 ? "s" : ""} held
+                {payouts.totalShares > 0 ? ` · ${money(payouts.perShare)} each` : ""}
+              </div>
+              {payouts.unclaimed ? (
+                <div style={{ padding: "12px 14px", fontSize: FS.small, color: K.warn, lineHeight: 1.5 }}>
+                  Nobody is holding {leader?.name}. The {money(marketPot)} pot has no claimant — that is a conversation for the room, not something the app should decide.
+                </div>
+              ) : payouts.rows.map(r => (
+                <div key={r.pid} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", borderBottom: `1px solid ${K.bdr}${ALPHA.hair}` }}>
+                  <span style={{ flex: 1, minWidth: 0, fontSize: FS.body, fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {players.find(p => p.id === r.pid)?.name || r.pid}
+                  </span>
+                  <span style={{ fontSize: FS.body, fontWeight: 700, color: K.acc, flexShrink: 0 }}>{r.shares} sh</span>
+                  <span style={{ fontSize: FS.small, fontWeight: 700, color: K.gold, width: 64, textAlign: "right", flexShrink: 0 }}>{money(r.payout)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* ── Who is holding what ── */}
+          {holders.length > 0 && (
+            <Card style={{ marginBottom: 10 }}>
+              <SectionLabel style={{ marginBottom: 8 }}>Holders</SectionLabel>
+              {holders.map(h => {
+                const isOpen = openHolder === h.pid;
+                return (
+                  <div key={h.pid} style={{ borderBottom: `1px solid ${K.bdr}${ALPHA.wash}` }}>
+                    <div onClick={() => setOpenHolder(isOpen ? null : h.pid)}
+                      style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 4px", cursor: "pointer" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                        <span style={{ fontSize: FS.micro, color: isOpen ? K.acc : K.t3, transition: `transform ${MOTION}`, display: "inline-block", transform: isOpen ? "rotate(90deg)" : "rotate(0deg)" }}>▶</span>
+                        <span style={{ fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.name}</span>
+                      </div>
+                      <span style={{ color: K.acc, fontWeight: 800, flexShrink: 0 }}>{h.shares} sh</span>
+                    </div>
+                    {isOpen && (
+                      <div style={{ padding: "0 4px 8px 20px" }}>
+                        {h.lots.map(l => (
+                          <div key={l.pid} style={{ display: "flex", justifyContent: "space-between", fontSize: FS.small, color: K.t2, padding: "3px 0" }}>
+                            <span>{players.find(p => p.id === l.pid)?.name || l.pid}</span>
+                            <span style={{ fontWeight: 700, color: K.t1 }}>{l.shares}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </Card>
+          )}
         </div>
       )}
     </div>
@@ -6164,6 +6710,18 @@ export default function WBCApp() {
   const [courseList, setCourseList] = useState([]);
   const [holeData, setHoleData] = useState({});
   const [ctpData, setCtpData] = useState({});
+  // Every player's market portfolio, one entry per bettor. See rowsToMarket.
+  const [marketBets, setMarketBets] = useState([]);
+  // The three side games' money, from tournament_state.side_games. Each `in`
+  // is an ARRAY of player ids, or NULL when no director has ever touched it —
+  // and null means everybody, which is what every tournament played before
+  // this existed was. An empty array is a different answer (nobody), so the
+  // two must not be collapsed. See components/BuyIns.
+  const [sideGames, setSideGames] = useState({
+    skins: { amount: 0, in: null, pot: 0 },
+    ctp: { amount: 0, in: null },
+    market: { amount: 0, in: null },
+  });
   const [pairingsData, setPairingsData] = useState({});
   const [teeData, setTeeData] = useState({});
   const [teesSaved, setTeesSaved] = useState({});
@@ -6390,7 +6948,7 @@ export default function WBCApp() {
         // NEVER read — ctpData started empty on every load, so the on-course prompt
         // treated already-tagged holes as untagged and the Betting tab showed nothing.
         const skinRows = await db.get("skins", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
-        if (skinRows?.length) setCtpData(rowsToCtp(skinRows));
+        if (skinRows?.length) { setCtpData(rowsToCtp(skinRows)); setMarketBets(rowsToMarket(skinRows)); }
 
         const stateRows = await db.get("tournament_state", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
         if (stateRows?.length) {
@@ -6402,6 +6960,7 @@ export default function WBCApp() {
           if (s.scoring_open) setScoringOpen(s.scoring_open);
           if (s.pairing_strategy) setPairingStrategy(s.pairing_strategy);
           if (s.meta) setTournamentMeta(s.meta);
+          if (s.side_games) setSideGames(mergeSideGames(s.side_games));
         }
 
       } catch(e) { console.error("Load failed:", e); }
@@ -6442,6 +7001,7 @@ export default function WBCApp() {
     // the last group in wins by default. Live subscription, same as scores.
     unsubs.push(db.subscribe("skins", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
       setCtpData(rowsToCtp(docs));
+      setMarketBets(rowsToMarket(docs));
     }));
 
     unsubs.push(db.subscribe("tournament_state", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
@@ -6453,6 +7013,7 @@ export default function WBCApp() {
         if (docs[0].scoring_open) setScoringOpen(docs[0].scoring_open);
         if (docs[0].pairing_strategy) setPairingStrategy(docs[0].pairing_strategy);
         if (docs[0].meta) setTournamentMeta(docs[0].meta);
+        if (docs[0].side_games) setSideGames(mergeSideGames(docs[0].side_games));
       }
     }));
 
@@ -6528,6 +7089,12 @@ export default function WBCApp() {
     setCourseList([]);
     setHoleData({});
     setCtpData({});
+    // The side games go with the scorecards: the `skins` delete above took the
+    // CTP tags AND every market portfolio, and the tournament_state delete took
+    // the buy-in lists. Resetting them here keeps the screen agreeing with what
+    // is left in Firestore instead of showing a pot nobody has bought into.
+    setMarketBets([]);
+    setSideGames(mergeSideGames(null));
     setPairingsData({});
     setTeeData({});
     setTeeTimesData({});
@@ -7048,27 +7615,26 @@ export default function WBCApp() {
   };
 
   // Compute gross skin wins for scorecard highlighting: { "round_holeIdx": playerId }
+  // Gross skin wins for scorecard highlighting: { "round_holeIdx": playerId }.
+  //
+  // Computed through lib/sideGames, the same function the Betting tab runs, so
+  // a gold circle on the leaderboard's card is provably the same skin the
+  // Betting tab is paying for. It also respects the skins buy-in list: a hole
+  // won by somebody who is not in the game is not a skin, and highlighting it
+  // as one would put a circle on the board that the money disagrees with.
   const skinWins = useMemo(() => {
+    const field = fieldFor(sideGames?.skins?.in, activePlayers);
     const wins = {};
     for (let r = 1; r <= numRounds; r++) {
       const tr = tRounds.find(t => t.round_number === r);
-      if (!tr) continue;
-      const rCourse = courseList.find(c => c.id === tr.course_id);
+      const rCourse = tr ? courseList.find(c => c.id === tr.course_id) : null;
       if (!rCourse) continue;
-      for (let hole = 0; hole < 18; hole++) {
-        const scores = [];
-        activePlayers.forEach(p => {
-          const s = holeData[`${p.id}_${r}`]?.[hole];
-          if (s) scores.push({ pid: p.id, gross: s });
-        });
-        if (scores.length < 2) continue;
-        const minG = Math.min(...scores.map(s => s.gross));
-        const winners = scores.filter(s => s.gross === minG);
-        if (winners.length === 1) wins[`${r}_${hole}`] = winners[0].pid;
-      }
+      computeSkins({ players: field, holeData, round: r, pars: rCourse.hole_pars || [] })
+        .filter(s => s.winner)
+        .forEach(s => { wins[`${r}_${s.hole}`] = s.winner.pid; });
     }
     return wins;
-  }, [activePlayers, holeData, tRounds, courseList, numRounds]);
+  }, [activePlayers, holeData, tRounds, courseList, numRounds, sideGames]);
 
   // Tag / re-tag the tournament-wide CTP for a par 3. One doc per round+hole, so a
   // closer ball from a later group overwrites the standing tag.
@@ -7104,6 +7670,51 @@ export default function WBCApp() {
       tagged_at: new Date().toISOString(),
     }, "id");
     notify(ft ? `CTP Hole ${hole} — ${ft} ft` : `CTP Hole ${hole} set`);
+  };
+
+  // ── The side games' money ────────────────────────────────────────
+  // A MERGE of only the named game, deliberately: writing the whole shape
+  // every time would materialise `in: null` as a stored field and destroy the
+  // distinction between "never configured" (everybody) and "nobody in".
+  // Firestore's setDoc(merge:true) merges maps field by field, so patching
+  // { skins: { in: [...] } } leaves the skins buy-in price alone.
+  //
+  // Applied locally first so sixteen taps down a roster feel immediate.
+  const onUpdateSideGames = async (game, patch) => {
+    setSideGames(prev => ({ ...prev, [game]: { ...prev[game], ...patch } }));
+    await db.upsert("tournament_state", {
+      id: `ts_${TOURNAMENT_ID}`,
+      tournament_id: TOURNAMENT_ID,
+      side_games: { [game]: patch },
+      updated_at: new Date().toISOString(),
+    });
+  };
+
+  // ── Placing a bet ────────────────────────────────────────────────
+  // One document per bettor holding BOTH windows, written whole. The lots
+  // are arrays rather than maps for exactly this reason: db.upsert merges,
+  // and a map would keep a golfer the bettor has just sold out of.
+  //
+  // The window guard is on the screen, not here, because this is also the
+  // director's correction path — a phone that died before the bell still has
+  // to get its shares in.
+  const onSaveMarketBet = async (pid, lots) => {
+    if (!pid) return;
+    const opening = normalizeLots(lots.opening);
+    const mid = normalizeLots(lots.mid);
+    setMarketBets(prev => {
+      const rest = prev.filter(b => b.pid !== pid);
+      return [...rest, { pid, opening, mid }].sort((a, b) => String(a.pid).localeCompare(String(b.pid)));
+    });
+    await db.upsert("skins", {
+      id: docIds.marketBet(_e(), pid),
+      tournament_id: TOURNAMENT_ID,
+      skin_type: "market",
+      player_id: pid,
+      opening,
+      mid,
+      updated_at: new Date().toISOString(),
+    });
   };
 
   const setPairings = async (rnd, groups) => {
@@ -7533,7 +8144,7 @@ export default function WBCApp() {
         <div style={{ display: view === "scoring" ? "block" : "none", paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
           <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeTimesData={teeTimesData} roundDates={roundDates} scoringOpen={scoringOpen} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={async (key, signerPid, signerName, present, rnd) => { const nonSigners = (present || []).filter(pid => pid !== signerPid); const autoFinal = nonSigners.length === 0; const optimistic = { signedBy: signerPid, signedByName: signerName, attestedBy: [], present: present || [] }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: optimistic })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), tournament_id: TOURNAMENT_ID, groupKey: key, round: rnd, signedBy: signerPid, signedByName: signerName, present: present || [], attestedBy: [], signedAt: new Date().toISOString() }); if (autoFinal) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onAttestScorecard={async (key, attesterPid, nonSigners) => { const cur = scorecardSigs[key]; if (!cur) return; const attestedBy = [...new Set([...(cur.attestedBy || []), attesterPid])]; const optimistic = { ...cur, attestedBy }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: { ...prev[key], attestedBy } })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), attestedBy }); const allDone = (nonSigners || []).every(pid => attestedBy.includes(pid)); if (allDone) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onUnsignScorecard={async key => { pendingSigsRef.current.delete(key); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); if (finalizedRounds[key]) { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); pendingSigsRef.current.delete(key); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); await saveTournamentState(nf); }} onGoToAdminCourses={(rnd) => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); setAdminSettingsRound(rnd || null); }} markPlayerWD={markPlayerWD} ctpData={ctpData} onSetCtp={onSetCtp} directorPick={directorPick} onGroupChange={setScoringGroup} onSetRound={setRound} />
         </div>
-        {view === "skins" && <SkinsCtpView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} />}
+        {view === "skins" && <BettingView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} numRounds={numRounds} getPlayerTee={getPlayerTee} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} marketBets={marketBets} onSaveMarketBet={onSaveMarketBet} leaderboard={getLeaderboard} />}
         {view === "groups" && <GroupsView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} pairingsData={pairingsData} teeTimesData={teeTimesData} getPlayerTee={getPlayerTee} user={user} />}
         {view === "admin" && (user.isDirector ? <AdminView activePlayers={activePlayers} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
               setTeeTimesData(prev => {

@@ -60,6 +60,11 @@ export const docIds = {
   tournamentRound: (slug, round) => `tr_${slug}_r${round}`,
   // skins, skin_type "ctp": one per par-3, per round.
   ctp: (slug, round, hole) => `ctp_${slug}_r${round}_h${hole}`,
+  // skins, skin_type "market": one per BETTOR — the whole portfolio, both
+  // windows, on one document. Per-bettor rather than per-lot because a
+  // portfolio is edited as a whole: shares move between golfers, and a lot
+  // taken to zero has to disappear rather than linger at zero.
+  marketBet: (slug, pid) => `mkt_${slug}_${pid}`,
 
   // wbc_scorecard_sigs: one per scoring group, per round. The odd one out.
   //
