@@ -16,7 +16,10 @@ import { Popup, ConfirmModal } from "./components/Popup";
 import { EditionSwitcher } from "./components/EditionSwitcher";
 import { docIds } from "./lib/editionId";
 import { openingHole } from "./lib/holeAdvance";
+import { groupKey as groupKeyOf, sameGroup, liveRound, switchableGroups, groupProgress } from "./lib/groupSwitch";
 import { AppHeader } from "./components/AppHeader";
+import { GroupSwitcher } from "./components/GroupSwitcher";
+import { OffRoundBanner } from "./components/OffRoundBanner";
 import { MoreMenu } from "./components/MoreMenu";
 import { TROPHY_SVG_URL, WBC_LOGO, WBC_FAVICON } from "./constants";
 import { collection, doc, setDoc, getDocs, query, where, writeBatch, onSnapshot, deleteDoc } from "firebase/firestore";
@@ -1024,7 +1027,7 @@ function ScoreButtonRow({ score, par, onPick }) {
 
 // ── ON-COURSE SCORING (replaces old ScoringView) ──
 // Flow: Group Setup → Hole-by-hole for entire group → auto-advance
-function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPlayers, onSaveHole, notify, pairingsData, teeTimesData, roundDates, scoringOpen, setTee, getPlayerTee, finalizedRounds, scorecardSigs, onSignScorecard, onAttestScorecard, onUnsignScorecard, onFinalizeRound, onUnfinalizeRound, onGoToAdminCourses, markPlayerWD, ctpData, onSetCtp }) {
+function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPlayers, onSaveHole, notify, pairingsData, teeTimesData, roundDates, scoringOpen, setTee, getPlayerTee, finalizedRounds, scorecardSigs, onSignScorecard, onAttestScorecard, onUnsignScorecard, onFinalizeRound, onUnfinalizeRound, onGoToAdminCourses, markPlayerWD, ctpData, onSetCtp, directorPick, onGroupChange, onSetRound }) {
   const [group, setGroup] = useState(null);
   const [currentHole, setCurrentHole] = useState(0);
   const [manualOverride, setManualOverride] = useState(false);
@@ -1050,6 +1053,14 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
   const [ctpPickPlayer, setCtpPickPlayer] = useState("");
   const [ctpFeet, setCtpFeet] = useState(10);
 
+  // ── The safety catch on a round that is not being played ──
+  // The group key editing has been ARMED for, or null. A director who opened
+  // Round 1 to LOOK at a card gets a read-only screen: the score buttons are a
+  // grid of large targets, so arriving somewhere is one brushed thumb from
+  // changing it. Arming takes a confirmation that names the change, and it is
+  // per GROUP — walking to another group, or back to the live round, drops it.
+  const [armedKey, setArmedKey] = useState(null);
+  const { confirm: confirmEdit, confirmModal: editConfirmModal } = useConfirm();
 
   const tr = tRounds.find(t => t.round_number === round);
   const course = tr ? courses.find(c => c.id === tr.course_id) : null;
@@ -1062,21 +1073,54 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
   useEffect(() => {
     // Always reset editing state when round changes
     setEditingCompleted(false);
-    if (myPresetGroup && !manualOverride) {
+    // A manual pick only survives while the group it named is still IN this
+    // round's draw. It used to survive the round change outright, which is how
+    // a director who picked Group 3 in Round 1 kept looking at Round 1's four
+    // players after finalizing advanced the app to Round 2 — under Round 2's
+    // heading, writing Round 2 scores for a group that isn't playing in it.
+    if (manualOverride && presetGroups.some(g => sameGroup(g, group))) return;
+    if (manualOverride) setManualOverride(false);
+    if (myPresetGroup) {
       // Update group if pairings were set/changed (even if group already exists)
-      const currentIds = (group || []).slice().sort().join(",");
-      const presetIds = myPresetGroup.slice().sort().join(",");
-      if (currentIds !== presetIds) {
+      if (!sameGroup(myPresetGroup, group)) {
         setGroup(myPresetGroup);
         setCurrentHole(0);
       }
-    } else if (!myPresetGroup) {
+    } else {
       // No pairings for this round — clear any stale group from a previous round
       setGroup(null);
       setCurrentHole(0);
-      setManualOverride(false);
     }
   }, [round, JSON.stringify(myPresetGroup)]);
+
+  // ── The director's crown, landing ──
+  // A pick made in the app header (components/GroupSwitcher) arrives as
+  // { seq, round, ids }; the round has already been set on the app, in the same
+  // batch, so by the time this runs `round` is the picked one. `seq` is what
+  // makes it a one-shot: the pick stays in state after it lands, and without a
+  // consumed marker any later return to that round would silently re-apply it.
+  //
+  // This effect MUST stay below the auto-assign one above. Both run in the
+  // same commit when a pick crosses rounds — that one drops the group it no
+  // longer recognises, this one puts the picked group in its place — and React
+  // runs a component's effects in the order they are declared.
+  const appliedPickRef = useRef(0);
+  useEffect(() => {
+    if (!directorPick || directorPick.seq === appliedPickRef.current) return;
+    if (directorPick.round !== round) return;
+    appliedPickRef.current = directorPick.seq;
+    setGroup(directorPick.ids);
+    setManualOverride(true);
+  }, [directorPick, round]);
+
+  // What the crown is pointed at, reported up so the chip can name it. The
+  // header is two components above this one and has no idea a round is being
+  // scored; which group this screen resolved to is the one fact it needs.
+  const reportedGroup = group ? groupKeyOf(round, group) : null;
+  useEffect(() => {
+    if (onGroupChange) onGroupChange(group ? { round, ids: group } : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reportedGroup]);
 
   // ── Resume at the right hole when the group is set ──
   //
@@ -1160,8 +1204,28 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
   // dark screen (the reopen "flash then dark" bug). Declaring it up here — before
   // any effect or early return — guarantees it's always initialized when those
   // closures run. Depends only on group/round/finalizedRounds, all available now.
-  const _groupKey = group ? `${round}_${group.slice().sort().join(",")}` : null;
+  const _groupKey = group ? groupKeyOf(round, group) : null;
   const isGroupFinalized = _groupKey && (finalizedRounds[_groupKey] || finalizedRounds[round]);
+
+  // ── Off the round being played ──
+  // Only a director can be here: the round pills are gone on this tab, and the
+  // crown is the only control that moves the app off the round the tournament
+  // is on. Everybody else is on the live round by construction, and nothing
+  // below this line renders for them.
+  //
+  // A null live round — every round finalized, the event over — counts as off
+  // for anything a director opens. There is no round to be ON, and that is the
+  // state where a stray edit is least likely to be noticed.
+  const liveRoundNum = liveRound(finalizedRounds, NUM_ROUNDS);
+  const offRound = !!user.isDirector && liveRoundNum !== round;
+  // Read-only until armed. Compared against the group ACTUALLY on screen rather
+  // than the one that was armed, so a selection that resolves elsewhere — the
+  // pairings redrawn under the director's feet — lands read-only rather than
+  // carrying an arming granted for something else.
+  const editLocked = offRound && armedKey !== _groupKey;
+  useEffect(() => {
+    setArmedKey(k => (k != null && k !== _groupKey ? null : k));
+  }, [_groupKey]);
 
   const isHoleComplete = (holeIdx) => {
     if (!group) return false;
@@ -1340,9 +1404,74 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
     return { gross, netToPar, thru };
   };
 
+  // ── The off-round banner ────────────────────────────────────────────
+  // components/OffRoundBanner carries the look and the two hit targets; what
+  // stays here is what they DO, since both act on this screen's own state.
+  //
+  // The confirm modal rides along with it. Every question this screen can ask
+  // about an off-round edit is asked from inside this branch, so the two are
+  // never apart — and the banner renders on each of the branches below that can
+  // raise one.
+  const offRoundBanner = offRound ? (
+    <>
+      <OffRoundBanner
+        round={round} live={liveRoundNum} editLocked={editLocked}
+        onReturn={onSetRound ? () => onSetRound(liveRoundNum) : null}
+        onToggleEdit={async () => {
+          if (!editLocked) { setArmedKey(null); return; }
+          const ok = await confirmEdit({
+            eyebrow: `Round ${round}`,
+            title: "Edit scores in a round that isn't live?",
+            message: [
+              "This is not the round being played. Anything you change posts immediately and moves the leaderboard, and the players in this group are not asked.",
+              "",
+              "Editing stays on for this group until you tap Done or leave it.",
+            ].join("\n"),
+            confirmLabel: "Edit scores",
+            destructive: true,
+          });
+          if (ok) setArmedKey(_groupKey);
+        }}
+      />
+      <ConfirmModal modal={editConfirmModal} />
+    </>
+  ) : null;
+
+  // What a score tap asks on a round that isn't live, and the tap itself. The
+  // first tap does not enter a score, it asks — and it asks about THAT tap by
+  // name: who, which hole, what it says now and what it would say. "Are you
+  // sure?" is a question a thumb answers yes to without reading, and the tap
+  // nobody meant to make is the whole point here.
+  //
+  // Saying yes applies the tap AND arms the group, so correcting a card is one
+  // question rather than eighteen; the banner turns loud for as long as it
+  // stays armed, and walking away from the group drops it.
+  const saveScore = async (p, val) => {
+    if (editLocked) {
+      const was = getScore(p.id);
+      const ok = await confirmEdit({
+        eyebrow: `Round ${round} · Hole ${currentHole + 1}`,
+        title: "Change a score in a round that isn't live?",
+        message: [
+          `${p.name}, hole ${currentHole + 1}: ${was > 0 ? was : "no score"} → ${val > 0 ? val : "no score"}.`,
+          "",
+          "This is not the round being played. The change posts immediately and moves the leaderboard, and the players in this group are not asked.",
+          "",
+          "Editing stays on for this group until you leave it.",
+        ].join("\n"),
+        confirmLabel: "Change it",
+        destructive: true,
+      });
+      if (!ok) return;
+      setArmedKey(_groupKey);
+    }
+    onSaveHole(p.id, round, currentHole, val);
+  };
+
   // ── EARLY RETURNS (after all hooks) ──
   if (!course) return (
     <div>
+      {offRoundBanner}
       <h2 style={{ fontFamily: "'Montserrat', sans-serif", fontSize: FS.title, margin: "0 0 14px", fontWeight: 800 }}>Score — Round {round}</h2>
       <div
         onClick={user.isDirector && onGoToAdminCourses ? () => onGoToAdminCourses(round) : undefined}
@@ -1367,6 +1496,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
     if (user.isDirector && presetGroups.length > 0) {
       return (
         <div style={{ padding: "16px 0" }}>
+          {offRoundBanner}
           <div style={{ fontSize: FS.small, fontWeight: 700, color: K.t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 12 }}>Select Group to Score</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {presetGroups.map((grp, gi) => {
@@ -1415,6 +1545,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
     }
     return (
       <div style={{ textAlign: "center", padding: "40px 20px" }}>
+        {offRoundBanner}
         <div style={{ fontSize: FS.jumbo, marginBottom: 12 }}>⛳</div>
         <div style={{ fontSize: FS.lead, fontWeight: 700, color: K.t1, marginBottom: 6 }}>Waiting for Pairings</div>
         <div style={{ fontSize: FS.small, color: K.t3 }}>Your tournament director will set up groups before the round begins.</div>
@@ -1427,6 +1558,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
   // effects above can safely close over them — see the note there.)
   if (isGroupFinalized) return (
     <div style={{ padding: "24px 16px", display: "flex", flexDirection: "column", gap: 16 }}>
+      {offRoundBanner}
       {/* Compact header: All Groups (director only) · course */}
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         {user.isDirector && presetGroups.length > 1 && (
@@ -1533,6 +1665,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
 
   return (
     <div>
+      {offRoundBanner}
       {/* Compact header: All Groups (director only) · course · Full Scorecard */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
         {user.isDirector && presetGroups.length > 1 && (
@@ -1764,7 +1897,9 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
               )}
 
               {/* Score buttons — par-relative control (ported from league) */}
-              <ScoreButtonRow score={score} par={par} onPick={(val) => { onSaveHole(p.id, round, currentHole, val); }} />
+              {/* saveScore, not onSaveHole: on a round that isn't live the first
+                  tap asks before it writes. See the note on saveScore. */}
+              <ScoreButtonRow score={score} par={par} onPick={(val) => saveScore(p, val)} />
             </div>
           );
         })}
@@ -5975,6 +6110,16 @@ export default function WBCApp() {
   }, []);
   const [view, setView] = useState("leaderboard");
   const [round, setRound] = useState(1);
+  // ── The director's crown ──
+  // Which group the Scoring tab is pointed at, reported up by OnCourseScoring,
+  // and the pick that points it somewhere else. Both live up here because the
+  // crown that reads them is app CHROME: it rides in the header, above every
+  // tab, and the header knows nothing about a round being scored. The pick
+  // carries a sequence number so the screen below can apply it exactly once —
+  // see the effect there.
+  const [scoringGroup, setScoringGroup] = useState(null);
+  const [directorPick, setDirectorPick] = useState(null);
+  const pickSeq = useRef(0);
   const [notif, setNotif] = useState(null);
   // Kept next to the state it drives, and above every caller: several hook
   // dependency arrays name `notify`, and those are evaluated during render.
@@ -6089,6 +6234,14 @@ export default function WBCApp() {
   // makes it safe to do here.
   const numRounds = clampRounds(tournamentMeta?.rounds);
   if (NUM_ROUNDS !== numRounds) setRoundCount(numRounds);
+
+  // Every group in every round — what the director's crown lists. Kept here
+  // rather than inside the header's JSX so the same array decides whether the
+  // crown appears at all: with one group there is nothing to switch to.
+  const switchableGroupList = useMemo(
+    () => switchableGroups(pairingsData, numRounds),
+    [pairingsData, numRounds]
+  );
 
   // The tab title follows the saved tournament name, so renaming the event in
   // the Event settings tab renames the browser tab too. Kept here rather than up
@@ -7211,6 +7364,27 @@ export default function WBCApp() {
       <AppHeader
         location={tournamentLocation}
         right={<>
+            {/* The director's crown — components/GroupSwitcher. Only on the
+                Scoring tab, because that is the screen it points; only for a
+                director, because the flag it reads is the same one the security
+                rules check; and only when there is more than one group to point
+                at, since with one it would be a control that changes nothing.
+                Up here it costs the scoring screen nothing at all — not a row,
+                not a corner of one. */}
+            {user.isDirector && view === "scoring" && switchableGroupList.length > 1 && (
+              <GroupSwitcher
+                groups={switchableGroupList}
+                currentKey={scoringGroup ? groupKeyOf(scoringGroup.round, scoringGroup.ids) : null}
+                live={liveRound(finalizedRounds, numRounds)}
+                nameOf={pid => allPlayers.find(p => p.id === pid)?.name || pid}
+                progressOf={g => groupProgress(g.round, g.ids, holeData, finalizedRounds)}
+                onPick={g => {
+                  pickSeq.current += 1;
+                  setDirectorPick({ seq: pickSeq.current, round: g.round, ids: g.ids });
+                  setRound(g.round);
+                }}
+              />
+            )}
             <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
               <div style={{ position: "relative", width: 6, height: 6 }}>
                 <div style={{ width: 6, height: 6, borderRadius: "50%", background: syncing ? K.acc : K.ok }} />
@@ -7357,7 +7531,7 @@ export default function WBCApp() {
       <div className="wbc-app-body" style={{ padding: (view === "leaderboard" || view === "admin") ? "14px 20px 0 20px" : "14px 20px", flex: 1, overflowY: "auto", overflowX: "hidden", display: (view === "leaderboard" || view === "admin") ? "flex" : "block", flexDirection: "column", minHeight: 0, paddingBottom: (view === "leaderboard" || view === "admin") ? "28px" : 0 }}>
         {view === "leaderboard" && <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} loaded={storageLoaded} />}
         <div style={{ display: view === "scoring" ? "block" : "none", paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
-          <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeTimesData={teeTimesData} roundDates={roundDates} scoringOpen={scoringOpen} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={async (key, signerPid, signerName, present, rnd) => { const nonSigners = (present || []).filter(pid => pid !== signerPid); const autoFinal = nonSigners.length === 0; const optimistic = { signedBy: signerPid, signedByName: signerName, attestedBy: [], present: present || [] }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: optimistic })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), tournament_id: TOURNAMENT_ID, groupKey: key, round: rnd, signedBy: signerPid, signedByName: signerName, present: present || [], attestedBy: [], signedAt: new Date().toISOString() }); if (autoFinal) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onAttestScorecard={async (key, attesterPid, nonSigners) => { const cur = scorecardSigs[key]; if (!cur) return; const attestedBy = [...new Set([...(cur.attestedBy || []), attesterPid])]; const optimistic = { ...cur, attestedBy }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: { ...prev[key], attestedBy } })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), attestedBy }); const allDone = (nonSigners || []).every(pid => attestedBy.includes(pid)); if (allDone) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onUnsignScorecard={async key => { pendingSigsRef.current.delete(key); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); if (finalizedRounds[key]) { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); pendingSigsRef.current.delete(key); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); await saveTournamentState(nf); }} onGoToAdminCourses={(rnd) => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); setAdminSettingsRound(rnd || null); }} markPlayerWD={markPlayerWD} ctpData={ctpData} onSetCtp={onSetCtp} />
+          <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeTimesData={teeTimesData} roundDates={roundDates} scoringOpen={scoringOpen} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={async (key, signerPid, signerName, present, rnd) => { const nonSigners = (present || []).filter(pid => pid !== signerPid); const autoFinal = nonSigners.length === 0; const optimistic = { signedBy: signerPid, signedByName: signerName, attestedBy: [], present: present || [] }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: optimistic })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), tournament_id: TOURNAMENT_ID, groupKey: key, round: rnd, signedBy: signerPid, signedByName: signerName, present: present || [], attestedBy: [], signedAt: new Date().toISOString() }); if (autoFinal) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onAttestScorecard={async (key, attesterPid, nonSigners) => { const cur = scorecardSigs[key]; if (!cur) return; const attestedBy = [...new Set([...(cur.attestedBy || []), attesterPid])]; const optimistic = { ...cur, attestedBy }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: { ...prev[key], attestedBy } })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), attestedBy }); const allDone = (nonSigners || []).every(pid => attestedBy.includes(pid)); if (allDone) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onUnsignScorecard={async key => { pendingSigsRef.current.delete(key); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); if (finalizedRounds[key]) { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); pendingSigsRef.current.delete(key); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); await saveTournamentState(nf); }} onGoToAdminCourses={(rnd) => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); setAdminSettingsRound(rnd || null); }} markPlayerWD={markPlayerWD} ctpData={ctpData} onSetCtp={onSetCtp} directorPick={directorPick} onGroupChange={setScoringGroup} onSetRound={setRound} />
         </div>
         {view === "skins" && <SkinsCtpView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} />}
         {view === "groups" && <GroupsView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} pairingsData={pairingsData} teeTimesData={teeTimesData} getPlayerTee={getPlayerTee} user={user} />}

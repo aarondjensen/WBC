@@ -1,0 +1,97 @@
+import { describe, it, expect } from "vitest";
+import { groupKey, sameGroup, liveRound, switchableGroups, groupProgress } from "./groupSwitch";
+
+// n holes posted for a player, as holeData files them: `${pid}_${round}`.
+const card = (n, s = 4) => Object.fromEntries(Array.from({ length: n }, (_, i) => [i, s]));
+
+describe("groupKey", () => {
+  it("is order-independent, so a re-drawn group keeps its card", () => {
+    expect(groupKey(2, ["c", "a", "b"])).toBe(groupKey(2, ["a", "b", "c"]));
+  });
+
+  it("carries the round, so the same four in round 2 are a different card", () => {
+    expect(groupKey(1, ["a", "b"])).not.toBe(groupKey(2, ["a", "b"]));
+  });
+});
+
+describe("sameGroup", () => {
+  it("matches the same people in any order", () => {
+    expect(sameGroup(["a", "b"], ["b", "a"])).toBe(true);
+  });
+
+  it("does not match a different draw, or nothing at all", () => {
+    expect(sameGroup(["a", "b"], ["a", "c"])).toBe(false);
+    expect(sameGroup(null, ["a"])).toBe(false);
+  });
+});
+
+describe("liveRound", () => {
+  it("is the first round nobody has finalized", () => {
+    expect(liveRound({ 1: true }, 4)).toBe(2);
+  });
+
+  // A group-level key finalizes ONE card, not the round — the round is still
+  // being played by everybody else in it.
+  it("ignores group-level finalizations", () => {
+    expect(liveRound({ "1_a,b": true }, 4)).toBe(1);
+  });
+
+  it("is null once every round is in — the event is over", () => {
+    expect(liveRound({ 1: true, 2: true }, 2)).toBe(null);
+  });
+});
+
+describe("switchableGroups", () => {
+  const pairings = { 1: [["a", "b"], ["c", "d"]], 3: [["a", "c"]] };
+
+  it("lists every group in every round, rounds ascending", () => {
+    const gs = switchableGroups(pairings, 4);
+    expect(gs.map(g => `${g.round}/${g.index}`)).toEqual(["1/0", "1/1", "3/0"]);
+  });
+
+  it("keeps each group's position in its own round, which is its number", () => {
+    const gs = switchableGroups(pairings, 4);
+    expect(gs[1]).toMatchObject({ round: 1, index: 1, ids: ["c", "d"] });
+  });
+
+  // The pairings editor leaves empty slots behind while a director fills
+  // groups in. There is nothing to point a scoring screen at.
+  it("skips empty groups", () => {
+    expect(switchableGroups({ 1: [[], ["a"]] }, 1)).toHaveLength(1);
+  });
+
+  it("stops at the event's round count", () => {
+    expect(switchableGroups(pairings, 2).every(g => g.round <= 2)).toBe(true);
+  });
+
+  it("survives a tournament with no pairings at all", () => {
+    expect(switchableGroups(undefined, 4)).toEqual([]);
+  });
+});
+
+describe("groupProgress", () => {
+  it("reports the furthest player, not the group's agreed position", () => {
+    const hd = { a_1: card(9), b_1: card(7) };
+    expect(groupProgress(1, ["a", "b"], hd, {})).toMatchObject({ thru: 9, complete: false });
+  });
+
+  it("is complete only when every player has all 18", () => {
+    expect(groupProgress(1, ["a", "b"], { a_1: card(18), b_1: card(18) }, {}))
+      .toMatchObject({ complete: true, thru: 18 });
+    expect(groupProgress(1, ["a", "b"], { a_1: card(18), b_1: card(17) }, {}).complete).toBe(false);
+  });
+
+  it("counts a cleared score as unplayed", () => {
+    expect(groupProgress(1, ["a"], { a_1: { ...card(6), 3: 0 } }, {}).thru).toBe(5);
+  });
+
+  it("reads finalized off the group's own key or the whole round's", () => {
+    expect(groupProgress(1, ["a", "b"], {}, { "1_a,b": true }).finalized).toBe(true);
+    expect(groupProgress(1, ["a", "b"], {}, { 1: true }).finalized).toBe(true);
+    expect(groupProgress(1, ["a", "b"], {}, { 2: true }).finalized).toBe(false);
+  });
+
+  it("does not call an empty group complete", () => {
+    expect(groupProgress(1, [], {}, {}).complete).toBe(false);
+  });
+});
