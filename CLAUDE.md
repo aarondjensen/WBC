@@ -68,8 +68,8 @@ touching `firestore.rules`.
 - `src/App.jsx` — the app shell and most screen routing
 - `src/components/` — shared UI (`ui.jsx`, `AppHeader`, `MoreMenu`, `Popup`, …)
 - `src/lib/` — logic worth testing on its own: pairings, leaderboards, score
-  guards, hole advance, editions, accounts, notifications. Tests live beside
-  their modules as `*.test.js`.
+  guards, hole advance, group switching, editions, accounts, notifications.
+  Tests live beside their modules as `*.test.js`.
 - `src/firebase.js`, `src/theme.js`, `src/constants.js` — config and shared
   constants
 - `functions/` — Firebase Cloud Functions
