@@ -27,6 +27,14 @@ export const K = {
   // move without dragging every checkmark and minus sign along with them.
   ok: "#22c55e",    // done, saved, signed, moved up — a state that is complete
   under: "#ef4444", // ink for a number under par, the way a scorecard prints it
+  // Won something. Skins, the round-complete header, your own name in a list.
+  // This hex was borrowed from the tee-colour map — it is the gold TEE marker —
+  // and typed raw at 11 call sites, which put a third warm tone on screen
+  // beside `warn` (amber, 38°) and a stray lemon (50°) with nothing naming
+  // which was which. The map keeps its own copy: a physical gold tee marker
+  // and an achievement colour are the same hex today by coincidence, and
+  // repainting one should never drag the other along.
+  gold: "#d4a843",
   // The bottom nav bar's surface, and the dome the trophy sits in. Very
   // slightly lighter and more opaque than `card`: it sits over scrolling
   // content and has to stop it, which a flat `card` does not do.
@@ -72,6 +80,19 @@ export const FS = {
   display: 32, // large empty-state icons, headline totals
   jumbo:   40, // full-screen empty-state icons
 };
+// The rungs in order, for the one case the scale cannot express as a constant:
+// a size that is COMPUTED. The leaderboard fits its rows to whatever height it
+// has, and inside a row the total column sits a step above the player's name.
+// Written as `rowStyle.fontSize + 1` that arithmetic lands between rungs — a
+// 12 becomes a 13 — which is the exact drift the scale exists to stop. Stepping
+// the ladder cannot: it returns a rung or it returns what you gave it.
+export const FS_RUNGS = [FS.micro, FS.label, FS.small, FS.body, FS.lead, FS.title, FS.hero, FS.display, FS.jumbo];
+export const fsStep = (size, n) => {
+  const i = FS_RUNGS.indexOf(size);
+  if (i === -1) return size;
+  return FS_RUNGS[Math.min(FS_RUNGS.length - 1, Math.max(0, i + n))];
+};
+
 // One functional constraint rides on this scale: a text input below 16px makes
 // iOS Safari zoom the page on focus and never zoom back out. Every field the
 // director types free text into is therefore at FS.lead and stays there —

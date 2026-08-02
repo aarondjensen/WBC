@@ -59,12 +59,29 @@ export default defineConfig([
     ignores: ['src/theme.js', 'src/main.jsx'],
     rules: {
       'no-restricted-syntax': ['error',
+        // Two selectors per scale, not one. A bare descendant match (`Property
+        // Literal`) reaches every number in the value expression — the 0 in a
+        // `d < 0 ?` test, the step count in `fsStep(size, 1)` — and flags
+        // arithmetic that was never a size. A direct-child match alone misses
+        // the other half: `cond ? 10 : 9` hides its literals one level down.
+        // So: the value itself, plus the BRANCHES of any ternary in it. A
+        // comparison operand sits under a BinaryExpression and matches neither.
         {
           selector: 'Property[key.name="fontSize"] > Literal[value=type(number)]',
           message: 'Use a rung off the FS type scale (FS.small, FS.body, …) rather than a raw px size — see theme.js.',
         },
         {
-          selector: 'Property[key.name="borderRadius"] > Literal[value=type(number)]',
+          selector: 'Property[key.name="fontSize"] ConditionalExpression > Literal[value=type(number)]',
+          message: 'Use a rung off the FS type scale (FS.small, FS.body, …) rather than a raw px size — see theme.js.',
+        },
+        {
+          selector: 'Property[key.name="borderRadius"] > Literal[value=type(number)][value!=0]',
+          message: 'Use a rung off the R radius scale (R.sm, R.md, …) rather than a raw px radius — see theme.js.',
+        },
+        {
+          // 0 is exempt here: a squared-off corner is the absence of a radius,
+          // not a size someone picked off-scale.
+          selector: 'Property[key.name="borderRadius"] ConditionalExpression > Literal[value=type(number)][value!=0]',
           message: 'Use a rung off the R radius scale (R.sm, R.md, …) rather than a raw px radius — see theme.js.',
         },
         {

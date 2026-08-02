@@ -2,7 +2,7 @@ import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } fr
 import { createPortal } from "react-dom";
 import { _app, _db, _auth, onAuthStateChanged, doGoogleSignIn, doAppleSignIn, doSignOut, consumeRedirectResult, deleteAccount, USERS_COLLECTION, NATIVE_APPLE_ENABLED, APPLE_PROVIDER_ENABLED, isNativePlatform, isAndroidNative, AUTH_PROVIDERS_ENABLED, TOURNAMENT_ID, getEditionSlug, getTournamentYear, isDefaultEdition } from "./firebase";
 import { readMembership, isDirectorAccount, resolveMember, joinWithCode, readAccessCode, setAccessCode, setDirector, subscribeMemberships, accountsUnreadable, membershipForPlayer, playerIsDirector } from "./lib/accounts";
-import { K, ON_ACC, FS, R, ALPHA, MOTION, FONT, SHADOW, SCRIM } from "./theme";
+import { K, ON_ACC, FS, fsStep, R, ALPHA, MOTION, FONT, SHADOW, SCRIM } from "./theme";
 import { SegmentedToggle, StickyTop, SectionLabel, Card, Toast, Btn } from "./components/ui";
 import { calcCH, computeIndividualBoard, rankIndividualBoard, rankIndividualBoardIds, WD_SCORE } from "./lib/individualBoard";
 import { useConfirm } from "./lib/useConfirm";
@@ -606,7 +606,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
       const available = containerRect.height - headerH;
       const perRow = Math.floor(available / lb.length);
       const clampedPerRow = Math.min(perRow, 36);
-      const fSize = clampedPerRow >= 32 ? 13 : clampedPerRow >= 26 ? 12 : clampedPerRow >= 18 ? 11 : 10;
+      const fSize = clampedPerRow >= 26 ? FS.small : FS.label;
       // Same object identity when the numbers have not moved, so the delayed
       // re-measure below is free unless it actually found a different layout.
       setRowStyle(prev => (prev.fontSize === fSize && prev.lineHeight === 1 && prev.padding === undefined)
@@ -714,7 +714,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                     const d = s ? s - rc.holePars[h] : null;
                     const st = rc.strokeMap[h] || 0;
                     const isSkin = skinWins[`${rc.r}_${h}`] === p.id;
-                    const clr = isSkin ? "#d4a843" : K.t2;
+                    const clr = isSkin ? K.gold : K.t2;
                     return (
                       <div key={h} style={{
                         textAlign: "center", fontSize: FS.label, fontWeight: 700, padding: "1px 0",
@@ -723,11 +723,11 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                       }}>
                         {s && d !== 0 && d != null && (
                           <div style={{ position: "absolute", width: 20, height: 20, left: "50%", top: "50%", transform: "translate(-50%, -50%)" }}>
-                            <div style={{ position: "absolute", inset: 0, borderRadius: d < 0 ? "50%" : 2, border: `1.5px solid ${clr}` }} />
-                            {(d <= -2 || d >= 2) && <div style={{ position: "absolute", inset: 3, borderRadius: d < 0 ? "50%" : 1, border: `1px solid ${clr}` }} />}
+                            <div style={{ position: "absolute", inset: 0, borderRadius: d < 0 ? "50%" : R.xs, border: `1.5px solid ${clr}` }} />
+                            {(d <= -2 || d >= 2) && <div style={{ position: "absolute", inset: 3, borderRadius: d < 0 ? "50%" : R.xs, border: `1px solid ${clr}` }} />}
                           </div>
                         )}
-                        <span style={{ position: "relative", zIndex: 1, color: isSkin ? "#d4a843" : K.t2 }}>
+                        <span style={{ position: "relative", zIndex: 1, color: isSkin ? K.gold : K.t2 }}>
                           {s || "·"}
                           {st > 0 && <span style={{ position: "absolute", top: -1, left: "100%", display: "flex", gap: 1, paddingLeft: 1 }}>
                             {Array.from({length: st}).map((_, i) => <span key={i} style={{ width: 3, height: 3, borderRadius: "50%", background: K.acc, display: "block" }} />)}
@@ -899,11 +899,11 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                         <span style={{ fontSize: FS.micro, flexShrink: 0, color: isExpanded ? K.acc : K.t3, transition: `transform ${MOTION}`, display: "inline-block", transform: isExpanded ? "rotate(180deg)" : "rotate(0)" }}>▼</span>
                       </div>
                       {/* Total */}
-                      <span style={{ textAlign: "center", fontWeight: 800, fontSize: rowStyle.fontSize + 1, color: p.isWD ? K.t3 : displayTotal != null ? (showGross || !showToPar ? K.t2 : displayTotal < 0 ? K.under : displayTotal > 0 ? K.t2 : K.t1) : K.t3 }}>
-                        {p.isWD ? <span style={{ fontSize: rowStyle.fontSize - 1, color: K.t3, fontWeight: 700 }}>WD</span> : displayTotal != null ? (showGross || !showToPar ? displayTotal : fmtPar(displayTotal)) : "—"}
+                      <span style={{ textAlign: "center", fontWeight: 800, fontSize: fsStep(rowStyle.fontSize, 1), color: p.isWD ? K.t3 : displayTotal != null ? (showGross || !showToPar ? K.t2 : displayTotal < 0 ? K.under : displayTotal > 0 ? K.t2 : K.t1) : K.t3 }}>
+                        {p.isWD ? <span style={{ fontSize: fsStep(rowStyle.fontSize, -1), color: K.t3, fontWeight: 700 }}>WD</span> : displayTotal != null ? (showGross || !showToPar ? displayTotal : fmtPar(displayTotal)) : "—"}
                       </span>
                       {/* Thru */}
-                      <span style={{ textAlign: "center", fontSize: rowStyle.fontSize - 2, color: K.t2 }}>{p.isWD ? "—" : rd?.thru > 0 ? (rd.thru === 18 ? "F" : rd.thru) : "—"}</span>
+                      <span style={{ textAlign: "center", fontSize: fsStep(rowStyle.fontSize, -1), color: K.t2 }}>{p.isWD ? "—" : rd?.thru > 0 ? (rd.thru === 18 ? "F" : rd.thru) : "—"}</span>
                       {/* Gap between current round stats and prior rounds */}
                       <span />
                       {/* Prior rounds — always show all 4 */}
@@ -922,7 +922,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                                 return prRd.netToPar + par2;
                               })();
                         return (
-                          <span key={r} style={{ textAlign: "center", fontSize: rowStyle.fontSize - 2, color: isWDRound ? K.t3 : prVal != null && !showGross && showToPar && prVal < 0 ? K.under : K.t3, opacity: isWDRound ? 0.5 : prVal != null ? 0.6 : 0.3 }}>
+                          <span key={r} style={{ textAlign: "center", fontSize: fsStep(rowStyle.fontSize, -1), color: isWDRound ? K.t3 : prVal != null && !showGross && showToPar && prVal < 0 ? K.under : K.t3, opacity: isWDRound ? 0.5 : prVal != null ? 0.6 : 0.3 }}>
                             {isWDRound ? "WD" : prVal != null ? (showGross || !showToPar ? prVal : fmtPar(prVal)) : "—"}
                           </span>
                         );
@@ -1000,9 +1000,9 @@ function ScoreButtonRow({ score, par, onPick }) {
           <div key={btn} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, minWidth: 0 }}>
             <button onClick={() => { tapScore(); onPick(isCur ? 0 : btn); }} style={{ width: "100%", height: 44, borderRadius: R.sm, cursor: "pointer", fontSize: FS.body, fontWeight: 800, border: "none", background: isCur ? K.acc : K.inp, color: isCur ? K.bg : K.t2, position: "relative", transition: `all ${MOTION}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
               {/* Selected-state rings: circles under par, squares over par */}
-              {isCur && sd !== 0 && <div style={{ position: "absolute", width: boxSize, height: boxSize, left: "50%", top: "50%", transform: "translate(-50%, -50%)" }}><div style={{ position: "absolute", inset: 0, borderRadius: sd < 0 ? "50%" : 3, border: `1.5px solid ${ringClr}` }} />{Math.abs(sd) >= 2 && <div style={{ position: "absolute", inset: 3, borderRadius: sd < 0 ? "50%" : 2, border: `1px solid ${ringClr}` }} />}</div>}
+              {isCur && sd !== 0 && <div style={{ position: "absolute", width: boxSize, height: boxSize, left: "50%", top: "50%", transform: "translate(-50%, -50%)" }}><div style={{ position: "absolute", inset: 0, borderRadius: sd < 0 ? "50%" : R.xs, border: `1.5px solid ${ringClr}` }} />{Math.abs(sd) >= 2 && <div style={{ position: "absolute", inset: 3, borderRadius: sd < 0 ? "50%" : R.xs, border: `1px solid ${ringClr}` }} />}</div>}
               {/* Resting-state faint outlines on non-par, non-selected buttons */}
-              {!isCur && sd !== 0 && <div style={{ position: "absolute", width: boxSize, height: boxSize, left: "50%", top: "50%", transform: "translate(-50%, -50%)", opacity: 0.15 }}><div style={{ position: "absolute", inset: 0, borderRadius: sd < 0 ? "50%" : 3, border: `1.25px solid ${sd < 0 ? K.danger : K.t2}` }} />{Math.abs(sd) >= 2 && <div style={{ position: "absolute", inset: 3, borderRadius: sd < 0 ? "50%" : 2, border: `1px solid ${sd < 0 ? K.danger : K.t2}` }} />}</div>}
+              {!isCur && sd !== 0 && <div style={{ position: "absolute", width: boxSize, height: boxSize, left: "50%", top: "50%", transform: "translate(-50%, -50%)", opacity: 0.15 }}><div style={{ position: "absolute", inset: 0, borderRadius: sd < 0 ? "50%" : R.xs, border: `1.25px solid ${sd < 0 ? K.danger : K.t2}` }} />{Math.abs(sd) >= 2 && <div style={{ position: "absolute", inset: 3, borderRadius: sd < 0 ? "50%" : R.xs, border: `1px solid ${sd < 0 ? K.danger : K.t2}` }} />}</div>}
               <span style={{ position: "relative", zIndex: 1 }}>{btn}</span>
             </button>
             <div style={{ fontSize: FS.micro, color: showParAnchor ? K.t2 : K.t3, fontWeight: showParAnchor ? 700 : 600, letterSpacing: 0.4, lineHeight: 1, height: 12 }}>
@@ -1560,7 +1560,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
               return (
                 <button key={i} onClick={() => goToHole(i)} style={{
                   flex: 1, height: 32, display: "flex", alignItems: "center", justifyContent: "center",
-                  borderRadius: allScoredHole || isCurrent ? 12 : 6,
+                  borderRadius: allScoredHole || isCurrent ? R.lg : R.sm,
                   border: allScoredHole && !isCurrent ? `1.5px solid ${K.acc}${ALPHA.line}` : "none",
                   cursor: "pointer",
                   fontSize: FS.label, fontWeight: 700,
@@ -1589,7 +1589,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
 
       {/* Current hole header - compact with par left, hcp right */}
       <div style={{
-        background: `linear-gradient(135deg, ${K.card}, #12233f)`,
+        background: `linear-gradient(135deg, ${K.card}, ${K.hover})`,
         borderRadius: R.lg, border: `1px solid ${K.bdr}`, padding: "10px 16px",
         marginBottom: 8, position: "relative",
       }}>
@@ -1672,8 +1672,8 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
                       }}>
                         {isCur && bsd !== 0 && (
                           <div style={{ position: "absolute", width: sz, height: sz, left: "50%", top: "50%", transform: "translate(-50%, -50%)" }}>
-                            <div style={{ position: "absolute", inset: 0, borderRadius: bsd < 0 ? "50%" : 3, border: `1.5px solid ${bclr}` }} />
-                            {(bsd <= -2 || bsd >= 2) && <div style={{ position: "absolute", inset: 3, borderRadius: bsd < 0 ? "50%" : 2, border: `1px solid ${bclr}` }} />}
+                            <div style={{ position: "absolute", inset: 0, borderRadius: bsd < 0 ? "50%" : R.xs, border: `1.5px solid ${bclr}` }} />
+                            {(bsd <= -2 || bsd >= 2) && <div style={{ position: "absolute", inset: 3, borderRadius: bsd < 0 ? "50%" : R.xs, border: `1px solid ${bclr}` }} />}
                           </div>
                         )}
                         <span style={{ position: "relative", zIndex: 1 }}>{btn}</span>
@@ -1691,10 +1691,10 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
       {/* Return to play banner */}
       {editingCompleted && (
         <div style={{
-          background: "#fde04730", border: `1.5px solid #fde047`, borderRadius: R.sm,
+          background: K.warn + ALPHA.tint, border: `1.5px solid ${K.warn}`, borderRadius: R.sm,
           padding: "6px 12px", marginBottom: 6, display: "flex", justifyContent: "space-between", alignItems: "center",
         }}>
-          <span style={{ fontSize: FS.small, color: "#fde047", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em" }}>✏️ EDITING HOLE {currentHole + 1}</span>
+          <span style={{ fontSize: FS.small, color: K.warn, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em" }}>✏️ EDITING HOLE {currentHole + 1}</span>
           <button onClick={returnToPlay} style={{
             padding: "4px 12px", borderRadius: R.sm, background: K.acc, border: "none",
             color: K.bg, fontSize: FS.label, fontWeight: 700, cursor: "pointer",
@@ -1992,7 +1992,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
                   style={{ height: "100%", overflowY: "scroll", scrollSnapType: "y mandatory", padding: `${(CTP_WHEEL_H - CTP_WHEEL_ITEM) / 2}px 0`, WebkitOverflowScrolling: "touch", scrollbarWidth: "none" }}
                 >
                   {Array.from({ length: CTP_MAX_FT }, (_, i) => i + 1).map(ft => (
-                    <div key={ft} style={{ height: CTP_WHEEL_ITEM, lineHeight: `${CTP_WHEEL_ITEM}px`, textAlign: "center", fontSize: ft === ctpFeet ? 21 : 18, fontWeight: ft === ctpFeet ? 800 : 700, color: ft === ctpFeet ? K.t1 : K.t3, scrollSnapAlign: "center" }}>
+                    <div key={ft} style={{ height: CTP_WHEEL_ITEM, lineHeight: `${CTP_WHEEL_ITEM}px`, textAlign: "center", fontSize: ft === ctpFeet ? FS.title : FS.lead, fontWeight: ft === ctpFeet ? 800 : 700, color: ft === ctpFeet ? K.t1 : K.t3, scrollSnapAlign: "center" }}>
                       {ft}
                     </div>
                   ))}
@@ -2111,14 +2111,14 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
                               <div style={{
                                 position: "absolute",
                                 width: 18, height: 18,
-                                borderRadius: d < 0 ? "50%" : 3,
+                                borderRadius: d < 0 ? "50%" : R.xs,
                                 border: `1px solid rgba(180,180,180,0.3)`,
                               }} />
                               {(d <= -2 || d >= 2) && (
                                 <div style={{
                                   position: "absolute",
                                   width: 13, height: 13,
-                                  borderRadius: d < 0 ? "50%" : 2,
+                                  borderRadius: d < 0 ? "50%" : R.xs,
                                   border: `1px solid rgba(180,180,180,0.3)`,
                                 }} />
                               )}
@@ -2320,13 +2320,13 @@ function SkinsCtpView({ players, round, tRounds, courses, holeData, ctpData, onS
       const d = score - par;
       const isUnder = d < 0;
       const isDouble = d <= -2;
-      const circleClr = isSkin ? "#d4a843" : K.t2;
+      const circleClr = isSkin ? K.gold : K.t2;
       return (
         <div style={{ width: "100%", aspectRatio: "1", display: "flex", alignItems: "center", justifyContent: "center" }}>
           <div style={{ position: "relative", width: "85%", aspectRatio: "1", display: "flex", alignItems: "center", justifyContent: "center" }}>
             {(isUnder || isSkin) && <div style={{ position: "absolute", inset: 0, borderRadius: "50%", border: `1.5px solid ${circleClr}` }} />}
             {isDouble && <div style={{ position: "absolute", inset: 3, borderRadius: "50%", border: `1px solid ${circleClr}` }} />}
-            <span style={{ fontSize: FS.micro, fontWeight: 700, color: isSkin ? "#d4a843" : K.t2, position: "relative", zIndex: 1 }}>{score}</span>
+            <span style={{ fontSize: FS.micro, fontWeight: 700, color: isSkin ? K.gold : K.t2, position: "relative", zIndex: 1 }}>{score}</span>
           </div>
         </div>
       );
@@ -2388,7 +2388,7 @@ function SkinsCtpView({ players, round, tRounds, courses, holeData, ctpData, onS
             <tr style={{ borderBottom: cellBdr }}>
               <td style={{ fontSize: FS.micro, fontWeight: 700, color: K.t2, padding: "4px 6px", borderBottom: cellBdr }}>Hole</td>
               {holes.map(i => (
-                <td key={i} style={{ textAlign: "center", fontSize: skinByHole[i]?.winner ? 10 : 9, fontWeight: skinByHole[i]?.winner ? 800 : 700, color: skinByHole[i]?.winner ? "#d4a843" : K.t1, padding: "4px 1px", borderLeft: cellBdr }}>
+                <td key={i} style={{ textAlign: "center", fontSize: skinByHole[i]?.winner ? FS.label : FS.micro, fontWeight: skinByHole[i]?.winner ? 800 : 700, color: skinByHole[i]?.winner ? K.gold : K.t1, padding: "4px 1px", borderLeft: cellBdr }}>
                   {i + 1}
                 </td>
               ))}
@@ -2413,13 +2413,13 @@ function SkinsCtpView({ players, round, tRounds, courses, holeData, ctpData, onS
                     const d = s ? s - par : null;
                     const isUnder = d !== null && d < 0;
                     const isDouble = d !== null && d <= -2;
-                    const circleClr = isSkinWinner ? "#d4a843" : K.t2;
+                    const circleClr = isSkinWinner ? K.gold : K.t2;
                     return (
                       <td key={i} style={{ textAlign: "center", padding: "2px 1px", borderLeft: cellBdr }}>
                         <div style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 18, height: 18, position: "relative" }}>
                           {s && (isUnder || isSkinWinner) && <div style={{ position: "absolute", inset: 0, borderRadius: "50%", border: `1.5px solid ${circleClr}` }} />}
                           {s && isDouble && <div style={{ position: "absolute", inset: 3, borderRadius: "50%", border: `1px solid ${circleClr}` }} />}
-                          <span style={{ fontSize: FS.label, fontWeight: 600, color: s ? (isSkinWinner ? "#d4a843" : K.t2) : K.t3, position: "relative", zIndex: 1 }}>{s || "–"}</span>
+                          <span style={{ fontSize: FS.label, fontWeight: 600, color: s ? (isSkinWinner ? K.gold : K.t2) : K.t3, position: "relative", zIndex: 1 }}>{s || "–"}</span>
                         </div>
                       </td>
                     );
@@ -2595,7 +2595,7 @@ function GroupsView({ players, round, tRounds, courses, pairingsData, teeTimesDa
                 const isMe = pid === user.id;
                 return (
                   <div key={pid} style={{ padding: "5px 12px", display: "grid", gridTemplateColumns: "5fr 1.6fr 2.4fr 2fr", alignItems: "center", borderBottom: pi < grp.length - 1 ? `1px solid ${K.bdr}${ALPHA.wash}` : "none", background: isMe ? K.t2 + ALPHA.wash : "transparent" }}>
-                    <span style={{ fontWeight: 600, fontSize: FS.small, color: isMe ? "#d4a843" : K.t1 }}>{p.name}</span>
+                    <span style={{ fontWeight: 600, fontSize: FS.small, color: isMe ? K.gold : K.t1 }}>{p.name}</span>
                     <span style={{ fontSize: FS.label, fontWeight: 600, color: K.t2, textAlign: "center" }}>{p.handicap_index}</span>
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: FS.label, fontWeight: 600, color: isDarkTee(teeClr) ? "#9ca3af" : isLightTee(teeClr) ? K.t3 : teeClr }}>
                       {teeName && <>
@@ -3629,7 +3629,7 @@ function DateRangeCalendar({ start, end, onChange }) {
               background: edge ? K.acc : between ? K.acc + ALPHA.tint : "transparent",
               color: edge ? ON_ACC : beyond ? K.t3 + ALPHA.line : between ? K.acc : K.t1,
               border: (!edge && !between && iso === today) ? `1px solid ${K.t3}` : "1px solid transparent",
-              borderRadius: isStart && isEnd ? 8 : isStart ? "8px 0 0 8px" : isEnd ? "0 8px 8px 0" : between ? 0 : 8,
+              borderRadius: isStart && isEnd ? R.sm : isStart ? `${R.sm}px 0 0 ${R.sm}px` : isEnd ? `0 ${R.sm}px ${R.sm}px 0` : between ? 0 : R.sm,
               fontSize: FS.small, fontWeight: edge ? 800 : 600,
             }}>{d}</button>
           );
@@ -4331,10 +4331,10 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
         <div style={{ position: "fixed", top: 0, bottom: 0, left: 0, right: 0, background: SCRIM, zIndex: 200, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }}>
           <div style={{ background: K.card, borderRadius: R.xl, border: `1px solid ${K.bdr}`, width: "100%", maxWidth: 420, overflow: "hidden", marginTop: "auto", marginBottom: "auto" }}>
             {/* Header */}
-            <div style={{ background: "#fde04710", borderBottom: `1px solid #d4a84330`, padding: "14px 16px", display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ background: K.gold + ALPHA.wash, borderBottom: `1px solid ${K.gold}${ALPHA.hair}`, padding: "14px 16px", display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ fontSize: FS.lead }}>⚡</span>
               <div>
-                <div style={{ fontSize: FS.body, fontWeight: 800, color: "#d4a843" }}>Round {finalizeModal.round} Complete</div>
+                <div style={{ fontSize: FS.body, fontWeight: 800, color: K.gold }}>Round {finalizeModal.round} Complete</div>
                 <div style={{ fontSize: FS.label, color: K.t3 }}>{finalizeModal.course?.name || "Review scores before finalizing"}</div>
               </div>
             </div>
@@ -5001,7 +5001,7 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
                           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                             <div style={{ fontWeight: 600, fontSize: FS.small }}>{c.name}</div>
                             {c._incompleteData && <span style={{ fontSize: FS.micro, background: "#d4584520", border: "1px solid #d4584540", color: "#d45845", borderRadius: R.xs, padding: "1px 5px", fontWeight: 700 }}>⚠ incomplete data</span>}
-                            {!c._incompleteData && (c.tee_boxes?.length || 0) < 2 && <span style={{ fontSize: FS.micro, background: "#d4a84320", border: "1px solid #d4a84340", color: "#d4a843", borderRadius: R.xs, padding: "1px 5px", fontWeight: 700 }}>⚠ 1 tee</span>}
+                            {!c._incompleteData && (c.tee_boxes?.length || 0) < 2 && <span style={{ fontSize: FS.micro, background: K.gold + ALPHA.tint, border: `1px solid ${K.gold}${ALPHA.hair}`, color: K.gold, borderRadius: R.xs, padding: "1px 5px", fontWeight: 700 }}>⚠ 1 tee</span>}
                             {c._source && c._source !== "WBC History" && <span style={{ fontSize: FS.micro, background: `${ac}${ALPHA.wash}`, border: `1px solid ${ac}${ALPHA.hair}`, color: ac, borderRadius: R.xs, padding: "1px 5px", fontWeight: 600 }}>{c._source}</span>}
                             {c.updated_at && (() => {
                               const d = new Date(c.updated_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
@@ -5204,7 +5204,7 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
                               const sbSlope = draft.tee_boxes?.find(t => parseInt(t.slope) !== 113)?.slope || draft.slope;
                               const apiSlope = draft._apiVersion?.tee_boxes?.find(t => parseInt(t.slope) !== 113)?.slope || draft._apiVersion?.slope;
                               const bothReal = sbHasReal && apiHasReal;
-                              const bannerColor = bothReal ? "#d4a843" : "#5b9bd5";
+                              const bannerColor = bothReal ? K.gold : "#5b9bd5";
                               const bannerMsg = bothReal
                                 ? "⚡ Both sources have real slope data — review each and pick the most accurate:"
                                 : "ℹ️ One source has real slope data — selecting the better one:";
@@ -5237,7 +5237,7 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
                               </div>
                             )}
                             {!hasConflict && !draft._incompleteData && (draft.tee_boxes?.length || 0) < 2 && (
-                              <div style={{ marginTop: 8, padding: "8px 10px", background: "#d4a84310", border: "1px solid #d4a84340", borderRadius: R.sm, fontSize: FS.micro, color: "#d4a843" }}>
+                              <div style={{ marginTop: 8, padding: "8px 10px", background: K.gold + ALPHA.wash, border: `1px solid ${K.gold}${ALPHA.hair}`, borderRadius: R.sm, fontSize: FS.micro, color: K.gold }}>
                                 ⚠ Only {draft.tee_boxes?.length || 0} tee box found — most courses have multiple tees. Tap <strong>+ Tee</strong> above to add Black, Blue, White, Red etc. with their ratings and slopes.
                               </div>
                             )}
