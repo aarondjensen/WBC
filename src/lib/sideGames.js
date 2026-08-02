@@ -34,6 +34,57 @@ export const fieldFor = (ids, players) =>
 export const potFor = ({ amount, count, typed = 0 }) =>
   (amount || 0) > 0 ? (amount || 0) * (count || 0) : (typed || 0);
 
+// ── The collection sheet ───────────────────────────────────────────
+// One table instead of one panel per game. The director's actual job on a
+// Friday morning is not "configure the skins game" — it is standing in a car
+// park working out what each man owes and whether everybody has paid, and
+// that question spans all four buy-ins at once.
+//
+// `games` is [{ key, amount, ids }] in the order they should appear.
+// Returns the whole sheet in one pass: a row per player carrying which games
+// they are in and what they owe, a per-game total, and the grand total the
+// director is counting cash against.
+//
+// `all` on a game total is what the column's toggle reads to decide whether
+// tapping it means everybody-in or nobody-in — computed from the ROWS rather
+// than from `ids`, so a null list (everybody) reports `all` correctly instead
+// of looking like an empty one.
+export function buyInSheet({ players, games }) {
+  const list = players || [];
+  const gs = games || [];
+  const rows = list.map(p => {
+    const inGames = {};
+    let owes = 0;
+    gs.forEach(g => {
+      const isIn = g.ids == null ? true : g.ids.includes(p.id);
+      inGames[g.key] = isIn;
+      if (isIn) owes += g.amount || 0;
+    });
+    return { pid: p.id, name: p.name, games: inGames, owes };
+  });
+  const totals = {};
+  gs.forEach(g => {
+    const count = rows.filter(r => r.games[g.key]).length;
+    totals[g.key] = {
+      count,
+      amount: count * (g.amount || 0),
+      all: rows.length > 0 && count === rows.length,
+      none: count === 0,
+    };
+  });
+  return { rows, totals, grand: rows.reduce((sum, r) => sum + r.owes, 0) };
+}
+
+// Add or remove one player from one game's list, materialising `null` into
+// the full roster first. That materialisation is the whole reason this is a
+// function rather than an inline splice: turning a single player OFF a
+// never-configured game has to leave the roster MINUS one behind, not an
+// empty list that would read back as "everybody".
+export function toggleIn(ids, players, pid) {
+  const list = ids ?? (players || []).map(p => p.id);
+  return list.includes(pid) ? list.filter(x => x !== pid) : [...list, pid];
+}
+
 // ── Skins ──────────────────────────────────────────────────────────
 // One pass over 18 holes. `strokeMaps` is { pid: { holeIdx: strokes } } for
 // net play and null/undefined for gross.
