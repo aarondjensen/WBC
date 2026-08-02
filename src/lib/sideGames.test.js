@@ -177,3 +177,29 @@ describe("toggleIn", () => {
     expect(toggleIn(["a"], players, "a")).toEqual([]);
   });
 });
+
+// A derived column is one the director does not tag — the market rebuy is
+// incurred by placing halfway shares. buyInSheet does not care where the
+// list came from, but the sheet has to BILL for it either way, which is the
+// property worth pinning.
+describe("buyInSheet with a derived column", () => {
+  const games = [
+    { key: "market", amount: 25, ids: null },
+    { key: "rebuy", amount: 25, ids: ["a"], derived: true },
+  ];
+
+  it("charges a derived buy-in exactly like a tagged one", () => {
+    const { rows, grand } = buyInSheet({ players, games });
+    expect(rows.map(r => r.owes)).toEqual([50, 25, 25]);
+    expect(grand).toBe(100);
+  });
+
+  it("counts and totals it too", () => {
+    expect(buyInSheet({ players, games }).totals.rebuy).toMatchObject({ count: 1, amount: 25 });
+  });
+
+  it("bills nobody for it while it is empty", () => {
+    const empty = [{ key: "rebuy", amount: 25, ids: [], derived: true }];
+    expect(buyInSheet({ players, games: empty }).grand).toBe(0);
+  });
+});

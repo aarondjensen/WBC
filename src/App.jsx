@@ -9,7 +9,7 @@ import { fieldFor, potFor, computeSkins, allSkins, skinCounts } from "./lib/side
 import {
   MARKET_OPENING_SHARES, MARKET_MID_SHARES, marketWindows, normalizeLots, totalShares,
   sharesOn, setLotShares, lotsFor, allLots, marketBoard, marketHoldings, marketPayouts, roundComplete,
-  eligibleBets,
+  eligibleBets, rebuyers,
 } from "./lib/market";
 import { BuyInTracker } from "./components/BuyIns";
 import { useConfirm } from "./lib/useConfirm";
@@ -397,10 +397,12 @@ const rowsToMarket = (rows) =>
 //
 // `rebuy` is the market's halfway window, and it is a BUY-IN of its own
 // rather than a free top-up on the market seat: about half the field takes
-// it, its money goes into the same market pot, and its ten shares only exist
-// for the players who paid. Keeping it as a fourth game is what lets the
-// collection sheet ask about it in a column instead of the director holding
-// "and also these six rebought" in their head.
+// it and its money goes into the same market pot. It carries a PRICE here
+// but no list — the ten shares are open to everybody in the market game and
+// the debt is incurred by placing them, so who is in for it is read off the
+// bets rather than tagged (see lib/market rebuyers). Keeping it as a fourth
+// game is what puts it on the collection sheet as a column instead of the
+// director holding "and also these six rebought" in their head.
 const SIDE_GAME_KEYS = ["skins", "ctp", "market", "rebuy"];
 // The order and the wording the Betting tab's collection sheet uses. `short`
 // has to fit a 38px column on a phone.
@@ -2500,23 +2502,12 @@ function BettingView({
   const skinsField = fieldFor(sideGames?.skins?.in, players);
   const ctpField = fieldFor(sideGames?.ctp?.in, players);
   const marketField = fieldFor(sideGames?.market?.in, players);
-  // The halfway rebuy is its own buy-in — see SIDE_GAME_KEYS. A player can
-  // only rebuy into a game they are in, so the field is the intersection:
-  // "everybody rebought" cannot quietly let somebody who never bought a
-  // market seat in the first place hold ten shares.
-  const rebuyField = fieldFor(sideGames?.rebuy?.in, marketField);
   const ctpInSet = new Set(ctpField.map(p => p.id));
   const marketInSet = new Set(marketField.map(p => p.id));
-  const rebuyInSet = new Set(rebuyField.map(p => p.id));
 
   const skinsCounted = (sideGames?.skins?.amount || 0) > 0;
   const skinsPot = potFor({ amount: sideGames?.skins?.amount, count: skinsField.length, typed: sideGames?.skins?.pot });
   const ctpPot = potFor({ amount: sideGames?.ctp?.amount, count: ctpField.length });
-  // Both buy-ins land in ONE pot. The rebuy is more money on the same game,
-  // not a second game — which is exactly why the ten shares it buys dilute
-  // the twenty everybody already holds.
-  const marketPot = potFor({ amount: sideGames?.market?.amount, count: marketField.length })
-    + potFor({ amount: sideGames?.rebuy?.amount, count: rebuyField.length });
 
   // ── Which round a tab lands on ──
   // The most recent round anybody has actually played, which is not the same
@@ -2600,12 +2591,25 @@ function BettingView({
   // event pays out; until then the same board is a projection and says so.
   const leader = (leaderboard || []).find(p => !p.isWD && !p.withdrew && p.roundsPlayed > 0) || null;
   const winnerId = leader?.id || null;
-  // Mid lots only count for the players who rebought — see eligibleBets.
-  const bets = eligibleBets({
-    bets: marketBets,
-    inMarket: pid => marketInSet.has(pid),
-    inRebuy: pid => rebuyInSet.has(pid),
-  });
+  const bets = eligibleBets({ bets: marketBets, inMarket: pid => marketInSet.has(pid) });
+  // ── Who owes the halfway rebuy ──
+  // Nobody tags this. The second window is open to everybody in the market
+  // game and the rebuy is INCURRED by placing into it, so this list is read
+  // off the bets — see lib/market rebuyers. It is what the buy-in sheet's RE
+  // column shows and what the second half of the market pot is counted from,
+  // which is the same thing said twice on purpose: what a man owes and what
+  // is in the pot are one number, and they cannot drift if only one of them
+  // exists.
+  const rebuyPids = new Set(rebuyers(bets));
+  const rebuyField = marketField.filter(p => rebuyPids.has(p.id));
+  const rebuyAmount = sideGames?.rebuy?.amount || 0;
+  // Both buy-ins land in ONE pot. The rebuy is more money on the same game,
+  // not a second game — which is exactly why the ten shares it buys dilute
+  // the twenty everybody already holds. The pot therefore GROWS during the
+  // second window as people place, which is correct: it is a live tally of
+  // what is owed, not a figure fixed at the turn.
+  const marketPot = potFor({ amount: sideGames?.market?.amount, count: marketField.length })
+    + potFor({ amount: rebuyAmount, count: rebuyField.length });
   const board = marketBoard({ bets, players, pot: marketPot });
   const holders = marketHoldings({ bets, players });
   const payouts = marketPayouts({ bets, winnerId, pot: marketPot });
@@ -2625,10 +2629,11 @@ function BettingView({
   // rebuy sees the window and what it would have cost them, and cannot place
   // into it — including the director, whose override is over the CLOCK, not
   // over who has handed money across.
-  const rebought = !!bookPid && rebuyInSet.has(bookPid);
-  const paidFor = activeWindow === "mid" ? rebought : true;
   // The director can place into a shut window; nobody else can.
-  const canPlace = !!bookPid && marketInSet.has(bookPid) && paidFor && (win.open || !!user?.isDirector);
+  const canPlace = !!bookPid && marketInSet.has(bookPid) && (win.open || !!user?.isDirector);
+  // Placing anything into the second window is what takes on the rebuy, so
+  // the book has to say what that costs BEFORE the first tap, not after.
+  const owesRebuy = !!bookPid && rebuyPids.has(bookPid);
   const draftLots = draft && draft.pid === bookPid && draft.window === activeWindow
     ? draft.lots
     : lotsFor(bookBet, activeWindow);
@@ -2731,7 +2736,11 @@ function BettingView({
           games={SIDE_GAME_KEYS.map(k => ({
             key: k, ...SIDE_GAME_LABELS[k],
             amount: sideGames?.[k]?.amount || 0,
-            ids: sideGames?.[k]?.in ?? null,
+            // The rebuy column is a readout of who has placed halfway shares,
+            // not a list anybody keeps. Everything else is the director's.
+            ...(k === "rebuy"
+              ? { ids: rebuyField.map(p => p.id), derived: true }
+              : { ids: sideGames?.[k]?.in ?? null }),
           }))}
           onChange={onUpdateSideGames}
         />
@@ -3094,7 +3103,7 @@ function BettingView({
             label: "MARKET POT", pot: marketPot,
             // Two buy-ins in one pot, so the summary names both counts — the
             // rebuy is the one the director is still chasing at the turn.
-            summary: `${marketField.length} IN · ${rebuyField.length} REBOUGHT`,
+            summary: `${marketField.length} IN · ${rebuyField.length} REBUYING`,
             rightTop: `${board.reduce((a, b) => a + b.shares, 0)} share${board.reduce((a, b) => a + b.shares, 0) !== 1 ? "s" : ""} placed`,
             rightBottom: `${holders.length} holder${holders.length !== 1 ? "s" : ""}`,
           })}
@@ -3114,13 +3123,15 @@ function BettingView({
                 </div>
                 <div style={{ fontSize: FS.small, fontWeight: 700, color: K.t1, marginTop: 2 }}>{w.label}</div>
                 <div style={{ fontSize: FS.label, color: w.open ? K.acc : K.t3, marginTop: 2, lineHeight: 1.4 }}>{w.note}</div>
-                {/* The halfway window is a second buy-in, so its chip says how
-                    many people are actually in it. Without that line it reads
-                    as ten free shares for the field. */}
+                {/* The halfway window is a second buy-in, so its chip has to
+                    say what it costs. Without that line it reads as ten free
+                    shares for the field — and since nothing is prepaid, the
+                    only thing standing between a player and a debt they did
+                    not mean to take on is this sentence. */}
                 {w.key === "mid" && (
                   <div style={{ fontSize: FS.label, color: K.t3, marginTop: 4, lineHeight: 1.4 }}>
-                    {rebuyField.length} of {marketField.length} rebought
-                    {(sideGames?.rebuy?.amount || 0) > 0 ? ` · $${sideGames.rebuy.amount}` : ""}
+                    {rebuyAmount > 0 ? `$${rebuyAmount} if you place any` : "No rebuy price set"}
+                    {" · "}{rebuyField.length} in so far
                   </div>
                 )}
               </div>
@@ -3138,11 +3149,8 @@ function BettingView({
                 <SectionLabel style={{ marginBottom: 0, flex: 1 }}>
                   {bookPid === myPid ? "Your book" : `${players.find(p => p.id === bookPid)?.name || bookPid}'s book`}
                 </SectionLabel>
-                {/* Shares left to place — but not on a window that was never
-                    bought: "10 of 10 left" reads as an invitation, and this
-                    one is not one. */}
-                <span style={{ fontSize: FS.small, fontWeight: 800, color: !paidFor ? K.t3 : remaining > 0 ? K.acc : K.t3 }}>
-                  {!paidFor ? "not bought" : `${remaining} of ${win.shares} left`}
+                <span style={{ fontSize: FS.small, fontWeight: 800, color: remaining > 0 ? K.acc : K.t3 }}>
+                  {remaining} of {win.shares} left
                 </span>
               </div>
 
@@ -3164,22 +3172,30 @@ function BettingView({
                   compact
                   style={{ marginBottom: 8 }}
                   options={[["opening", `Opening · ${totalShares(lotsFor(bookBet, "opening"))}/${MARKET_OPENING_SHARES}`],
-                            ["mid", rebought
-                              ? `${windows.mid.label} · ${totalShares(lotsFor(bookBet, "mid"))}/${MARKET_MID_SHARES}`
-                              : `${windows.mid.label} · no rebuy`]]}
+                            ["mid", `${windows.mid.label} · ${totalShares(lotsFor(bookBet, "mid"))}/${MARKET_MID_SHARES}`]]}
                   value={activeWindow}
                   onChange={k => { setBookWindow(k); setDraft(null); }}
                 />
               )}
 
-              {/* Two different reasons this can be read-only, and they need
-                  different sentences: the window is shut (wait, or you missed
-                  it), or the rebuy was never paid (this is not your window). */}
               {!canPlace && (
-                <div style={{ fontSize: FS.label, color: K.t3, marginBottom: 8, lineHeight: 1.5 }}>
-                  {!paidFor
-                    ? `${bookPid === myPid ? "You did" : "They did"} not buy back in${(sideGames?.rebuy?.amount || 0) > 0 ? ` ($${sideGames.rebuy.amount})` : ""}, so these ${MARKET_MID_SHARES} are not ${bookPid === myPid ? "yours" : "theirs"} to place. The opening ${MARKET_OPENING_SHARES} still stand.`
-                    : win.note}
+                <div style={{ fontSize: FS.label, color: K.t3, marginBottom: 8, lineHeight: 1.5 }}>{win.note}</div>
+              )}
+
+              {/* What the second window costs, said before the first tap
+                  rather than after. Nothing is prepaid here: placing a share
+                  IS taking on the rebuy, so a player who has placed none is
+                  being warned and a player who has placed some is being told
+                  what they already owe. */}
+              {activeWindow === "mid" && canPlace && rebuyAmount > 0 && (
+                <div style={{
+                  fontSize: FS.label, marginBottom: 8, lineHeight: 1.5, padding: "6px 10px",
+                  borderRadius: R.sm, border: `1px solid ${owesRebuy ? K.acc : K.warn}${ALPHA.line}`,
+                  color: owesRebuy ? K.acc : K.warn,
+                }}>
+                  {owesRebuy
+                    ? `In for the $${rebuyAmount} rebuy — settle up with the director. Taking every share back off drops it.`
+                    : `Placing any of these ${MARKET_MID_SHARES} puts ${bookPid === myPid ? "you" : "them"} in for the $${rebuyAmount} rebuy. Pay the director after.`}
                 </div>
               )}
 

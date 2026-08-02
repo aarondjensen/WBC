@@ -168,26 +168,33 @@ export function marketWindows({ holeData, players, numRounds }) {
 export const lotsFor = (bet, key) => normalizeLots(key === "mid" ? bet?.mid : bet?.opening);
 export const allLots = (bet) => normalizeLots([...(bet?.opening || []), ...(bet?.mid || [])]);
 
-// ── Who the halfway shares belong to ───────────────────────────────
-// The second window is a SECOND BUY-IN, not a free top-up: about half the
-// field takes it. So the ten shares are only real if that player paid for
-// them, and a bet from somebody who did not rebuy keeps its opening twenty
-// with the mid lots dropped rather than being thrown out entirely.
+// Bets that count: everybody still in the market game. A player the director
+// has taken out of the market entirely stops holding shares, which is the one
+// case where the board would otherwise disagree with the pot.
 //
-// This runs on every read rather than at write time on purpose. A director
-// who un-tags a rebuy after the fact — the cash never turned up, or it was
-// entered against the wrong name — has to see those ten shares leave the
-// board and the payout immediately, because the pot no longer contains that
-// money. Pruning the document instead would leave the two disagreeing until
-// somebody noticed.
+// `inMarket` is a predicate so the caller keeps the null-means-everybody rule
+// in one place (see lib/sideGames fieldFor).
+export const eligibleBets = ({ bets, inMarket }) => (bets || []).filter(b => inMarket(b.pid));
+
+// ── Who owes the halfway rebuy ─────────────────────────────────────
+// The second window is a second BUY-IN, and it is INCURRED, not prepaid:
+// the ten shares are open to everybody in the market game, and placing any of
+// them is what puts a man in for the rebuy. He settles up with the director
+// afterwards like every other debt at this tournament.
 //
-// `inMarket` and `inRebuy` are predicates so the caller keeps the
-// null-means-everybody rule in one place (see lib/sideGames fieldFor).
-export function eligibleBets({ bets, inMarket, inRebuy }) {
-  return (bets || [])
-    .filter(b => inMarket(b.pid))
-    .map(b => (inRebuy(b.pid) ? b : { ...b, mid: [] }));
-}
+// That is the right way round for the same reason the buy-in sheet exists at
+// all. A prepaid rebuy needs the director to collect from half the field at
+// the turn and tag each one before anybody can place, which is the exact
+// sequence of taps this screen was built to delete. Deriving it means the
+// column fills itself, and the one thing the director has to know — who owes
+// what — is answered by what people actually did rather than by a list
+// somebody had to keep in step with them.
+//
+// Any shares at all, not a prorated count: this is a seat, not a per-share
+// price. One share in the second window costs the same as ten, which is also
+// why nobody places just one.
+export const rebuyers = (bets) =>
+  (bets || []).filter(b => totalShares(normalizeLots(b.mid)) > 0).map(b => b.pid);
 
 // ── The board ──────────────────────────────────────────────────────
 // Every golfer anybody holds shares in, richest first. `perShare` is what a

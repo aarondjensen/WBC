@@ -3,7 +3,7 @@ import {
   MARKET_OPENING_SHARES, MARKET_MID_SHARES, midRoundFor,
   normalizeLots, totalShares, sharesOn, setLotShares,
   roundStarted, roundComplete, marketWindows,
-  lotsFor, allLots, marketBoard, marketHoldings, marketPayouts, eligibleBets,
+  lotsFor, allLots, marketBoard, marketHoldings, marketPayouts, eligibleBets, rebuyers,
 } from "./market";
 
 const players = [
@@ -243,35 +243,51 @@ describe("marketPayouts", () => {
 describe("eligibleBets", () => {
   const bets = [
     { pid: "aaron_j", opening: [{ pid: "cole_m", shares: 20 }], mid: [{ pid: "cole_m", shares: 10 }] },
-    { pid: "brad_k", opening: [{ pid: "brad_k", shares: 20 }], mid: [{ pid: "brad_k", shares: 10 }] },
+    { pid: "brad_k", opening: [{ pid: "brad_k", shares: 20 }], mid: [] },
     { pid: "cole_m", opening: [{ pid: "cole_m", shares: 20 }], mid: [] },
   ];
-  const all = () => true;
 
-  it("keeps the opening twenty of somebody who did not rebuy, and drops their ten", () => {
-    const out = eligibleBets({ bets, inMarket: all, inRebuy: pid => pid === "aaron_j" });
-    expect(out.find(b => b.pid === "brad_k")).toEqual({ pid: "brad_k", opening: [{ pid: "brad_k", shares: 20 }], mid: [] });
-    expect(out.find(b => b.pid === "aaron_j").mid).toEqual([{ pid: "cole_m", shares: 10 }]);
+  it("keeps everybody still in the market game", () => {
+    expect(eligibleBets({ bets, inMarket: () => true }).map(b => b.pid)).toEqual(["aaron_j", "brad_k", "cole_m"]);
   });
 
-  it("drops a bettor who is not in the market game at all", () => {
-    const out = eligibleBets({ bets, inMarket: pid => pid !== "cole_m", inRebuy: all });
-    expect(out.map(b => b.pid)).toEqual(["aaron_j", "brad_k"]);
+  it("drops a bettor the director has taken out of the market", () => {
+    expect(eligibleBets({ bets, inMarket: pid => pid !== "cole_m" }).map(b => b.pid)).toEqual(["aaron_j", "brad_k"]);
   });
 
-  it("leaves the stored bet untouched — the prune is a read, not a write", () => {
-    eligibleBets({ bets, inMarket: all, inRebuy: () => false });
-    expect(bets[0].mid).toEqual([{ pid: "cole_m", shares: 10 }]);
+  it("leaves the halfway shares alone — they are open to everybody in", () => {
+    expect(eligibleBets({ bets, inMarket: () => true })[0].mid).toEqual([{ pid: "cole_m", shares: 10 }]);
+  });
+});
+
+describe("rebuyers", () => {
+  it("is whoever placed into the second window — nobody tags it", () => {
+    const bets = [
+      { pid: "aaron_j", opening: [{ pid: "cole_m", shares: 20 }], mid: [{ pid: "cole_m", shares: 10 }] },
+      { pid: "brad_k", opening: [{ pid: "brad_k", shares: 20 }], mid: [] },
+      { pid: "cole_m", opening: [], mid: [{ pid: "brad_k", shares: 1 }] },
+    ];
+    expect(rebuyers(bets)).toEqual(["aaron_j", "cole_m"]);
   });
 
-  it("un-tagging a rebuy takes those shares off the board and out of the payout", () => {
-    const withRebuy = eligibleBets({ bets, inMarket: all, inRebuy: all });
-    const without = eligibleBets({ bets, inMarket: all, inRebuy: pid => pid !== "brad_k" });
-    expect(marketBoard({ bets: withRebuy, players, pot: 0 }).find(r => r.pid === "brad_k").shares).toBe(30);
-    expect(marketBoard({ bets: without, players, pot: 0 }).find(r => r.pid === "brad_k").shares).toBe(20);
-    // And the pot follows: 30 shares on the winner at a 300 pot is 10 each,
-    // 20 is 15 each.
-    expect(marketPayouts({ bets: withRebuy, winnerId: "brad_k", pot: 300 }).perShare).toBe(10);
-    expect(marketPayouts({ bets: without, winnerId: "brad_k", pot: 300 }).perShare).toBe(15);
+  it("charges a seat, not a share — one counts the same as ten", () => {
+    const one = rebuyers([{ pid: "a", mid: [{ pid: "x", shares: 1 }] }]);
+    const ten = rebuyers([{ pid: "a", mid: [{ pid: "x", shares: 10 }] }]);
+    expect(one).toEqual(ten);
+  });
+
+  it("drops off again when every share is taken back", () => {
+    expect(rebuyers([{ pid: "a", mid: [{ pid: "x", shares: 0 }] }])).toEqual([]);
+    expect(rebuyers([{ pid: "a", mid: [] }])).toEqual([]);
+    expect(rebuyers([{ pid: "a" }])).toEqual([]);
+  });
+
+  it("ignores the opening window entirely", () => {
+    expect(rebuyers([{ pid: "a", opening: [{ pid: "x", shares: 20 }], mid: [] }])).toEqual([]);
+  });
+
+  it("is empty before anybody bets", () => {
+    expect(rebuyers([])).toEqual([]);
+    expect(rebuyers(null)).toEqual([]);
   });
 });
