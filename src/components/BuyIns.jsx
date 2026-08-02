@@ -19,6 +19,11 @@
 //    • A PLAYER NAME drops that player out of everything — the guy who only
 //      came to drink — and puts them into everything if they are already out
 //      of it all. See toggleRow for why it is not symmetrical.
+//
+//  A game marked `derived` has no toggles at all. Its column is filled in
+//  from what players have already done rather than from anything the director
+//  tags — the market rebuy is incurred by placing halfway shares, not paid up
+//  front — so the cells are a readout and the row still bills for them.
 //    • A CELL toggles one buy-in for one player, which after the two above is
 //      only the half-dozen rebuys.
 //
@@ -61,10 +66,15 @@ export function BuyInTracker({ players, games, onChange }) {
     onChange({ [g.key]: { amount: Number.isFinite(v) && v > 0 ? v : 0 } });
   };
 
-  const toggleCell = (g, pid) => onChange({ [g.key]: { in: toggleIn(g.ids, players, pid) } });
+  const toggleCell = (g, pid) => {
+    if (g.derived) return;
+    onChange({ [g.key]: { in: toggleIn(g.ids, players, pid) } });
+  };
 
-  const toggleColumn = (g) =>
+  const toggleColumn = (g) => {
+    if (g.derived) return;
     onChange({ [g.key]: { in: sheet.totals[g.key].all ? [] : players.map(p => p.id) } });
+  };
 
   // A row toggle DROPS a player who is in anything, and only adds when they
   // are in nothing at all.
@@ -78,9 +88,14 @@ export function BuyInTracker({ players, games, onChange }) {
   // happen from zero, where there is nothing to misread.
   const toggleRow = (pid) => {
     const row = rowFor(pid);
-    const anyIn = games.some(g => row.games[g.key]);
+    // Derived columns are excluded from BOTH halves. Dropping a player must
+    // not silently delete the shares they placed, and adding one must not
+    // invent a rebuy they never took — a derived column only ever changes
+    // because of what its own game recorded.
+    const tagged = games.filter(g => !g.derived);
+    const anyIn = tagged.some(g => row.games[g.key]);
     const patch = {};
-    games.forEach(g => {
+    tagged.forEach(g => {
       const list = g.ids ?? players.map(p => p.id);
       patch[g.key] = { in: anyIn ? list.filter(x => x !== pid) : [...new Set([...list, pid])] };
     });
@@ -129,6 +144,9 @@ export function BuyInTracker({ players, games, onChange }) {
       </div>
       <div style={{ fontSize: FS.label, color: K.t3, padding: "2px 12px 8px", lineHeight: 1.4 }}>
         Tap a heading for the whole column, a name to drop a player entirely.
+        {games.some(g => g.derived) && (
+          <> Columns marked <span style={{ color: K.acc, fontWeight: 700 }}>auto</span> fill themselves.</>
+        )}
       </div>
 
       {/* Column headings double as the all-in / all-out toggle. */}
@@ -138,9 +156,9 @@ export function BuyInTracker({ players, games, onChange }) {
           const t = sheet.totals[g.key];
           return (
             <div key={g.key} onClick={() => toggleColumn(g)}
-              style={{ textAlign: "center", cursor: "pointer", padding: "4px 0", borderRadius: R.xs, background: t.all ? `${K.acc}${ALPHA.wash}` : "transparent" }}>
-              <div style={{ fontSize: FS.micro, fontWeight: 800, color: t.all ? K.acc : K.t2, letterSpacing: 0.3 }}>{g.short}</div>
-              <div style={{ fontSize: FS.micro, color: K.t3 }}>{t.count}</div>
+              style={{ textAlign: "center", cursor: g.derived ? "default" : "pointer", padding: "4px 0", borderRadius: R.xs, background: !g.derived && t.all ? `${K.acc}${ALPHA.wash}` : "transparent" }}>
+              <div style={{ fontSize: FS.micro, fontWeight: 800, color: g.derived ? K.t2 : t.all ? K.acc : K.t2, letterSpacing: 0.3 }}>{g.short}</div>
+              <div style={{ fontSize: FS.micro, color: g.derived ? K.acc : K.t3 }}>{g.derived ? "auto" : t.count}</div>
             </div>
           );
         })}
@@ -159,10 +177,10 @@ export function BuyInTracker({ players, games, onChange }) {
               <div key={g.key} onClick={() => toggleCell(g, row.pid)}
                 style={{
                   height: 28, display: "flex", alignItems: "center", justifyContent: "center",
-                  cursor: "pointer", borderRadius: R.xs,
-                  background: on ? K.acc : "transparent",
-                  border: `1px solid ${on ? "transparent" : K.bdr}`,
-                  color: on ? ON_ACC : K.t3, fontSize: FS.small, fontWeight: 800,
+                  cursor: g.derived ? "default" : "pointer", borderRadius: R.xs,
+                  background: on && !g.derived ? K.acc : "transparent",
+                  border: `1px solid ${on ? (g.derived ? `${K.acc}${ALPHA.line}` : "transparent") : K.bdr}`,
+                  color: on ? (g.derived ? K.acc : ON_ACC) : K.t3, fontSize: FS.small, fontWeight: 800,
                 }}>
                 {on ? "✓" : "–"}
               </div>
