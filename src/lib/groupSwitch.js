@@ -37,6 +37,32 @@ export function liveRound(finalizedRounds, numRounds) {
   return null;
 }
 
+// Is a round DONE — not "is the app past it", but "is nothing in it going to
+// move again". Two things can say so, and `finalizedRounds` is keyed by both:
+//
+//   • the director finalized the whole round from Admin, which stores the
+//     ROUND NUMBER; or
+//   • every group in the round finalized its own card, which stores a GROUP
+//     KEY each. The last group signing off ends the round whether or not
+//     anybody goes to Admin afterwards.
+//
+// This is what settles a round's closest-to-the-pin tags. A pin is provisional
+// while any group is still out — a later group can still get inside it — and
+// the moment the round is done the standing tag is the answer. Deriving it
+// here rather than stamping a flag on each CTP document means the two can
+// never disagree, and un-finalizing a round correctly un-settles its pins.
+//
+// A round with no groups drawn is NOT finalized: an empty draw is a round
+// nobody has set up, and reading "every group has finished" off zero groups
+// would settle a round before it was scheduled.
+export function roundFinalized(finalizedRounds, pairingsData, round) {
+  const fr = finalizedRounds || {};
+  if (fr[round]) return true;
+  const groups = ((pairingsData || {})[round] || []).filter(g => g && g.length > 0);
+  if (groups.length === 0) return false;
+  return groups.every(ids => !!fr[groupKey(round, ids)]);
+}
+
 // Every group in every round, rounds ascending, each round keeping the order
 // the pairings came in. Rounds are the outer axis because that is the axis a
 // director crosses deliberately — a group is picked out of a round, never the
