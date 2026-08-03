@@ -1765,7 +1765,12 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
           player cards. */}
       <button onClick={() => setShowFullCard(true)} style={{
         width: "100%", padding: "9px 0", borderRadius: R.sm, marginBottom: 8, cursor: "pointer",
-        background: K.card, border: `1px solid ${K.bdr}`, color: K.t2,
+        // A card-coloured bar with a neutral edge sat flat against the hole
+        // strips above it and read as a caption. It keeps its footprint — a
+        // hint of the accent on the edge, full-strength ink, and a shadow to
+        // lift it off the background is enough to read as something to tap.
+        background: K.card, border: `1px solid ${K.acc}${ALPHA.hair}`, color: K.t1,
+        boxShadow: `0 1px 2px ${SHADOW}`,
         fontFamily: FONT, fontSize: FS.small, fontWeight: 700, letterSpacing: 0.5,
       }}>Full Scorecard</button>
 
