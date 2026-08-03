@@ -1630,19 +1630,6 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
   if (isGroupFinalized) return (
     <div style={{ padding: "24px 16px", display: "flex", flexDirection: "column", gap: 16 }}>
       {offRoundBanner}
-      {/* Compact header: All Groups (director only) · course */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        {user.isDirector && presetGroups.length > 1 && (
-          <button onClick={() => { setGroup(null); setManualOverride(true); }} style={{
-            flexShrink: 0, background: "transparent", border: "none", color: K.acc, fontSize: FS.small,
-            fontWeight: 600, cursor: "pointer", padding: 0, display: "flex", alignItems: "center", gap: 3,
-          }}>← All Groups</button>
-        )}
-        <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, flex: 1 }}>
-          <span style={{ fontSize: FS.label, fontWeight: 800, color: K.acc, flexShrink: 0 }}>R{round}</span>
-          {course && <span style={{ fontSize: FS.small, color: K.t2, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{course.name}</span>}
-        </div>
-      </div>
       {/* Submitted notice */}
       <div style={{ background: K.acc + ALPHA.wash, border: `1px solid ${K.acc}${ALPHA.hair}`, borderRadius: R.xl, padding: "24px 20px", textAlign: "center" }}>
         <div style={{ fontSize: FS.display, marginBottom: 12 }}>🏆</div>
@@ -1737,19 +1724,13 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
   return (
     <div>
       {offRoundBanner}
-      {/* Compact header: All Groups (director only) · round · course */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-        {user.isDirector && presetGroups.length > 1 && (
-          <button onClick={() => { setGroup(null); setManualOverride(true); }} style={{
-            flexShrink: 0, background: "transparent", border: "none", color: K.acc, fontSize: FS.small,
-            fontWeight: 600, cursor: "pointer", padding: 0, display: "flex", alignItems: "center", gap: 3,
-          }}>← All Groups</button>
-        )}
-        <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, flex: 1 }}>
-          <span style={{ fontSize: FS.label, fontWeight: 800, color: K.acc, flexShrink: 0 }}>R{round}</span>
-          {course && <span style={{ fontSize: FS.small, color: K.t2, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{course.name}</span>}
-        </div>
-      </div>
+      {/* No header row here. The round, the course and the way back to the
+          other groups all used to ride above the hole strips; the crown in the
+          app header (components/GroupSwitcher) names the group and the round it
+          belongs to, and reaches every group in every round rather than only
+          this round's draw — so the row was spending the top of the scoring
+          screen on an answer already on screen and a control already in the
+          chrome. The hole strips start at the top now. */}
       {/* Hole navigator - Front 9 / Back 9 */}
       <div style={{ marginBottom: 8 }}>
         {[0, 9].map(start => (
