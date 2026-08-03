@@ -2552,6 +2552,27 @@ function BettingView({
   const [bookWindow, setBookWindow] = useState(null);
   const [draft, setDraft] = useState(null);
   const [openHolder, setOpenHolder] = useState(null);
+  const { confirm, confirmModal } = useConfirm();
+
+  // Gross is the default, so this never fires on arrival: reaching Net always
+  // means somebody crossed the toggle to get there, which is a deliberate act
+  // and therefore fair game. Fires every time they do it, which is the joke.
+  //
+  // It does NOT change the mode — Net stays selected behind the notice —
+  // because the point is the comment, not the veto. `alert` gives it one OK
+  // button rather than a choice, so it has to be dismissed rather than
+  // drifting past like a toast.
+  const pickMode = (gross) => {
+    setGrossMode(gross);
+    if (!gross) {
+      confirm({
+        title: "NET skins?!",
+        message: "This is for entertainment purposes only, real men don't play net skins.",
+        alert: true,
+      });
+    }
+  };
+
   // The book lives above the holders list, so a director who taps Edit five
   // rows down has to be taken back to it — otherwise the selector changes off
   // screen and the tap looks like it did nothing.
@@ -3026,8 +3047,8 @@ function BettingView({
           <SegmentedToggle
             options={[[true, "Gross"], [false, "Net"]]}
             value={grossMode}
-            onChange={setGrossMode}
-            style={{ marginBottom: 10, width: 160 }}
+            onChange={pickMode}
+            style={{ marginBottom: 10, width: 160, marginLeft: "auto", marginRight: "auto" }}
           />
 
           {/* SKINS LEADERS, with each row opening that player's own cards.
@@ -3501,6 +3522,8 @@ function BettingView({
           )}
         </div>
       )}
+
+      <ConfirmModal modal={confirmModal} />
     </div>
   );
 }
