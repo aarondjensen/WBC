@@ -1737,7 +1737,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
   return (
     <div>
       {offRoundBanner}
-      {/* Compact header: All Groups (director only) · course · Full Scorecard */}
+      {/* Compact header: All Groups (director only) · round · course */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
         {user.isDirector && presetGroups.length > 1 && (
           <button onClick={() => { setGroup(null); setManualOverride(true); }} style={{
@@ -1749,10 +1749,6 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
           <span style={{ fontSize: FS.label, fontWeight: 800, color: K.acc, flexShrink: 0 }}>R{round}</span>
           {course && <span style={{ fontSize: FS.small, color: K.t2, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{course.name}</span>}
         </div>
-        <button onClick={() => setShowFullCard(true)} style={{
-          flexShrink: 0, background: K.card, border: `1px solid ${K.bdr}`, color: K.t2,
-          fontSize: FS.label, fontWeight: 700, borderRadius: R.sm, padding: "5px 10px", cursor: "pointer", whiteSpace: "nowrap",
-        }}>Full Scorecard</button>
       </div>
       {/* Hole navigator - Front 9 / Back 9 */}
       <div style={{ marginBottom: 8 }}>
@@ -1779,6 +1775,18 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
           </div>
         ))}
       </div>
+
+      {/* Full Scorecard — Bourbon Cup's placement: a full-width bar under the
+          hole strips and above the hole banner, rather than a pill tucked into
+          the header row. It is the one control on this screen that isn't about
+          the hole you're standing on, and at pill size it read as a label. The
+          bar costs one slim row and is reachable without scrolling past four
+          player cards. */}
+      <button onClick={() => setShowFullCard(true)} style={{
+        width: "100%", padding: "9px 0", borderRadius: R.sm, marginBottom: 8, cursor: "pointer",
+        background: K.card, border: `1px solid ${K.bdr}`, color: K.t2,
+        fontFamily: FONT, fontSize: FS.small, fontWeight: 700, letterSpacing: 0.5,
+      }}>Full Scorecard</button>
 
       {/* Animated hole content */}
       <div style={{
