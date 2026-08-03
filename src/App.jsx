@@ -23,7 +23,7 @@ import { Popup, ConfirmModal } from "./components/Popup";
 import { EditionSwitcher } from "./components/EditionSwitcher";
 import { docIds } from "./lib/editionId";
 import { openingHole } from "./lib/holeAdvance";
-import { groupKey as groupKeyOf, sameGroup, liveRound, switchableGroups, groupProgress } from "./lib/groupSwitch";
+import { groupKey as groupKeyOf, sameGroup, liveRound, roundFinalized, switchableGroups, groupProgress } from "./lib/groupSwitch";
 import { AppHeader } from "./components/AppHeader";
 import { GroupSwitcher } from "./components/GroupSwitcher";
 import { OffRoundBanner } from "./components/OffRoundBanner";
@@ -363,6 +363,11 @@ const rowsToCtp = (rows) => {
       distanceFt: ft,
       distance: r.distance || (ft ? `${ft} ft` : ""),
       taggedByName: r.tagged_by_name || "",
+      // Who has walked off this green, seen the standing tag and let it
+      // stand. See onConfirmCtp — it is the other half of the on-course
+      // prompt, and the only record that a group answered rather than
+      // never being asked.
+      confirmedBy: Array.isArray(r.confirmed_by) ? r.confirmed_by : [],
     };
   });
   return cd;
@@ -1093,7 +1098,7 @@ function ScoreButtonRow({ score, par, onPick }) {
 
 // ── ON-COURSE SCORING (replaces old ScoringView) ──
 // Flow: Group Setup → Hole-by-hole for entire group → auto-advance
-function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPlayers, onSaveHole, notify, pairingsData, teeTimesData, roundDates, scoringOpen, setTee, getPlayerTee, finalizedRounds, scorecardSigs, onSignScorecard, onAttestScorecard, onUnsignScorecard, onFinalizeRound, onUnfinalizeRound, onGoToAdminCourses, markPlayerWD, ctpData, onSetCtp, directorPick, onGroupChange, onSetRound }) {
+function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPlayers, onSaveHole, notify, pairingsData, teeTimesData, roundDates, scoringOpen, setTee, getPlayerTee, finalizedRounds, scorecardSigs, onSignScorecard, onAttestScorecard, onUnsignScorecard, onFinalizeRound, onUnfinalizeRound, onGoToAdminCourses, markPlayerWD, ctpData, onSetCtp, onConfirmCtp, directorPick, onGroupChange, onSetRound }) {
   const [group, setGroup] = useState(null);
   const [currentHole, setCurrentHole] = useState(0);
   const [manualOverride, setManualOverride] = useState(false);
@@ -1812,6 +1817,42 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
         </div>
       </div>
 
+      {/* Par-3 CTP chip — the standing closest-to-the-pin for this hole, and
+          the way BACK to the prompt.
+          The prompt fires once per group per hole and blocks auto-advance, so
+          a group that skipped it, or answered before somebody remembered the
+          real number, had no route back short of finding a director. Tapping
+          this re-opens it deliberately and ignores the once-per-hole guard.
+          It carries no FINAL state on purpose: a round being settled means
+          this group's card is settled too, and that replaces this whole screen
+          with the finalized card. FINAL is the Betting tab's word. */}
+      {par === 3 && !isGroupFinalized && (() => {
+        const rec = ((ctpData || {})[round] || {})[currentHole + 1];
+        const holder = rec?.playerId ? players.find(p => p.id === rec.playerId) : null;
+        const dist = rec?.distanceFt ? `${rec.distanceFt} ft` : (rec?.distance || "");
+        const reopen = () => {
+          setCtpPickPlayer("");
+          setCtpFeet(rec?.distanceFt ? Math.max(1, Math.min(CTP_MAX_FT, rec.distanceFt)) : 10);
+          setShowCtpForHole(currentHole);
+        };
+        return (
+          <div onClick={reopen} style={{
+            display: "flex", alignItems: "center", gap: 8, marginBottom: 8,
+            padding: "7px 12px", borderRadius: R.md, cursor: "pointer",
+            background: holder ? K.acc + ALPHA.wash : K.inp,
+            border: `1px solid ${holder ? K.acc + ALPHA.line : K.bdr}`,
+          }}>
+            <span style={{ fontSize: FS.small }}>🎯</span>
+            <span style={{ flex: 1, minWidth: 0, fontSize: FS.label, fontWeight: 700, color: holder ? K.acc : K.t3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {holder ? `${holder.name}${dist ? ` · ${dist}` : ""}` : "No CTP tagged yet"}
+            </span>
+            <span style={{ fontSize: FS.micro, fontWeight: 800, color: K.t3, letterSpacing: 0.5, flexShrink: 0 }}>
+              {holder ? "TAP TO BEAT IT" : "TAP TO TAG"}
+            </span>
+          </div>
+        );
+      })()}
+
       {/* Completed hole confirmation overlay */}
       {!isSigned && navSource === "manual" && isHoleComplete(currentHole) && !editingCompleted && (<>
         <div style={{
@@ -2213,8 +2254,21 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
               )}
 
               <Btn block disabled={!canTag} onClick={save} style={{ letterSpacing: 0.5 }}>{leader ? "Tag New CTP" : "Tag CTP"}</Btn>
-              <Btn variant="secondary" size="sm" block onClick={() => { tapNudge(); closeAndAdvance(); }}
-                style={{ marginTop: 7, color: K.t3 }}>{leader ? "Our group wasn't closer" : "None of us — skip"}</Btn>
+              {/* Passing is an ANSWER, not a dismissal. A group that walks off
+                  without getting inside the standing tag is saying it is
+                  right, and recording that is what lets the Betting tab tell
+                  "nobody has been asked" apart from "everybody has been asked
+                  and it stands". The last group to confirm is the one that
+                  settles the pin. */}
+              <Btn variant="secondary" size="sm" block
+                onClick={async () => {
+                  tapNudge();
+                  if (leader) { try { await onConfirmCtp?.(round, holeNum, user?.id); } catch { /* the pass still closes */ } }
+                  closeAndAdvance();
+                }}
+                style={{ marginTop: 7, color: K.t3 }}>
+                {leader ? `Confirm — ${leaderPl?.name || "the standing CTP"} keeps it` : "None of us — skip"}
+              </Btn>
             </div>
           </Popup>
         );
@@ -2471,6 +2525,7 @@ function GroupSetup({ user, players, onStart, presetGroup }) {
 function BettingView({
   players, round, tRounds, courses, holeData, ctpData, onSetCtp, user, numRounds,
   getPlayerTee, sideGames, onUpdateSideGames, marketBets, onSaveMarketBet, leaderboard,
+  finalizedRounds, pairingsData,
 }) {
   const [tab, setTab] = useState("skins");
   const [expandedPlayer, setExpandedPlayer] = useState(null);
@@ -2593,6 +2648,13 @@ function BettingView({
   // settles as the schedule fills in.
   const par3Count = roundList.reduce((n, r) => n + par3sFor(r).length, 0);
   const perPin = perUnit(ctpPot, par3Count);
+  // A pin is PROVISIONAL while its round is live — a group still out can get
+  // inside it — and FINAL the moment the round is done, which is the last
+  // group signing its card or the director finalizing from Admin. Derived
+  // rather than stamped on each tag, so un-finalizing a round correctly
+  // un-settles its pins. See lib/groupSwitch roundFinalized.
+  const roundSettled = (r) => roundFinalized(finalizedRounds, pairingsData, r);
+  const settledPins = ctpTags.filter(t => roundSettled(t.round)).length;
 
   // ── The market tab ──
   const windows = marketWindows({ holeData, players, numRounds });
@@ -3014,7 +3076,7 @@ function BettingView({
                 {(ctpPot > 0 || user?.isDirector) && potCard({
                   label: "CTP POT", pot: ctpPot,
                   summary: `${ctpField.length} IN${(sideGames?.ctp?.amount || 0) > 0 ? ` · $${sideGames.ctp.amount} EACH` : ""}`,
-                  rightTop: `${ctpTags.length} of ${par3Count} pin${par3Count !== 1 ? "s" : ""} taken`,
+                  rightTop: `${ctpTags.length} of ${par3Count} taken · ${settledPins} final`,
                   rightBottom: `${money(perPin)} / pin`,
                 })}
 
@@ -3042,16 +3104,31 @@ function BettingView({
                   );
                   return (
                     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                      <SectionLabel style={{ marginBottom: 0, marginTop: 4 }}>{course?.name || "TBD"}</SectionLabel>
+                      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 4 }}>
+                        <SectionLabel style={{ marginBottom: 0, flex: 1 }}>{course?.name || "TBD"}</SectionLabel>
+                        {/* Whether this round's pins are the answer or still
+                            up for grabs. It is the same sentence the scoring
+                            tab's par-3 chip prints, off the same derivation. */}
+                        <span style={{ fontSize: FS.label, fontWeight: 800, letterSpacing: 0.5, color: roundSettled(ctpShownRound) ? K.acc : K.t3 }}>
+                          {roundSettled(ctpShownRound) ? "ROUND FINAL" : "STILL OUT"}
+                        </span>
+                      </div>
                       {par3s.map(hole => {
                         const rec = (ctpData[ctpShownRound] || {})[hole];
                         const winner = rec ? players.find(p => p.id === rec.playerId) : null;
                         const dist = rec ? (rec.distanceFt ? `${rec.distanceFt} ft` : (rec.distance || "")) : "";
                         const isEd = editCtpHole === hole;
+                        const settled = roundSettled(ctpShownRound);
+                        const confirmers = (rec?.confirmedBy || [])
+                          .map(pid => players.find(p => p.id === pid)?.name)
+                          .filter(Boolean);
                         return (
                           <Card key={hole} style={{ border: `1px solid ${winner ? K.acc + ALPHA.line : K.bdr}` }}>
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-                              <div><span style={{ fontSize: FS.body, fontWeight: 700 }}>Hole {hole}</span><span style={{ fontSize: FS.small, color: K.t3, marginLeft: 8 }}>Par 3</span></div>
+                              <div>
+                                <span style={{ fontSize: FS.body, fontWeight: 700 }}>Hole {hole}</span>
+                                <span style={{ fontSize: FS.small, color: K.t3, marginLeft: 8 }}>Par 3</span>
+                              </div>
                               {winner ? (
                                 <span style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
                                   <span style={{ fontSize: FS.body, fontWeight: 700, color: K.acc, whiteSpace: "nowrap" }}>🎯 {winner.name}</span>
@@ -3059,6 +3136,32 @@ function BettingView({
                                 </span>
                               ) : <span style={{ fontSize: FS.small, color: K.t3 }}>No winner yet</span>}
                             </div>
+
+                            {/* The pin's standing. A tagged hole in a live
+                                round is what the field has SO FAR — a group
+                                still out can get inside it — so saying FINAL
+                                only once the round is done is the difference
+                                between a result and a running total. */}
+                            {winner && (
+                              <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
+                                <span style={{
+                                  fontSize: FS.micro, fontWeight: 800, letterSpacing: 0.5,
+                                  padding: "2px 6px", borderRadius: R.xs,
+                                  color: settled ? K.acc : K.t3,
+                                  border: `1px solid ${settled ? K.acc + ALPHA.line : K.bdr}`,
+                                }}>{settled ? "FINAL" : "PENDING"}</span>
+                                {/* Groups that walked off, saw this tag and let
+                                    it stand — the on-course prompt's other
+                                    answer. It is how a director tells a pin
+                                    nobody has been asked about apart from one
+                                    the field has agreed on. */}
+                                {confirmers.length > 0 && (
+                                  <span style={{ fontSize: FS.label, color: K.t3, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                    Confirmed by {confirmers.join(", ")}
+                                  </span>
+                                )}
+                              </div>
+                            )}
 
                             {/* A tag naming somebody who is not in the CTP game
                                 still shows — the document is the hole's answer —
@@ -3081,6 +3184,11 @@ function BettingView({
                               <Btn variant="secondary" size="sm" block style={{ marginTop: 10 }}
                                 onClick={() => { setEditCtpHole(hole); setEditCtpPlayer(rec?.playerId || ""); setEditCtpFeet(rec?.distanceFt ? String(rec.distanceFt) : ""); }}
                               >{winner ? "Edit CTP" : "Set CTP winner"}</Btn>
+                            )}
+                            {user.isDirector && isEd && settled && (
+                              <div style={{ fontSize: FS.label, color: K.warn, marginTop: 8, lineHeight: 1.5 }}>
+                                Round {ctpShownRound} is finalized — this pin is settled. Changing it moves money that has already been called.
+                              </div>
                             )}
                             {user.isDirector && isEd && (
                               <div style={{ marginTop: 10 }}>
@@ -7813,7 +7921,7 @@ export default function WBCApp() {
     const taggedByName = user?.name || "";
     setCtpData(prev => ({
       ...prev,
-      [rnd]: { ...(prev[rnd] || {}), [hole]: { playerId: pid, distanceFt: ft, distance, taggedByName } },
+      [rnd]: { ...(prev[rnd] || {}), [hole]: { playerId: pid, distanceFt: ft, distance, taggedByName, confirmedBy: [] } },
     }));
     // Store CTP as a skin type in the skins table.
     // tournament_id was previously MISSING — which meant these docs were invisible to
@@ -7833,6 +7941,10 @@ export default function WBCApp() {
       tagged_by: user?.id || null,
       tagged_by_name: taggedByName,
       tagged_at: new Date().toISOString(),
+      // Cleared, not merged: a confirmation was agreement with a distance
+      // that has just been beaten, and carrying it onto the new tag would
+      // show groups signing off a number they never saw.
+      confirmed_by: [],
     }, "id");
     notify(ft ? `CTP Hole ${hole} — ${ft} ft` : `CTP Hole ${hole} set`);
   };
@@ -7888,6 +8000,32 @@ export default function WBCApp() {
       mid,
       updated_at: new Date().toISOString(),
     });
+  };
+
+  // ── Confirming a standing CTP ────────────────────────────────────
+  // The other answer the on-course prompt can take. A group that walks off a
+  // par 3 without getting inside the standing tag is not saying nothing —
+  // they are saying the tag is right, and that is the only thing that turns
+  // "nobody has been asked" into "everybody has been asked and it stands".
+  //
+  // Additive and idempotent, so two phones in the same group confirming at
+  // once converge instead of racing. A merge write of ONLY this field: the
+  // winner, the distance and who tagged it belong to whoever tagged it.
+  const onConfirmCtp = async (rnd, hole, pid) => {
+    const rec = ((ctpData || {})[rnd] || {})[hole];
+    if (!rec?.playerId || !pid) return;
+    if ((rec.confirmedBy || []).includes(pid)) return;
+    const confirmedBy = [...new Set([...(rec.confirmedBy || []), pid])];
+    setCtpData(prev => ({
+      ...prev,
+      [rnd]: { ...(prev[rnd] || {}), [hole]: { ...rec, confirmedBy } },
+    }));
+    await db.upsert("skins", {
+      id: docIds.ctp(_e(), rnd, hole),
+      tournament_id: TOURNAMENT_ID,
+      confirmed_by: confirmedBy,
+    }, "id");
+    notify(`CTP Hole ${hole} confirmed`);
   };
 
   const setPairings = async (rnd, groups) => {
@@ -8315,9 +8453,9 @@ export default function WBCApp() {
       <div className="wbc-app-body" style={{ padding: (view === "leaderboard" || view === "admin") ? "14px 20px 0 20px" : "14px 20px", flex: 1, overflowY: "auto", overflowX: "hidden", display: (view === "leaderboard" || view === "admin") ? "flex" : "block", flexDirection: "column", minHeight: 0, paddingBottom: (view === "leaderboard" || view === "admin") ? "28px" : 0 }}>
         {view === "leaderboard" && <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} loaded={storageLoaded} />}
         <div style={{ display: view === "scoring" ? "block" : "none", paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
-          <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeTimesData={teeTimesData} roundDates={roundDates} scoringOpen={scoringOpen} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={async (key, signerPid, signerName, present, rnd) => { const nonSigners = (present || []).filter(pid => pid !== signerPid); const autoFinal = nonSigners.length === 0; const optimistic = { signedBy: signerPid, signedByName: signerName, attestedBy: [], present: present || [] }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: optimistic })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), tournament_id: TOURNAMENT_ID, groupKey: key, round: rnd, signedBy: signerPid, signedByName: signerName, present: present || [], attestedBy: [], signedAt: new Date().toISOString() }); if (autoFinal) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onAttestScorecard={async (key, attesterPid, nonSigners) => { const cur = scorecardSigs[key]; if (!cur) return; const attestedBy = [...new Set([...(cur.attestedBy || []), attesterPid])]; const optimistic = { ...cur, attestedBy }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: { ...prev[key], attestedBy } })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), attestedBy }); const allDone = (nonSigners || []).every(pid => attestedBy.includes(pid)); if (allDone) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onUnsignScorecard={async key => { pendingSigsRef.current.delete(key); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); if (finalizedRounds[key]) { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); pendingSigsRef.current.delete(key); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); await saveTournamentState(nf); }} onGoToAdminCourses={(rnd) => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); setAdminSettingsRound(rnd || null); }} markPlayerWD={markPlayerWD} ctpData={ctpData} onSetCtp={onSetCtp} directorPick={directorPick} onGroupChange={setScoringGroup} onSetRound={setRound} />
+          <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeTimesData={teeTimesData} roundDates={roundDates} scoringOpen={scoringOpen} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={async (key, signerPid, signerName, present, rnd) => { const nonSigners = (present || []).filter(pid => pid !== signerPid); const autoFinal = nonSigners.length === 0; const optimistic = { signedBy: signerPid, signedByName: signerName, attestedBy: [], present: present || [] }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: optimistic })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), tournament_id: TOURNAMENT_ID, groupKey: key, round: rnd, signedBy: signerPid, signedByName: signerName, present: present || [], attestedBy: [], signedAt: new Date().toISOString() }); if (autoFinal) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onAttestScorecard={async (key, attesterPid, nonSigners) => { const cur = scorecardSigs[key]; if (!cur) return; const attestedBy = [...new Set([...(cur.attestedBy || []), attesterPid])]; const optimistic = { ...cur, attestedBy }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: { ...prev[key], attestedBy } })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), attestedBy }); const allDone = (nonSigners || []).every(pid => attestedBy.includes(pid)); if (allDone) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onUnsignScorecard={async key => { pendingSigsRef.current.delete(key); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); if (finalizedRounds[key]) { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); pendingSigsRef.current.delete(key); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); await saveTournamentState(nf); }} onGoToAdminCourses={(rnd) => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); setAdminSettingsRound(rnd || null); }} markPlayerWD={markPlayerWD} ctpData={ctpData} onSetCtp={onSetCtp} onConfirmCtp={onConfirmCtp} directorPick={directorPick} onGroupChange={setScoringGroup} onSetRound={setRound} />
         </div>
-        {view === "skins" && <BettingView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} numRounds={numRounds} getPlayerTee={getPlayerTee} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} marketBets={marketBets} onSaveMarketBet={onSaveMarketBet} leaderboard={getLeaderboard} />}
+        {view === "skins" && <BettingView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} numRounds={numRounds} getPlayerTee={getPlayerTee} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} marketBets={marketBets} onSaveMarketBet={onSaveMarketBet} leaderboard={getLeaderboard} finalizedRounds={finalizedRounds} pairingsData={pairingsData} />}
         {view === "groups" && <GroupsView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} pairingsData={pairingsData} teeTimesData={teeTimesData} getPlayerTee={getPlayerTee} user={user} />}
         {view === "admin" && (user.isDirector ? <AdminView activePlayers={activePlayers} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
               setTeeTimesData(prev => {

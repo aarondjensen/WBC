@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { groupKey, sameGroup, liveRound, switchableGroups, groupProgress } from "./groupSwitch";
+import { groupKey, sameGroup, liveRound, switchableGroups, groupProgress, roundFinalized } from "./groupSwitch";
 
 // n holes posted for a player, as holeData files them: `${pid}_${round}`.
 const card = (n, s = 4) => Object.fromEntries(Array.from({ length: n }, (_, i) => [i, s]));
@@ -93,5 +93,48 @@ describe("groupProgress", () => {
 
   it("does not call an empty group complete", () => {
     expect(groupProgress(1, [], {}, {}).complete).toBe(false);
+  });
+});
+
+describe("roundFinalized", () => {
+  const pairings = { 1: [["a", "b"], ["c", "d"]], 2: [["a", "c"], ["b", "d"]] };
+
+  it("is true when the director finalized the whole round from Admin", () => {
+    expect(roundFinalized({ 1: true }, pairings, 1)).toBe(true);
+  });
+
+  it("is true when every group has finalized its own card", () => {
+    const fr = { [groupKey(1, ["a", "b"])]: true, [groupKey(1, ["c", "d"])]: true };
+    expect(roundFinalized(fr, pairings, 1)).toBe(true);
+  });
+
+  it("is false while one group is still out", () => {
+    const fr = { [groupKey(1, ["a", "b"])]: true };
+    expect(roundFinalized(fr, pairings, 1)).toBe(false);
+  });
+
+  it("does not leak across rounds", () => {
+    expect(roundFinalized({ 1: true }, pairings, 2)).toBe(false);
+    const fr = { [groupKey(1, ["a", "b"])]: true, [groupKey(1, ["c", "d"])]: true };
+    expect(roundFinalized(fr, pairings, 2)).toBe(false);
+  });
+
+  it("reads the group key off the ids in any order", () => {
+    const fr = { [groupKey(1, ["b", "a"])]: true, [groupKey(1, ["d", "c"])]: true };
+    expect(roundFinalized(fr, pairings, 1)).toBe(true);
+  });
+
+  it("is false for a round nobody has drawn — an empty draw is not a finished round", () => {
+    expect(roundFinalized({}, {}, 1)).toBe(false);
+    expect(roundFinalized({}, { 1: [] }, 1)).toBe(false);
+    expect(roundFinalized({}, { 1: [[], []] }, 1)).toBe(false);
+  });
+
+  it("still honours the director's flag on a round with no draw", () => {
+    expect(roundFinalized({ 3: true }, {}, 3)).toBe(true);
+  });
+
+  it("survives missing arguments", () => {
+    expect(roundFinalized(null, null, 1)).toBe(false);
   });
 });
