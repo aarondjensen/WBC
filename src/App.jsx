@@ -1734,13 +1734,20 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
       {/* Hole navigator - Front 9 / Back 9 */}
       <div style={{ marginBottom: 8 }}>
         {[0, 9].map(start => (
-          <div key={start} style={{ display: "flex", gap: 2, justifyContent: "center", marginBottom: 2 }}>
+          // 6px of air between the tiles, and between the two rows. The
+          // current hole is ringed with a 2px outline set 1px off the button,
+          // so it reaches 3px past its own box on every side — at a 2px gap
+          // the neighbouring tiles painted over it and the ring looked cut
+          // off down its sides. 6px clears the ring; the raised tile also
+          // stacks above its neighbours so nothing can cover it.
+          <div key={start} style={{ display: "flex", gap: 6, justifyContent: "center", marginBottom: 6 }}>
             {Array.from({ length: 9 }, (_, i) => start + i).map(i => {
               const allScoredHole = groupPlayers.every(p => (holeData[`${p.id}_${round}`] || {})[i] > 0);
               const isCurrent = i === currentHole;
               return (
                 <button key={i} onClick={() => goToHole(i)} style={{
                   flex: 1, height: 32, display: "flex", alignItems: "center", justifyContent: "center",
+                  position: "relative", zIndex: isCurrent ? 1 : 0,
                   borderRadius: allScoredHole || isCurrent ? R.lg : R.sm,
                   border: allScoredHole && !isCurrent ? `1.5px solid ${K.acc}${ALPHA.line}` : "none",
                   cursor: "pointer",
