@@ -6028,7 +6028,6 @@ export default function WBCApp() {
   // and a dep array is evaluated during render.
   useEffect(() => { setRound(r => Math.min(r, numRounds)); }, [numRounds]);
   const [storageLoaded, setStorageLoaded] = useState(false);
-  const [syncing, setSyncing] = useState(false);
 
   // ── Pull-to-refresh ──
   // Two jobs, and the first is the reason it exists at all: an installed PWA
@@ -6083,8 +6082,6 @@ export default function WBCApp() {
   useEffect(() => {
     (async () => {
       try {
-        setSyncing(true);
-
         const playerRows = await db.get("players");
         if (playerRows?.length) {
           DEMO_PLAYERS = playerRows
@@ -6176,14 +6173,13 @@ export default function WBCApp() {
         }
 
       } catch(e) { console.error("Load failed:", e); }
-      finally { setSyncing(false); setStorageLoaded(true); }
+      finally { setStorageLoaded(true); }
     })();
 
     // ── Real-time subscriptions via Firestore onSnapshot ──
     const unsubs = [];
 
     unsubs.push(db.subscribe("hole_scores", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs, changes) => {
-      setSyncing(true);
       setHoleData(prev => {
         const next = { ...prev };
         (changes || []).forEach(change => {
@@ -6195,7 +6191,6 @@ export default function WBCApp() {
         });
         return next;
       });
-      setTimeout(() => setSyncing(false), 600);
     }));
 
     unsubs.push(db.subscribe("pairings", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
@@ -7002,7 +6997,6 @@ export default function WBCApp() {
           @keyframes toastDown { 0% { transform: translateX(-50%) translateY(-20px); opacity: 0; } 100% { transform: translateX(-50%) translateY(0); opacity: 1; } }
           @keyframes finalizeGlow { 0%,100% { box-shadow: 0 0 4px rgba(212,168,67,0.2); } 50% { box-shadow: 0 0 14px rgba(212,168,67,0.5); } }
           @keyframes pulse { 0%,100% { opacity: 0.5; } 50% { opacity: 0.2; } }
-          @keyframes syncPing { 0% { transform: scale(1); opacity: 1; } 100% { transform: scale(2); opacity: 0; } }
         `}</style>
 
         <div style={{ width: "100%", maxWidth: 420, textAlign: "center" }}>
@@ -7132,17 +7126,7 @@ export default function WBCApp() {
         </div>
       )}
 
-      <AppHeader
-        location={tournamentLocation}
-        right={<>
-            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <div style={{ position: "relative", width: 6, height: 6 }}>
-                <div style={{ width: 6, height: 6, borderRadius: "50%", background: syncing ? K.acc : K.ok }} />
-                {syncing && <div style={{ position: "absolute", inset: 0, borderRadius: "50%", background: K.acc, animation: "syncPing 0.8s ease-out" }} />}
-              </div>
-            </div>
-        </>}
-      />
+      <AppHeader location={tournamentLocation} />
 
       <MoreMenu
         open={menuOpen}
