@@ -25,7 +25,7 @@ import { docIds } from "./lib/editionId";
 import { openingHole, nineComplete } from "./lib/holeAdvance";
 import { scoreWindow, nudgeUpTarget, nudgeDownTarget } from "./lib/scoreEntry";
 import { groupKey as groupKeyOf, sameGroup, liveRound, roundFinalized, switchableGroups, groupProgress } from "./lib/groupSwitch";
-import { AppHeader } from "./components/AppHeader";
+import { AppHeader, HEADER_SAFE_PAD } from "./components/AppHeader";
 import { GroupSwitcher } from "./components/GroupSwitcher";
 import { OffRoundBanner } from "./components/OffRoundBanner";
 import { MoreMenu } from "./components/MoreMenu";
@@ -2217,8 +2217,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
         return (
           <Popup onClose={() => setShowFront9(false)} maxWidth={420} dismissOnBackdrop={false} background={K.card} borderColor={K.acc + ALPHA.hair} padding={0} zIndex={340}>
             <div style={{ background: K.acc + ALPHA.wash, borderBottom: `1px solid ${K.acc}${ALPHA.hair}`, padding: "14px 20px", textAlign: "center" }}>
-              <div style={{ fontSize: FS.body, fontWeight: 800, color: K.acc, letterSpacing: 0.3 }}>Front 9 Check</div>
-              <div style={{ fontSize: FS.label, color: K.t3, marginTop: 2 }}>Make sure these are right before you play on</div>
+              <div style={{ fontSize: FS.body, fontWeight: 800, color: K.acc, letterSpacing: 0.3 }}>At the Turn</div>
             </div>
             <div style={{ padding: "14px 16px" }}>
               <div style={{ display: "grid", gridTemplateColumns: gridCols, gap: 2 }}>
@@ -2249,9 +2248,11 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
                 })}
               </div>
 
-              <div style={{ fontSize: FS.micro, color: K.t3, textAlign: "center", margin: "10px 0 12px" }}>Tap a hole number to go back and fix it</div>
+              {/* The hole numbers above are still buttons back to that hole —
+                  the line that said so is gone, but the way back is not. */}
+              <div style={{ height: 12 }} />
 
-              <Btn variant="primary" block onClick={() => { tapBigAction(); setShowFront9(false); }}>Looks Good</Btn>
+              <Btn variant="primary" block onClick={() => { tapBigAction(); setShowFront9(false); }}>On to the Back 9</Btn>
             </div>
           </Popup>
         );
@@ -2525,8 +2526,16 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
         );
       })()}
 
+      {/* Sits ON the app header rather than below it. At top: 80 this landed
+          across the hole strip — the one part of the screen a player might be
+          reaching for while it is up, since the toast is showing precisely
+          when the group has just finished a hole and somebody wants to check
+          or correct the one before it. The header underneath is a logo and a
+          caption: nothing to tap, and nothing that changes in the second and
+          a half this covers it. Offset from the same safe-area inset the
+          header uses so it stays centred on that band on a notched phone. */}
       {allScored && currentHole < 17 && navSource === "auto" && !editingCompleted && (
-        <div style={{ position: "fixed", top: 80, left: "50%", transform: "translateX(-50%)", background: K.acc, color: K.bg, padding: "12px 48px", borderRadius: R.lg, fontSize: FS.small, fontWeight: 700, zIndex: 1000, whiteSpace: "nowrap", minWidth: 280, textAlign: "center", boxShadow: "0 8px 32px rgba(0,0,0,0.4)", animation: "toastDown 0.3s ease" }}>
+        <div style={{ position: "fixed", top: `calc(${HEADER_SAFE_PAD} + 9px)`, left: "50%", transform: "translateX(-50%)", background: K.acc, color: K.bg, padding: "12px 48px", borderRadius: R.lg, fontSize: FS.small, fontWeight: 700, zIndex: 1000, whiteSpace: "nowrap", minWidth: 280, textAlign: "center", boxShadow: "0 8px 32px rgba(0,0,0,0.4)", animation: "toastDown 0.3s ease", pointerEvents: "none" }}>
           ✓ Hole {currentHole + 1} saved — advancing...
         </div>
       )}
