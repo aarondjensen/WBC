@@ -3,7 +3,7 @@ import {
   MARKET_OPENING_SHARES, MARKET_MID_SHARES, midRoundFor,
   normalizeLots, totalShares, sharesOn, setLotShares,
   roundStarted, roundComplete, marketWindows,
-  lotsFor, allLots, marketBoard, marketHoldings, marketPayouts, eligibleBets, rebuyers,
+  lotsFor, allLots, marketBoard, marketHoldings, marketPayouts, eligibleBets, rebuyers, marketRoster,
 } from "./market";
 
 const players = [
@@ -289,5 +289,44 @@ describe("rebuyers", () => {
   it("is empty before anybody bets", () => {
     expect(rebuyers([])).toEqual([]);
     expect(rebuyers(null)).toEqual([]);
+  });
+});
+
+describe("marketRoster", () => {
+  const bets = [
+    { pid: "cole_m", opening: [{ pid: "aaron_j", shares: 20 }], mid: [{ pid: "aaron_j", shares: 4 }] },
+    { pid: "aaron_j", opening: [{ pid: "brad_k", shares: 12 }], mid: [] },
+  ];
+
+  it("counts each window without saying what it was placed on", () => {
+    const { rows } = marketRoster({ players, bets });
+    expect(rows).toEqual([
+      { pid: "aaron_j", name: "Aaron", opening: 12, mid: 0, placed: 12 },
+      { pid: "brad_k", name: "Brad", opening: 0, mid: 0, placed: 0 },
+      { pid: "cole_m", name: "Cole", opening: 20, mid: 4, placed: 24 },
+    ]);
+  });
+
+  // The gap this exists to close: marketHoldings only knows about people who
+  // have already bet, so the man who never opened the app was missing from
+  // the one screen meant to chase him.
+  it("lists a player who has placed nothing at all", () => {
+    const { rows } = marketRoster({ players, bets });
+    expect(rows.find(r => r.pid === "brad_k")).toMatchObject({ placed: 0 });
+  });
+
+  it("counts who is still outstanding", () => {
+    expect(marketRoster({ players, bets }).outstanding).toBe(1);
+    expect(marketRoster({ players, bets: [] }).outstanding).toBe(3);
+    expect(marketRoster({ players: [], bets }).outstanding).toBe(0);
+  });
+
+  it("is alphabetical, because it is read by looking for a name", () => {
+    const shuffled = [players[2], players[0], players[1]];
+    expect(marketRoster({ players: shuffled, bets }).rows.map(r => r.name)).toEqual(["Aaron", "Brad", "Cole"]);
+  });
+
+  it("survives missing arguments", () => {
+    expect(marketRoster({})).toEqual({ rows: [], outstanding: 0 });
   });
 });

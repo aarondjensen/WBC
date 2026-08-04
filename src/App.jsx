@@ -9,7 +9,7 @@ import { fieldFor, potFor, perUnit, computeSkins, allSkins, skinCounts } from ".
 import {
   MARKET_OPENING_SHARES, MARKET_MID_SHARES, marketWindows, normalizeLots, totalShares,
   sharesOn, setLotShares, lotsFor, allLots, marketBoard, marketHoldings, marketPayouts, roundComplete,
-  eligibleBets, rebuyers,
+  eligibleBets, rebuyers, marketRoster,
 } from "./lib/market";
 import { BuyInTracker } from "./components/BuyIns";
 import { useConfirm } from "./lib/useConfirm";
@@ -2523,6 +2523,10 @@ function BettingView({
   const [bookWindow, setBookWindow] = useState(null);
   const [draft, setDraft] = useState(null);
   const [openHolder, setOpenHolder] = useState(null);
+  // The director's shares worklist — who has handed their picks in and who
+  // has not. Its own drawer rather than a section of the book, because it is
+  // the INDEX into the book, not part of it.
+  const [showRoster, setShowRoster] = useState(false);
   const { confirm, confirmModal } = useConfirm();
 
   // Gross is the default, so this never fires on arrival: reaching Net always
@@ -2719,10 +2723,33 @@ function BettingView({
   const dirty = !!draft && draft.pid === bookPid && draft.window === activeWindow
     && JSON.stringify(draft.lots) !== JSON.stringify(lotsFor(bookBet, activeWindow));
 
+  const roster = marketRoster({ players: marketField, bets });
+
+  // Point the book at somebody and bring it into view. The one action every
+  // route into the editor shares — the roster row, the holders row, and the
+  // dropdown all end here — so a director cannot end up editing one player
+  // while looking at another's numbers.
+  const openBook = (pid, windowKey = null) => {
+    setBookFor(pid);
+    setBookWindow(windowKey);
+    setDraft(null);
+    setShowRoster(false);
+    // After the drawer closes, so the book is where it will finally sit.
+    requestAnimationFrame(() => bookRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  };
+
   const bump = (pid, delta) => {
     const next = setLotShares(draftLots, pid, sharesOn(draftLots, pid) + delta, win.shares);
     setDraft({ pid: bookPid, window: activeWindow, lots: next });
   };
+  // Typed entry, capped the same way the steppers are. Twenty shares is
+  // twenty taps on a stepper, and a director entering the field's picks off a
+  // sheet of paper is doing that sixteen times.
+  const setShares = (pid, value) => {
+    const next = setLotShares(draftLots, pid, value, win.shares);
+    setDraft({ pid: bookPid, window: activeWindow, lots: next });
+  };
+  const clearWindow = () => setDraft({ pid: bookPid, window: activeWindow, lots: [] });
   const commitBook = async () => {
     const lots = activeWindow === "mid"
       ? { opening: bookBet.opening, mid: draftLots }
@@ -3234,6 +3261,71 @@ function BettingView({
             rightBottom: `${holders.length} holder${holders.length !== 1 ? "s" : ""}`,
           })}
 
+          {/* ── The director's shares worklist ── */}
+          {/* Its own drawer, and the only place that lists a player who has
+              placed NOTHING. The holders list below only knows about people
+              who have already bet, which made the man who handed his picks
+              over on paper invisible on the screen meant to chase him. */}
+          {user?.isDirector && (
+            <>
+              <div
+                onClick={() => setShowRoster(v => !v)}
+                style={{
+                  display: "flex", alignItems: "center", gap: 8, cursor: "pointer",
+                  background: K.card, borderRadius: R.lg, border: `1px solid ${K.bdr}`,
+                  padding: "10px 14px", marginBottom: showRoster ? 0 : 10,
+                }}
+              >
+                <span style={{ flex: 1, fontSize: FS.label, fontWeight: 700, color: K.t3, letterSpacing: 0.6 }}>
+                  {roster.rows.length - roster.outstanding} OF {roster.rows.length} HAVE PLACED
+                  {roster.outstanding > 0 ? ` · ${roster.outstanding} TO ENTER` : ""}
+                </span>
+                <span style={{ fontSize: FS.label, fontWeight: 700, color: K.acc, letterSpacing: 0.6 }}>
+                  SHARES {showRoster ? "▾" : "▸"}
+                </span>
+              </div>
+
+              {showRoster && (
+                <div style={{ background: K.card, border: `1px solid ${K.acc}${ALPHA.line}`, borderRadius: R.sm, marginBottom: 10, overflow: "hidden" }}>
+                  <div style={{ padding: "8px 12px", fontSize: FS.label, color: K.t3, lineHeight: 1.4, borderBottom: `1px solid ${K.bdr}` }}>
+                    Tap a name to enter or change their shares. Counts only — what they
+                    are holding stays in their book.
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 56px 56px", gap: 2, padding: "6px 12px", borderBottom: `1px solid ${K.bdr}` }}>
+                    <span style={{ fontSize: FS.label, fontWeight: 700, color: K.t3, letterSpacing: 0.5 }}>PLAYER</span>
+                    <span style={{ fontSize: FS.micro, fontWeight: 800, color: K.t2, textAlign: "center" }}>OPEN</span>
+                    <span style={{ fontSize: FS.micro, fontWeight: 800, color: K.t2, textAlign: "center" }}>HALF</span>
+                  </div>
+                  {roster.rows.map(r => {
+                    const openFull = r.opening >= MARKET_OPENING_SHARES;
+                    const midAny = r.mid > 0;
+                    const cell = (n, full, tone) => (
+                      <span style={{ textAlign: "center", fontSize: FS.small, fontWeight: 800, color: tone ? (full ? K.acc : K.warn) : K.t3 }}>
+                        {n > 0 ? n : "–"}
+                      </span>
+                    );
+                    return (
+                      <div key={r.pid}
+                        onClick={() => openBook(r.pid)}
+                        style={{
+                          display: "grid", gridTemplateColumns: "minmax(0,1fr) 56px 56px", gap: 2,
+                          alignItems: "center", padding: "8px 12px", cursor: "pointer",
+                          borderBottom: `1px solid ${K.bdr}${ALPHA.hair}`,
+                          background: r.placed === 0 ? K.warn + ALPHA.wash : "transparent",
+                        }}>
+                        <span style={{ minWidth: 0, fontSize: FS.small, fontWeight: 600, color: r.placed > 0 ? K.t1 : K.t2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {r.name}
+                        </span>
+                        {cell(r.opening, openFull, r.opening > 0)}
+                        {cell(r.mid, r.mid >= MARKET_MID_SHARES, midAny)}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          )}
+
           {/* The two windows, and where the tournament is relative to them.
               A player with unspent shares needs to know whether they are early
               or late, and those are very different messages. */}
@@ -3287,7 +3379,7 @@ function BettingView({
                 <>
                   <select
                     value={bookPid}
-                    onChange={e => { setBookFor(e.target.value); setDraft(null); }}
+                    onChange={e => openBook(e.target.value, bookWindow)}
                     style={{ width: "100%", padding: "8px 12px", background: K.inp, border: `1px solid ${K.bdr}`, borderRadius: R.sm, color: K.t1, fontSize: FS.small, marginBottom: 8 }}
                   >
                     {marketField.map(p => <option key={p.id} value={p.id}>{p.name}{p.id === myPid ? " (you)" : ""}</option>)}
@@ -3357,7 +3449,28 @@ function BettingView({
                       <Btn variant="secondary" size="sm" disabled={!canPlace || n <= 0}
                         style={{ padding: "3px 10px", minWidth: 32 }}
                         onClick={() => bump(p.id, -1)}>−</Btn>
-                      <span style={{ width: 24, textAlign: "center", fontSize: FS.body, fontWeight: 800, color: n > 0 ? K.acc : K.t3 }}>{n}</span>
+                      {/* The number is a FIELD, not a readout. Twenty shares
+                          is twenty taps on a stepper, and a director entering
+                          the field's picks off a sheet of paper does that
+                          sixteen times over. Typing 12 is one action.
+                          Capped through the same setLotShares the steppers
+                          use, so a window still cannot be overspent however
+                          the number got there. FS.lead because this is a real
+                          input and anything under 16px makes iOS zoom the
+                          page on focus and never zoom back. */}
+                      <input
+                        type="number" inputMode="numeric" min="0" max={win.shares}
+                        value={n === 0 ? "" : String(n)} placeholder="0"
+                        disabled={!canPlace}
+                        onChange={e => setShares(p.id, e.target.value === "" ? 0 : parseInt(e.target.value, 10) || 0)}
+                        onFocus={e => e.currentTarget.select()}
+                        style={{
+                          width: 38, textAlign: "center", fontSize: FS.lead, fontWeight: 800,
+                          color: n > 0 ? K.acc : K.t3, background: "transparent",
+                          border: "none", borderBottom: `1px solid ${canPlace ? K.bdr : "transparent"}`,
+                          outline: "none", fontFamily: FONT, padding: 0,
+                        }}
+                      />
                       <Btn variant="secondary" size="sm" disabled={!canPlace || remaining <= 0}
                         style={{ padding: "3px 10px", minWidth: 32 }}
                         onClick={() => bump(p.id, 1)}>+</Btn>
@@ -3367,9 +3480,17 @@ function BettingView({
               </div>
 
               {canPlace && (
-                <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                <div style={{ marginTop: 10 }}>
                   <Btn block disabled={!dirty} onClick={commitBook}>{dirty ? "Place shares" : "Placed"}</Btn>
-                  <Btn variant="secondary" block disabled={!dirty} onClick={() => setDraft(null)}>Reset</Btn>
+                  {/* The two ways back, under the commit rather than beside
+                      it: three block buttons do not fit a phone, and these
+                      are the undo pair, not alternatives to saving.
+                      Clear beats taking twenty shares off one at a time,
+                      which is what re-entering a misheard book meant. */}
+                  <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                    <Btn variant="secondary" size="sm" block disabled={!dirty} onClick={() => setDraft(null)}>Reset</Btn>
+                    <Btn variant="secondary" size="sm" block disabled={placed === 0} onClick={clearWindow}>Clear window</Btn>
+                  </div>
                 </div>
               )}
             </Card>
@@ -3476,12 +3597,7 @@ function BettingView({
                             is how the wrong man gets edited. */}
                         {user?.isDirector && (
                           <Btn variant="secondary" size="sm" style={{ marginTop: 6 }}
-                            onClick={() => {
-                              setBookFor(h.pid);
-                              setBookWindow(null);
-                              setDraft(null);
-                              bookRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-                            }}
+                            onClick={() => openBook(h.pid)}
                           >Edit these shares</Btn>
                         )}
                       </div>

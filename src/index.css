@@ -44,6 +44,27 @@ input, button, textarea, select, optgroup {
   font-variant-numeric: inherit;
 }
 
+/* ── Number fields carry no spinner ────────────────────────────────
+   Every numeric input in this app is a narrow, centred cell — a buy-in
+   price, a CTP distance, a share count — sized to the digits and nothing
+   else. The browser's spin buttons appear on focus, eat ~14px of that
+   width and shove the number off centre, which reads as the field breaking
+   the moment you tap it. They are also useless here: these are values you
+   type or nudge with the app's own +/- controls, on a phone that has no
+   pointer to hover them with.
+
+   Both engines, because they disagree about the mechanism: WebKit/Blink
+   render a pseudo-element, Firefox styles the input itself. */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
 /* Horizontal strips that scroll on touch — the admin round pills once the
    round count outgrows the width. No scrollbar sitting under them, and iOS
    momentum scrolling, which `overflow-x: auto` alone does not give in a
