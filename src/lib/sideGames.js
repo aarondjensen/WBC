@@ -151,6 +151,67 @@ export function allSkins({ players, holeData, rounds, roundSetup }) {
   });
 }
 
+// ── Low net ────────────────────────────────────────────────────────
+// A payout per ROUND to the lowest net score of the day, split when it is
+// tied. Unlike skins it is not a hole-by-hole game and unlike the market it
+// is not a bet — it is the one side game that pays the same thing the
+// leaderboard ranks on, one round at a time.
+//
+// `lineFor(pid, round)` hands back that player's round line — the same
+// computeRoundLine the leaderboard and the finalize preview use, so the low
+// net here and the number on the board can never be two different answers.
+// Injected rather than computed, which is what keeps this testable without a
+// course, a tee sheet or a handicap.
+//
+// ONLY COMPLETE ROUNDS COUNT. computeRoundLine scores a partial card against
+// the holes actually played, so a man walking in after nine sits on a net −3
+// that would win the day from the clubhouse. `thru === 18` is the whole
+// qualification; a withdrawal is out for the same reason.
+//
+// A round nobody has finished yet returns no winners rather than a leader so
+// far, because a payout that changes hands as the last group comes in is
+// worse than one that simply is not decided yet.
+export function lowNetRounds({ players, rounds, lineFor }) {
+  return (rounds || []).map(round => {
+    const entries = (players || []).map(p => {
+      const line = lineFor(p.id, round);
+      if (!line || !line.played || line.wd || line.thru < 18) return null;
+      return { pid: p.id, name: p.name, net: line.netToPar, gross: line.gross };
+    }).filter(Boolean);
+
+    if (entries.length === 0) return { round, winners: [], net: null, decided: false };
+    const best = Math.min(...entries.map(e => e.net));
+    return {
+      round,
+      net: best,
+      decided: true,
+      winners: entries
+        .filter(e => e.net === best)
+        .sort((a, b) => String(a.name).localeCompare(String(b.name))),
+    };
+  });
+}
+
+// What each player has won across the rounds. A tied round splits that
+// round's share between the men who tied it — the money is divided, not
+// duplicated, so the total paid out never exceeds the pot.
+export function lowNetPayouts({ rounds, perRound }) {
+  const byPlayer = {};
+  (rounds || []).forEach(r => {
+    const n = (r.winners || []).length;
+    if (n === 0) return;
+    const share = (perRound || 0) / n;
+    r.winners.forEach(w => {
+      const e = byPlayer[w.pid] || (byPlayer[w.pid] = { pid: w.pid, name: w.name, rounds: 0, shared: 0, payout: 0 });
+      e.rounds += 1;
+      if (n > 1) e.shared += 1;
+      e.payout += share;
+    });
+  });
+  return Object.values(byPlayer)
+    .sort((a, b) => b.payout - a.payout || String(a.name).localeCompare(String(b.name)));
+}
+
 // pid → skins won, for the leaderboard.
 export function skinCounts(skins) {
   const counts = {};

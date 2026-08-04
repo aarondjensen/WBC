@@ -4,8 +4,8 @@ import { _app, _db, _auth, onAuthStateChanged, doGoogleSignIn, doAppleSignIn, do
 import { readMembership, isDirectorAccount, resolveMember, joinWithCode, readAccessCode, setAccessCode, setDirector, subscribeMemberships, accountsUnreadable, membershipForPlayer, playerIsDirector } from "./lib/accounts";
 import { K, ON_ACC, FS, fsStep, R, ALPHA, MOTION, FONT, SHADOW, SCRIM } from "./theme";
 import { SegmentedToggle, StickyTop, SectionLabel, Card, Toast, Btn } from "./components/ui";
-import { calcCH, buildStrokesMap, computeIndividualBoard, rankIndividualBoard, rankIndividualBoardIds, WD_SCORE } from "./lib/individualBoard";
-import { fieldFor, potFor, perUnit, computeSkins, allSkins, skinCounts } from "./lib/sideGames";
+import { calcCH, buildStrokesMap, computeRoundLine, computeIndividualBoard, rankIndividualBoard, rankIndividualBoardIds, WD_SCORE } from "./lib/individualBoard";
+import { fieldFor, potFor, perUnit, computeSkins, allSkins, skinCounts, lowNetRounds, lowNetPayouts } from "./lib/sideGames";
 import { teeTimesByPlayer, roundInPlay, thruStatus } from "./lib/thruStatus";
 import {
   MARKET_OPENING_SHARES, MARKET_MID_SHARES, marketWindows, normalizeLots, totalShares,
@@ -411,12 +411,13 @@ const rowsToMarket = (rows) =>
 // bets rather than tagged (see lib/market rebuyers). Keeping it as a fourth
 // game is what puts it on the collection sheet as a column instead of the
 // director holding "and also these six rebought" in their head.
-const SIDE_GAME_KEYS = ["skins", "ctp", "market", "rebuy"];
+const SIDE_GAME_KEYS = ["skins", "ctp", "lownet", "market", "rebuy"];
 // The order and the wording the Betting tab's collection sheet uses. `short`
 // has to fit a 38px column on a phone.
 const SIDE_GAME_LABELS = {
   skins:  { label: "Skins",           short: "SKIN" },
   ctp:    { label: "Closest to Pin",  short: "CTP" },
+  lownet: { label: "Low Net",         short: "NET" },
   market: { label: "Market",          short: "MKT" },
   rebuy:  { label: "Market rebuy",    short: "RE" },
 };
@@ -2993,6 +2994,8 @@ function BettingView({
   const skinsCounted = (sideGames?.skins?.amount || 0) > 0;
   const skinsPot = potFor({ amount: sideGames?.skins?.amount, count: skinsField.length, typed: sideGames?.skins?.pot });
   const ctpPot = potFor({ amount: sideGames?.ctp?.amount, count: ctpField.length });
+  const lowNetField = fieldFor(sideGames?.lownet?.in, players);
+  const lowNetPot = potFor({ amount: sideGames?.lownet?.amount, count: lowNetField.length });
 
   // ── Which round a tab lands on ──
   // The most recent round anybody has actually played, which is not the same
@@ -3080,6 +3083,31 @@ function BettingView({
   // rather than stamped on each tag, so un-finalizing a round correctly
   // un-settles its pins. See lib/groupSwitch roundFinalized.
   const roundSettled = (r) => roundFinalized(finalizedRounds, pairingsData, r);
+
+  // ── The Low Net tab ──
+  // One round line per player, resolved exactly the way the leaderboard
+  // resolves it — same tee, same course handicap, same computeRoundLine — so
+  // the low net paid here and the number on the board are the same number by
+  // construction rather than by two implementations agreeing.
+  const lineFor = (pid, r) => {
+    const { course } = roundSetup(r);
+    if (!course) return null;
+    const p = players.find(x => x.id === pid);
+    const tee = getPlayerTee(r, pid, course);
+    const ch = calcCH(p?.handicap_index, tee?.slope || course.slope, tee?.rating || course.rating, tee?.par || course.par);
+    return computeRoundLine({
+      scores: holeData[`${pid}_${r}`] || {},
+      holePars: course.hole_pars || [],
+      holeHcps: course.hole_handicaps || [],
+      ch,
+    });
+  };
+  // The pot divides by the rounds the event HAS, not the rounds decided so
+  // far — same reasoning as a CTP pin. A day's share is known before anybody
+  // tees off, so winning Thursday is worth the same whatever happens Friday.
+  const lowNetPerRound = perUnit(lowNetPot, roundList.length);
+  const lowNetRows = lowNetRounds({ players: lowNetField, rounds: roundList, lineFor });
+  const lowNetBoard = lowNetPayouts({ rounds: lowNetRows, perRound: lowNetPerRound });
   const settledPins = ctpTags.filter(t => roundSettled(t.round)).length;
 
   // ── The market tab ──
@@ -3455,7 +3483,7 @@ function BettingView({
           away. */}
       <StickyTop>
         <SegmentedToggle
-          options={[["skins", "💰 Skins"], ["ctp", "🎯 CTP"], ["market", "📈 Market"]]}
+          options={[["skins", "💰 Skins"], ["ctp", "🎯 CTP"], ["lownet", "🏅 Low Net"], ["market", "📈 Market"]]}
           value={tab} onChange={setTab}
         />
       </StickyTop>
@@ -3677,6 +3705,76 @@ function BettingView({
                 })()}
               </>
             )}
+        </div>
+      )}
+
+      {tab === "lownet" && (
+        <div>
+          {potCard({
+            label: "LOW NET POT", pot: lowNetPot,
+            summary: `${lowNetField.length} IN${(sideGames?.lownet?.amount || 0) > 0 ? ` · $${sideGames.lownet.amount} EACH` : ""}`,
+            rightTop: `${roundList.length} round${roundList.length !== 1 ? "s" : ""}`,
+            rightBottom: `${money(lowNetPerRound)} / round`,
+          })}
+
+          {/* The board first — what each man has actually won — then the
+              rounds it came from. Same order as Skins: money, then the
+              evidence. */}
+          {lowNetBoard.length > 0 && (
+            <div style={{ background: K.card, borderRadius: R.lg, border: `1px solid ${K.bdr}`, marginBottom: 10, overflow: "hidden" }}>
+              <div style={{ padding: "8px 14px", borderBottom: `1px solid ${K.bdr}`, fontSize: FS.label, fontWeight: 700, color: K.gold, letterSpacing: 1 }}>LOW NET LEADERS</div>
+              {lowNetBoard.map(r => (
+                <div key={r.pid} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", borderBottom: `1px solid ${K.bdr}${ALPHA.hair}` }}>
+                  <span style={{ flex: 1, minWidth: 0, fontSize: FS.body, fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</span>
+                  <span style={{ fontSize: FS.body, fontWeight: 700, color: K.acc, flexShrink: 0 }}>
+                    {r.rounds} round{r.rounds !== 1 ? "s" : ""}
+                    {r.shared > 0 && <span style={{ color: K.t3, fontWeight: 600 }}> · {r.shared} split</span>}
+                  </span>
+                  <span style={{ fontSize: FS.small, color: K.t3, flexShrink: 0, minWidth: 56, textAlign: "right" }}>{money(r.payout)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Every round on one screen rather than behind pills: there are
+              four of them, each is one line, and the question this tab
+              answers — who took which day — is a comparison across them. */}
+          <div style={{ background: K.card, borderRadius: R.lg, border: `1px solid ${K.bdr}`, overflow: "hidden" }}>
+            <div style={{ padding: "8px 14px", borderBottom: `1px solid ${K.bdr}`, fontSize: FS.label, fontWeight: 700, color: K.gold, letterSpacing: 1 }}>BY ROUND</div>
+            {lowNetRows.map(r => {
+              const settled = roundSettled(r.round);
+              const share = r.winners.length > 0 ? lowNetPerRound / r.winners.length : 0;
+              return (
+                <div key={r.round} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 14px", borderBottom: `1px solid ${K.bdr}${ALPHA.hair}` }}>
+                  <span style={{ fontSize: FS.label, fontWeight: 800, color: K.t3, width: 32, flexShrink: 0 }}>Rd {r.round}</span>
+                  {r.decided ? (
+                    <>
+                      <span style={{ flex: 1, minWidth: 0, fontSize: FS.small, fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {r.winners.map(w => w.name).join(", ")}
+                        {/* A day still being played can change hands as the
+                            last group comes in, so it says so rather than
+                            reading like a result. */}
+                        {!settled && <span style={{ color: K.warn, fontWeight: 700 }}> · still out</span>}
+                      </span>
+                      <span style={{ fontSize: FS.body, fontWeight: 800, color: K.acc, flexShrink: 0 }}>{fmtPar(r.net)}</span>
+                      <span style={{ fontSize: FS.small, color: K.t3, flexShrink: 0, minWidth: 64, textAlign: "right" }}>
+                        {money(share)}{r.winners.length > 1 ? " ea" : ""}
+                      </span>
+                    </>
+                  ) : (
+                    <span style={{ flex: 1, fontSize: FS.small, color: K.t3 }}>
+                      {roundSetup(r.round).course ? "Nobody has finished yet" : "No course set"}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <div style={{ fontSize: FS.label, color: K.t3, lineHeight: 1.5, padding: "10px 2px 0" }}>
+            The lowest net of each round takes that round&apos;s share. A tie splits it.
+            Only a full 18 counts — a card walked in early is not a low net.
+          </div>
         </div>
       )}
 
@@ -7532,6 +7630,7 @@ export default function WBCApp() {
   const [sideGames, setSideGames] = useState({
     skins: { amount: 0, in: null, pot: 0 },
     ctp: { amount: 0, in: null },
+    lownet: { amount: 0, in: null },
     market: { amount: 0, in: null },
     rebuy: { amount: 0, in: null },
   });
