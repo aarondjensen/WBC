@@ -1959,21 +1959,40 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
           par 3 that row pushed the last player's score buttons down behind the
           tab bar. The prompt is the whole story. */}
 
-      {/* Completed hole confirmation overlay */}
+      {/* Completed hole confirmation overlay.
+          You get here by walking BACKWARDS onto a hole your group already
+          scored, so the screen has to say why the card below it does nothing.
+          It used to say it in amber at 8% behind an amber border at 20% — on
+          this background that is a panel you scroll straight past, and what
+          people did next was tap the score buttons underneath and wonder why
+          nothing happened. Three things fix that: the panel is drawn at the
+          same strength as the EDITING banner it leads to, "Edit Scores" is
+          filled instead of being the quietest thing in its own panel, and the
+          locked cards below now enter edit mode when tapped, so the guess
+          everybody was already making is the right one. */}
       {!isSigned && navSource === "manual" && isHoleComplete(currentHole) && !editingCompleted && (<>
         <div style={{
-          background: K.warn + ALPHA.wash, border: `1px solid ${K.warn}${ALPHA.hair}`, borderRadius: R.lg,
+          background: K.warn + ALPHA.tint, border: `1.5px solid ${K.warn}`, borderRadius: R.lg,
           padding: 12, marginBottom: 8,
         }}>
-          <div style={{ fontSize: FS.small, fontWeight: 700, color: K.warn, marginBottom: 8, textAlign: "center" }}>Hole {currentHole + 1} already complete</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{
+              flexShrink: 0, width: 20, height: 20, borderRadius: "50%", background: K.warn, color: ON_ACC,
+              fontSize: FS.label, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center",
+            }}>✓</span>
+            <span style={{ fontSize: FS.body, fontWeight: 800, color: K.warn }}>Hole {currentHole + 1} already scored</span>
+          </div>
+          <div style={{ fontSize: FS.label, color: K.t2, margin: "4px 0 10px", paddingLeft: 28 }}>
+            These scores are posted. Tap a card below to change them.
+          </div>
           <div style={{ display: "flex", gap: 6 }}>
             <button onClick={() => setEditingCompleted(true)} style={{
-              flex: 1, padding: "8px 0", borderRadius: R.sm, background: K.card, border: `1px solid ${K.warn}${ALPHA.hair}`,
-              color: K.warn, fontSize: FS.label, fontWeight: 600, cursor: "pointer",
-            }}>Edit Scores</button>
+              flex: 1, padding: "10px 0", borderRadius: R.sm, background: K.warn, border: "none",
+              color: ON_ACC, fontSize: FS.small, fontWeight: 800, cursor: "pointer",
+            }}>✏️ Edit Scores</button>
             <button onClick={returnToPlay} style={{
-              flex: 1, padding: "8px 0", borderRadius: R.sm, background: K.acc, border: "none",
-              color: K.bg, fontSize: FS.label, fontWeight: 700, cursor: "pointer",
+              flex: 1, padding: "10px 0", borderRadius: R.sm, background: K.acc, border: "none",
+              color: ON_ACC, fontSize: FS.small, fontWeight: 800, cursor: "pointer",
             }}>Resume Hole {findNextIncompleteHole() + 1} →</button>
           </div>
         </div>
@@ -1990,9 +2009,11 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
             if (s === 1) displayScores[0] = 1;
             if (s > maxBase) displayScores[displayScores.length - 1] = s;
             return (
-              <div key={p.id} style={{
-                background: K.card, borderRadius: R.md, border: `1px solid ${K.bdr}`,
-                padding: "8px 10px", opacity: 0.7,
+              // Tapping a locked card IS the request to edit it — that tap was
+              // already happening, it just landed on nothing.
+              <div key={p.id} onClick={() => setEditingCompleted(true)} style={{
+                background: K.card, borderRadius: R.md, border: `1px solid ${K.warn}${ALPHA.hair}`,
+                padding: "8px 10px", opacity: 0.85, cursor: "pointer",
               }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -2000,6 +2021,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
                     <span style={{ fontSize: FS.label, color: K.acc, fontWeight: 700 }}>{ch}</span>
                     {strokes > 0 && <span style={{ color: K.acc, fontSize: FS.label, letterSpacing: "-1px" }}>{"●".repeat(strokes)}</span>}
                   </div>
+                  <span style={{ fontSize: FS.micro, color: K.warn, fontWeight: 700, letterSpacing: "0.06em" }}>✏️ TAP TO EDIT</span>
                 </div>
                 <div style={{ display: "flex", gap: 3 }}>
                   {displayScores.map(btn => {
