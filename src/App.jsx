@@ -1169,7 +1169,11 @@ function ScoreButtonRow({ score, par, onPick }) {
         const ringClr = sd < 0 ? K.danger : K.bg;
         return (
           <div key={btn} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, minWidth: 0 }}>
-            <button onClick={() => { tapScore(); onPick(isCur ? 0 : btn); }} style={{ width: "100%", height: 44, borderRadius: R.sm, cursor: "pointer", fontSize: FS.body, fontWeight: 800, border: "none", background: isCur ? K.acc : K.inp, color: isCur ? K.bg : K.t2, position: "relative", transition: `all ${MOTION}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            {/* A rung above FS.body, unlike the ± either side of it. This is
+                the number the whole screen exists to read and to hit, it sits
+                in a 44px box with room to spare, and it is read at arm's
+                length in sun. Nothing reflows: the box height is fixed. */}
+            <button onClick={() => { tapScore(); onPick(isCur ? 0 : btn); }} style={{ width: "100%", height: 44, borderRadius: R.sm, cursor: "pointer", fontSize: FS.lead, fontWeight: 800, border: "none", background: isCur ? K.acc : K.inp, color: isCur ? K.bg : K.t2, position: "relative", transition: `all ${MOTION}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
               {/* Selected-state rings: circles under par, squares over par */}
               {isCur && sd !== 0 && <div style={{ position: "absolute", width: boxSize, height: boxSize, left: "50%", top: "50%", transform: "translate(-50%, -50%)" }}><div style={{ position: "absolute", inset: 0, borderRadius: sd < 0 ? "50%" : R.xs, border: `1.5px solid ${ringClr}` }} />{Math.abs(sd) >= 2 && <div style={{ position: "absolute", inset: 3, borderRadius: sd < 0 ? "50%" : R.xs, border: `1px solid ${ringClr}` }} />}</div>}
               {/* Resting-state faint outlines on non-par, non-selected buttons */}
@@ -1997,7 +2001,11 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
                   borderRadius: allScoredHole || isCurrent ? R.lg : R.sm,
                   border: allScoredHole && !isCurrent ? `1.5px solid ${K.acc}${ALPHA.line}` : "none",
                   cursor: "pointer",
-                  fontSize: FS.label, fontWeight: 700,
+                  // A rung above the label size these tiles used to wear. They
+                  // are 18 targets across a phone and the number in them is
+                  // how you find the one you want; the 32px tile carries it
+                  // without growing.
+                  fontSize: FS.small, fontWeight: 700,
                   background: isCurrent ? K.acc : allScoredHole ? K.accDim + ALPHA.wash : K.card,
                   color: isCurrent ? K.bg : allScoredHole ? K.acc : K.t3,
                   outline: isCurrent ? `2px solid ${K.acc}` : "none",

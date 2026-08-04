@@ -18,9 +18,24 @@ export const K = {
   acc: "#22d3a7", accDim: "#0d9b73", accGlow: "rgba(34,211,167,0.12)",
   tourn: "#38bdf8", tournGlow: "rgba(56,189,248,0.12)",
   warn: "#f59e0b", danger: "#ef4444",
-  t1: "#e8edf5", t2: "#8b9ec2", t3: "#526484",
+  // ── The two greys, brightened ──
+  // These are read on a phone, outdoors, in sun, by people who are not
+  // twenty-five. t3 was #526484, which is 3.2:1 on the background — under the
+  // 4.5:1 that small text needs, and t3 is exactly where the SMALL text is:
+  // the 9px grid cells, the labels under the score buttons, the hint lines.
+  // Dim ink at 9px is the one combination the palette should never have made.
+  //
+  // The new pair keeps the same three-step hierarchy, measured on `bg`:
+  //   t1 #e8edf5 — 16.3:1, unchanged; it was never the problem
+  //   t2 #a3b4d4 —  9.2:1, was 7.1
+  //   t3 #7b8eae —  5.8:1, was 3.2
+  // Still plainly three weights of grey, but the bottom one now clears AA at
+  // the sizes it is actually used at.
+  t1: "#e8edf5", t2: "#a3b4d4", t3: "#7b8eae",
   bdr: "#1a2b47",
-  eagle: "#3b82f6", birdie: "#22c55e", par: "#8b9ec2", bogey: "#eab308", dbl: "#ef4444",
+  // `par` has always been the same hex as t2 — a par is the score with no
+  // colour of its own, printed in the muted ink — so it moves with it.
+  eagle: "#3b82f6", birdie: "#22c55e", par: "#a3b4d4", bogey: "#eab308", dbl: "#ef4444",
   // Two aliases, because the same two hexes were being typed raw at ~30 call
   // sites to mean something that is NOT a score. Named separately so the
   // meaning is legible at the call site and so the scoring colors could ever
@@ -69,16 +84,36 @@ export const FONT = "'Montserrat', sans-serif";
 // "same role, same size" — not "sizes come from a list". Pick the entry whose
 // description matches what you're rendering; if none fits, the answer is
 // almost never a new number, it's that the thing is one of these in disguise.
+//
+// Every rung is one up from where it started (8/10/12/14/16/20/26/32/40). The
+// bump is uniform on purpose: the scale's whole job is that a role has ONE
+// size, and moving rungs by different amounts closes the gaps between them —
+// at the bottom, where 9 and 11 already sit two apart, a rung that moved 2
+// while its neighbour moved 1 would collide and the two roles would stop being
+// distinguishable. One step everywhere keeps the shape and reads bigger
+// exactly where it matters most: +12% on the 8px grid cells, +10% on the 10px
+// labels, both of which were being read at arm's length on a tee box.
+//
+// The screens that must not scroll — Scoring, Leaderboard — were measured
+// before and after. Scoring's controls are fixed-height boxes (44px score
+// buttons, 32px hole tiles) with text inside them, so a rung costs a few
+// pixels of line box rather than a row: the whole screen grew 7px against 100
+// of headroom. The leaderboard fits its own rows to the space it has and picks
+// its rung from that, so height absorbs itself there — but its columns are
+// FIXED PIXEL WIDTHS (LB_COL in App.jsx: 24px for a prior round, 34px for
+// thru), and that is what caps this bump at one rung. Two rungs put "+18" at
+// 14px into a 24px column with nothing either side of it, and a tee time of
+// "10:24a" into 34px. A rung is worth having; a clipped total is not.
 export const FS = {
-  micro:    8, // dense grid cells, scorecard column heads, tiny badges
-  label:   10, // all-caps eyebrows/section labels, hint + helper prose
-  small:   12, // list rows, secondary body copy, pill and segmented buttons
-  body:    14, // form inputs, standard buttons, player names, dialog titles
-  lead:    16, // key values, primary CTAs, panel and screen titles
-  title:   20, // hero numerics, oversized nav glyphs
-  hero:    26, // the active hole number
-  display: 32, // large empty-state icons, headline totals
-  jumbo:   40, // full-screen empty-state icons
+  micro:    9, // dense grid cells, scorecard column heads, tiny badges
+  label:   11, // all-caps eyebrows/section labels, hint + helper prose
+  small:   13, // list rows, secondary body copy, pill and segmented buttons
+  body:    15, // form inputs, standard buttons, player names, dialog titles
+  lead:    17, // key values, primary CTAs, panel and screen titles
+  title:   21, // hero numerics, oversized nav glyphs
+  hero:    27, // the active hole number
+  display: 33, // large empty-state icons, headline totals
+  jumbo:   41, // full-screen empty-state icons
 };
 // The rungs in order, for the one case the scale cannot express as a constant:
 // a size that is COMPUTED. The leaderboard fits its rows to whatever height it
