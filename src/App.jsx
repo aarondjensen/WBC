@@ -6,6 +6,8 @@ import { K, ON_ACC, FS, fsStep, R, ALPHA, MOTION, FONT, SHADOW, SCRIM } from "./
 import { SegmentedToggle, StickyTop, SectionLabel, Card, Toast, Btn } from "./components/ui";
 import { calcCH, computeIndividualBoard, rankIndividualBoard, rankIndividualBoardIds, WD_SCORE } from "./lib/individualBoard";
 import { useConfirm } from "./lib/useConfirm";
+// Tee times survive a re-group because of these two — see lib/teeSheet.js.
+import { rowsToTeeTimes, mergeTeeTimes } from "./lib/teeSheet";
 import { useDirtyForm } from "./lib/useDirtyForm";
 import { usePullToRefresh, hasNewBundle } from "./lib/usePullToRefresh";
 import { NotificationSettings } from "./components/NotificationSettings";
@@ -139,6 +141,32 @@ const db = {
       }
       return true;
     } catch(e) { console.error("db.upsertMany error:", col, e); return null; }
+  },
+  // Write a set of rows and delete another set in the SAME commit. Doing it as
+  // a delete followed by writes means the collection is briefly missing
+  // everything the delete took, and every listener sees that gap and rebuilds
+  // its state from it.
+  replaceMany: async (col, rows, deleteIds = []) => {
+    const valid = (rows || []).filter(r => r && r.id);
+    const gone = (deleteIds || []).filter(Boolean);
+    if (!valid.length && !gone.length) return true;
+    try {
+      // 500 writes per batch is Firestore's cap; 490 leaves room. Deletes ride
+      // in the first batch so the replacement lands with them.
+      const ops = [
+        ...gone.map(id => ({ kind: "del", id })),
+        ...valid.map(r => ({ kind: "set", row: r })),
+      ];
+      for (let i = 0; i < ops.length; i += 490) {
+        const batch = writeBatch(_db);
+        ops.slice(i, i + 490).forEach(op => {
+          if (op.kind === "del") batch.delete(doc(_db, col, String(op.id)));
+          else batch.set(doc(_db, col, String(op.row.id)), op.row, { merge: true });
+        });
+        await batch.commit();
+      }
+      return true;
+    } catch(e) { console.error("db.replaceMany error:", col, e); return null; }
   },
   delete: async (col, filters = []) => {
     try {
@@ -359,17 +387,6 @@ const rowsToCtp = (rows) => {
 };
 
 // Convert tee times rows → teeTimesData { round: [time, time, ...] }
-const rowsToTeeTimes = (rows) => {
-  const tt = {};
-  rows.forEach(r => {
-    if (!tt[r.round_number]) tt[r.round_number] = [];
-    const gi = r.group_number - 1;
-    while (tt[r.round_number].length <= gi) tt[r.round_number].push("");
-    tt[r.round_number][gi] = r.tee_time || "";
-  });
-  return tt;
-};
-
 // calcCH now lives in lib/individualBoard.js, alongside the net-to-par math it
 // feeds, and is imported at the top of this file — one implementation for the
 // leaderboard, the scorecards and the finalize preview alike.
@@ -5473,17 +5490,21 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
         <PairingsEditor key={`${editRound}:${activePlayers.length}`} activePlayers={activePlayers} pairingsData={pairingsData} setPairings={setPairings} tRounds={tRounds} courses={courses} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
               setTeeTimesData(prev => {
                 const next = typeof updater === "function" ? updater(prev) : updater;
-                // Fire-and-forget: update tee times on pairings rows in Firestore
-                Object.keys(next).forEach(async rnd => {
-                  const groups = pairingsData[rnd] || [];
-                  groups.forEach(async (grp, gi) => {
+                // One commit for the whole tee sheet. Writing a row per player
+                // meant a snapshot per player, and each one rebuilt teeTimesData
+                // from a server that was only part way through the change —
+                // which is what made the times flicker while they were typed.
+                const rows = [];
+                Object.keys(next).forEach(rnd => {
+                  (pairingsData[rnd] || []).forEach((grp, gi) => {
                     const teeTime = (next[rnd] || [])[gi] || null;
-                    grp.forEach(async pid => {
-                      const row = { id: docIds.pairing(_e(), rnd, gi + 1, pid), tournament_id: TOURNAMENT_ID, round_number: parseInt(rnd), group_number: gi+1, player_id: pid, tee_time: teeTime };
-                      await db.upsert("pairings", row);
-                    });
+                    grp.forEach(pid => rows.push({
+                      id: docIds.pairing(_e(), rnd, gi + 1, pid), tournament_id: TOURNAMENT_ID,
+                      round_number: parseInt(rnd), group_number: gi + 1, player_id: pid, tee_time: teeTime,
+                    }));
                   });
                 });
+                db.upsertMany("pairings", rows);
                 return next;
               });
             }} roundDates={roundDates} onSetRoundDate={onSetRoundDate} scoringOpen={scoringOpen} onSetScoringOpen={onSetScoringOpen} pairingStrategy={pairingStrategy} onSetPairingStrategy={onSetPairingStrategy} leaderboard={leaderboard} finalizedRounds={finalizedRounds} getPlayerTee={getPlayerTee} editRound={editRound} holeData={holeData} />
@@ -6227,7 +6248,7 @@ export default function WBCApp() {
         if (pairRows?.length) {
           const sorted = pairRows.sort((a, b) => a.round_number - b.round_number || a.group_number - b.group_number || (a.player_id || "").localeCompare(b.player_id || ""));
           setPairingsData(rowsToPairings(sorted));
-          setTeeTimesData(rowsToTeeTimes(sorted));
+          setTeeTimesData(prev => mergeTeeTimes(prev, rowsToTeeTimes(sorted)));
         }
 
         const teeRows = await db.get("tee_assignments", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
@@ -6277,7 +6298,7 @@ export default function WBCApp() {
     unsubs.push(db.subscribe("pairings", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
       const sorted = docs.sort((a, b) => a.round_number - b.round_number || a.group_number - b.group_number || (a.player_id || "").localeCompare(b.player_id || ""));
       setPairingsData(rowsToPairings(sorted));
-      setTeeTimesData(rowsToTeeTimes(sorted));
+      setTeeTimesData(prev => mergeTeeTimes(prev, rowsToTeeTimes(sorted)));
     }));
 
     unsubs.push(db.subscribe("tee_assignments", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
@@ -6958,15 +6979,30 @@ export default function WBCApp() {
     const incoming = JSON.stringify(groups);
     if (existing === incoming) return;
     setPairingsData(prev => ({ ...prev, [rnd]: groups }));
-    // Delete old pairings for this round and reinsert
-    await db.delete("pairings", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }, { field: "round_number", op: "==", value: rnd }]);
+    // The old shape of this was: delete every pairing row for the round, then
+    // write the new ones one at a time. The delete commits on its own, so every
+    // listener — including this app's — saw a round with no pairings and no tee
+    // times, and then watched them come back a group at a time as the writes
+    // landed. That is the flash: the times were never lost, they were being
+    // re-derived from a collection that was briefly empty.
+    //
+    // One commit instead. The rows that are no longer wanted are deleted in the
+    // same batch that writes the new ones, so there is no moment in between to
+    // observe. Tee times carry across by GROUP INDEX — group 1 keeps its time
+    // when its players change, which is the whole point of a tee sheet.
     const rows = [];
     groups.forEach((grp, gi) => {
       grp.forEach(pid => {
         rows.push({ id: docIds.pairing(_e(), rnd, gi + 1, pid), tournament_id: TOURNAMENT_ID, round_number: rnd, group_number: gi + 1, player_id: pid, tee_time: (teeTimesData[rnd] || [])[gi] || null });
       });
     });
-    for (const row of rows) await db.upsert("pairings", row);
+    const keep = new Set(rows.map(r => r.id));
+    // Read the round's rows rather than trusting the local mirror: another
+    // director may have moved somebody, and a row left behind is a player who
+    // shows up in two groups.
+    const onServer = await db.get("pairings", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }, { field: "round_number", op: "==", value: rnd }]);
+    const stale = (onServer || []).map(r => r.id).filter(id => id && !keep.has(id));
+    await db.replaceMany("pairings", rows, stale);
     notify(`Round ${rnd} pairings saved`);
   };
 
@@ -7364,17 +7400,21 @@ export default function WBCApp() {
         {view === "admin" && (user.isDirector ? <AdminView activePlayers={activePlayers} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
               setTeeTimesData(prev => {
                 const next = typeof updater === "function" ? updater(prev) : updater;
-                // Fire-and-forget: update tee times on pairings rows in Firestore
-                Object.keys(next).forEach(async rnd => {
-                  const groups = pairingsData[rnd] || [];
-                  groups.forEach(async (grp, gi) => {
+                // One commit for the whole tee sheet. Writing a row per player
+                // meant a snapshot per player, and each one rebuilt teeTimesData
+                // from a server that was only part way through the change —
+                // which is what made the times flicker while they were typed.
+                const rows = [];
+                Object.keys(next).forEach(rnd => {
+                  (pairingsData[rnd] || []).forEach((grp, gi) => {
                     const teeTime = (next[rnd] || [])[gi] || null;
-                    grp.forEach(async pid => {
-                      const row = { id: docIds.pairing(_e(), rnd, gi + 1, pid), tournament_id: TOURNAMENT_ID, round_number: parseInt(rnd), group_number: gi+1, player_id: pid, tee_time: teeTime };
-                      await db.upsert("pairings", row);
-                    });
+                    grp.forEach(pid => rows.push({
+                      id: docIds.pairing(_e(), rnd, gi + 1, pid), tournament_id: TOURNAMENT_ID,
+                      round_number: parseInt(rnd), group_number: gi + 1, player_id: pid, tee_time: teeTime,
+                    }));
                   });
                 });
+                db.upsertMany("pairings", rows);
                 return next;
               });
             }} roundDates={roundDates} onSetRoundDate={async (rnd, dateStr) => { const next = { ...roundDates }; if (dateStr) next[rnd] = dateStr; else delete next[rnd]; setRoundDates(next); await saveTournamentState(finalizedRounds, teesSaved, teesModified, next, scoringOpen); }} scoringOpen={scoringOpen} onSetScoringOpen={async (rnd, open) => { const next = { ...scoringOpen }; if (open) next[rnd] = true; else delete next[rnd]; setScoringOpen(next); await saveTournamentState(finalizedRounds, teesSaved, teesModified, roundDates, next); }} pairingStrategy={pairingStrategy} onSetPairingStrategy={async (rnd, cfg) => { const next = { ...pairingStrategy }; if (cfg) next[rnd] = cfg; else delete next[rnd]; setPairingStrategy(next); await saveTournamentState(finalizedRounds, teesSaved, teesModified, roundDates, scoringOpen, next); }} leaderboard={getLeaderboard} holeData={holeData} finalizedRounds={finalizedRounds} onDiscardRoundScores={onDiscardRoundScores} onFinalizeRound={async rnd => { const nf = { ...finalizedRounds, [rnd]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${rnd}`, tournament_id: TOURNAMENT_ID, round: rnd, finalized: true }); if (rnd < NUM_ROUNDS) setRound(rnd + 1); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf); if (/^\d+$/.test(String(key))) { await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${key}`, tournament_id: TOURNAMENT_ID, round: Number(key), finalized: false }); } else { setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); } }} notify={notify} getPlayerTee={getPlayerTee} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} externalSettingsRound={adminSettingsRound} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); setAdminSettingsRound(null); }} teesSaved={teesSaved} onTeesSave={async r => { const next = { ...teesSaved, [r]: true }; const nextMod = { ...teesModified, [r]: false }; setTeesSaved(next); setTeesModified(nextMod); await saveTournamentState(finalizedRounds, next, nextMod); }} teesModified={teesModified} onTeesModify={async r => { const nextMod = { ...teesModified, [r]: true }; setTeesModified(nextMod); await saveTournamentState(finalizedRounds, teesSaved, nextMod); }} memberships={memberships} onSetDirector={onSetDirector} claims={claims} authUid={fbUser?.uid || null} tournamentMeta={tournamentMeta} onSaveTournamentMeta={saveTournamentMeta} /> : (
