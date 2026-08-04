@@ -22,7 +22,8 @@ import { groupsForRound, assignToGroup, removeFromGroup as removeFromGroupPure, 
 import { Popup, ConfirmModal } from "./components/Popup";
 import { EditionSwitcher } from "./components/EditionSwitcher";
 import { docIds } from "./lib/editionId";
-import { openingHole } from "./lib/holeAdvance";
+import { openingHole, nineComplete } from "./lib/holeAdvance";
+import { scoreWindow, nudgeUpTarget, nudgeDownTarget } from "./lib/scoreEntry";
 import { groupKey as groupKeyOf, sameGroup, liveRound, roundFinalized, switchableGroups, groupProgress } from "./lib/groupSwitch";
 import { AppHeader } from "./components/AppHeader";
 import { GroupSwitcher } from "./components/GroupSwitcher";
@@ -1045,26 +1046,18 @@ const SCORE_LABELS = ["Birdie", "Par", "Bogey", "Double", "Triple"];
 // buttons. Birdie/Par/Bogey/Double/Triple labels render beneath. Tapping the
 // selected score again clears it (onPick(0)). 44px touch targets per Apple HIG.
 function ScoreButtonRow({ score, par, onPick }) {
-  const defaultBtns = [par - 1, par, par + 1, par + 2, par + 3];
-  const maxBtn = defaultBtns[defaultBtns.length - 1];
-  const minBtn = defaultBtns[0];
-  let btns = defaultBtns;
-  if (score > maxBtn) {
-    const shift = score - maxBtn;
-    btns = defaultBtns.map(b => b + shift);
-  } else if (score > 0 && score < minBtn) {
-    const shift = minBtn - score;
-    btns = defaultBtns.map(b => b - shift);
-  }
-  // Reference-equal only when recenter didn't fire — labels would mislabel a
-  // shifted window (e.g. an ace on a par 3), so we hide them but keep the
-  // 12px slot so row height stays constant.
-  const showLabels = btns === defaultBtns;
+  // Window and ± targets live in lib/scoreEntry — see the header there for
+  // why a cold + opens past the top of the row rather than on a bogey.
+  const { btns, shifted } = scoreWindow(par, score);
+  // A shifted window would mislabel its buttons (an ace on a par 3 is not a
+  // "Birdie"), so the labels drop out but keep their 12px slot — the row
+  // height has to stay put.
+  const showLabels = !shifted;
   const boxSize = 32;
   const handleNudge = (val) => { tapNudge(); onPick(Math.max(1, val)); };
   return (
     <div style={{ display: "flex", gap: 4, alignItems: "flex-start" }}>
-      <button onClick={() => handleNudge((score || par) - 1)} style={{ width: 36, height: 44, borderRadius: R.sm, background: K.inp, border: "none", color: K.t3, fontSize: FS.body, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>−</button>
+      <button onClick={() => handleNudge(nudgeDownTarget(score, par))} style={{ width: 36, height: 44, borderRadius: R.sm, background: K.inp, border: "none", color: K.t3, fontSize: FS.body, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>−</button>
       {btns.map((btn, idx) => {
         const isCur = btn === score; const sd = btn - par;
         const isPar = btn === par;
@@ -1085,7 +1078,7 @@ function ScoreButtonRow({ score, par, onPick }) {
           </div>
         );
       })}
-      <button onClick={() => handleNudge((score || par) + 1)} style={{ width: 36, height: 44, borderRadius: R.sm, background: K.inp, border: "none", color: K.t3, fontSize: FS.body, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>+</button>
+      <button onClick={() => handleNudge(nudgeUpTarget(score, par))} style={{ width: 36, height: 44, borderRadius: R.sm, background: K.inp, border: "none", color: K.t3, fontSize: FS.body, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>+</button>
     </div>
   );
 }
@@ -1123,6 +1116,11 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
   const promptedCtpKeys = useRef({});
   const [ctpPickPlayer, setCtpPickPlayer] = useState("");
   const [ctpFeet, setCtpFeet] = useState(10);
+  // Front 9 check — shown once per group per round as they arrive on hole 10.
+  // Same session-guard shape as the CTP prompt, and for the same reason: one
+  // device can score more than one group, so the key carries the group.
+  const [showFront9, setShowFront9] = useState(false);
+  const promptedFront9Keys = useRef({});
 
   // ── The safety catch on a round that is not being played ──
   // The group key editing has been ARMED for, or null. A director who opened
@@ -1389,6 +1387,30 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
     setShowCtpForHole(currentHole);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allScored, par, currentHole, round, ctpData, editingCompleted, isGroupFinalized]);
+
+  // Front 9 check — the turn is where a wrong number is still cheap to fix.
+  // Once the group lands on hole 10 with all nine front holes in, the group's
+  // gross front nine goes up as a card to eyeball before they play on. Once
+  // per group per round: a group walking back to hole 4 and forward again is
+  // not asking to be shown it twice. A par-3 ninth fires the CTP prompt first,
+  // so this waits for that to close rather than stacking on top of it.
+  useEffect(() => {
+    if (!group || isGroupFinalized) return;
+    if ((scorecardSigs || {})[_groupKey]) return;
+    if (editingCompleted) return;
+    if (currentHole !== 9) return;
+    if (showCtpForHole !== null) return;
+    const frontDone = nineComplete(
+      groupPlayers.map(p => p.id),
+      (pid, h) => (holeData[`${pid}_${round}`] || {})[h],
+    );
+    if (!frontDone) return;
+    const key = `${round}_${group.slice().sort().join(",")}`;
+    if (promptedFront9Keys.current[key]) return;
+    promptedFront9Keys.current[key] = true;
+    setShowFront9(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentHole, group, round, holeData, editingCompleted, isGroupFinalized, showCtpForHole]);
 
   // Auto-advance after short delay when all scored (only on fresh scoring, not editing).
   // Suppressed while the CTP popup is open so the user isn't fighting the animation.
@@ -2118,6 +2140,61 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
             <button onClick={() => setShowFullCard(false)} style={{ display: "block", width: "100%", padding: 10, background: K.inp, border: `1px solid ${K.bdr}`, borderRadius: R.md, color: K.t2, fontSize: FS.small, fontWeight: 700, cursor: "pointer" }}>Close</button>
         </Popup>
       )}
+
+      {/* Front 9 check — the group's gross front nine, put up once as they
+          reach hole 10. Gross only, and no stroke dots or birdie rings: this
+          is the "is that what you shot?" card, not the scorecard, and the
+          numbers a player can check against their own memory are the raw
+          ones. Tapping a hole number closes this and walks back to that hole,
+          because catching a wrong number is only useful with a way to it. */}
+      {showFront9 && (() => {
+        const holes = Array.from({ length: 9 }, (_, i) => i);
+        const parOut = holes.reduce((a, h) => a + (holePars[h] || 0), 0);
+        const cb = { display: "flex", alignItems: "center", justifyContent: "center", height: 30 };
+        const gridCols = "58px repeat(9, minmax(0,1fr)) 34px";
+        const jump = (h) => { setShowFront9(false); goToHole(h); };
+        return (
+          <Popup onClose={() => setShowFront9(false)} maxWidth={420} dismissOnBackdrop={false} background={K.card} borderColor={K.acc + ALPHA.hair} padding={0} zIndex={340}>
+            <div style={{ background: K.acc + ALPHA.wash, borderBottom: `1px solid ${K.acc}${ALPHA.hair}`, padding: "14px 20px", textAlign: "center" }}>
+              <div style={{ fontSize: FS.body, fontWeight: 800, color: K.acc, letterSpacing: 0.3 }}>Front 9 Check</div>
+              <div style={{ fontSize: FS.label, color: K.t3, marginTop: 2 }}>Make sure these are right before you play on</div>
+            </div>
+            <div style={{ padding: "14px 16px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: gridCols, gap: 2 }}>
+                <div style={{ ...cb, justifyContent: "flex-start", fontSize: FS.micro, fontWeight: 700, color: K.t3 }}>HOLE</div>
+                {holes.map(h => (
+                  <button key={"h" + h} onClick={() => jump(h)} style={{ ...cb, background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit", fontSize: FS.label, fontWeight: 700, color: K.acc }}>{h + 1}</button>
+                ))}
+                <div style={{ ...cb, fontSize: FS.micro, fontWeight: 800, color: K.acc }}>OUT</div>
+
+                <div style={{ ...cb, justifyContent: "flex-start", fontSize: FS.micro, fontWeight: 600, color: K.t3 }}>Par</div>
+                {holes.map(h => <div key={"p" + h} style={{ ...cb, fontSize: FS.label, fontWeight: 600, color: K.t2 }}>{holePars[h] || "-"}</div>)}
+                <div style={{ ...cb, fontSize: FS.label, fontWeight: 700, color: K.t2 }}>{parOut || "-"}</div>
+
+                {groupPlayers.map(p => {
+                  const scMap = holeData[`${p.id}_${round}`] || {};
+                  const out = holes.reduce((a, h) => { const v = scMap[h]; return a + ((v > 0 && v < 90) ? v : 0); }, 0);
+                  return [
+                    <div key={p.id + "-n"} style={{ ...cb, justifyContent: "flex-start", overflow: "hidden" }}>
+                      <span style={{ fontSize: FS.label, fontWeight: 700, color: K.t1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name.split(" ")[0]}</span>
+                    </div>,
+                    ...holes.map(h => {
+                      const v = scMap[h];
+                      const has = v > 0 && v < 90;
+                      return <div key={p.id + "-" + h} style={{ ...cb, fontSize: FS.label, fontWeight: 700, color: K.t1 }}>{has ? v : (v >= 90 ? "—" : "")}</div>;
+                    }),
+                    <div key={p.id + "-o"} style={{ ...cb, fontSize: FS.label, fontWeight: 800, color: K.acc }}>{out || ""}</div>,
+                  ];
+                })}
+              </div>
+
+              <div style={{ fontSize: FS.micro, color: K.t3, textAlign: "center", margin: "10px 0 12px" }}>Tap a hole number to go back and fix it</div>
+
+              <Btn variant="primary" block onClick={() => { tapBigAction(); setShowFront9(false); }}>Looks Good</Btn>
+            </div>
+          </Popup>
+        );
+      })()}
 
       {/* CTP popup — asks who was Closest to Pin when a par-3 completes for this group.
           Tournament-wide CTP: one winner per par-3 per round. Every group gets the

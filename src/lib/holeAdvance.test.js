@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { openingHole, HOLES } from "./holeAdvance";
+import { openingHole, nineComplete, HOLES } from "./holeAdvance";
 
 // A reader over { pid: { holeIdx: strokes } }.
 const reader = (map) => (pid, h) => map?.[pid]?.[h] || 0;
@@ -68,5 +68,40 @@ describe("openingHole", () => {
   it("honours a shorter card for a nine-hole round", () => {
     const r = openingHole(["a"], reader({ a: card(9) }), 9);
     expect(r).toMatchObject({ hole: 8, allComplete: true });
+  });
+});
+
+describe("nineComplete", () => {
+  it("is true when every player has every hole of the front", () => {
+    expect(nineComplete(["a", "b"], reader({ a: card(9), b: card(9) }))).toBe(true);
+  });
+
+  it("waits for the slowest player", () => {
+    expect(nineComplete(["a", "b"], reader({ a: card(9), b: card(8) }))).toBe(false);
+  });
+
+  it("does not count a gap in the middle of the nine", () => {
+    const holed = { ...card(9) };
+    delete holed[4];
+    expect(nineComplete(["a"], reader({ a: holed }))).toBe(false);
+  });
+
+  it("reads the back nine from hole 10", () => {
+    const back = Object.fromEntries(Array.from({ length: 9 }, (_, i) => [i + 9, 5]));
+    expect(nineComplete(["a"], reader({ a: back }), 9)).toBe(true);
+    expect(nineComplete(["a"], reader({ a: back }), 0)).toBe(false);
+  });
+
+  it("counts a WD sentinel as posted — the card is structurally complete", () => {
+    expect(nineComplete(["a"], reader({ a: card(9, 99) }))).toBe(true);
+  });
+
+  it("is false with nobody in the group", () => {
+    expect(nineComplete([], reader({}))).toBe(false);
+    expect(nineComplete(undefined, reader({}))).toBe(false);
+  });
+
+  it("drops empty slots in the player list", () => {
+    expect(nineComplete(["a", null], reader({ a: card(9) }))).toBe(true);
   });
 });
