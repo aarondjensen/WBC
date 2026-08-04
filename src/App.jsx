@@ -899,12 +899,25 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
           const priorW = 22;
           const gridCols = `32px ${playerColW} ${statW}px ${statW}px 1fr${allPriorRounds.map(() => ` ${priorW}px`).join("")}`;
           const gridStyle = { display: "grid", gridTemplateColumns: gridCols, alignItems: "center" };
+          // The Total column is drawn as a band running the whole height of the
+          // board rather than as a number sitting loose in each row. Every row
+          // paints its own slice — full-bleed top to bottom, hairline down each
+          // side — and the slices stack into one continuous column, so the
+          // number the standings are actually ranked on is boxed off from the
+          // round-by-round detail either side of it.
+          const totalBand = {
+            alignSelf: "stretch", display: "flex", alignItems: "center", justifyContent: "center",
+            background: K.t3 + ALPHA.wash,
+            borderLeft: `1px solid ${K.bdr}`, borderRight: `1px solid ${K.bdr}`,
+          };
           return (
             <>
               <div ref={headerRef} style={{ ...gridStyle, padding: "7px 12px", fontSize: FS.micro, fontWeight: 600, color: K.t3, textTransform: "uppercase", letterSpacing: "0.06em", borderBottom: `1px solid ${K.bdr}` }}>
                 <span>#</span>
                 <span>Player</span>
-                <span style={{ textAlign: "center" }}>{showGross ? "Gross" : showToPar ? "Total" : "Strokes"}</span>
+                {/* Negative margin eats the header's own padding so the band
+                    starts at the top edge instead of 7px down from it. */}
+                <span style={{ ...totalBand, margin: "-7px 0", padding: "7px 0", fontWeight: 700, color: K.t2 }}>{showGross ? "Gross" : showToPar ? "Total" : "Strokes"}</span>
                 <span style={{ textAlign: "center" }}>Thru</span>
                 <span />
                 {allPriorRounds.map(r => <span key={r} style={{ textAlign: "center" }}>R{r}</span>)}
@@ -968,13 +981,18 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                         {pos}
                         {mov && <span style={{ fontSize: FS.micro, color: mov === "up" ? K.ok : K.danger, lineHeight: 1 }}>{mov === "up" ? "▲" : "▼"}</span>}
                       </span>
-                      {/* Player */}
-                      <div style={{ fontWeight: 600, fontSize: rowStyle.fontSize, display: "flex", alignItems: "center", gap: 3, overflow: "hidden" }}>
+                      {/* Player — a rung above the fitted row size. The name is
+                          what you scan the board for, and at the row size it
+                          was reading as one column of many. */}
+                      <div style={{ fontWeight: 600, fontSize: fsStep(rowStyle.fontSize, 1), display: "flex", alignItems: "center", gap: 3, overflow: "hidden" }}>
                         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
                         <span style={{ fontSize: FS.micro, flexShrink: 0, color: isExpanded ? K.acc : K.t3, transition: `transform ${MOTION}`, display: "inline-block", transform: isExpanded ? "rotate(180deg)" : "rotate(0)" }}>▼</span>
                       </div>
                       {/* Total */}
-                      <span style={{ textAlign: "center", fontWeight: 800, fontSize: fsStep(rowStyle.fontSize, 1), color: p.isWD ? K.t3 : displayTotal != null ? (showGross || !showToPar ? K.t2 : displayTotal < 0 ? K.under : displayTotal > 0 ? K.t2 : K.t1) : K.t3 }}>
+                      {/* Full-strength ink, not the t2 the row's other numbers
+                          take: under par still prints red, everything else is
+                          the brightest thing in the row. */}
+                      <span style={{ ...totalBand, fontWeight: 800, fontSize: fsStep(rowStyle.fontSize, 1), color: p.isWD || displayTotal == null ? K.t3 : (!showGross && showToPar && displayTotal < 0 ? K.under : K.t1) }}>
                         {p.isWD ? <span style={{ fontSize: fsStep(rowStyle.fontSize, -1), color: K.t3, fontWeight: 700 }}>WD</span> : displayTotal != null ? (showGross || !showToPar ? displayTotal : fmtPar(displayTotal)) : "—"}
                       </span>
                       {/* Thru */}
