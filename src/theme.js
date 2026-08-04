@@ -82,7 +82,8 @@ export const FS = {
 };
 // The rungs in order, for the one case the scale cannot express as a constant:
 // a size that is COMPUTED. The leaderboard fits its rows to whatever height it
-// has, and inside a row the total column sits a step above the player's name.
+// has, and inside a row the name and total sit a step above that fitted size
+// while thru and the prior rounds sit a step below it.
 // Written as `rowStyle.fontSize + 1` that arithmetic lands between rungs — a
 // 12 becomes a 13 — which is the exact drift the scale exists to stop. Stepping
 // the ladder cannot: it returns a rung or it returns what you gave it.
