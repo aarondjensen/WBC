@@ -622,7 +622,7 @@ const TEE_PALETTE = ["#60a5fa","#f59e0b","#a78bfa","#34d399","#fb923c","#f472b6"
 // trophy it is supposed to line up with. Widths are sized to the widest string
 // each column can hold at its font size: Total takes a 3-digit gross, the
 // round columns take a "+11", # takes "T12" plus a movement arrow.
-const LB_COL = { num: 36, total: 40, thru: 34, prior: 23 };
+const LB_COL = { num: 36, total: 40, thru: 34, prior: 24 };
 // The least gap that still reads as a gap between this round's stats and the
 // round-by-round history beside them.
 const LB_GAP_MIN = 8;
@@ -732,7 +732,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
       if (Object.keys(scores).length === 0) continue;
       availRounds.push(r);
     }
-    if (availRounds.length === 0) return <div style={{ padding: 12, fontSize: FS.small, color: K.t3 }}>No scores yet</div>;
+    if (availRounds.length === 0) return <div style={{ padding: 12, fontSize: FS.small, color: K.t2 }}>No scores yet</div>;
 
     const viewRound = scorecardRound && availRounds.includes(scorecardRound) ? scorecardRound : availRounds[availRounds.length - 1];
     const tr = tRounds.find(t => t.round_number === viewRound);
@@ -782,28 +782,28 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
             ) : (
               <span style={{ fontSize: FS.label, fontWeight: 700, color: K.acc }}>Rd {rc.r}: {rc.course.name}</span>
             )}
-            <span style={{ fontSize: FS.micro, color: K.t3 }}>CH {rc.ch}</span>
+            <span style={{ fontSize: FS.micro, color: K.t2 }}>CH {rc.ch}</span>
           </div>
           <div style={{ display: "flex", gap: 8, fontSize: FS.label }}>
-            <span style={{ color: K.t3 }}>Gross <strong style={{ color: K.t2 }}>{totalGross || "—"}</strong></span>
-            <span style={{ color: K.t3 }}>Net <strong style={{ color: netToPar < 0 ? K.under : K.t1 }}>{totalNet || "—"}</strong></span>
+            <span style={{ color: K.t2 }}>Gross <strong style={{ color: K.t1 }}>{totalGross || "—"}</strong></span>
+            <span style={{ color: K.t2 }}>Net <strong style={{ color: netToPar < 0 ? K.under : K.t1 }}>{totalNet || "—"}</strong></span>
           </div>
         </div>
             {[["Front", 0, 9, rc.frontPar, rc.frontGross], ["Back", 9, 9, rc.backPar, rc.backGross]].map(([label, start, count, parT, grossT]) => (
               <div key={label} style={{ marginBottom: 4 }}>
                 <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 32px`, gap: 1, fontSize: FS.micro }}>
-                  <div style={{ color: K.t3, fontWeight: 600, padding: "2px 0" }}></div>
+                  <div style={{ color: K.t2, fontWeight: 600, padding: "2px 0" }}></div>
                   {Array.from({length: count}, (_, i) => start + i).map(h => (
-                    <div key={h} style={{ textAlign: "center", color: K.t3, fontWeight: 600, padding: "2px 0" }}>{h+1}</div>
+                    <div key={h} style={{ textAlign: "center", color: K.t2, fontWeight: 600, padding: "2px 0" }}>{h+1}</div>
                   ))}
-                  <div style={{ textAlign: "center", color: K.t3, fontWeight: 700 }}></div>
+                  <div style={{ textAlign: "center", color: K.t2, fontWeight: 700 }}></div>
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 32px`, gap: 1, fontSize: FS.micro }}>
-                  <div style={{ color: K.t3, padding: "2px 0", fontSize: FS.micro }}>Par</div>
+                  <div style={{ color: K.t2, padding: "2px 0", fontSize: FS.micro }}>Par</div>
                   {Array.from({length: count}, (_, i) => start + i).map(h => (
-                    <div key={h} style={{ textAlign: "center", color: K.t3, padding: "2px 0" }}>{rc.holePars[h]}</div>
+                    <div key={h} style={{ textAlign: "center", color: K.t2, padding: "2px 0" }}>{rc.holePars[h]}</div>
                   ))}
-                  <div style={{ textAlign: "center", color: K.t3, fontWeight: 700 }}>{parT}</div>
+                  <div style={{ textAlign: "center", color: K.t2, fontWeight: 700 }}>{parT}</div>
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 32px`, gap: 1 }}>
                   <div style={{ color: K.t2, padding: "3px 0", fontSize: FS.micro, fontWeight: 600 }}>Scr</div>
@@ -865,12 +865,16 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
             display: "flex", alignItems: "center", cursor: "pointer", userSelect: "none",
             background: K.bdr + ALPHA.tint, borderRadius: R.pill, padding: "2px 3px", gap: 1,
           }}>
+            {/* The unselected label was t3 held back to 53% — under 2:1 on
+                this background, so the option you were NOT on was the one you
+                could not read. Off is plain t3 and on is t1: the same on/off
+                gap, both legible. */}
             {[["Net", false], ["Gross", true]].map(([label, val]) => (
               <span key={label} style={{
                 fontSize: FS.micro, fontWeight: 600, padding: "2px 0", borderRadius: R.xl,
                 width: 30, textAlign: "center",
                 background: showGross === val ? K.t3 + ALPHA.hair : "transparent",
-                color: showGross === val ? K.t2 : K.t3 + ALPHA.panel,
+                color: showGross === val ? K.t1 : K.t3,
                 transition: `background ${MOTION}, color ${MOTION}`,
               }}>{label}</span>
             ))}
@@ -907,7 +911,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                 fontSize: FS.micro, fontWeight: 600, padding: "2px 0", borderRadius: R.xl,
                 width: 30, textAlign: "center",
                 background: showToPar === val ? K.t3 + ALPHA.hair : "transparent",
-                color: showToPar === val ? K.t2 : K.t3 + ALPHA.panel,
+                color: showToPar === val ? K.t1 : K.t3,
                 transition: `background ${MOTION}, color ${MOTION}`,
               }}>{label}</span>
             ))}
@@ -933,13 +937,21 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
             background: K.t3 + ALPHA.wash, borderLeft: `1px solid ${K.bdr}`,
           };
           const bandEnd = { ...bandStart, borderLeft: undefined, borderRight: `1px solid ${K.bdr}` };
+          // Ruling between the round columns, so four numbers in a row read as
+          // four rounds rather than one string of digits. Fainter than the
+          // band's edges — these divide inside a group, the band divides the
+          // groups — and none on R1, whose left edge is already the gap.
+          const roundCell = (i) => ({
+            alignSelf: "stretch", display: "flex", alignItems: "center", justifyContent: "center",
+            borderLeft: i === 0 ? undefined : `1px solid ${K.bdr}${ALPHA.line}`,
+          });
           return (
             <>
               {/* The one row that does NOT step up with the rest of the board.
                   These are eyebrows, not data, and "STROKES" already fills the
                   Total column at micro — a rung up and it spills over the band
                   it is supposed to cap. */}
-              <div ref={headerRef} style={{ ...gridStyle, padding: "7px 12px", fontSize: FS.micro, fontWeight: 600, color: K.t3, textTransform: "uppercase", letterSpacing: "0.06em", borderBottom: `1px solid ${K.bdr}` }}>
+              <div ref={headerRef} style={{ ...gridStyle, padding: "7px 12px", fontSize: FS.micro, fontWeight: 600, color: K.t2, textTransform: "uppercase", letterSpacing: "0.06em", borderBottom: `1px solid ${K.bdr}` }}>
                 <span>#</span>
                 <span>Player</span>
                 {/* Negative margin eats the header's own padding so the band
@@ -955,13 +967,13 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                 })()}
                 <span style={{ ...bandEnd, margin: "-7px 0", padding: "7px 0", fontWeight: 700, color: K.t2 }}>Thru</span>
                 <span />
-                {allPriorRounds.map(r => <span key={r} style={{ textAlign: "center" }}>R{r}</span>)}
+                {allPriorRounds.map((r, i) => <span key={r} style={{ ...roundCell(i), margin: "-7px 0", padding: "7px 0" }}>R{r}</span>)}
               </div>
               {/* Only once the round data is actually in. An empty `lb` also means
                   "Firestore has not answered yet", and reporting that as "no scores"
                   flashed the message up on every reload before the board arrived. */}
               {lb.length === 0 && (loaded
-                ? <div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>No scores yet — be the first!</div>
+                ? <div style={{ padding: 24, textAlign: "center", color: K.t2, fontSize: FS.small }}>No scores yet — be the first!</div>
                 : <div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small, opacity: 0.5 }}>&nbsp;</div>)}
               <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: expanded ? "auto" : "hidden" }}>
               {(() => {
@@ -1011,7 +1023,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                   <div key={p.id} style={{ flex: isExpanded ? "0 0 auto" : 1, minHeight: (expanded && !isExpanded) ? rowMinH : 0, display: "flex", flexDirection: "column", justifyContent: "center" }}>
                     <div onClick={() => { setExpanded(isExpanded ? null : p.id); setScorecardRound(null); }} style={{ ...gridStyle, padding: "0 12px", minHeight: 28, height: "100%", alignItems: "center", borderBottom: `1px solid ${K.bdr}${ALPHA.wash}`, background: "transparent", cursor: "pointer", fontSize: rowStyle.fontSize, lineHeight: 1 }}>
                       {/* # */}
-                      <span style={{ fontWeight: 800, fontSize: rowStyle.fontSize, color: top3 ? K.acc : K.t3, display: "flex", alignItems: "center", gap: 1 }}>
+                      <span style={{ fontWeight: 800, fontSize: rowStyle.fontSize, color: top3 ? K.acc : K.t2, display: "flex", alignItems: "center", gap: 1 }}>
                         {pos}
                         {/* Stays at micro while the rest of the row steps up:
                             "T12" plus an arrow is what sizes the # column, and
@@ -1023,14 +1035,14 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                           was reading as one column of many. */}
                       <div style={{ fontWeight: 600, fontSize: fsStep(rowStyle.fontSize, 1), display: "flex", alignItems: "center", gap: 3, overflow: "hidden" }}>
                         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
-                        <span style={{ fontSize: fsStep(rowStyle.fontSize, -1), flexShrink: 0, color: isExpanded ? K.acc : K.t3, transition: `transform ${MOTION}`, display: "inline-block", transform: isExpanded ? "rotate(180deg)" : "rotate(0)" }}>▼</span>
+                        <span style={{ fontSize: fsStep(rowStyle.fontSize, -1), flexShrink: 0, color: isExpanded ? K.acc : K.t2, transition: `transform ${MOTION}`, display: "inline-block", transform: isExpanded ? "rotate(180deg)" : "rotate(0)" }}>▼</span>
                       </div>
                       {/* Total */}
                       {/* Full-strength ink, not the t2 the row's other numbers
                           take: under par still prints red, everything else is
                           the brightest thing in the row. */}
-                      <span style={{ ...bandStart, fontWeight: 800, fontSize: fsStep(rowStyle.fontSize, 1), color: p.isWD || displayTotal == null ? K.t3 : (!showGross && showToPar && displayTotal < 0 ? K.under : K.t1) }}>
-                        {p.isWD ? <span style={{ fontSize: fsStep(rowStyle.fontSize, -1), color: K.t3, fontWeight: 700 }}>WD</span> : displayTotal != null ? (showGross || !showToPar ? displayTotal : fmtPar(displayTotal)) : "—"}
+                      <span style={{ ...bandStart, fontWeight: 800, fontSize: fsStep(rowStyle.fontSize, 1), color: p.isWD || displayTotal == null ? K.t2 : (!showGross && showToPar && displayTotal < 0 ? K.under : K.t1) }}>
+                        {p.isWD ? <span style={{ fontSize: fsStep(rowStyle.fontSize, -1), color: K.t2, fontWeight: 700 }}>WD</span> : displayTotal != null ? (showGross || !showToPar ? displayTotal : fmtPar(displayTotal)) : "—"}
                       </span>
                       {/* Thru — holes played across the whole tournament, not
                           this round's count. Per-round it went blank between
@@ -1043,7 +1055,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                       {/* Gap between current round stats and prior rounds */}
                       <span />
                       {/* Prior rounds — always show all 4 */}
-                      {allPriorRounds.map(r => {
+                      {allPriorRounds.map((r, i) => {
                         const prRd = p.rds[r - 1];
                         const isWDRound = prRd?.wd;
                         const prVal = isWDRound ? null : showGross
@@ -1057,8 +1069,14 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                                 const par2 = c2?.hole_pars?.reduce((a,b) => a+b, 0) || 72;
                                 return prRd.netToPar + par2;
                               })();
+                        // These carried an opacity on top of an already-dim t3,
+                        // which put a played round at under 2:1 against the
+                        // background — a number you could see was there without
+                        // being able to read it. The ink alone sets them back
+                        // now: t2 for a round played, t3 for the dash standing
+                        // in for one that wasn't.
                         return (
-                          <span key={r} style={{ textAlign: "center", fontSize: fsStep(rowStyle.fontSize, -1), color: isWDRound ? K.t3 : prVal != null && !showGross && showToPar && prVal < 0 ? K.under : K.t3, opacity: isWDRound ? 0.5 : prVal != null ? 0.6 : 0.3 }}>
+                          <span key={r} style={{ ...roundCell(i), fontSize: fsStep(rowStyle.fontSize, -1), color: prVal != null && !showGross && showToPar && prVal < 0 ? K.under : isWDRound || prVal == null ? K.t3 : K.t2 }}>
                             {isWDRound ? "WD" : prVal != null ? (showGross || !showToPar ? prVal : fmtPar(prVal)) : "—"}
                           </span>
                         );
