@@ -226,6 +226,29 @@ export function marketHoldings({ bets, players }) {
     .sort((a, b) => b.shares - a.shares || a.name.localeCompare(b.name));
 }
 
+// ── The director's worklist ────────────────────────────────────────
+// Every player in the market game and how much of each window they have
+// placed — NOT what they placed it on.
+//
+// This is the thing a director actually needs and could not get anywhere
+// else. `marketHoldings` only lists people who have already bet, so the man
+// who handed his picks over on a napkin and never opened the app was
+// invisible on the one screen meant to chase him. The counts are the
+// checklist; the composition is a tap away in his book.
+//
+// Alphabetical, because it is read by looking for a name. `outstanding` is
+// the number who have placed nothing at all, which is the count worth putting
+// on the drawer that opens this.
+export function marketRoster({ players, bets }) {
+  const rows = (players || []).map(p => {
+    const bet = (bets || []).find(b => b.pid === p.id) || {};
+    const opening = totalShares(lotsFor(bet, "opening"));
+    const mid = totalShares(lotsFor(bet, "mid"));
+    return { pid: p.id, name: p.name, opening, mid, placed: opening + mid };
+  }).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  return { rows, outstanding: rows.filter(r => r.placed === 0).length };
+}
+
 // ── The payout ─────────────────────────────────────────────────────
 // The whole pot goes to the shares on ONE golfer. Everybody else's shares
 // are worth nothing, which is the game — there is no place money here.
