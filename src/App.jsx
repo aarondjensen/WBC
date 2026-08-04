@@ -1826,6 +1826,12 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
   const allAttested = isSigned && presentNonSigners.every(pid => attestedPids.includes(pid));
   const meId = user?.id;
 
+  // Walked back onto a hole this group has already finished. Drives the amber
+  // bar on the header band, and suppresses the Round complete bar while it is
+  // up — they share that band, and this one is the answer to what the player
+  // just did. Signing is still one tap away in the footer.
+  const onCompletedHole = !isSigned && navSource === "manual" && isHoleComplete(currentHole) && !editingCompleted;
+
   const handleSign = () => {
     if (!groupKey) return;
     tapBigAction();
@@ -1949,24 +1955,10 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
           par 3 that row pushed the last player's score buttons down behind the
           tab bar. The prompt is the whole story. */}
 
-      {/* Completed hole confirmation overlay */}
-      {!isSigned && navSource === "manual" && isHoleComplete(currentHole) && !editingCompleted && (<>
-        <div style={{
-          background: K.warn + ALPHA.wash, border: `1px solid ${K.warn}${ALPHA.hair}`, borderRadius: R.lg,
-          padding: 12, marginBottom: 8,
-        }}>
-          <div style={{ fontSize: FS.small, fontWeight: 700, color: K.warn, marginBottom: 8, textAlign: "center" }}>Hole {currentHole + 1} already complete</div>
-          <div style={{ display: "flex", gap: 6 }}>
-            <button onClick={() => setEditingCompleted(true)} style={{
-              flex: 1, padding: "8px 0", borderRadius: R.sm, background: K.card, border: `1px solid ${K.warn}${ALPHA.hair}`,
-              color: K.warn, fontSize: FS.label, fontWeight: 600, cursor: "pointer",
-            }}>Edit Scores</button>
-            <button onClick={returnToPlay} style={{
-              flex: 1, padding: "8px 0", borderRadius: R.sm, background: K.acc, border: "none",
-              color: K.bg, fontSize: FS.label, fontWeight: 700, cursor: "pointer",
-            }}>Resume Hole {findNextIncompleteHole() + 1} →</button>
-          </div>
-        </div>
+      {/* Completed hole — the banner that used to sit here is now a bar on the
+          header band (rendered outside the animated wrapper, below), so the
+          read-only scores start where the score cards normally would. */}
+      {onCompletedHole && (<>
         {/* Recorded scores - styled like scoring cards */}
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {groupPlayers.map(p => {
@@ -2590,7 +2582,28 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
           88px short of the right, which leaves the header's crown — the
           director's group switcher, the one live control up here — uncovered
           and tappable the whole time this is showing. */}
-      {allRoundComplete && !isGroupFinalized && !isSigned && !showFinalize && (
+      {/* On a hole this group already finished — same band, same geometry as
+          Round complete, in the warning colour. It has to live out here rather
+          than up with the read-only scores it explains: the hole content is
+          wrapped in a transformed div for the slide animation, and a transform
+          makes its box the containing block for anything `position: fixed`
+          inside it, which would drop this bar into the middle of the screen.
+          "Resume Hole 18 →" shortens to "Hole 18 →" — the row has three things
+          on it now, and the green button is self-evidently the way onward. */}
+      {onCompletedHole && (
+        <div style={{ position: "fixed", top: `calc(${HEADER_SAFE_PAD} + 6px)`, left: 12, right: 88, display: "flex", alignItems: "center", gap: 8, background: K.card, border: `1px solid ${K.warn}${ALPHA.line}`, borderRadius: R.lg, padding: "8px 12px", zIndex: 1000, boxShadow: "0 8px 32px rgba(0,0,0,0.4)", animation: "toastDownBar 0.3s ease" }}>
+          <span style={{ flex: 1, fontSize: FS.label, fontWeight: 700, color: K.warn }}>Hole {currentHole + 1} already complete</span>
+          <button onClick={() => setEditingCompleted(true)} style={{
+            padding: "7px 10px", borderRadius: R.sm, background: K.inp, border: `1px solid ${K.warn}${ALPHA.hair}`,
+            color: K.warn, fontSize: FS.label, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap",
+          }}>Edit Scores</button>
+          <button onClick={returnToPlay} style={{
+            padding: "7px 10px", borderRadius: R.sm, background: K.acc, border: "none",
+            color: K.bg, fontSize: FS.label, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap",
+          }}>Hole {findNextIncompleteHole() + 1} →</button>
+        </div>
+      )}
+      {allRoundComplete && !isGroupFinalized && !isSigned && !showFinalize && !onCompletedHole && (
         <div style={{ position: "fixed", top: `calc(${HEADER_SAFE_PAD} + 6px)`, left: 12, right: 88, display: "flex", alignItems: "center", gap: 10, background: K.acc, color: K.bg, padding: "10px 14px", borderRadius: R.lg, fontSize: FS.small, fontWeight: 700, zIndex: 1000, boxShadow: "0 8px 32px rgba(0,0,0,0.4)", animation: "toastDownBar 0.3s ease" }}>
           <span style={{ flex: 1 }}>🏆 Round complete!</span>
           <button onClick={() => setShowFinalize(true)} style={{ background: K.bg, color: K.acc, border: "none", borderRadius: R.sm, padding: "6px 14px", fontSize: FS.small, fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap" }}>Sign Scorecard</button>
