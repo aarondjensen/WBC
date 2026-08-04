@@ -727,6 +727,10 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
   // this round for anyone who has teed off, the group's tee time for anyone who
   // hasn't. Outside it, the tournament total.
   const inPlay = roundInPlay(lb, round, finalizedRounds[round]);
+  // The board stops being a running total and becomes a RESULT the moment the
+  // director finalizes the last round. Nothing else marks the end of a
+  // tournament — scores can still be corrected up to that point.
+  const tournamentOver = !!finalizedRounds[NUM_ROUNDS];
   const teeTimes = useMemo(
     () => teeTimesByPlayer((pairingsData || {})[round], (teeTimesData || {})[round]),
     [pairingsData, teeTimesData, round],
@@ -1010,6 +1014,10 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                 const rows = lb.map((p, idx) => {
                 const pos = posMap[p.id] ?? idx + 1;
                 const top3 = pos === 1 || pos === "T1";
+                // A tie at the top stays a tie: both rows get the trophy rather
+                // than the board picking a champion out of sort order, which is
+                // a decision the scores have not made.
+                const isChampion = tournamentOver && top3 && !p.isWD && p.roundsPlayed > 0;
                 const isExpanded = expanded === p.id;
                 const mov = movements[p.id];
                 const displayTotal = showGross
@@ -1043,7 +1051,9 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                     <div onClick={() => { setExpanded(isExpanded ? null : p.id); setScorecardRound(null); }} style={{ ...gridStyle, padding: "0 12px", minHeight: 28, height: "100%", alignItems: "center", borderBottom: `1px solid ${K.bdr}${ALPHA.wash}`, background: "transparent", cursor: "pointer", fontSize: rowStyle.fontSize, lineHeight: 1 }}>
                       {/* # */}
                       <span style={{ fontWeight: 800, fontSize: rowStyle.fontSize, color: top3 ? K.acc : K.t2, display: "flex", alignItems: "center", gap: 1 }}>
-                        {pos}
+                        {isChampion
+                          ? <img src={WBC_TROPHY} alt="Champion" title="Champion" style={{ height: fsStep(rowStyle.fontSize, 2), display: "block" }} />
+                          : pos}
                         {/* Stays at micro while the rest of the row steps up:
                             "T12" plus an arrow is what sizes the # column, and
                             a bigger glyph pushes the pair past its width. */}
@@ -1052,7 +1062,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                       {/* Player — a rung above the fitted row size. The name is
                           what you scan the board for, and at the row size it
                           was reading as one column of many. */}
-                      <div style={{ fontWeight: 600, fontSize: fsStep(rowStyle.fontSize, 1), display: "flex", alignItems: "center", gap: 3, overflow: "hidden", paddingRight: 4 }}>
+                      <div style={{ fontWeight: isChampion ? 800 : 600, color: isChampion ? K.acc : undefined, fontSize: fsStep(rowStyle.fontSize, 1), display: "flex", alignItems: "center", gap: 3, overflow: "hidden", paddingRight: 4 }}>
                         {/* flex:1 on the name is what parks the chevron on the
                             right edge of the column instead of trailing the
                             last letter — with names of six or seven characters
