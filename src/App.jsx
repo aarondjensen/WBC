@@ -613,6 +613,20 @@ const getDefaultTee = (tees) => {
 const TEE_PALETTE = ["#60a5fa","#f59e0b","#a78bfa","#34d399","#fb923c","#f472b6","#38bdf8","#e879f9"];
 
 // ── LEADERBOARD ──
+
+// The board's fixed column widths, in one place because TWO things read them:
+// the grid template, and the measurement that centres Total under the trophy.
+// They used to be literals in the template and a comment in the measurement,
+// and the comment went stale — the # column had been widened from 24 to 36
+// while the arithmetic still said 24, so Total sat a dozen pixels off the
+// trophy it is supposed to line up with. Widths are sized to the widest string
+// each column can hold at its font size: Total takes a 3-digit gross, the
+// round columns take a "+11", # takes "T12" plus a movement arrow.
+const LB_COL = { num: 36, total: 40, thru: 34, prior: 23 };
+// The least gap that still reads as a gap between this round's stats and the
+// round-by-round history beside them.
+const LB_GAP_MIN = 8;
+
 function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getPlayerTee, finalizedRounds, skinWins, loaded = true }) {
   const [expanded, setExpanded] = useState(null);
   const [scorecardRound, setScorecardRound] = useState(null);
@@ -622,7 +636,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
   useEffect(() => { setShowGross(false); setShowToPar(true); }, []);
   const containerRef = useRef(null);
   const headerRef = useRef(null);
-  const [rowStyle, setRowStyle] = useState({ padding: "6px 12px", fontSize: FS.small });
+  const [rowStyle, setRowStyle] = useState({ padding: "6px 12px", fontSize: FS.body });
   const [rowMinH, setRowMinH] = useState(0);
 
   // Compute player column width to center Total, and align trophy to match.
@@ -640,10 +654,16 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
       // Card has padding 12px each side, grid padding 12px each side
       const containerW = containerRef.current.offsetWidth;
       const gridW = containerW - 24; // 12px padding each side
-      // Fixed cols right of player: 34(Total) + 34(Thru) + 14(gap) + 4*22(88) = 170
-      // Fixed cols left of player: 24(#)
-      // Total center = 24 + playerW + 17 = gridW/2  =>  playerW = gridW/2 - 41
-      const playerW = Math.max(60, gridW / 2 - 41);
+      // Total's centre sits at num + playerW + total/2 from the grid's content
+      // edge, and the grid is inset equally on both sides — so centring Total
+      // in the grid centres it in the viewport, under the trophy behind it.
+      const centred = gridW / 2 - LB_COL.num - LB_COL.total / 2;
+      // On a narrow phone the fixed columns want more than half the width, and
+      // honouring the centring would push the round columns off the right edge.
+      // So centred is a CEILING, not a rule: the player column gives way first,
+      // and Total drifts off the trophy rather than the board losing a column.
+      const fixed = LB_COL.num + LB_COL.total + LB_COL.thru + LB_COL.prior * NUM_ROUNDS;
+      const playerW = Math.max(60, Math.min(centred, gridW - fixed - LB_GAP_MIN));
       setPlayerColW(`${Math.floor(playerW)}px`);
     };
     align();
@@ -681,7 +701,10 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
       const available = containerRect.height - headerH;
       const perRow = Math.floor(available / lb.length);
       const clampedPerRow = Math.min(perRow, 36);
-      const fSize = clampedPerRow >= 26 ? FS.small : FS.label;
+      // The rung the whole row is built from: the name and Total sit one above
+      // it, Thru and the round columns one below. A full field on a short
+      // screen drops the lot back a rung rather than clipping.
+      const fSize = clampedPerRow >= 26 ? FS.body : FS.small;
       // Same object identity when the numbers have not moved, so the delayed
       // re-measure below is free unless it actually found a different layout.
       setRowStyle(prev => (prev.fontSize === fSize && prev.lineHeight === 1 && prev.padding === undefined)
@@ -895,9 +918,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
         {/* Build dynamic grid: #, Player, Total, Thru, Rd, [8px gap], prior rounds */}
         {(() => {
           const allPriorRounds = Array.from({ length: NUM_ROUNDS }, (_, i) => i + 1);
-          const statW = 34;
-          const priorW = 22;
-          const gridCols = `32px ${playerColW} ${statW}px ${statW}px 1fr${allPriorRounds.map(() => ` ${priorW}px`).join("")}`;
+          const gridCols = `${LB_COL.num}px ${playerColW} ${LB_COL.total}px ${LB_COL.thru}px 1fr${allPriorRounds.map(() => ` ${LB_COL.prior}px`).join("")}`;
           const gridStyle = { display: "grid", gridTemplateColumns: gridCols, alignItems: "center" };
           // Total and Thru are drawn as one band running the whole height of
           // the board rather than as numbers sitting loose in each row. Every
@@ -914,12 +935,24 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
           const bandEnd = { ...bandStart, borderLeft: undefined, borderRight: `1px solid ${K.bdr}` };
           return (
             <>
+              {/* The one row that does NOT step up with the rest of the board.
+                  These are eyebrows, not data, and "STROKES" already fills the
+                  Total column at micro — a rung up and it spills over the band
+                  it is supposed to cap. */}
               <div ref={headerRef} style={{ ...gridStyle, padding: "7px 12px", fontSize: FS.micro, fontWeight: 600, color: K.t3, textTransform: "uppercase", letterSpacing: "0.06em", borderBottom: `1px solid ${K.bdr}` }}>
                 <span>#</span>
                 <span>Player</span>
                 {/* Negative margin eats the header's own padding so the band
                     starts at the top edge instead of 7px down from it. */}
-                <span style={{ ...bandStart, margin: "-7px 0", padding: "7px 0", fontWeight: 700, color: K.t2 }}>{showGross ? "Gross" : showToPar ? "Total" : "Strokes"}</span>
+                {(() => {
+                  const label = showGross ? "Gross" : showToPar ? "Total" : "Strokes";
+                  // "STROKES" is two letters longer than the other two labels
+                  // and fills the column on its own; the eyebrow tracking is
+                  // what tips it out over the band's hairline. The long label
+                  // goes untracked rather than the column growing for a word
+                  // only one of the three toggle states ever shows.
+                  return <span style={{ ...bandStart, margin: "-7px 0", padding: "7px 0", fontWeight: 700, color: K.t2, letterSpacing: label.length > 5 ? 0 : undefined }}>{label}</span>;
+                })()}
                 <span style={{ ...bandEnd, margin: "-7px 0", padding: "7px 0", fontWeight: 700, color: K.t2 }}>Thru</span>
                 <span />
                 {allPriorRounds.map(r => <span key={r} style={{ textAlign: "center" }}>R{r}</span>)}
@@ -980,6 +1013,9 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                       {/* # */}
                       <span style={{ fontWeight: 800, fontSize: rowStyle.fontSize, color: top3 ? K.acc : K.t3, display: "flex", alignItems: "center", gap: 1 }}>
                         {pos}
+                        {/* Stays at micro while the rest of the row steps up:
+                            "T12" plus an arrow is what sizes the # column, and
+                            a bigger glyph pushes the pair past its width. */}
                         {mov && <span style={{ fontSize: FS.micro, color: mov === "up" ? K.ok : K.danger, lineHeight: 1 }}>{mov === "up" ? "▲" : "▼"}</span>}
                       </span>
                       {/* Player — a rung above the fitted row size. The name is
@@ -987,7 +1023,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                           was reading as one column of many. */}
                       <div style={{ fontWeight: 600, fontSize: fsStep(rowStyle.fontSize, 1), display: "flex", alignItems: "center", gap: 3, overflow: "hidden" }}>
                         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
-                        <span style={{ fontSize: FS.micro, flexShrink: 0, color: isExpanded ? K.acc : K.t3, transition: `transform ${MOTION}`, display: "inline-block", transform: isExpanded ? "rotate(180deg)" : "rotate(0)" }}>▼</span>
+                        <span style={{ fontSize: fsStep(rowStyle.fontSize, -1), flexShrink: 0, color: isExpanded ? K.acc : K.t3, transition: `transform ${MOTION}`, display: "inline-block", transform: isExpanded ? "rotate(180deg)" : "rotate(0)" }}>▼</span>
                       </div>
                       {/* Total */}
                       {/* Full-strength ink, not the t2 the row's other numbers
