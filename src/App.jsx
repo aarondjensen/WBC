@@ -25,8 +25,9 @@ import { EditionSwitcher } from "./components/EditionSwitcher";
 import { docIds } from "./lib/editionId";
 import { openingHole, nineComplete } from "./lib/holeAdvance";
 import { scoreWindow, nudgeUpTarget, nudgeDownTarget } from "./lib/scoreEntry";
+import { groupTrouble, roundTrouble, describeTrouble, blocksScoring } from "./lib/roundSetup";
 import { groupKey as groupKeyOf, sameGroup, liveRound, roundFinalized, switchableGroups, groupProgress } from "./lib/groupSwitch";
-import { AppHeader } from "./components/AppHeader";
+import { AppHeader, HEADER_SAFE_PAD } from "./components/AppHeader";
 import { GroupSwitcher } from "./components/GroupSwitcher";
 import { OffRoundBanner } from "./components/OffRoundBanner";
 import { MoreMenu } from "./components/MoreMenu";
@@ -1178,7 +1179,11 @@ function ScoreButtonRow({ score, par, onPick }) {
         const ringClr = sd < 0 ? K.danger : K.bg;
         return (
           <div key={btn} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, minWidth: 0 }}>
-            <button onClick={() => { tapScore(); onPick(isCur ? 0 : btn); }} style={{ width: "100%", height: 44, borderRadius: R.sm, cursor: "pointer", fontSize: FS.body, fontWeight: 800, border: "none", background: isCur ? K.acc : K.inp, color: isCur ? K.bg : K.t2, position: "relative", transition: `all ${MOTION}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            {/* A rung above FS.body, unlike the ± either side of it. This is
+                the number the whole screen exists to read and to hit, it sits
+                in a 44px box with room to spare, and it is read at arm's
+                length in sun. Nothing reflows: the box height is fixed. */}
+            <button onClick={() => { tapScore(); onPick(isCur ? 0 : btn); }} style={{ width: "100%", height: 44, borderRadius: R.sm, cursor: "pointer", fontSize: FS.lead, fontWeight: 800, border: "none", background: isCur ? K.acc : K.inp, color: isCur ? K.bg : K.t2, position: "relative", transition: `all ${MOTION}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
               {/* Selected-state rings: circles under par, squares over par */}
               {isCur && sd !== 0 && <div style={{ position: "absolute", width: boxSize, height: boxSize, left: "50%", top: "50%", transform: "translate(-50%, -50%)" }}><div style={{ position: "absolute", inset: 0, borderRadius: sd < 0 ? "50%" : R.xs, border: `1.5px solid ${ringClr}` }} />{Math.abs(sd) >= 2 && <div style={{ position: "absolute", inset: 3, borderRadius: sd < 0 ? "50%" : R.xs, border: `1px solid ${ringClr}` }} />}</div>}
               {/* Resting-state faint outlines on non-par, non-selected buttons */}
@@ -1204,6 +1209,41 @@ function ScoreButtonRow({ score, par, onPick }) {
 
 // ── ON-COURSE SCORING (replaces old ScoringView) ──
 // Flow: Group Setup → Hole-by-hole for entire group → auto-advance
+// ── The bar for "you are not on the live hole" ──
+// Two states, half a tap apart: the hole is already scored, and you have
+// chosen to edit it. They were drawn as two different things — a fixed amber
+// bar on the header band, and an inline tinted strip above the score cards —
+// which made tapping Edit look like the screen had changed into something
+// else. Same bar for both, so what changes when you tap Edit is what it SAYS.
+//
+// It rides ON the app header for the reason the other bars here do: the header
+// is a logo and a caption, so nothing under it is worth tapping, while the
+// hole strip below it is exactly what a scorer reaches for while this is up.
+// It stops 88px short of the right edge to leave the director's group switcher
+// — the one live control on that band — uncovered.
+const HoleStateBar = ({ glyph, label, children }) => (
+  <div style={{
+    position: "fixed", top: `calc(${HEADER_SAFE_PAD} + 6px)`, left: 12, right: 88,
+    display: "flex", alignItems: "center", gap: 8,
+    background: K.warn + ALPHA.tint, backdropFilter: "blur(8px)",
+    border: `1.5px solid ${K.warn}`, borderRadius: R.lg, padding: "8px 12px",
+    zIndex: 1000, boxShadow: "0 8px 32px rgba(0,0,0,0.4)", animation: "toastDownBar 0.3s ease",
+  }}>
+    <span style={{
+      flexShrink: 0, width: 18, height: 18, borderRadius: "50%", background: K.warn, color: ON_ACC,
+      fontSize: FS.micro, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center",
+    }}>{glyph}</span>
+    <span style={{ flex: 1, fontSize: FS.small, fontWeight: 800, color: K.warn, lineHeight: 1.2 }}>{label}</span>
+    {children}
+  </div>
+);
+// The bar's two actions. Filled either way: the button that resolves this
+// state should never be the quietest thing on the bar it belongs to.
+const holeBarBtn = (fill) => ({
+  padding: "7px 10px", borderRadius: R.sm, background: fill, border: "none",
+  color: ON_ACC, fontSize: FS.label, fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap",
+});
+
 function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPlayers, onSaveHole, notify, pairingsData, teeTimesData, roundDates, scoringOpen, setTee, getPlayerTee, finalizedRounds, scorecardSigs, onSignScorecard, onAttestScorecard, onUnsignScorecard, onFinalizeRound, onUnfinalizeRound, onGoToAdminCourses, markPlayerWD, ctpData, onSetCtp, onConfirmCtp, directorPick, onGroupChange, onSetRound }) {
   const [group, setGroup] = useState(null);
   const [currentHole, setCurrentHole] = useState(0);
@@ -1228,7 +1268,18 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
   const [showCtpForHole, setShowCtpForHole] = useState(null);
   const promptedCtpKeys = useRef({});
   const [ctpPickPlayer, setCtpPickPlayer] = useState("");
-  const [ctpFeet, setCtpFeet] = useState(10);
+  // NULL until the group sets one. A seeded default is a number nobody chose,
+  // and it would ride onto the card as though somebody had paced it off — so
+  // the wheel starts unanswered and Tag stays dead until it is answered.
+  const [ctpFeet, setCtpFeet] = useState(null);
+  // Where the wheel PARKS before anything is chosen — the standing tag, or a
+  // sensible 10 — kept apart from ctpFeet so parking somewhere is not the
+  // same as choosing it.
+  const [ctpFeetStart, setCtpFeetStart] = useState(10);
+  // The wheel scrolls itself into position on mount, and that fires the same
+  // scroll event a thumb does. This flips only on a real gesture, so the
+  // programmatic scroll cannot mark the distance as chosen.
+  const ctpWheelTouched = useRef(false);
   // Front 9 check — shown once per group per round as they arrive on hole 10.
   // Same session-guard shape as the CTP prompt, and for the same reason: one
   // device can score more than one group, so the key carries the group.
@@ -1496,7 +1547,9 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
     // Seed the wheel at the standing distance so "beat it" means scrolling up, not
     // hunting from a cold 10 ft default.
     setCtpPickPlayer("");
-    setCtpFeet(leader?.distanceFt ? Math.max(1, Math.min(CTP_MAX_FT, leader.distanceFt)) : 10);
+    setCtpFeet(null);
+    ctpWheelTouched.current = false;
+    setCtpFeetStart(leader?.distanceFt ? Math.max(1, Math.min(CTP_MAX_FT, leader.distanceFt)) : 10);
     setShowCtpForHole(currentHole);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allScored, par, currentHole, round, ctpData, editingCompleted, isGroupFinalized]);
@@ -1749,12 +1802,26 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
         </div>
       );
     }
+    // No draw for this round. For a player that is a wait; for a director it
+    // is a job, and the job is two taps away, so say which it is.
     return (
       <div style={{ textAlign: "center", padding: "40px 20px" }}>
         {offRoundBanner}
         <div style={{ fontSize: FS.jumbo, marginBottom: 12 }}>⛳</div>
-        <div style={{ fontSize: FS.lead, fontWeight: 700, color: K.t1, marginBottom: 6 }}>Waiting for Pairings</div>
-        <div style={{ fontSize: FS.small, color: K.t3 }}>Your tournament director will set up groups before the round begins.</div>
+        <div style={{ fontSize: FS.lead, fontWeight: 700, color: K.t1, marginBottom: 6 }}>
+          {user.isDirector ? `No pairings for Round ${round}` : "Waiting for Pairings"}
+        </div>
+        <div style={{ fontSize: FS.small, color: K.t3, marginBottom: user.isDirector ? 16 : 0 }}>
+          {user.isDirector
+            ? "Nobody can score this round until the groups are drawn."
+            : "Your tournament director will set up groups before the round begins."}
+        </div>
+        {user.isDirector && onGoToAdminCourses && (
+          <button onClick={() => onGoToAdminCourses(round)} style={{
+            padding: "10px 20px", borderRadius: R.md, background: K.acc, border: "none",
+            color: K.bg, fontSize: FS.small, fontWeight: 800, cursor: "pointer",
+          }}>Set up Round {round} →</button>
+        )}
       </div>
     );
   }
@@ -1783,6 +1850,47 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
     </div>
   );
 
+  // ── DRAW GUARD ──
+  // The screen is about to put a score row up for every player in `group`. If
+  // that group is not a foursome out of this round's draw — the whole field in
+  // one group, a player drawn twice, somebody who is no longer on the roster —
+  // then every row below is a card being built against the wrong people, and
+  // it saves as it goes. Scoring stops here and says so instead.
+  //
+  // Placed after the finalized early-return: a signed and locked card keeps
+  // showing as final, because nothing about it is going to change.
+  const _nameOf = (pid) => players.find(p => p.id === pid)?.name || "a player no longer on the roster";
+  const _troubleWithGroup = groupTrouble(group, {
+    rosterIds: players.map(p => p.id),
+    otherGroups: presetGroups.filter(g => !sameGroup(g, group)),
+  });
+  if (blocksScoring(_troubleWithGroup)) {
+    const nameOf = _nameOf;
+    return (
+      <div style={{ padding: "24px 4px" }}>
+        {offRoundBanner}
+        <div style={{ background: K.warn + ALPHA.wash, border: `1px solid ${K.warn}${ALPHA.line}`, borderRadius: R.xl, padding: "22px 20px", textAlign: "center" }}>
+          <div style={{ fontSize: FS.display, marginBottom: 10 }}>⚠️</div>
+          <div style={{ fontSize: FS.body, fontWeight: 800, color: K.warn, marginBottom: 8 }}>Round {round} pairings need a fix</div>
+          <div style={{ fontSize: FS.small, color: K.t2, lineHeight: 1.6, maxWidth: 320, margin: "0 auto" }}>
+            {describeTrouble(_troubleWithGroup, nameOf)}
+          </div>
+          <div style={{ fontSize: FS.small, color: K.t3, lineHeight: 1.6, maxWidth: 320, margin: "10px auto 0" }}>
+            {user.isDirector
+              ? "Scoring is held until the draw is right — a card entered against the wrong group is the expensive kind of mistake."
+              : "Your tournament director has to redraw this round before scoring can open. Nothing you have already posted is lost."}
+          </div>
+          {user.isDirector && onGoToAdminCourses && (
+            <button onClick={() => onGoToAdminCourses(round)} style={{
+              marginTop: 16, padding: "10px 20px", borderRadius: R.md, background: K.acc, border: "none",
+              color: K.bg, fontSize: FS.small, fontWeight: 800, cursor: "pointer",
+            }}>Fix Round {round} pairings →</button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   // ── SCORING GATE ──
   // Non-directors can't enter scores until SCORING_LEAD_MIN before their group's
   // tee time on the round's scheduled date — unless a director has toggled the
@@ -1798,8 +1906,14 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
     const dateStr = (roundDates || {})[round];
     return (
       <div style={{ textAlign: "center", padding: "40px 20px" }}>
-        <div style={{ fontSize: FS.jumbo, marginBottom: 12 }}>⏱️</div>
-        <div style={{ fontSize: FS.lead, fontWeight: 700, color: K.t1, marginBottom: 6 }}>Scoring Not Open Yet</div>
+        <div style={{ fontSize: FS.jumbo, marginBottom: 12 }}>{_myTeeTime ? "⏱️" : "⚠️"}</div>
+        <div style={{ fontSize: FS.lead, fontWeight: 700, color: K.t1, marginBottom: 6 }}>
+          {_myTeeTime ? "Scoring Not Open Yet" : `Round ${round} has no tee times`}
+        </div>
+        {/* Without a tee time there is nothing for the gate to open on, so it
+            stays shut — and "your director will open scoring" reads as a wait
+            for something that is never going to happen on its own. Name the
+            missing setting instead. */}
         <div style={{ fontSize: FS.small, color: K.t3, lineHeight: 1.7, maxWidth: 300, margin: "0 auto" }}>
           {_myTeeTime ? (
             <>
@@ -1809,7 +1923,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
               {dateStr ? <> on <strong style={{ color: K.t2 }}>{fmtRoundDate(dateStr)}</strong></> : null}.
             </>
           ) : (
-            <>Your tournament director will open scoring before the round begins.</>
+            <>Scoring opens {SCORING_LEAD_MIN} minutes before your tee time, and this round has none set. Your tournament director needs to set them in Admin.</>
           )}
         </div>
         {_myGroupIdx >= 0 && (
@@ -1835,6 +1949,36 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
   const presentNonSigners = presentGroupPids.filter(pid => pid !== signerPid);
   const allAttested = isSigned && presentNonSigners.every(pid => attestedPids.includes(pid));
   const meId = user?.id;
+
+  // Walked back onto a hole this group has already finished. Drives the amber
+  // bar on the header band, and suppresses the Round complete bar while it is
+  // up — they share that band, and this one is the answer to what the player
+  // just did. Signing is still one tap away in the footer.
+  const onCompletedHole = !isSigned && navSource === "manual" && isHoleComplete(currentHole) && !editingCompleted;
+
+  // ── What the DIRECTOR can't see from here ──
+  // A director bypasses the scoring gate, so a round with no tee times looks
+  // completely normal on this screen while every player in the field is stuck
+  // on "Scoring Not Open Yet" — the one setup fault the person who can fix it
+  // is structurally blind to. Same for another group's draw being broken:
+  // this screen is one group, and the round is not.
+  // One slim line, director only, and only when there is something to fix.
+  const _setup = user.isDirector
+    ? roundTrouble({ groups: presetGroups, teeTimes: (teeTimesData || {})[round], rosterIds: players.map(p => p.id) })
+    : { broken: [], missingTeeTimes: [] };
+  const _setupWarning = !user.isDirector ? null : (() => {
+    // A stale draw in THIS group first — it is the one the director is looking
+    // at, and it did not stop the screen, so nothing else will say it.
+    if (_troubleWithGroup) return describeTrouble(_troubleWithGroup, _nameOf);
+    const miss = _setup.missingTeeTimes.length;
+    if (miss > 0) {
+      return miss === _setup.groupCount
+        ? "No tee times set — nobody else can score this round"
+        : `${miss} group${miss === 1 ? "" : "s"} with no tee time — they can't score`;
+    }
+    if (_setup.broken.length > 0) return `Group ${_setup.broken[0].index + 1}'s draw needs a fix`;
+    return null;
+  })();
 
   const handleSign = () => {
     if (!groupKey) return;
@@ -1866,6 +2010,22 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
           this round's draw — so the row was spending the top of the scoring
           screen on an answer already on screen and a control already in the
           chrome. The hole strips start at the top now. */}
+      {/* The director's one line about the round they can't see from here.
+          A whole row is a lot on this screen, so it is 24px tall, it only
+          exists when something is actually wrong, and tapping it lands on the
+          round's setup rather than making anybody go looking. */}
+      {_setupWarning && onGoToAdminCourses && (
+        <div onClick={() => onGoToAdminCourses(round)} style={{
+          display: "flex", alignItems: "center", gap: 6, marginBottom: 8, cursor: "pointer",
+          padding: "5px 10px", borderRadius: R.sm,
+          background: K.warn + ALPHA.wash, border: `1px solid ${K.warn}${ALPHA.hair}`,
+        }}>
+          <span style={{ fontSize: FS.label }}>⚠️</span>
+          <span style={{ flex: 1, minWidth: 0, fontSize: FS.micro, fontWeight: 700, color: K.warn, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{_setupWarning}</span>
+          <span style={{ fontSize: FS.micro, fontWeight: 800, color: K.t3, letterSpacing: 0.5, flexShrink: 0 }}>FIX →</span>
+        </div>
+      )}
+
       {/* Hole navigator - Front 9 / Back 9 */}
       <div style={{ marginBottom: 8 }}>
         {[0, 9].map(start => (
@@ -1886,7 +2046,11 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
                   borderRadius: allScoredHole || isCurrent ? R.lg : R.sm,
                   border: allScoredHole && !isCurrent ? `1.5px solid ${K.acc}${ALPHA.line}` : "none",
                   cursor: "pointer",
-                  fontSize: FS.label, fontWeight: 700,
+                  // A rung above the label size these tiles used to wear. They
+                  // are 18 targets across a phone and the number in them is
+                  // how you find the one you want; the 32px tile carries it
+                  // without growing.
+                  fontSize: FS.small, fontWeight: 700,
                   background: isCurrent ? K.acc : allScoredHole ? K.accDim + ALPHA.wash : K.card,
                   color: isCurrent ? K.bg : allScoredHole ? K.acc : K.t3,
                   outline: isCurrent ? `2px solid ${K.acc}` : "none",
@@ -1959,43 +2123,10 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
           par 3 that row pushed the last player's score buttons down behind the
           tab bar. The prompt is the whole story. */}
 
-      {/* Completed hole confirmation overlay.
-          You get here by walking BACKWARDS onto a hole your group already
-          scored, so the screen has to say why the card below it does nothing.
-          It used to say it in amber at 8% behind an amber border at 20% — on
-          this background that is a panel you scroll straight past, and what
-          people did next was tap the score buttons underneath and wonder why
-          nothing happened. Three things fix that: the panel is drawn at the
-          same strength as the EDITING banner it leads to, "Edit Scores" is
-          filled instead of being the quietest thing in its own panel, and the
-          locked cards below now enter edit mode when tapped, so the guess
-          everybody was already making is the right one. */}
-      {!isSigned && navSource === "manual" && isHoleComplete(currentHole) && !editingCompleted && (<>
-        <div style={{
-          background: K.warn + ALPHA.tint, border: `1.5px solid ${K.warn}`, borderRadius: R.lg,
-          padding: 12, marginBottom: 8,
-        }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{
-              flexShrink: 0, width: 20, height: 20, borderRadius: "50%", background: K.warn, color: ON_ACC,
-              fontSize: FS.label, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center",
-            }}>✓</span>
-            <span style={{ fontSize: FS.body, fontWeight: 800, color: K.warn }}>Hole {currentHole + 1} already scored</span>
-          </div>
-          <div style={{ fontSize: FS.label, color: K.t2, margin: "4px 0 10px", paddingLeft: 28 }}>
-            These scores are posted. Tap a card below to change them.
-          </div>
-          <div style={{ display: "flex", gap: 6 }}>
-            <button onClick={() => setEditingCompleted(true)} style={{
-              flex: 1, padding: "10px 0", borderRadius: R.sm, background: K.warn, border: "none",
-              color: ON_ACC, fontSize: FS.small, fontWeight: 800, cursor: "pointer",
-            }}>✏️ Edit Scores</button>
-            <button onClick={returnToPlay} style={{
-              flex: 1, padding: "10px 0", borderRadius: R.sm, background: K.acc, border: "none",
-              color: ON_ACC, fontSize: FS.small, fontWeight: 800, cursor: "pointer",
-            }}>Resume Hole {findNextIncompleteHole() + 1} →</button>
-          </div>
-        </div>
+      {/* Completed hole — the banner that used to sit here is now a bar on the
+          header band (rendered outside the animated wrapper, below), so the
+          read-only scores start where the score cards normally would. */}
+      {onCompletedHole && (<>
         {/* Recorded scores - styled like scoring cards */}
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {groupPlayers.map(p => {
@@ -2055,20 +2186,6 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
           })}
         </div>
       </>)}
-
-      {/* Return to play banner */}
-      {editingCompleted && (
-        <div style={{
-          background: K.warn + ALPHA.tint, border: `1.5px solid ${K.warn}`, borderRadius: R.sm,
-          padding: "6px 12px", marginBottom: 6, display: "flex", justifyContent: "space-between", alignItems: "center",
-        }}>
-          <span style={{ fontSize: FS.small, color: K.warn, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em" }}>✏️ EDITING HOLE {currentHole + 1}</span>
-          <button onClick={returnToPlay} style={{
-            padding: "4px 12px", borderRadius: R.sm, background: K.acc, border: "none",
-            color: K.bg, fontSize: FS.label, fontWeight: 700, cursor: "pointer",
-          }}>Resume Hole {findNextIncompleteHole() + 1} →</button>
-        </div>
-      )}
 
       {/* Signed notice — score entry is locked once the card is signed (unsign to edit) */}
       {isSigned && (
@@ -2291,8 +2408,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
         return (
           <Popup onClose={() => setShowFront9(false)} maxWidth={420} dismissOnBackdrop={false} background={K.card} borderColor={K.acc + ALPHA.hair} padding={0} zIndex={340}>
             <div style={{ background: K.acc + ALPHA.wash, borderBottom: `1px solid ${K.acc}${ALPHA.hair}`, padding: "14px 20px", textAlign: "center" }}>
-              <div style={{ fontSize: FS.body, fontWeight: 800, color: K.acc, letterSpacing: 0.3 }}>Front 9 Check</div>
-              <div style={{ fontSize: FS.label, color: K.t3, marginTop: 2 }}>Make sure these are right before you play on</div>
+              <div style={{ fontSize: FS.body, fontWeight: 800, color: K.acc, letterSpacing: 0.3 }}>At the Turn</div>
             </div>
             <div style={{ padding: "14px 16px" }}>
               <div style={{ display: "grid", gridTemplateColumns: gridCols, gap: 2 }}>
@@ -2323,9 +2439,11 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
                 })}
               </div>
 
-              <div style={{ fontSize: FS.micro, color: K.t3, textAlign: "center", margin: "10px 0 12px" }}>Tap a hole number to go back and fix it</div>
+              {/* The hole numbers above are still buttons back to that hole —
+                  the line that said so is gone, but the way back is not. */}
+              <div style={{ height: 12 }} />
 
-              <Btn variant="primary" block onClick={() => { tapBigAction(); setShowFront9(false); }}>Looks Good</Btn>
+              <Btn variant="primary" block onClick={() => { tapBigAction(); setShowFront9(false); }}>On to the Back 9</Btn>
             </div>
           </Popup>
         );
@@ -2345,23 +2463,36 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
         const closeAndAdvance = () => { setShowCtpForHole(null); setCtpPickPlayer(""); };
         // Beating the standing tag is a strictly-shorter distance. Equal isn't closer —
         // ties keep the earlier group's tag (first to hole it holds the pin).
-        const beatsLeader = !leader || !leader.distanceFt || ctpFeet < leader.distanceFt;
-        const canTag = !!ctpPickPlayer && beatsLeader;
+        // Undecided is not "beats it": until a distance is chosen there is
+        // nothing to compare, so the question simply has not been answered.
+        const chosen = ctpFeet != null;
+        const beatsLeader = !leader || !leader.distanceFt || (chosen && ctpFeet < leader.distanceFt);
+        // BOTH halves, deliberately. A name with no distance is a claim
+        // nobody measured, and it would go onto the card looking like one
+        // somebody did.
+        const canTag = !!ctpPickPlayer && chosen && beatsLeader;
         const save = async () => {
           if (!canTag) return;
           tapBigAction();
           try { await onSetCtp?.(round, holeNum, ctpPickPlayer, ctpFeet); } catch {}
           closeAndAdvance();
         };
-        // Wheel: set scrollTop once when the scroll node mounts, then derive feet from
-        // scroll position. Snap stride === CTP_WHEEL_ITEM so a settle always lands on a row.
+        // Wheel: park it on ctpFeetStart when the scroll node mounts, then derive feet
+        // from scroll position. Snap stride === CTP_WHEEL_ITEM so a settle always lands
+        // on a row.
         const wheelRef = (el) => {
           if (el && !el.dataset.init) {
             el.dataset.init = "1";
-            el.scrollTop = (ctpFeet - 1) * CTP_WHEEL_ITEM;
+            el.scrollTop = (ctpFeetStart - 1) * CTP_WHEEL_ITEM;
           }
         };
+        // A gesture, not a scroll, is what counts as choosing. Setting scrollTop above
+        // fires the same scroll event a thumb does, so reading the scroll alone would
+        // mark the parked value as chosen the instant the wheel appeared. Pointer,
+        // touch and wheel between them cover a thumb, a stylus and a trackpad.
+        const markTouched = () => { ctpWheelTouched.current = true; };
         const onWheelScroll = (e) => {
+          if (!ctpWheelTouched.current) return;
           const v = Math.max(1, Math.min(CTP_MAX_FT, Math.round(e.currentTarget.scrollTop / CTP_WHEEL_ITEM) + 1));
           setCtpFeet(prev => (prev === v ? prev : v));
         };
@@ -2386,72 +2517,108 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
                 </div>
               )}
 
-              <div style={{ fontSize: FS.label, fontWeight: 800, color: K.t3, letterSpacing: 1.2, textTransform: "uppercase", marginBottom: 6 }}>
-                {leader ? "Who was closer?" : "Who was closest?"}
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 14 }}>
-                {presentGroupPids.map(pid => {
-                  const pl = players.find(p => p.id === pid);
-                  if (!pl) return null;
-                  const sel = ctpPickPlayer === pid;
-                  return (
-                    <button key={pid} onClick={() => { tapNudge(); setCtpPickPlayer(sel ? "" : pid); }} style={{
-                      padding: "11px 6px", borderRadius: R.md,
-                      background: sel ? K.acc + ALPHA.tint : K.inp,
-                      border: `1px solid ${sel ? K.acc : K.bdr}`,
-                      color: sel ? K.acc : K.t2,
-                      fontSize: FS.small, fontWeight: 700, cursor: "pointer", textAlign: "center",
-                    }}>{pl.name}</button>
-                  );
-                })}
+              {/* ── Who was closest ── */}
+              {/* One card holding the whole first question: the names, and
+                  the answer for when it was none of them. Passing used to sit
+                  at the very bottom under Tag, which put the group's most
+                  common answer furthest from the question and behind a
+                  control that did not apply to them. */}
+              <div style={{ background: K.inp, border: `1px solid ${K.bdr}`, borderRadius: R.lg, padding: "10px 12px", marginBottom: 12 }}>
+                <div style={{ fontSize: FS.label, fontWeight: 800, color: K.t3, letterSpacing: 1.2, textTransform: "uppercase", marginBottom: 8 }}>
+                  {leader ? "Who was closer?" : "Who was closest?"}
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 8 }}>
+                  {presentGroupPids.map(pid => {
+                    const pl = players.find(p => p.id === pid);
+                    if (!pl) return null;
+                    const sel = ctpPickPlayer === pid;
+                    return (
+                      <button key={pid}
+                        onClick={() => {
+                          tapNudge();
+                          // Changing who it was un-answers the distance: the
+                          // number belonged to the other man's shot.
+                          setCtpPickPlayer(sel ? "" : pid);
+                          setCtpFeet(null);
+                          ctpWheelTouched.current = false;
+                        }}
+                        style={{
+                          padding: "11px 6px", borderRadius: R.md,
+                          background: sel ? K.acc + ALPHA.tint : K.card,
+                          border: `1px solid ${sel ? K.acc : K.bdr}`,
+                          color: sel ? K.acc : K.t2,
+                          fontSize: FS.small, fontWeight: 700, cursor: "pointer", textAlign: "center",
+                        }}>{pl.name}</button>
+                    );
+                  })}
+                </div>
+                {/* Passing is an ANSWER, not a dismissal. A group that walks
+                    off without getting inside the standing tag is saying it is
+                    right, and recording that is what lets the Betting tab tell
+                    "nobody has been asked" apart from "everybody has been
+                    asked and it stands". The last group to confirm is the one
+                    that settles the pin. */}
+                <Btn variant="secondary" size="sm" block
+                  onClick={async () => {
+                    tapNudge();
+                    if (leader) { try { await onConfirmCtp?.(round, holeNum, user?.id); } catch { /* the pass still closes */ } }
+                    closeAndAdvance();
+                  }}
+                  style={{ color: K.t3 }}>
+                  {leader ? `Confirm — ${leaderPl?.name || "the standing CTP"} keeps it` : "None of us — skip"}
+                </Btn>
               </div>
 
-              <div style={{ fontSize: FS.label, fontWeight: 800, color: K.t3, letterSpacing: 1.2, textTransform: "uppercase", marginBottom: 6 }}>Approx. distance</div>
-              <div style={{ position: "relative", height: CTP_WHEEL_H, background: K.inp, border: `1px solid ${K.bdr}`, borderRadius: R.lg, overflow: "hidden", marginBottom: 10 }}>
-                {/* selection band */}
-                <div style={{ position: "absolute", left: 10, right: 10, top: "50%", height: CTP_WHEEL_ITEM + 2, transform: "translateY(-50%)", borderTop: `1.5px solid ${K.acc}`, borderBottom: `1.5px solid ${K.acc}`, borderRadius: R.xs, background: K.acc + ALPHA.wash, pointerEvents: "none", zIndex: 2 }} />
-                <div style={{ position: "absolute", right: 46, top: "50%", transform: "translateY(-50%)", fontSize: FS.label, fontWeight: 800, color: K.acc, letterSpacing: 1.2, pointerEvents: "none", zIndex: 2 }}>FT</div>
-                <div
-                  ref={wheelRef}
-                  onScroll={onWheelScroll}
-                  style={{ height: "100%", overflowY: "scroll", scrollSnapType: "y mandatory", padding: `${(CTP_WHEEL_H - CTP_WHEEL_ITEM) / 2}px 0`, WebkitOverflowScrolling: "touch", scrollbarWidth: "none" }}
-                >
-                  {Array.from({ length: CTP_MAX_FT }, (_, i) => i + 1).map(ft => (
-                    <div key={ft} style={{ height: CTP_WHEEL_ITEM, lineHeight: `${CTP_WHEEL_ITEM}px`, textAlign: "center", fontSize: ft === ctpFeet ? FS.title : FS.lead, fontWeight: ft === ctpFeet ? 800 : 700, color: ft === ctpFeet ? K.t1 : K.t3, scrollSnapAlign: "center" }}>
-                      {ft}
+              {/* ── How close ── */}
+              {/* Only once somebody is claiming it. Asking a group to set a
+                  distance before they have said whose shot it was is asking
+                  the second question first, and the group whose answer is
+                  "none of us" never needed it at all. */}
+              {ctpPickPlayer && (
+                <>
+                  <div style={{ fontSize: FS.label, fontWeight: 800, color: K.t3, letterSpacing: 1.2, textTransform: "uppercase", marginBottom: 6 }}>
+                    Approx. distance
+                  </div>
+                  <div style={{ position: "relative", height: CTP_WHEEL_H, background: K.inp, border: `1px solid ${chosen ? K.acc + ALPHA.line : K.bdr}`, borderRadius: R.lg, overflow: "hidden", marginBottom: 10 }}>
+                    {/* selection band */}
+                    <div style={{ position: "absolute", left: 10, right: 10, top: "50%", height: CTP_WHEEL_ITEM + 2, transform: "translateY(-50%)", borderTop: `1.5px solid ${chosen ? K.acc : K.t3}`, borderBottom: `1.5px solid ${chosen ? K.acc : K.t3}`, borderRadius: R.xs, background: chosen ? K.acc + ALPHA.wash : "transparent", pointerEvents: "none", zIndex: 2 }} />
+                    <div style={{ position: "absolute", right: 46, top: "50%", transform: "translateY(-50%)", fontSize: FS.label, fontWeight: 800, color: chosen ? K.acc : K.t3, letterSpacing: 1.2, pointerEvents: "none", zIndex: 2 }}>FT</div>
+                    <div
+                      ref={wheelRef}
+                      onScroll={onWheelScroll}
+                      onPointerDown={markTouched}
+                      onTouchStart={markTouched}
+                      onWheel={markTouched}
+                      style={{ height: "100%", overflowY: "scroll", scrollSnapType: "y mandatory", padding: `${(CTP_WHEEL_H - CTP_WHEEL_ITEM) / 2}px 0`, WebkitOverflowScrolling: "touch", scrollbarWidth: "none" }}
+                    >
+                      {Array.from({ length: CTP_MAX_FT }, (_, i) => i + 1).map(ft => (
+                        <div key={ft} style={{ height: CTP_WHEEL_ITEM, lineHeight: `${CTP_WHEEL_ITEM}px`, textAlign: "center", fontSize: ft === ctpFeet ? FS.title : FS.lead, fontWeight: ft === ctpFeet ? 800 : 700, color: ft === ctpFeet ? K.t1 : K.t3, scrollSnapAlign: "center" }}>
+                          {ft}
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-                {/* edge fades */}
-                <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 46, background: `linear-gradient(${K.inp}, transparent)`, pointerEvents: "none" }} />
-                <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 46, background: `linear-gradient(transparent, ${K.inp})`, pointerEvents: "none" }} />
-              </div>
+                    {/* edge fades */}
+                    <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 46, background: `linear-gradient(${K.inp}, transparent)`, pointerEvents: "none" }} />
+                    <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 46, background: `linear-gradient(transparent, ${K.inp})`, pointerEvents: "none" }} />
+                  </div>
 
-              {/* Why the tag button is dead — surfaced instead of leaving it mysteriously grey */}
-              {ctpPickPlayer && !beatsLeader && (
-                <div style={{ fontSize: FS.label, color: K.warn, textAlign: "center", marginBottom: 8, lineHeight: 1.4 }}>
-                  {ctpFeet === leader.distanceFt
-                    ? `Tied with ${leaderPl?.name || "the current CTP"} — the earlier tag holds.`
-                    : `Not inside ${leaderDist} — ${leaderPl?.name || "the current CTP"} keeps it.`}
-                </div>
+                  {/* Why the tag button is dead — surfaced instead of leaving it mysteriously grey */}
+                  {!chosen && (
+                    <div style={{ fontSize: FS.label, color: K.t3, textAlign: "center", marginBottom: 8, lineHeight: 1.4 }}>
+                      Spin the wheel to set how close {players.find(p => p.id === ctpPickPlayer)?.name.split(" ")[0] || "they"} was.
+                    </div>
+                  )}
+                  {chosen && !beatsLeader && (
+                    <div style={{ fontSize: FS.label, color: K.warn, textAlign: "center", marginBottom: 8, lineHeight: 1.4 }}>
+                      {ctpFeet === leader.distanceFt
+                        ? `Tied with ${leaderPl?.name || "the current CTP"} — the earlier tag holds.`
+                        : `Not inside ${leaderDist} — ${leaderPl?.name || "the current CTP"} keeps it.`}
+                    </div>
+                  )}
+
+                  <Btn block disabled={!canTag} onClick={save} style={{ letterSpacing: 0.5 }}>{leader ? "Tag New CTP" : "Tag CTP"}</Btn>
+                </>
               )}
-
-              <Btn block disabled={!canTag} onClick={save} style={{ letterSpacing: 0.5 }}>{leader ? "Tag New CTP" : "Tag CTP"}</Btn>
-              {/* Passing is an ANSWER, not a dismissal. A group that walks off
-                  without getting inside the standing tag is saying it is
-                  right, and recording that is what lets the Betting tab tell
-                  "nobody has been asked" apart from "everybody has been asked
-                  and it stands". The last group to confirm is the one that
-                  settles the pin. */}
-              <Btn variant="secondary" size="sm" block
-                onClick={async () => {
-                  tapNudge();
-                  if (leader) { try { await onConfirmCtp?.(round, holeNum, user?.id); } catch { /* the pass still closes */ } }
-                  closeAndAdvance();
-                }}
-                style={{ marginTop: 7, color: K.t3 }}>
-                {leader ? `Confirm — ${leaderPl?.name || "the standing CTP"} keeps it` : "None of us — skip"}
-              </Btn>
             </div>
           </Popup>
         );
@@ -2599,15 +2766,56 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
         );
       })()}
 
+      {/* Sits ON the app header rather than below it. At top: 80 this landed
+          across the hole strip — the one part of the screen a player might be
+          reaching for while it is up, since the toast is showing precisely
+          when the group has just finished a hole and somebody wants to check
+          or correct the one before it. The header underneath is a logo and a
+          caption: nothing to tap, and nothing that changes in the second and
+          a half this covers it. Offset from the same safe-area inset the
+          header uses so it stays centred on that band on a notched phone. */}
       {allScored && currentHole < 17 && navSource === "auto" && !editingCompleted && (
-        <div style={{ position: "fixed", top: 80, left: "50%", transform: "translateX(-50%)", background: K.acc, color: K.bg, padding: "12px 48px", borderRadius: R.lg, fontSize: FS.small, fontWeight: 700, zIndex: 1000, whiteSpace: "nowrap", minWidth: 280, textAlign: "center", boxShadow: "0 8px 32px rgba(0,0,0,0.4)", animation: "toastDown 0.3s ease" }}>
+        <div style={{ position: "fixed", top: `calc(${HEADER_SAFE_PAD} + 9px)`, left: "50%", transform: "translateX(-50%)", background: K.acc, color: K.bg, padding: "12px 48px", borderRadius: R.lg, fontSize: FS.small, fontWeight: 700, zIndex: 1000, whiteSpace: "nowrap", minWidth: 280, textAlign: "center", boxShadow: "0 8px 32px rgba(0,0,0,0.4)", animation: "toastDown 0.3s ease", pointerEvents: "none" }}>
           ✓ Hole {currentHole + 1} saved — advancing...
         </div>
       )}
-      {allRoundComplete && !isGroupFinalized && !isSigned && !showFinalize && (
-        <div style={{ position: "fixed", top: 80, left: "50%", transform: "translateX(-50%)", display: "flex", alignItems: "center", gap: 12, background: K.acc, color: K.bg, padding: "12px 20px", borderRadius: R.lg, fontSize: FS.small, fontWeight: 700, zIndex: 1000, minWidth: 280, maxWidth: "calc(100vw - 40px)", boxShadow: "0 8px 32px rgba(0,0,0,0.4)", animation: "toastDown 0.3s ease" }}>
+      {/* Round complete — on the header band, same as the advancing toast, and
+          for a sharper reason: this one does not time out. It stays up until
+          the card is signed, and at top: 80 it sat across the hole strip for
+          as long as it was there — so a group that finished and then wanted to
+          fix hole 3 had the way back to hole 3 covered by it.
+          It is a BAR rather than a centred pill: it runs from the left edge to
+          88px short of the right, which leaves the header's crown — the
+          director's group switcher, the one live control up here — uncovered
+          and tappable the whole time this is showing. */}
+      {/* On a hole this group already finished — same band, same geometry as
+          Round complete, in the warning colour. It has to live out here rather
+          than up with the read-only scores it explains: the hole content is
+          wrapped in a transformed div for the slide animation, and a transform
+          makes its box the containing block for anything `position: fixed`
+          inside it, which would drop this bar into the middle of the screen.
+          "Resume Hole 18 →" shortens to "Hole 18 →" — the row has three things
+          on it now, and the green button is self-evidently the way onward. */}
+      {onCompletedHole && (
+        <HoleStateBar glyph="✓" label={`Hole ${currentHole + 1} already scored`}>
+          <button onClick={() => setEditingCompleted(true)} style={holeBarBtn(K.warn)}>✏️ Edit</button>
+          <button onClick={returnToPlay} style={holeBarBtn(K.acc)}>Hole {findNextIncompleteHole() + 1} →</button>
+        </HoleStateBar>
+      )}
+      {/* The other half of the same state, and now the same bar: you tapped
+          Edit, the cards below went live, and this stays pinned to say which
+          hole you are editing and how to get back to the live one. It was an
+          inline strip above the cards, which scrolled away exactly when you
+          were deepest into the thing it was warning you about. */}
+      {editingCompleted && (
+        <HoleStateBar glyph="✎" label={`Editing hole ${currentHole + 1}`}>
+          <button onClick={returnToPlay} style={holeBarBtn(K.acc)}>Hole {findNextIncompleteHole() + 1} →</button>
+        </HoleStateBar>
+      )}
+      {allRoundComplete && !isGroupFinalized && !isSigned && !showFinalize && !onCompletedHole && (
+        <div style={{ position: "fixed", top: `calc(${HEADER_SAFE_PAD} + 6px)`, left: 12, right: 88, display: "flex", alignItems: "center", gap: 10, background: K.acc, color: K.bg, padding: "10px 14px", borderRadius: R.lg, fontSize: FS.small, fontWeight: 700, zIndex: 1000, boxShadow: "0 8px 32px rgba(0,0,0,0.4)", animation: "toastDownBar 0.3s ease" }}>
           <span style={{ flex: 1 }}>🏆 Round complete!</span>
-          <button onClick={() => setShowFinalize(true)} style={{ background: K.bg, color: K.acc, border: "none", borderRadius: R.sm, padding: "6px 16px", fontSize: FS.small, fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap" }}>Sign Scorecard</button>
+          <button onClick={() => setShowFinalize(true)} style={{ background: K.bg, color: K.acc, border: "none", borderRadius: R.sm, padding: "6px 14px", fontSize: FS.small, fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap" }}>Sign Scorecard</button>
         </div>
       )}
     </div>
@@ -8263,7 +8471,9 @@ export default function WBCApp() {
       // show groups signing off a number they never saw.
       confirmed_by: [],
     }, "id");
-    notify(ft ? `CTP Hole ${hole} — ${ft} ft` : `CTP Hole ${hole} set`);
+    // No toast. The prompt closing IS the acknowledgement, and this one fired
+    // on a screen the group is about to walk away from — a banner over the
+    // next hole's scores telling them what they just did.
   };
 
   // ── The side games' money ────────────────────────────────────────
@@ -8342,7 +8552,7 @@ export default function WBCApp() {
       tournament_id: TOURNAMENT_ID,
       confirmed_by: confirmedBy,
     }, "id");
-    notify(`CTP Hole ${hole} confirmed`);
+    // Same as onSetCtp: the prompt closing is the acknowledgement.
   };
 
   const setPairings = async (rnd, groups) => {
@@ -8350,12 +8560,27 @@ export default function WBCApp() {
     const incoming = JSON.stringify(groups);
     if (existing === incoming) return;
     setPairingsData(prev => ({ ...prev, [rnd]: groups }));
+    // A round's TEE TIMES live on its pairing rows, and this deletes every one
+    // of them before writing the new draw — so the times only survive because
+    // they are copied back out of `teeTimesData` below. That makes client state
+    // the only copy for the length of this function, and if it is empty when a
+    // save lands (a cold load that has not filled it yet, a save raised from a
+    // screen that never subscribed) the round comes back with every tee time
+    // gone — which reads as "admin cleared the tee times", and locks every
+    // non-director out of scoring behind a gate that has nothing to open on.
+    // So: when client state has nothing, ask Firestore what is actually stored
+    // before deleting it.
+    let times = (teeTimesData[rnd] || []);
+    if (!times.some(t => t)) {
+      const existing = await db.get("pairings", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }, { field: "round_number", op: "==", value: rnd }]);
+      times = rowsToTeeTimes(existing || [])[rnd] || times;
+    }
     // Delete old pairings for this round and reinsert
     await db.delete("pairings", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }, { field: "round_number", op: "==", value: rnd }]);
     const rows = [];
     groups.forEach((grp, gi) => {
       grp.forEach(pid => {
-        rows.push({ id: docIds.pairing(_e(), rnd, gi + 1, pid), tournament_id: TOURNAMENT_ID, round_number: rnd, group_number: gi + 1, player_id: pid, tee_time: (teeTimesData[rnd] || [])[gi] || null });
+        rows.push({ id: docIds.pairing(_e(), rnd, gi + 1, pid), tournament_id: TOURNAMENT_ID, round_number: rnd, group_number: gi + 1, player_id: pid, tee_time: times[gi] || null });
       });
     });
     for (const row of rows) await db.upsert("pairings", row);
@@ -8468,6 +8693,9 @@ export default function WBCApp() {
       <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
         <style>{`
           @keyframes toastDown { 0% { transform: translateX(-50%) translateY(-20px); opacity: 0; } 100% { transform: translateX(-50%) translateY(0); opacity: 1; } }
+          /* Same drop-in for a full-width bar, which holds no centring
+             transform of its own to carry through the keyframe. */
+          @keyframes toastDownBar { 0% { transform: translateY(-20px); opacity: 0; } 100% { transform: translateY(0); opacity: 1; } }
           @keyframes finalizeGlow { 0%,100% { box-shadow: 0 0 4px rgba(212,168,67,0.2); } 50% { box-shadow: 0 0 14px rgba(212,168,67,0.5); } }
           @keyframes pulse { 0%,100% { opacity: 0.5; } 50% { opacity: 0.2; } }
         `}</style>
