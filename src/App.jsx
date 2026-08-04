@@ -6,6 +6,7 @@ import { K, ON_ACC, FS, fsStep, R, ALPHA, MOTION, FONT, SHADOW, SCRIM } from "./
 import { SegmentedToggle, StickyTop, SectionLabel, Card, Toast, Btn } from "./components/ui";
 import { calcCH, buildStrokesMap, computeIndividualBoard, rankIndividualBoard, rankIndividualBoardIds, WD_SCORE } from "./lib/individualBoard";
 import { fieldFor, potFor, perUnit, computeSkins, allSkins, skinCounts } from "./lib/sideGames";
+import { teeTimesByPlayer, roundInPlay, thruStatus } from "./lib/thruStatus";
 import {
   MARKET_OPENING_SHARES, MARKET_MID_SHARES, marketWindows, normalizeLots, totalShares,
   sharesOn, setLotShares, lotsFor, allLots, marketBoard, marketHoldings, marketPayouts, roundComplete,
@@ -620,14 +621,16 @@ const TEE_PALETTE = ["#60a5fa","#f59e0b","#a78bfa","#34d399","#fb923c","#f472b6"
 // and the comment went stale — the # column had been widened from 24 to 36
 // while the arithmetic still said 24, so Total sat a dozen pixels off the
 // trophy it is supposed to line up with. Widths are sized to the widest string
-// each column can hold at its font size: Total takes a 3-digit gross, the
-// round columns take a "+11", # takes "T12" plus a movement arrow.
+// each column can hold at its font size, measured rather than guessed: Total
+// takes the "STROKES" header (38px, the widest thing in that column — wider
+// than any score), Thru takes a "12:10p" tee time at 28px, the round columns
+// take a "+11" at 19px, # takes "T12" plus a movement arrow at 32px.
 const LB_COL = { num: 36, total: 40, thru: 34, prior: 24 };
 // The least gap that still reads as a gap between this round's stats and the
 // round-by-round history beside them.
 const LB_GAP_MIN = 8;
 
-function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getPlayerTee, finalizedRounds, skinWins, loaded = true }) {
+function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getPlayerTee, finalizedRounds, skinWins, pairingsData, teeTimesData, loaded = true }) {
   const [expanded, setExpanded] = useState(null);
   const [scorecardRound, setScorecardRound] = useState(null);
   const [showGross, setShowGross] = useState(false);
@@ -716,6 +719,17 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
     window.addEventListener("resize", calc);
     return () => { clearTimeout(t); window.removeEventListener("resize", calc); };
   }, [lb.length]);
+
+  // What the Thru column is counting right now — see lib/thruStatus. The round
+  // is "in play" from the first score anyone posts until the director
+  // finalizes, and for that whole stretch the column is about TODAY: holes into
+  // this round for anyone who has teed off, the group's tee time for anyone who
+  // hasn't. Outside it, the tournament total.
+  const inPlay = roundInPlay(lb, round, finalizedRounds[round]);
+  const teeTimes = useMemo(
+    () => teeTimesByPlayer((pairingsData || {})[round], (teeTimesData || {})[round]),
+    [pairingsData, teeTimesData, round],
+  );
 
   const renderScorecard = (p) => {
     const tp = tPlayers.find(t => t.player_id === p.id);
@@ -1044,14 +1058,24 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                       <span style={{ ...bandStart, fontWeight: 800, fontSize: fsStep(rowStyle.fontSize, 1), color: p.isWD || displayTotal == null ? K.t2 : (!showGross && showToPar && displayTotal < 0 ? K.under : K.t1) }}>
                         {p.isWD ? <span style={{ fontSize: fsStep(rowStyle.fontSize, -1), color: K.t2, fontWeight: 700 }}>WD</span> : displayTotal != null ? (showGross || !showToPar ? displayTotal : fmtPar(displayTotal)) : "—"}
                       </span>
-                      {/* Thru — holes played across the whole tournament, not
-                          this round's count. Per-round it went blank between
-                          rounds: a finished round 1 read "F" until someone teed
-                          off in round 2, then everyone dropped back to "—" even
-                          though they had 18 holes behind them. Cumulative never
-                          resets — 18 when round 1 is in, 23 on the 5th hole of
-                          round 2, 36 when that one is done. */}
-                      <span style={{ ...bandEnd, fontSize: fsStep(rowStyle.fontSize, -1), color: K.t2 }}>{p.isWD ? "—" : p.totalThru > 0 ? p.totalThru : "—"}</span>
+                      {/* Thru — today's holes while the round is being played,
+                          the tournament total once it is finalized. A tee time
+                          drops a rung: it is the one value here that isn't a
+                          hole count, and it has more characters to fit. */}
+                      {(() => {
+                        const st = thruStatus({
+                          inPlay,
+                          roundThru: p.rds[round - 1]?.thru || 0,
+                          totalThru: p.totalThru,
+                          teeTime: teeTimes[p.id],
+                          isWD: p.isWD,
+                        });
+                        return (
+                          <span style={{ ...bandEnd, fontSize: fsStep(rowStyle.fontSize, st.kind === "tee" ? -2 : -1), color: K.t2 }}>
+                            {st.text}
+                          </span>
+                        );
+                      })()}
                       {/* Gap between current round stats and prior rounds */}
                       <span />
                       {/* Prior rounds — always show all 4 */}
@@ -8464,7 +8488,7 @@ export default function WBCApp() {
           right={<button onClick={handleLogout} style={{ background: "transparent", border: `1px solid ${K.bdr}`, borderRadius: R.sm, color: K.t3, fontSize: FS.small, fontWeight: 600, padding: "5px 12px", cursor: "pointer" }}>Exit</button>}
         />
         <div style={{ padding: "14px 20px 0 20px", flex: 1, overflowY: "hidden", overflowX: "hidden", display: "flex", flexDirection: "column", minHeight: 0, marginBottom: 8 }}>
-          <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} loaded={storageLoaded} />
+          <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} pairingsData={pairingsData} teeTimesData={teeTimesData} loaded={storageLoaded} />
         </div>
       </div>
       </div>
@@ -8712,7 +8736,7 @@ export default function WBCApp() {
       )}
 
       <div className="wbc-app-body" style={{ padding: (view === "leaderboard" || view === "admin") ? "14px 20px 0 20px" : "14px 20px", flex: 1, overflowY: "auto", overflowX: "hidden", display: (view === "leaderboard" || view === "admin") ? "flex" : "block", flexDirection: "column", minHeight: 0, paddingBottom: (view === "leaderboard" || view === "admin") ? "28px" : 0 }}>
-        {view === "leaderboard" && <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} loaded={storageLoaded} />}
+        {view === "leaderboard" && <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} pairingsData={pairingsData} teeTimesData={teeTimesData} loaded={storageLoaded} />}
         <div style={{ display: view === "scoring" ? "block" : "none", paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
           <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeTimesData={teeTimesData} roundDates={roundDates} scoringOpen={scoringOpen} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={async (key, signerPid, signerName, present, rnd) => { const nonSigners = (present || []).filter(pid => pid !== signerPid); const autoFinal = nonSigners.length === 0; const optimistic = { signedBy: signerPid, signedByName: signerName, attestedBy: [], present: present || [] }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: optimistic })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), tournament_id: TOURNAMENT_ID, groupKey: key, round: rnd, signedBy: signerPid, signedByName: signerName, present: present || [], attestedBy: [], signedAt: new Date().toISOString() }); if (autoFinal) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onAttestScorecard={async (key, attesterPid, nonSigners) => { const cur = scorecardSigs[key]; if (!cur) return; const attestedBy = [...new Set([...(cur.attestedBy || []), attesterPid])]; const optimistic = { ...cur, attestedBy }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: { ...prev[key], attestedBy } })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), attestedBy }); const allDone = (nonSigners || []).every(pid => attestedBy.includes(pid)); if (allDone) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onUnsignScorecard={async key => { pendingSigsRef.current.delete(key); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); if (finalizedRounds[key]) { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); pendingSigsRef.current.delete(key); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); await saveTournamentState(nf); }} onGoToAdminCourses={(rnd) => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); setAdminSettingsRound(rnd || null); }} markPlayerWD={markPlayerWD} ctpData={ctpData} onSetCtp={onSetCtp} onConfirmCtp={onConfirmCtp} directorPick={directorPick} onGroupChange={setScoringGroup} onSetRound={setRound} />
         </div>
