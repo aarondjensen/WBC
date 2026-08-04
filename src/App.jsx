@@ -2581,10 +2581,19 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
           ✓ Hole {currentHole + 1} saved — advancing...
         </div>
       )}
+      {/* Round complete — on the header band, same as the advancing toast, and
+          for a sharper reason: this one does not time out. It stays up until
+          the card is signed, and at top: 80 it sat across the hole strip for
+          as long as it was there — so a group that finished and then wanted to
+          fix hole 3 had the way back to hole 3 covered by it.
+          It is a BAR rather than a centred pill: it runs from the left edge to
+          88px short of the right, which leaves the header's crown — the
+          director's group switcher, the one live control up here — uncovered
+          and tappable the whole time this is showing. */}
       {allRoundComplete && !isGroupFinalized && !isSigned && !showFinalize && (
-        <div style={{ position: "fixed", top: 80, left: "50%", transform: "translateX(-50%)", display: "flex", alignItems: "center", gap: 12, background: K.acc, color: K.bg, padding: "12px 20px", borderRadius: R.lg, fontSize: FS.small, fontWeight: 700, zIndex: 1000, minWidth: 280, maxWidth: "calc(100vw - 40px)", boxShadow: "0 8px 32px rgba(0,0,0,0.4)", animation: "toastDown 0.3s ease" }}>
+        <div style={{ position: "fixed", top: `calc(${HEADER_SAFE_PAD} + 6px)`, left: 12, right: 88, display: "flex", alignItems: "center", gap: 10, background: K.acc, color: K.bg, padding: "10px 14px", borderRadius: R.lg, fontSize: FS.small, fontWeight: 700, zIndex: 1000, boxShadow: "0 8px 32px rgba(0,0,0,0.4)", animation: "toastDownBar 0.3s ease" }}>
           <span style={{ flex: 1 }}>🏆 Round complete!</span>
-          <button onClick={() => setShowFinalize(true)} style={{ background: K.bg, color: K.acc, border: "none", borderRadius: R.sm, padding: "6px 16px", fontSize: FS.small, fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap" }}>Sign Scorecard</button>
+          <button onClick={() => setShowFinalize(true)} style={{ background: K.bg, color: K.acc, border: "none", borderRadius: R.sm, padding: "6px 14px", fontSize: FS.small, fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap" }}>Sign Scorecard</button>
         </div>
       )}
     </div>
@@ -8445,6 +8454,9 @@ export default function WBCApp() {
       <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
         <style>{`
           @keyframes toastDown { 0% { transform: translateX(-50%) translateY(-20px); opacity: 0; } 100% { transform: translateX(-50%) translateY(0); opacity: 1; } }
+          /* Same drop-in for a full-width bar, which holds no centring
+             transform of its own to carry through the keyframe. */
+          @keyframes toastDownBar { 0% { transform: translateY(-20px); opacity: 0; } 100% { transform: translateY(0); opacity: 1; } }
           @keyframes finalizeGlow { 0%,100% { box-shadow: 0 0 4px rgba(212,168,67,0.2); } 50% { box-shadow: 0 0 14px rgba(212,168,67,0.5); } }
           @keyframes pulse { 0%,100% { opacity: 0.5; } 50% { opacity: 0.2; } }
         `}</style>
