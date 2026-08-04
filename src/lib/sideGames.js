@@ -78,7 +78,10 @@ export function buyInSheet({ players, games }) {
       inGames[g.key] = isIn;
       if (isIn) owes += g.amount || 0;
     });
-    return { pid: p.id, name: p.name, games: inGames, owes };
+    // `wd` rides along so the sheet can say why somebody who is not playing
+    // is still being billed. It changes no arithmetic: a withdrawal does not
+    // refund a buy-in.
+    return { pid: p.id, name: p.name, wd: !!p.isWD, games: inGames, owes };
   });
   const totals = {};
   gs.forEach(g => {

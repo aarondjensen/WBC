@@ -2922,8 +2922,18 @@ function GroupSetup({ user, players, onStart, presetGroup }) {
 //   once the halfway round is complete, spread across any golfers you like;
 //   the pot divides by the shares held on whoever wins. See lib/market.
 //
-// What all three share is the money: a director tags who bought in and what a
+// What all four share is the money: a director tags who bought in and what a
 // seat costs, and every pot on this screen is counted from that.
+//
+// `players` is the WHOLE roster, withdrawals included — not the active field
+// every other screen takes. A man who paid his buy-ins and walked in on
+// Saturday still owes them, still has his money in the pot, and still keeps
+// the skins and the pin he won before he went; leaving him off the collection
+// sheet loses the director money and leaving him out of the field quietly
+// shrinks every pot he paid into. Each game decides for itself what a
+// withdrawal means to it — computeSkins skips the WD sentinel hole by hole
+// (which is the rule the withdraw dialog states: completed holes count), and
+// lowNetRounds drops a withdrawn card outright.
 function BettingView({
   players, round, tRounds, courses, holeData, ctpData, onSetCtp, user, numRounds,
   getPlayerTee, sideGames, onUpdateSideGames, marketBets, onSaveMarketBet, leaderboard,
@@ -3342,7 +3352,9 @@ function BettingView({
       rows.push({ r, scores, pars: course.hole_pars || [] });
     }
     // Circles for under par only; gold number + single circle for skin winners; plain number otherwise
-    const ScoreCell = ({ score, par, isSkin }) => {
+    const ScoreCell = ({ score: raw, par, isSkin }) => {
+      // Same rule as the field card: a WD hole is a dash, not a 99.
+      const score = raw > 0 && raw < WD_SCORE ? raw : 0;
       if (!score) return <div style={{ width: "100%", aspectRatio: "1", display: "flex", alignItems: "center", justifyContent: "center" }}><span style={{ fontSize: FS.micro, color: K.t3 }}>–</span></div>;
       const d = score - par;
       const isUnder = d < 0;
@@ -3430,7 +3442,13 @@ function BettingView({
                     {p.name.split(" ")[0]}
                   </td>
                   {holes.map(i => {
-                    const s = scores[i];
+                    // The WD sentinel is a marker, not a score. Withdrawals
+                    // are on this card because their money is in the pot and
+                    // the holes they DID play still won skins — but the holes
+                    // they did not are a dash, the way the scoring screen
+                    // draws them, not a row of 99s.
+                    const raw = scores[i];
+                    const s = raw > 0 && raw < WD_SCORE ? raw : 0;
                     const par = pars[i] || 0;
                     const isSkinWinner = skinByHole[i]?.winner?.pid === p.id;
                     const d = s ? s - par : null;
@@ -9105,7 +9123,7 @@ export default function WBCApp() {
         <div style={{ display: view === "scoring" ? "block" : "none", paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
           <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeTimesData={teeTimesData} roundDates={roundDates} scoringOpen={scoringOpen} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={async (key, signerPid, signerName, present, rnd) => { const nonSigners = (present || []).filter(pid => pid !== signerPid); const autoFinal = nonSigners.length === 0; const optimistic = { signedBy: signerPid, signedByName: signerName, attestedBy: [], present: present || [] }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: optimistic })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), tournament_id: TOURNAMENT_ID, groupKey: key, round: rnd, signedBy: signerPid, signedByName: signerName, present: present || [], attestedBy: [], signedAt: new Date().toISOString() }); if (autoFinal) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onAttestScorecard={async (key, attesterPid, nonSigners) => { const cur = scorecardSigs[key]; if (!cur) return; const attestedBy = [...new Set([...(cur.attestedBy || []), attesterPid])]; const optimistic = { ...cur, attestedBy }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: { ...prev[key], attestedBy } })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), attestedBy }); const allDone = (nonSigners || []).every(pid => attestedBy.includes(pid)); if (allDone) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onUnsignScorecard={async key => { pendingSigsRef.current.delete(key); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); if (finalizedRounds[key]) { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); pendingSigsRef.current.delete(key); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); await saveTournamentState(nf); }} onGoToAdminCourses={(rnd) => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); setAdminSettingsRound(rnd || null); }} markPlayerWD={markPlayerWD} ctpData={ctpData} onSetCtp={onSetCtp} onConfirmCtp={onConfirmCtp} directorPick={directorPick} onGroupChange={setScoringGroup} onSetRound={setRound} />
         </div>
-        {view === "skins" && <BettingView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} numRounds={numRounds} getPlayerTee={getPlayerTee} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} marketBets={marketBets} onSaveMarketBet={onSaveMarketBet} leaderboard={getLeaderboard} finalizedRounds={finalizedRounds} pairingsData={pairingsData} />}
+        {view === "skins" && <BettingView players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} numRounds={numRounds} getPlayerTee={getPlayerTee} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} marketBets={marketBets} onSaveMarketBet={onSaveMarketBet} leaderboard={getLeaderboard} finalizedRounds={finalizedRounds} pairingsData={pairingsData} />}
         {view === "groups" && <GroupsView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} pairingsData={pairingsData} teeTimesData={teeTimesData} getPlayerTee={getPlayerTee} user={user} />}
         {view === "admin" && (user.isDirector ? <AdminView activePlayers={activePlayers} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
               setTeeTimesData(prev => {
