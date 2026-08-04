@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { fieldFor, potFor, perUnit, computeSkins, allSkins, skinCounts, buyInSheet, toggleIn, lowNetRounds, lowNetPayouts } from "./sideGames";
+import { fieldFor, potFor, perUnit, computeSkins, allSkins, skinCounts, buyInSheet, toggleIn, lowNetRounds } from "./sideGames";
 import { WD_SCORE } from "./individualBoard";
 
 const players = [
@@ -241,7 +241,11 @@ describe("buyInSheet with a derived column", () => {
 
 describe("lowNetRounds", () => {
   // A finished card unless told otherwise.
-  const line = (net, over = {}) => ({ played: true, wd: false, thru: 18, netToPar: net, gross: 72 + net, ...over });
+  // A finished card: gross is par (72) + to-par + whatever strokes were given.
+  const line = (net, strokes = 0, over = {}) => ({
+    played: true, wd: false, thru: 18,
+    netToPar: net, grossToPar: net + strokes, gross: 72 + net + strokes, ...over,
+  });
   const from = (map) => (pid, round) => (map[`${pid}_${round}`] ?? null);
 
   it("pays the lowest net of the day", () => {
@@ -267,7 +271,7 @@ describe("lowNetRounds", () => {
   it("ignores a card that is not through 18", () => {
     const rounds = lowNetRounds({
       players, rounds: [1],
-      lineFor: from({ a_1: line(-6, { thru: 9 }), b_1: line(2) }),
+      lineFor: from({ a_1: line(-6, 0, { thru: 9 }), b_1: line(2) }),
     });
     expect(rounds[0].winners.map(w => w.pid)).toEqual(["b"]);
     expect(rounds[0].net).toBe(2);
@@ -276,7 +280,7 @@ describe("lowNetRounds", () => {
   it("ignores a withdrawal and an unplayed card", () => {
     const rounds = lowNetRounds({
       players, rounds: [1],
-      lineFor: from({ a_1: line(-9, { wd: true }), b_1: { played: false }, c_1: line(3) }),
+      lineFor: from({ a_1: line(-9, 0, { wd: true }), b_1: { played: false }, c_1: line(3) }),
     });
     expect(rounds[0].winners.map(w => w.pid)).toEqual(["c"]);
   });
@@ -284,7 +288,7 @@ describe("lowNetRounds", () => {
   it("leaves a round nobody has finished undecided rather than naming a leader", () => {
     const rounds = lowNetRounds({
       players, rounds: [1],
-      lineFor: from({ a_1: line(-4, { thru: 14 }) }),
+      lineFor: from({ a_1: line(-4, 0, { thru: 14 }) }),
     });
     expect(rounds[0]).toMatchObject({ decided: false, net: null, winners: [] });
   });
@@ -297,54 +301,17 @@ describe("lowNetRounds", () => {
     expect(rounds.map(r => [r.round, r.winners.map(w => w.pid)])).toEqual([[1, ["a"]], [2, ["b"]]]);
   });
 
+  // The same answer said the other way: a 90 with 22 strokes is a 68 net,
+  // which is what gets read out in a car park.
+  it("reports the low net as a score as well as to par", () => {
+    const rounds = lowNetRounds({
+      players, rounds: [1],
+      lineFor: from({ a_1: line(-4, 22), b_1: line(1, 4) }),
+    });
+    expect(rounds[0].winners[0]).toMatchObject({ pid: "a", net: -4, gross: 90, strokes: 22, netScore: 68 });
+  });
+
   it("survives an event with no rounds", () => {
     expect(lowNetRounds({ players, rounds: [], lineFor: () => null })).toEqual([]);
-  });
-});
-
-describe("lowNetPayouts", () => {
-  const w = (pid, name) => ({ pid, name });
-
-  it("pays the round's share to a lone winner", () => {
-    const out = lowNetPayouts({ rounds: [{ round: 1, winners: [w("a", "Aaron")] }], perRound: 80 });
-    expect(out).toEqual([{ pid: "a", name: "Aaron", rounds: 1, shared: 0, payout: 80 }]);
-  });
-
-  it("splits a tied round rather than paying it twice", () => {
-    const out = lowNetPayouts({ rounds: [{ round: 1, winners: [w("a", "Aaron"), w("b", "Brad")] }], perRound: 80 });
-    expect(out.map(r => [r.pid, r.payout])).toEqual([["a", 40], ["b", 40]]);
-    expect(out.every(r => r.shared === 1)).toBe(true);
-    // The pot is divided, never duplicated.
-    expect(out.reduce((s, r) => s + r.payout, 0)).toBe(80);
-  });
-
-  it("adds a player's rounds up across the week", () => {
-    const out = lowNetPayouts({
-      rounds: [
-        { round: 1, winners: [w("a", "Aaron")] },
-        { round: 2, winners: [w("a", "Aaron"), w("b", "Brad")] },
-        { round: 3, winners: [w("b", "Brad")] },
-      ],
-      perRound: 80,
-    });
-    expect(out.find(r => r.pid === "a")).toMatchObject({ rounds: 2, shared: 1, payout: 120 });
-    expect(out.find(r => r.pid === "b")).toMatchObject({ rounds: 2, shared: 1, payout: 120 });
-  });
-
-  it("pays nothing for an undecided round", () => {
-    expect(lowNetPayouts({ rounds: [{ round: 1, winners: [] }], perRound: 80 })).toEqual([]);
-  });
-
-  it("orders by money, then name", () => {
-    const out = lowNetPayouts({
-      rounds: [{ round: 1, winners: [w("b", "Brad")] }, { round: 2, winners: [w("a", "Aaron")] }, { round: 3, winners: [w("a", "Aaron")] }],
-      perRound: 80,
-    });
-    expect(out.map(r => r.pid)).toEqual(["a", "b"]);
-  });
-
-  it("survives no pot and no rounds", () => {
-    expect(lowNetPayouts({ rounds: [{ round: 1, winners: [w("a", "Aaron")] }] })[0].payout).toBe(0);
-    expect(lowNetPayouts({})).toEqual([]);
   });
 });

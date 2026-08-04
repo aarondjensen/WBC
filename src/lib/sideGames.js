@@ -176,7 +176,19 @@ export function lowNetRounds({ players, rounds, lineFor }) {
     const entries = (players || []).map(p => {
       const line = lineFor(p.id, round);
       if (!line || !line.played || line.wd || line.thru < 18) return null;
-      return { pid: p.id, name: p.name, net: line.netToPar, gross: line.gross };
+      // Two numbers, because golf says this two ways. `net` is to-par and is
+      // what decides the round — it is the figure the leaderboard ranks on.
+      // `netScore` is the same answer as a SCORE, which is how a low net gets
+      // read out in a car park: "Finn shot 68". Derived rather than stored,
+      // since strokes = grossToPar - netToPar falls straight out of the line.
+      const strokes = line.grossToPar - line.netToPar;
+      return {
+        pid: p.id, name: p.name,
+        net: line.netToPar,
+        netScore: line.gross - strokes,
+        gross: line.gross,
+        strokes,
+      };
     }).filter(Boolean);
 
     if (entries.length === 0) return { round, winners: [], net: null, decided: false };
@@ -190,26 +202,6 @@ export function lowNetRounds({ players, rounds, lineFor }) {
         .sort((a, b) => String(a.name).localeCompare(String(b.name))),
     };
   });
-}
-
-// What each player has won across the rounds. A tied round splits that
-// round's share between the men who tied it — the money is divided, not
-// duplicated, so the total paid out never exceeds the pot.
-export function lowNetPayouts({ rounds, perRound }) {
-  const byPlayer = {};
-  (rounds || []).forEach(r => {
-    const n = (r.winners || []).length;
-    if (n === 0) return;
-    const share = (perRound || 0) / n;
-    r.winners.forEach(w => {
-      const e = byPlayer[w.pid] || (byPlayer[w.pid] = { pid: w.pid, name: w.name, rounds: 0, shared: 0, payout: 0 });
-      e.rounds += 1;
-      if (n > 1) e.shared += 1;
-      e.payout += share;
-    });
-  });
-  return Object.values(byPlayer)
-    .sort((a, b) => b.payout - a.payout || String(a.name).localeCompare(String(b.name)));
 }
 
 // pid → skins won, for the leaderboard.
