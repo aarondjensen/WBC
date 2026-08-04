@@ -2,12 +2,12 @@
 //  BuyInTracker — one sheet for every buy-in, not one panel per game
 // ══════════════════════════════════════════════════════════════════
 //
-//  Four buy-ins run at this tournament: skins, closest-to-the-pin, the market
-//  and the market's halfway rebuy. Everybody takes the first three; about half
-//  take the fourth.
+//  Five buy-ins run at this tournament: skins, closest-to-the-pin, low net,
+//  the market, and the market's halfway rebuy. Everybody takes the first four;
+//  about half take the fifth.
 //
 //  Tracking that one game at a time meant opening a panel, scrolling a roster,
-//  closing it, opening the next — sixteen names times four games, with the
+//  closing it, opening the next — sixteen names times five games, with the
 //  running total living nowhere but the director's head. This is the same
 //  information as a table: a row per player, a column per buy-in, and the two
 //  numbers that actually matter — what this man owes, and what should be in
@@ -19,13 +19,13 @@
 //    • A PLAYER NAME drops that player out of everything — the guy who only
 //      came to drink — and puts them into everything if they are already out
 //      of it all. See toggleRow for why it is not symmetrical.
+//    • A CELL toggles one buy-in for one player, which after the two above is
+//      only the half-dozen rebuys.
 //
 //  A game marked `derived` has no toggles at all. Its column is filled in
 //  from what players have already done rather than from anything the director
 //  tags — the market rebuy is incurred by placing halfway shares, not paid up
 //  front — so the cells are a readout and the row still bills for them.
-//    • A CELL toggles one buy-in for one player, which after the two above is
-//      only the half-dozen rebuys.
 //
 //  THE THREE STATES OF `ids`, which is the whole design underneath:
 //
@@ -42,8 +42,8 @@
 //  everybody is in", which would silently put them straight back in.
 //
 //  `onChange` takes a PATCH SET — { skins: { in: [...] }, ctp: { in: [...] } }
-//  — rather than one game at a time, because a row toggle changes four games
-//  at once and four Firestore writes for one tap is four chances for half of
+//  — rather than one game at a time, because a row toggle changes every game
+//  at once and five Firestore writes for one tap is five chances for half of
 //  them to land.
 
 import { useState } from "react";
@@ -102,8 +102,12 @@ export function BuyInTracker({ players, games, onChange }) {
     onChange(patch);
   };
 
-  const CELL = 38;
-  const cols = `minmax(0, 1fr) repeat(${games.length}, ${CELL}px) 52px`;
+  // Five buy-ins now — skins, CTP, low net, the market and its rebuy — so the
+  // cells give up what the names need. A tick in a 32px box is still a
+  // comfortable tap target; a truncated roster is not readable at all.
+  const CELL = games.length > 4 ? 32 : 38;
+  const OWES = games.length > 4 ? 46 : 52;
+  const cols = `minmax(0, 1fr) repeat(${games.length}, ${CELL}px) ${OWES}px`;
 
   return (
     <div style={{ background: K.card, border: `1px solid ${K.acc}${ALPHA.line}`, borderRadius: R.sm, marginBottom: 8, overflow: "hidden", fontFamily: FONT }}>
@@ -150,7 +154,7 @@ export function BuyInTracker({ players, games, onChange }) {
       </div>
 
       {/* Column headings double as the all-in / all-out toggle. */}
-      <div style={{ display: "grid", gridTemplateColumns: cols, alignItems: "end", gap: 2, padding: "0 12px 6px", borderBottom: `1px solid ${K.bdr}` }}>
+      <div style={{ display: "grid", gridTemplateColumns: cols, alignItems: "end", gap: 2, padding: "0 10px 6px", borderBottom: `1px solid ${K.bdr}` }}>
         <span style={{ fontSize: FS.label, fontWeight: 700, color: K.t3, letterSpacing: 0.5 }}>PLAYER</span>
         {games.map(g => {
           const t = sheet.totals[g.key];
@@ -166,7 +170,7 @@ export function BuyInTracker({ players, games, onChange }) {
       </div>
 
       {sheet.rows.map(row => (
-        <div key={row.pid} style={{ display: "grid", gridTemplateColumns: cols, alignItems: "center", gap: 2, padding: "3px 12px", borderBottom: `1px solid ${K.bdr}${ALPHA.hair}` }}>
+        <div key={row.pid} style={{ display: "grid", gridTemplateColumns: cols, alignItems: "center", gap: 2, padding: "3px 10px", borderBottom: `1px solid ${K.bdr}${ALPHA.hair}` }}>
           <span onClick={() => toggleRow(row.pid)}
             style={{ minWidth: 0, fontSize: FS.small, fontWeight: 600, cursor: "pointer", color: row.owes > 0 ? K.t1 : K.t3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {row.name}
