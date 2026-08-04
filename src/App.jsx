@@ -727,6 +727,10 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
   // this round for anyone who has teed off, the group's tee time for anyone who
   // hasn't. Outside it, the tournament total.
   const inPlay = roundInPlay(lb, round, finalizedRounds[round]);
+  // The board stops being a running total and becomes a RESULT the moment the
+  // director finalizes the last round. Nothing else marks the end of a
+  // tournament — scores can still be corrected up to that point.
+  const tournamentOver = !!finalizedRounds[NUM_ROUNDS];
   const teeTimes = useMemo(
     () => teeTimesByPlayer((pairingsData || {})[round], (teeTimesData || {})[round]),
     [pairingsData, teeTimesData, round],
@@ -1010,6 +1014,10 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                 const rows = lb.map((p, idx) => {
                 const pos = posMap[p.id] ?? idx + 1;
                 const top3 = pos === 1 || pos === "T1";
+                // A tie at the top stays a tie: both rows get the trophy rather
+                // than the board picking a champion out of sort order, which is
+                // a decision the scores have not made.
+                const isChampion = tournamentOver && top3 && !p.isWD && p.roundsPlayed > 0;
                 const isExpanded = expanded === p.id;
                 const mov = movements[p.id];
                 const displayTotal = showGross
@@ -1043,7 +1051,9 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                     <div onClick={() => { setExpanded(isExpanded ? null : p.id); setScorecardRound(null); }} style={{ ...gridStyle, padding: "0 12px", minHeight: 28, height: "100%", alignItems: "center", borderBottom: `1px solid ${K.bdr}${ALPHA.wash}`, background: "transparent", cursor: "pointer", fontSize: rowStyle.fontSize, lineHeight: 1 }}>
                       {/* # */}
                       <span style={{ fontWeight: 800, fontSize: rowStyle.fontSize, color: top3 ? K.acc : K.t2, display: "flex", alignItems: "center", gap: 1 }}>
-                        {pos}
+                        {isChampion
+                          ? <img src={WBC_TROPHY} alt="Champion" title="Champion" style={{ height: fsStep(rowStyle.fontSize, 2), display: "block" }} />
+                          : pos}
                         {/* Stays at micro while the rest of the row steps up:
                             "T12" plus an arrow is what sizes the # column, and
                             a bigger glyph pushes the pair past its width. */}
@@ -1052,7 +1062,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                       {/* Player — a rung above the fitted row size. The name is
                           what you scan the board for, and at the row size it
                           was reading as one column of many. */}
-                      <div style={{ fontWeight: 600, fontSize: fsStep(rowStyle.fontSize, 1), display: "flex", alignItems: "center", gap: 3, overflow: "hidden", paddingRight: 4 }}>
+                      <div style={{ fontWeight: isChampion ? 800 : 600, color: isChampion ? K.acc : undefined, fontSize: fsStep(rowStyle.fontSize, 1), display: "flex", alignItems: "center", gap: 3, overflow: "hidden", paddingRight: 4 }}>
                         {/* flex:1 on the name is what parks the chevron on the
                             right edge of the column instead of trailing the
                             last letter — with names of six or seven characters
@@ -1209,6 +1219,41 @@ function ScoreButtonRow({ score, par, onPick }) {
 
 // ── ON-COURSE SCORING (replaces old ScoringView) ──
 // Flow: Group Setup → Hole-by-hole for entire group → auto-advance
+// ── The bar for "you are not on the live hole" ──
+// Two states, half a tap apart: the hole is already scored, and you have
+// chosen to edit it. They were drawn as two different things — a fixed amber
+// bar on the header band, and an inline tinted strip above the score cards —
+// which made tapping Edit look like the screen had changed into something
+// else. Same bar for both, so what changes when you tap Edit is what it SAYS.
+//
+// It rides ON the app header for the reason the other bars here do: the header
+// is a logo and a caption, so nothing under it is worth tapping, while the
+// hole strip below it is exactly what a scorer reaches for while this is up.
+// It stops 88px short of the right edge to leave the director's group switcher
+// — the one live control on that band — uncovered.
+const HoleStateBar = ({ glyph, label, children }) => (
+  <div style={{
+    position: "fixed", top: `calc(${HEADER_SAFE_PAD} + 6px)`, left: 12, right: 88,
+    display: "flex", alignItems: "center", gap: 8,
+    background: K.warn + ALPHA.tint, backdropFilter: "blur(8px)",
+    border: `1.5px solid ${K.warn}`, borderRadius: R.lg, padding: "8px 12px",
+    zIndex: 1000, boxShadow: "0 8px 32px rgba(0,0,0,0.4)", animation: "toastDownBar 0.3s ease",
+  }}>
+    <span style={{
+      flexShrink: 0, width: 18, height: 18, borderRadius: "50%", background: K.warn, color: ON_ACC,
+      fontSize: FS.micro, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center",
+    }}>{glyph}</span>
+    <span style={{ flex: 1, fontSize: FS.small, fontWeight: 800, color: K.warn, lineHeight: 1.2 }}>{label}</span>
+    {children}
+  </div>
+);
+// The bar's two actions. Filled either way: the button that resolves this
+// state should never be the quietest thing on the bar it belongs to.
+const holeBarBtn = (fill) => ({
+  padding: "7px 10px", borderRadius: R.sm, background: fill, border: "none",
+  color: ON_ACC, fontSize: FS.label, fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap",
+});
+
 function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPlayers, onSaveHole, notify, pairingsData, teeTimesData, roundDates, scoringOpen, setTee, getPlayerTee, finalizedRounds, scorecardSigs, onSignScorecard, onAttestScorecard, onUnsignScorecard, onFinalizeRound, onUnfinalizeRound, onGoToAdminCourses, markPlayerWD, ctpData, onSetCtp, onConfirmCtp, directorPick, onGroupChange, onSetRound }) {
   const [group, setGroup] = useState(null);
   const [currentHole, setCurrentHole] = useState(0);
@@ -2105,9 +2150,11 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
             if (s === 1) displayScores[0] = 1;
             if (s > maxBase) displayScores[displayScores.length - 1] = s;
             return (
-              <div key={p.id} style={{
-                background: K.card, borderRadius: R.md, border: `1px solid ${K.bdr}`,
-                padding: "8px 10px", opacity: 0.7,
+              // Tapping a locked card IS the request to edit it — that tap was
+              // already happening, it just landed on nothing.
+              <div key={p.id} onClick={() => setEditingCompleted(true)} style={{
+                background: K.card, borderRadius: R.md, border: `1px solid ${K.warn}${ALPHA.hair}`,
+                padding: "8px 10px", opacity: 0.85, cursor: "pointer",
               }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -2115,6 +2162,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
                     <span style={{ fontSize: FS.label, color: K.acc, fontWeight: 700 }}>{ch}</span>
                     {strokes > 0 && <span style={{ color: K.acc, fontSize: FS.label, letterSpacing: "-1px" }}>{"●".repeat(strokes)}</span>}
                   </div>
+                  <span style={{ fontSize: FS.micro, color: K.warn, fontWeight: 700, letterSpacing: "0.06em" }}>✏️ TAP TO EDIT</span>
                 </div>
                 <div style={{ display: "flex", gap: 3 }}>
                   {displayScores.map(btn => {
@@ -2148,20 +2196,6 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
           })}
         </div>
       </>)}
-
-      {/* Return to play banner */}
-      {editingCompleted && (
-        <div style={{
-          background: K.warn + ALPHA.tint, border: `1.5px solid ${K.warn}`, borderRadius: R.sm,
-          padding: "6px 12px", marginBottom: 6, display: "flex", justifyContent: "space-between", alignItems: "center",
-        }}>
-          <span style={{ fontSize: FS.small, color: K.warn, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em" }}>✏️ EDITING HOLE {currentHole + 1}</span>
-          <button onClick={returnToPlay} style={{
-            padding: "4px 12px", borderRadius: R.sm, background: K.acc, border: "none",
-            color: K.bg, fontSize: FS.label, fontWeight: 700, cursor: "pointer",
-          }}>Resume Hole {findNextIncompleteHole() + 1} →</button>
-        </div>
-      )}
 
       {/* Signed notice — score entry is locked once the card is signed (unsign to edit) */}
       {isSigned && (
@@ -2773,17 +2807,20 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
           "Resume Hole 18 →" shortens to "Hole 18 →" — the row has three things
           on it now, and the green button is self-evidently the way onward. */}
       {onCompletedHole && (
-        <div style={{ position: "fixed", top: `calc(${HEADER_SAFE_PAD} + 6px)`, left: 12, right: 88, display: "flex", alignItems: "center", gap: 8, background: K.card, border: `1px solid ${K.warn}${ALPHA.line}`, borderRadius: R.lg, padding: "8px 12px", zIndex: 1000, boxShadow: "0 8px 32px rgba(0,0,0,0.4)", animation: "toastDownBar 0.3s ease" }}>
-          <span style={{ flex: 1, fontSize: FS.label, fontWeight: 700, color: K.warn }}>Hole {currentHole + 1} already complete</span>
-          <button onClick={() => setEditingCompleted(true)} style={{
-            padding: "7px 10px", borderRadius: R.sm, background: K.inp, border: `1px solid ${K.warn}${ALPHA.hair}`,
-            color: K.warn, fontSize: FS.label, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap",
-          }}>Edit Scores</button>
-          <button onClick={returnToPlay} style={{
-            padding: "7px 10px", borderRadius: R.sm, background: K.acc, border: "none",
-            color: K.bg, fontSize: FS.label, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap",
-          }}>Hole {findNextIncompleteHole() + 1} →</button>
-        </div>
+        <HoleStateBar glyph="✓" label={`Hole ${currentHole + 1} already scored`}>
+          <button onClick={() => setEditingCompleted(true)} style={holeBarBtn(K.warn)}>✏️ Edit</button>
+          <button onClick={returnToPlay} style={holeBarBtn(K.acc)}>Hole {findNextIncompleteHole() + 1} →</button>
+        </HoleStateBar>
+      )}
+      {/* The other half of the same state, and now the same bar: you tapped
+          Edit, the cards below went live, and this stays pinned to say which
+          hole you are editing and how to get back to the live one. It was an
+          inline strip above the cards, which scrolled away exactly when you
+          were deepest into the thing it was warning you about. */}
+      {editingCompleted && (
+        <HoleStateBar glyph="✎" label={`Editing hole ${currentHole + 1}`}>
+          <button onClick={returnToPlay} style={holeBarBtn(K.acc)}>Hole {findNextIncompleteHole() + 1} →</button>
+        </HoleStateBar>
       )}
       {allRoundComplete && !isGroupFinalized && !isSigned && !showFinalize && !onCompletedHole && (
         <div style={{ position: "fixed", top: `calc(${HEADER_SAFE_PAD} + 6px)`, left: 12, right: 88, display: "flex", alignItems: "center", gap: 10, background: K.acc, color: K.bg, padding: "10px 14px", borderRadius: R.lg, fontSize: FS.small, fontWeight: 700, zIndex: 1000, boxShadow: "0 8px 32px rgba(0,0,0,0.4)", animation: "toastDownBar 0.3s ease" }}>
