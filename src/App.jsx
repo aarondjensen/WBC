@@ -1218,7 +1218,18 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
   const [showCtpForHole, setShowCtpForHole] = useState(null);
   const promptedCtpKeys = useRef({});
   const [ctpPickPlayer, setCtpPickPlayer] = useState("");
-  const [ctpFeet, setCtpFeet] = useState(10);
+  // NULL until the group sets one. A seeded default is a number nobody chose,
+  // and it would ride onto the card as though somebody had paced it off — so
+  // the wheel starts unanswered and Tag stays dead until it is answered.
+  const [ctpFeet, setCtpFeet] = useState(null);
+  // Where the wheel PARKS before anything is chosen — the standing tag, or a
+  // sensible 10 — kept apart from ctpFeet so parking somewhere is not the
+  // same as choosing it.
+  const [ctpFeetStart, setCtpFeetStart] = useState(10);
+  // The wheel scrolls itself into position on mount, and that fires the same
+  // scroll event a thumb does. This flips only on a real gesture, so the
+  // programmatic scroll cannot mark the distance as chosen.
+  const ctpWheelTouched = useRef(false);
   // Front 9 check — shown once per group per round as they arrive on hole 10.
   // Same session-guard shape as the CTP prompt, and for the same reason: one
   // device can score more than one group, so the key carries the group.
@@ -1486,7 +1497,9 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
     // Seed the wheel at the standing distance so "beat it" means scrolling up, not
     // hunting from a cold 10 ft default.
     setCtpPickPlayer("");
-    setCtpFeet(leader?.distanceFt ? Math.max(1, Math.min(CTP_MAX_FT, leader.distanceFt)) : 10);
+    setCtpFeet(null);
+    ctpWheelTouched.current = false;
+    setCtpFeetStart(leader?.distanceFt ? Math.max(1, Math.min(CTP_MAX_FT, leader.distanceFt)) : 10);
     setShowCtpForHole(currentHole);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allScored, par, currentHole, round, ctpData, editingCompleted, isGroupFinalized]);
@@ -2314,23 +2327,36 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
         const closeAndAdvance = () => { setShowCtpForHole(null); setCtpPickPlayer(""); };
         // Beating the standing tag is a strictly-shorter distance. Equal isn't closer —
         // ties keep the earlier group's tag (first to hole it holds the pin).
-        const beatsLeader = !leader || !leader.distanceFt || ctpFeet < leader.distanceFt;
-        const canTag = !!ctpPickPlayer && beatsLeader;
+        // Undecided is not "beats it": until a distance is chosen there is
+        // nothing to compare, so the question simply has not been answered.
+        const chosen = ctpFeet != null;
+        const beatsLeader = !leader || !leader.distanceFt || (chosen && ctpFeet < leader.distanceFt);
+        // BOTH halves, deliberately. A name with no distance is a claim
+        // nobody measured, and it would go onto the card looking like one
+        // somebody did.
+        const canTag = !!ctpPickPlayer && chosen && beatsLeader;
         const save = async () => {
           if (!canTag) return;
           tapBigAction();
           try { await onSetCtp?.(round, holeNum, ctpPickPlayer, ctpFeet); } catch {}
           closeAndAdvance();
         };
-        // Wheel: set scrollTop once when the scroll node mounts, then derive feet from
-        // scroll position. Snap stride === CTP_WHEEL_ITEM so a settle always lands on a row.
+        // Wheel: park it on ctpFeetStart when the scroll node mounts, then derive feet
+        // from scroll position. Snap stride === CTP_WHEEL_ITEM so a settle always lands
+        // on a row.
         const wheelRef = (el) => {
           if (el && !el.dataset.init) {
             el.dataset.init = "1";
-            el.scrollTop = (ctpFeet - 1) * CTP_WHEEL_ITEM;
+            el.scrollTop = (ctpFeetStart - 1) * CTP_WHEEL_ITEM;
           }
         };
+        // A gesture, not a scroll, is what counts as choosing. Setting scrollTop above
+        // fires the same scroll event a thumb does, so reading the scroll alone would
+        // mark the parked value as chosen the instant the wheel appeared. Pointer,
+        // touch and wheel between them cover a thumb, a stylus and a trackpad.
+        const markTouched = () => { ctpWheelTouched.current = true; };
         const onWheelScroll = (e) => {
+          if (!ctpWheelTouched.current) return;
           const v = Math.max(1, Math.min(CTP_MAX_FT, Math.round(e.currentTarget.scrollTop / CTP_WHEEL_ITEM) + 1));
           setCtpFeet(prev => (prev === v ? prev : v));
         };
@@ -2355,72 +2381,108 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
                 </div>
               )}
 
-              <div style={{ fontSize: FS.label, fontWeight: 800, color: K.t3, letterSpacing: 1.2, textTransform: "uppercase", marginBottom: 6 }}>
-                {leader ? "Who was closer?" : "Who was closest?"}
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 14 }}>
-                {presentGroupPids.map(pid => {
-                  const pl = players.find(p => p.id === pid);
-                  if (!pl) return null;
-                  const sel = ctpPickPlayer === pid;
-                  return (
-                    <button key={pid} onClick={() => { tapNudge(); setCtpPickPlayer(sel ? "" : pid); }} style={{
-                      padding: "11px 6px", borderRadius: R.md,
-                      background: sel ? K.acc + ALPHA.tint : K.inp,
-                      border: `1px solid ${sel ? K.acc : K.bdr}`,
-                      color: sel ? K.acc : K.t2,
-                      fontSize: FS.small, fontWeight: 700, cursor: "pointer", textAlign: "center",
-                    }}>{pl.name}</button>
-                  );
-                })}
+              {/* ── Who was closest ── */}
+              {/* One card holding the whole first question: the names, and
+                  the answer for when it was none of them. Passing used to sit
+                  at the very bottom under Tag, which put the group's most
+                  common answer furthest from the question and behind a
+                  control that did not apply to them. */}
+              <div style={{ background: K.inp, border: `1px solid ${K.bdr}`, borderRadius: R.lg, padding: "10px 12px", marginBottom: 12 }}>
+                <div style={{ fontSize: FS.label, fontWeight: 800, color: K.t3, letterSpacing: 1.2, textTransform: "uppercase", marginBottom: 8 }}>
+                  {leader ? "Who was closer?" : "Who was closest?"}
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 8 }}>
+                  {presentGroupPids.map(pid => {
+                    const pl = players.find(p => p.id === pid);
+                    if (!pl) return null;
+                    const sel = ctpPickPlayer === pid;
+                    return (
+                      <button key={pid}
+                        onClick={() => {
+                          tapNudge();
+                          // Changing who it was un-answers the distance: the
+                          // number belonged to the other man's shot.
+                          setCtpPickPlayer(sel ? "" : pid);
+                          setCtpFeet(null);
+                          ctpWheelTouched.current = false;
+                        }}
+                        style={{
+                          padding: "11px 6px", borderRadius: R.md,
+                          background: sel ? K.acc + ALPHA.tint : K.card,
+                          border: `1px solid ${sel ? K.acc : K.bdr}`,
+                          color: sel ? K.acc : K.t2,
+                          fontSize: FS.small, fontWeight: 700, cursor: "pointer", textAlign: "center",
+                        }}>{pl.name}</button>
+                    );
+                  })}
+                </div>
+                {/* Passing is an ANSWER, not a dismissal. A group that walks
+                    off without getting inside the standing tag is saying it is
+                    right, and recording that is what lets the Betting tab tell
+                    "nobody has been asked" apart from "everybody has been
+                    asked and it stands". The last group to confirm is the one
+                    that settles the pin. */}
+                <Btn variant="secondary" size="sm" block
+                  onClick={async () => {
+                    tapNudge();
+                    if (leader) { try { await onConfirmCtp?.(round, holeNum, user?.id); } catch { /* the pass still closes */ } }
+                    closeAndAdvance();
+                  }}
+                  style={{ color: K.t3 }}>
+                  {leader ? `Confirm — ${leaderPl?.name || "the standing CTP"} keeps it` : "None of us — skip"}
+                </Btn>
               </div>
 
-              <div style={{ fontSize: FS.label, fontWeight: 800, color: K.t3, letterSpacing: 1.2, textTransform: "uppercase", marginBottom: 6 }}>Approx. distance</div>
-              <div style={{ position: "relative", height: CTP_WHEEL_H, background: K.inp, border: `1px solid ${K.bdr}`, borderRadius: R.lg, overflow: "hidden", marginBottom: 10 }}>
-                {/* selection band */}
-                <div style={{ position: "absolute", left: 10, right: 10, top: "50%", height: CTP_WHEEL_ITEM + 2, transform: "translateY(-50%)", borderTop: `1.5px solid ${K.acc}`, borderBottom: `1.5px solid ${K.acc}`, borderRadius: R.xs, background: K.acc + ALPHA.wash, pointerEvents: "none", zIndex: 2 }} />
-                <div style={{ position: "absolute", right: 46, top: "50%", transform: "translateY(-50%)", fontSize: FS.label, fontWeight: 800, color: K.acc, letterSpacing: 1.2, pointerEvents: "none", zIndex: 2 }}>FT</div>
-                <div
-                  ref={wheelRef}
-                  onScroll={onWheelScroll}
-                  style={{ height: "100%", overflowY: "scroll", scrollSnapType: "y mandatory", padding: `${(CTP_WHEEL_H - CTP_WHEEL_ITEM) / 2}px 0`, WebkitOverflowScrolling: "touch", scrollbarWidth: "none" }}
-                >
-                  {Array.from({ length: CTP_MAX_FT }, (_, i) => i + 1).map(ft => (
-                    <div key={ft} style={{ height: CTP_WHEEL_ITEM, lineHeight: `${CTP_WHEEL_ITEM}px`, textAlign: "center", fontSize: ft === ctpFeet ? FS.title : FS.lead, fontWeight: ft === ctpFeet ? 800 : 700, color: ft === ctpFeet ? K.t1 : K.t3, scrollSnapAlign: "center" }}>
-                      {ft}
+              {/* ── How close ── */}
+              {/* Only once somebody is claiming it. Asking a group to set a
+                  distance before they have said whose shot it was is asking
+                  the second question first, and the group whose answer is
+                  "none of us" never needed it at all. */}
+              {ctpPickPlayer && (
+                <>
+                  <div style={{ fontSize: FS.label, fontWeight: 800, color: K.t3, letterSpacing: 1.2, textTransform: "uppercase", marginBottom: 6 }}>
+                    Approx. distance
+                  </div>
+                  <div style={{ position: "relative", height: CTP_WHEEL_H, background: K.inp, border: `1px solid ${chosen ? K.acc + ALPHA.line : K.bdr}`, borderRadius: R.lg, overflow: "hidden", marginBottom: 10 }}>
+                    {/* selection band */}
+                    <div style={{ position: "absolute", left: 10, right: 10, top: "50%", height: CTP_WHEEL_ITEM + 2, transform: "translateY(-50%)", borderTop: `1.5px solid ${chosen ? K.acc : K.t3}`, borderBottom: `1.5px solid ${chosen ? K.acc : K.t3}`, borderRadius: R.xs, background: chosen ? K.acc + ALPHA.wash : "transparent", pointerEvents: "none", zIndex: 2 }} />
+                    <div style={{ position: "absolute", right: 46, top: "50%", transform: "translateY(-50%)", fontSize: FS.label, fontWeight: 800, color: chosen ? K.acc : K.t3, letterSpacing: 1.2, pointerEvents: "none", zIndex: 2 }}>FT</div>
+                    <div
+                      ref={wheelRef}
+                      onScroll={onWheelScroll}
+                      onPointerDown={markTouched}
+                      onTouchStart={markTouched}
+                      onWheel={markTouched}
+                      style={{ height: "100%", overflowY: "scroll", scrollSnapType: "y mandatory", padding: `${(CTP_WHEEL_H - CTP_WHEEL_ITEM) / 2}px 0`, WebkitOverflowScrolling: "touch", scrollbarWidth: "none" }}
+                    >
+                      {Array.from({ length: CTP_MAX_FT }, (_, i) => i + 1).map(ft => (
+                        <div key={ft} style={{ height: CTP_WHEEL_ITEM, lineHeight: `${CTP_WHEEL_ITEM}px`, textAlign: "center", fontSize: ft === ctpFeet ? FS.title : FS.lead, fontWeight: ft === ctpFeet ? 800 : 700, color: ft === ctpFeet ? K.t1 : K.t3, scrollSnapAlign: "center" }}>
+                          {ft}
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-                {/* edge fades */}
-                <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 46, background: `linear-gradient(${K.inp}, transparent)`, pointerEvents: "none" }} />
-                <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 46, background: `linear-gradient(transparent, ${K.inp})`, pointerEvents: "none" }} />
-              </div>
+                    {/* edge fades */}
+                    <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 46, background: `linear-gradient(${K.inp}, transparent)`, pointerEvents: "none" }} />
+                    <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 46, background: `linear-gradient(transparent, ${K.inp})`, pointerEvents: "none" }} />
+                  </div>
 
-              {/* Why the tag button is dead — surfaced instead of leaving it mysteriously grey */}
-              {ctpPickPlayer && !beatsLeader && (
-                <div style={{ fontSize: FS.label, color: K.warn, textAlign: "center", marginBottom: 8, lineHeight: 1.4 }}>
-                  {ctpFeet === leader.distanceFt
-                    ? `Tied with ${leaderPl?.name || "the current CTP"} — the earlier tag holds.`
-                    : `Not inside ${leaderDist} — ${leaderPl?.name || "the current CTP"} keeps it.`}
-                </div>
+                  {/* Why the tag button is dead — surfaced instead of leaving it mysteriously grey */}
+                  {!chosen && (
+                    <div style={{ fontSize: FS.label, color: K.t3, textAlign: "center", marginBottom: 8, lineHeight: 1.4 }}>
+                      Spin the wheel to set how close {players.find(p => p.id === ctpPickPlayer)?.name.split(" ")[0] || "they"} was.
+                    </div>
+                  )}
+                  {chosen && !beatsLeader && (
+                    <div style={{ fontSize: FS.label, color: K.warn, textAlign: "center", marginBottom: 8, lineHeight: 1.4 }}>
+                      {ctpFeet === leader.distanceFt
+                        ? `Tied with ${leaderPl?.name || "the current CTP"} — the earlier tag holds.`
+                        : `Not inside ${leaderDist} — ${leaderPl?.name || "the current CTP"} keeps it.`}
+                    </div>
+                  )}
+
+                  <Btn block disabled={!canTag} onClick={save} style={{ letterSpacing: 0.5 }}>{leader ? "Tag New CTP" : "Tag CTP"}</Btn>
+                </>
               )}
-
-              <Btn block disabled={!canTag} onClick={save} style={{ letterSpacing: 0.5 }}>{leader ? "Tag New CTP" : "Tag CTP"}</Btn>
-              {/* Passing is an ANSWER, not a dismissal. A group that walks off
-                  without getting inside the standing tag is saying it is
-                  right, and recording that is what lets the Betting tab tell
-                  "nobody has been asked" apart from "everybody has been asked
-                  and it stands". The last group to confirm is the one that
-                  settles the pin. */}
-              <Btn variant="secondary" size="sm" block
-                onClick={async () => {
-                  tapNudge();
-                  if (leader) { try { await onConfirmCtp?.(round, holeNum, user?.id); } catch { /* the pass still closes */ } }
-                  closeAndAdvance();
-                }}
-                style={{ marginTop: 7, color: K.t3 }}>
-                {leader ? `Confirm — ${leaderPl?.name || "the standing CTP"} keeps it` : "None of us — skip"}
-              </Btn>
             </div>
           </Popup>
         );
@@ -8249,7 +8311,9 @@ export default function WBCApp() {
       // show groups signing off a number they never saw.
       confirmed_by: [],
     }, "id");
-    notify(ft ? `CTP Hole ${hole} — ${ft} ft` : `CTP Hole ${hole} set`);
+    // No toast. The prompt closing IS the acknowledgement, and this one fired
+    // on a screen the group is about to walk away from — a banner over the
+    // next hole's scores telling them what they just did.
   };
 
   // ── The side games' money ────────────────────────────────────────
@@ -8328,7 +8392,7 @@ export default function WBCApp() {
       tournament_id: TOURNAMENT_ID,
       confirmed_by: confirmedBy,
     }, "id");
-    notify(`CTP Hole ${hole} confirmed`);
+    // Same as onSetCtp: the prompt closing is the acknowledgement.
   };
 
   const setPairings = async (rnd, groups) => {
