@@ -5,7 +5,7 @@ import { readMembership, isDirectorAccount, resolveMember, joinWithCode, readAcc
 import { K, ON_ACC, FS, fsStep, R, ALPHA, MOTION, FONT, SHADOW, SCRIM } from "./theme";
 import { SegmentedToggle, StickyTop, SectionLabel, Card, Toast, Btn } from "./components/ui";
 import { calcCH, buildStrokesMap, computeRoundLine, computeIndividualBoard, rankIndividualBoard, rankIndividualBoardIds, WD_SCORE } from "./lib/individualBoard";
-import { fieldFor, potFor, perUnit, computeSkins, allSkins, skinCounts, lowNetRounds, lowNetPayouts } from "./lib/sideGames";
+import { fieldFor, potFor, perUnit, computeSkins, allSkins, skinCounts, lowNetRounds } from "./lib/sideGames";
 import { teeTimesByPlayer, roundInPlay, thruStatus } from "./lib/thruStatus";
 import {
   MARKET_OPENING_SHARES, MARKET_MID_SHARES, marketWindows, normalizeLots, totalShares,
@@ -3107,7 +3107,6 @@ function BettingView({
   // tees off, so winning Thursday is worth the same whatever happens Friday.
   const lowNetPerRound = perUnit(lowNetPot, roundList.length);
   const lowNetRows = lowNetRounds({ players: lowNetField, rounds: roundList, lineFor });
-  const lowNetBoard = lowNetPayouts({ rounds: lowNetRows, perRound: lowNetPerRound });
   const settledPins = ctpTags.filter(t => roundSettled(t.round)).length;
 
   // ── The market tab ──
@@ -3717,30 +3716,17 @@ function BettingView({
             rightBottom: `${money(lowNetPerRound)} / round`,
           })}
 
-          {/* The board first — what each man has actually won — then the
-              rounds it came from. Same order as Skins: money, then the
-              evidence. */}
-          {lowNetBoard.length > 0 && (
-            <div style={{ background: K.card, borderRadius: R.lg, border: `1px solid ${K.bdr}`, marginBottom: 10, overflow: "hidden" }}>
-              <div style={{ padding: "8px 14px", borderBottom: `1px solid ${K.bdr}`, fontSize: FS.label, fontWeight: 700, color: K.gold, letterSpacing: 1 }}>LOW NET LEADERS</div>
-              {lowNetBoard.map(r => (
-                <div key={r.pid} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", borderBottom: `1px solid ${K.bdr}${ALPHA.hair}` }}>
-                  <span style={{ flex: 1, minWidth: 0, fontSize: FS.body, fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</span>
-                  <span style={{ fontSize: FS.body, fontWeight: 700, color: K.acc, flexShrink: 0 }}>
-                    {r.rounds} round{r.rounds !== 1 ? "s" : ""}
-                    {r.shared > 0 && <span style={{ color: K.t3, fontWeight: 600 }}> · {r.shared} split</span>}
-                  </span>
-                  <span style={{ fontSize: FS.small, color: K.t3, flexShrink: 0, minWidth: 56, textAlign: "right" }}>{money(r.payout)}</span>
-                </div>
-              ))}
-            </div>
-          )}
-
           {/* Every round on one screen rather than behind pills: there are
               four of them, each is one line, and the question this tab
-              answers — who took which day — is a comparison across them. */}
+              answers — who took which day — is a comparison across them.
+              No leaders card above it: with four rounds the totals are a
+              sum anybody can do off these rows, and a second card repeating
+              the same names was a longer way to say it. */}
           <div style={{ background: K.card, borderRadius: R.lg, border: `1px solid ${K.bdr}`, overflow: "hidden" }}>
-            <div style={{ padding: "8px 14px", borderBottom: `1px solid ${K.bdr}`, fontSize: FS.label, fontWeight: 700, color: K.gold, letterSpacing: 1 }}>BY ROUND</div>
+            <div style={{ display: "flex", padding: "8px 14px", borderBottom: `1px solid ${K.bdr}`, fontSize: FS.label, fontWeight: 700, color: K.gold, letterSpacing: 1 }}>
+              <span style={{ flex: 1 }}>BY ROUND</span>
+              <span style={{ color: K.t3 }}>NET · PAYS</span>
+            </div>
             {lowNetRows.map(r => {
               const settled = roundSettled(r.round);
               const share = r.winners.length > 0 ? lowNetPerRound / r.winners.length : 0;
@@ -3755,8 +3741,27 @@ function BettingView({
                             last group comes in, so it says so rather than
                             reading like a result. */}
                         {!settled && <span style={{ color: K.warn, fontWeight: 700 }}> · still out</span>}
+                        {/* The gross it came off, so the number can be
+                            checked against the card rather than taken on
+                            trust — this is the line that gets argued about.
+                            Only for a lone winner: two men tie on the NET,
+                            off different grosses and different strokes, so
+                            one gross printed under both names is a sum that
+                            does not work for either of them. */}
+                        <span style={{ display: "block", fontSize: FS.label, color: K.t3, fontWeight: 600 }}>
+                          {r.winners.length === 1
+                            ? `${r.winners[0].gross} gross · ${r.winners[0].strokes} stroke${r.winners[0].strokes !== 1 ? "s" : ""}`
+                            : `${r.winners.length} tied on ${r.winners[0].netScore} net`}
+                        </span>
                       </span>
-                      <span style={{ fontSize: FS.body, fontWeight: 800, color: K.acc, flexShrink: 0 }}>{fmtPar(r.net)}</span>
+                      {/* The net as a SCORE, which is how a low net is read
+                          out, with the to-par under it — the figure the
+                          leaderboard ranks on and the one that decided the
+                          round. */}
+                      <span style={{ textAlign: "right", flexShrink: 0 }}>
+                        <span style={{ display: "block", fontSize: FS.body, fontWeight: 800, color: K.acc }}>{r.winners[0].netScore}</span>
+                        <span style={{ display: "block", fontSize: FS.label, color: K.t3, fontWeight: 700 }}>{fmtPar(r.net)}</span>
+                      </span>
                       <span style={{ fontSize: FS.small, color: K.t3, flexShrink: 0, minWidth: 64, textAlign: "right" }}>
                         {money(share)}{r.winners.length > 1 ? " ea" : ""}
                       </span>
