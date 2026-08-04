@@ -8,18 +8,17 @@
 // screen (an ace on a par 3, a 9 on a par 4).
 //
 // The ± buttons exist for scores the row does NOT show. That is the whole
-// point of them, and it decides where a cold tap lands:
+// point of them, and it decides where a cold tap lands: one step PAST the end
+// of the row it points at, never onto a button already under the thumb.
 //
-//   +  with nothing entered opens at ONE PAST the highest button showing.
-//      Stepping from par landed on par+1 — a bogey, a button already under
-//      the player's thumb — so the + did nothing the row couldn't. Nobody
-//      reaches for + to enter a bogey; they reach for it because the number
-//      they need is off the end of the row.
+//   +  with nothing entered opens at one past the highest button — par+4.
+//      Stepping from par landed on par+1, a bogey, which the row already
+//      offers. Nobody reaches for + to enter a bogey; they reach for it
+//      because their number is off the end of the row.
 //
-//   −  with nothing entered still steps from par, to a birdie. Below the row
-//      is eagle-and-better: a 2 on a par 4. That is rare enough that opening
-//      the − at par−2 would be the wrong guess far more often than it was
-//      right, which is not true of a big number going the other way.
+//   −  with nothing entered opens at one under the lowest button — par−2, an
+//      eagle. Same reasoning in the other direction: par−1 is the Birdie
+//      button, so opening there gave the − nothing to do.
 //
 // With a score already entered, both step from that score.
 
@@ -51,8 +50,11 @@ export function nudgeUpTarget(score, par) {
   return btns[btns.length - 1] + 1;
 }
 
-// Where − goes: one under the entered score, or a birdie from cold. Never
-// below 1 — there is no such thing as a 0.
+// Where − goes: one under the entered score, or one under the bottom of the
+// row when nothing is entered yet. Never below 1 — there is no such thing as
+// a 0, so a cold − on a par 3 is an ace rather than a 0.
 export function nudgeDownTarget(score, par) {
-  return Math.max(1, (score > 0 ? score : par) - 1);
+  if (score > 0) return Math.max(1, score - 1);
+  const { btns } = scoreWindow(par, score);
+  return Math.max(1, btns[0] - 1);
 }

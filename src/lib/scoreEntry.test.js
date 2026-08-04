@@ -36,9 +36,10 @@ describe("nudgeUpTarget", () => {
 });
 
 describe("nudgeDownTarget", () => {
-  it("opens on a birdie from cold", () => {
-    expect(nudgeDownTarget(0, 4)).toBe(3);
-    expect(nudgeDownTarget(undefined, 3)).toBe(2);
+  // Mirror of the + fix: par−1 is the Birdie button, so a cold − skips past it.
+  it("opens one under the bottom of the row when nothing is entered", () => {
+    expect(nudgeDownTarget(0, 4)).toBe(2);
+    expect(nudgeDownTarget(undefined, 5)).toBe(3);
   });
 
   it("steps down from a score already entered", () => {
@@ -47,5 +48,7 @@ describe("nudgeDownTarget", () => {
 
   it("never goes below 1", () => {
     expect(nudgeDownTarget(1, 3)).toBe(1);
+    // A cold − on a par 3 wants par−2, which is a 0. It gives an ace instead.
+    expect(nudgeDownTarget(0, 3)).toBe(1);
   });
 });
