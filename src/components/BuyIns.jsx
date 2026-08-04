@@ -174,6 +174,10 @@ export function BuyInTracker({ players, games, onChange }) {
           <span onClick={() => toggleRow(row.pid)}
             style={{ minWidth: 0, fontSize: FS.small, fontWeight: 600, cursor: "pointer", color: row.owes > 0 ? K.t1 : K.t3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {row.name}
+            {/* Withdrawals stay ON the sheet — they paid — and are marked so
+                the director is not left wondering why a man who went home on
+                Saturday is still being billed. */}
+            {row.wd && <span style={{ color: K.t3, fontWeight: 700 }}> · WD</span>}
           </span>
           {games.map(g => {
             const on = row.games[g.key];

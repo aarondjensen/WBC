@@ -157,6 +157,16 @@ describe("buyInSheet", () => {
     expect(rows.map(r => [r.name, r.owes])).toEqual([["Aaron", 80], ["Brad", 55], ["Cole", 30]]);
   });
 
+  // A withdrawal stays on the sheet and stays billed: he paid, and walking in
+  // does not refund a buy-in. The flag is only so the sheet can say why he is
+  // still there.
+  it("keeps a withdrawn player on the sheet, billed, and marked", () => {
+    const roster = [{ id: "a", name: "Aaron" }, { id: "b", name: "Brad", isWD: true }];
+    const { rows, grand } = buyInSheet({ players: roster, games });
+    expect(rows.map(r => [r.name, r.wd, r.owes])).toEqual([["Aaron", false, 80], ["Brad", true, 55]]);
+    expect(grand).toBe(135);
+  });
+
   it("says which games each player is in", () => {
     const { rows } = buyInSheet({ players, games });
     expect(rows[2].games).toEqual({ skins: true, ctp: true, market: false, rebuy: false });
