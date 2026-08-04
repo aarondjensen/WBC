@@ -899,17 +899,19 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
           const priorW = 22;
           const gridCols = `32px ${playerColW} ${statW}px ${statW}px 1fr${allPriorRounds.map(() => ` ${priorW}px`).join("")}`;
           const gridStyle = { display: "grid", gridTemplateColumns: gridCols, alignItems: "center" };
-          // The Total column is drawn as a band running the whole height of the
-          // board rather than as a number sitting loose in each row. Every row
-          // paints its own slice — full-bleed top to bottom, hairline down each
-          // side — and the slices stack into one continuous column, so the
-          // number the standings are actually ranked on is boxed off from the
-          // round-by-round detail either side of it.
-          const totalBand = {
+          // Total and Thru are drawn as one band running the whole height of
+          // the board rather than as numbers sitting loose in each row. Every
+          // row paints its own slice — full-bleed top to bottom — and the
+          // slices stack into one continuous block, so where a player stands
+          // and how far in they are read together, boxed off from the
+          // round-by-round detail either side. The hairline is on the OUTER
+          // edge of each end only: a rule between Total and Thru would split
+          // the band back into two columns, which is what it exists to undo.
+          const bandStart = {
             alignSelf: "stretch", display: "flex", alignItems: "center", justifyContent: "center",
-            background: K.t3 + ALPHA.wash,
-            borderLeft: `1px solid ${K.bdr}`, borderRight: `1px solid ${K.bdr}`,
+            background: K.t3 + ALPHA.wash, borderLeft: `1px solid ${K.bdr}`,
           };
+          const bandEnd = { ...bandStart, borderLeft: undefined, borderRight: `1px solid ${K.bdr}` };
           return (
             <>
               <div ref={headerRef} style={{ ...gridStyle, padding: "7px 12px", fontSize: FS.micro, fontWeight: 600, color: K.t3, textTransform: "uppercase", letterSpacing: "0.06em", borderBottom: `1px solid ${K.bdr}` }}>
@@ -917,8 +919,8 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                 <span>Player</span>
                 {/* Negative margin eats the header's own padding so the band
                     starts at the top edge instead of 7px down from it. */}
-                <span style={{ ...totalBand, margin: "-7px 0", padding: "7px 0", fontWeight: 700, color: K.t2 }}>{showGross ? "Gross" : showToPar ? "Total" : "Strokes"}</span>
-                <span style={{ textAlign: "center" }}>Thru</span>
+                <span style={{ ...bandStart, margin: "-7px 0", padding: "7px 0", fontWeight: 700, color: K.t2 }}>{showGross ? "Gross" : showToPar ? "Total" : "Strokes"}</span>
+                <span style={{ ...bandEnd, margin: "-7px 0", padding: "7px 0", fontWeight: 700, color: K.t2 }}>Thru</span>
                 <span />
                 {allPriorRounds.map(r => <span key={r} style={{ textAlign: "center" }}>R{r}</span>)}
               </div>
@@ -943,7 +945,6 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                 }
                 const rows = lb.map((p, idx) => {
                 const pos = posMap[p.id] ?? idx + 1;
-                const rd = p.rds[round - 1];
                 const top3 = pos === 1 || pos === "T1";
                 const isExpanded = expanded === p.id;
                 const mov = movements[p.id];
@@ -992,11 +993,17 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                       {/* Full-strength ink, not the t2 the row's other numbers
                           take: under par still prints red, everything else is
                           the brightest thing in the row. */}
-                      <span style={{ ...totalBand, fontWeight: 800, fontSize: fsStep(rowStyle.fontSize, 1), color: p.isWD || displayTotal == null ? K.t3 : (!showGross && showToPar && displayTotal < 0 ? K.under : K.t1) }}>
+                      <span style={{ ...bandStart, fontWeight: 800, fontSize: fsStep(rowStyle.fontSize, 1), color: p.isWD || displayTotal == null ? K.t3 : (!showGross && showToPar && displayTotal < 0 ? K.under : K.t1) }}>
                         {p.isWD ? <span style={{ fontSize: fsStep(rowStyle.fontSize, -1), color: K.t3, fontWeight: 700 }}>WD</span> : displayTotal != null ? (showGross || !showToPar ? displayTotal : fmtPar(displayTotal)) : "—"}
                       </span>
-                      {/* Thru */}
-                      <span style={{ textAlign: "center", fontSize: fsStep(rowStyle.fontSize, -1), color: K.t2 }}>{p.isWD ? "—" : rd?.thru > 0 ? (rd.thru === 18 ? "F" : rd.thru) : "—"}</span>
+                      {/* Thru — holes played across the whole tournament, not
+                          this round's count. Per-round it went blank between
+                          rounds: a finished round 1 read "F" until someone teed
+                          off in round 2, then everyone dropped back to "—" even
+                          though they had 18 holes behind them. Cumulative never
+                          resets — 18 when round 1 is in, 23 on the 5th hole of
+                          round 2, 36 when that one is done. */}
+                      <span style={{ ...bandEnd, fontSize: fsStep(rowStyle.fontSize, -1), color: K.t2 }}>{p.isWD ? "—" : p.totalThru > 0 ? p.totalThru : "—"}</span>
                       {/* Gap between current round stats and prior rounds */}
                       <span />
                       {/* Prior rounds — always show all 4 */}
