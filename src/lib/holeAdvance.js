@@ -67,3 +67,19 @@ export function openingHole(pids, score, holes = HOLES) {
   // Every hole done — the caller shows the last one, in edit mode.
   return { hole: holes - 1, allComplete: true, hasAnyScores: true, resolved: true };
 }
+
+// ── nineComplete ───────────────────────────────────────────────────
+// Has every player in the group posted every hole of this nine?
+// `from` is the first hole index of the nine (0 for the front, 9 for the back).
+//
+// This is what gates the front-9 check the scoring screen puts up at the turn.
+// A group with nobody in it has not finished anything, so an empty list is
+// false rather than a vacuously true "all done".
+export function nineComplete(pids, score, from = 0, len = 9) {
+  const clean = (pids || []).filter(Boolean);
+  if (clean.length === 0) return false;
+  for (let h = from; h < from + len; h++) {
+    if (!clean.every(pid => (score(pid, h) || 0) > 0)) return false;
+  }
+  return true;
+}
