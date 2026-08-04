@@ -953,12 +953,16 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
           };
           const bandEnd = { ...bandStart, borderLeft: undefined, borderRight: `1px solid ${K.bdr}` };
           // Ruling between the round columns, so four numbers in a row read as
-          // four rounds rather than one string of digits. Fainter than the
-          // band's edges — these divide inside a group, the band divides the
-          // groups — and none on R1, whose left edge is already the gap.
+          // four rounds rather than one string of digits. Full-strength K.bdr,
+          // the same rule the card edge and the header divider are drawn in:
+          // held back to a third of that it computed to 1.08:1 against the
+          // background, which is a line that exists in the stylesheet and not
+          // on the screen. The band still leads on its background tint rather
+          // than on having a heavier edge. None on R1 — its left edge is
+          // already the gap.
           const roundCell = (i) => ({
             alignSelf: "stretch", display: "flex", alignItems: "center", justifyContent: "center",
-            borderLeft: i === 0 ? undefined : `1px solid ${K.bdr}${ALPHA.line}`,
+            borderLeft: i === 0 ? undefined : `1px solid ${K.bdr}`,
           });
           return (
             <>
@@ -1048,9 +1052,15 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                       {/* Player — a rung above the fitted row size. The name is
                           what you scan the board for, and at the row size it
                           was reading as one column of many. */}
-                      <div style={{ fontWeight: 600, fontSize: fsStep(rowStyle.fontSize, 1), display: "flex", alignItems: "center", gap: 3, overflow: "hidden" }}>
-                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
-                        <span style={{ fontSize: fsStep(rowStyle.fontSize, -1), flexShrink: 0, color: isExpanded ? K.acc : K.t2, transition: `transform ${MOTION}`, display: "inline-block", transform: isExpanded ? "rotate(180deg)" : "rotate(0)" }}>▼</span>
+                      <div style={{ fontWeight: 600, fontSize: fsStep(rowStyle.fontSize, 1), display: "flex", alignItems: "center", gap: 3, overflow: "hidden", paddingRight: 4 }}>
+                        {/* flex:1 on the name is what parks the chevron on the
+                            right edge of the column instead of trailing the
+                            last letter — with names of six or seven characters
+                            it was landing in a different place on every row.
+                            minWidth:0 keeps the ellipsis working inside a flex
+                            item that is now allowed to grow. */}
+                        <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
+                        <span style={{ fontSize: fsStep(rowStyle.fontSize, -2), flexShrink: 0, color: isExpanded ? K.acc : K.t2, transition: `transform ${MOTION}`, display: "inline-block", transform: isExpanded ? "rotate(180deg)" : "rotate(0)" }}>▼</span>
                       </div>
                       {/* Total */}
                       {/* Full-strength ink, not the t2 the row's other numbers
