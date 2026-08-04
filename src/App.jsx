@@ -25,6 +25,7 @@ import { EditionSwitcher } from "./components/EditionSwitcher";
 import { docIds } from "./lib/editionId";
 import { openingHole, nineComplete } from "./lib/holeAdvance";
 import { scoreWindow, nudgeUpTarget, nudgeDownTarget } from "./lib/scoreEntry";
+import { groupTrouble, roundTrouble, describeTrouble, blocksScoring } from "./lib/roundSetup";
 import { groupKey as groupKeyOf, sameGroup, liveRound, roundFinalized, switchableGroups, groupProgress } from "./lib/groupSwitch";
 import { AppHeader, HEADER_SAFE_PAD } from "./components/AppHeader";
 import { GroupSwitcher } from "./components/GroupSwitcher";
@@ -1752,12 +1753,26 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
         </div>
       );
     }
+    // No draw for this round. For a player that is a wait; for a director it
+    // is a job, and the job is two taps away, so say which it is.
     return (
       <div style={{ textAlign: "center", padding: "40px 20px" }}>
         {offRoundBanner}
         <div style={{ fontSize: FS.jumbo, marginBottom: 12 }}>⛳</div>
-        <div style={{ fontSize: FS.lead, fontWeight: 700, color: K.t1, marginBottom: 6 }}>Waiting for Pairings</div>
-        <div style={{ fontSize: FS.small, color: K.t3 }}>Your tournament director will set up groups before the round begins.</div>
+        <div style={{ fontSize: FS.lead, fontWeight: 700, color: K.t1, marginBottom: 6 }}>
+          {user.isDirector ? `No pairings for Round ${round}` : "Waiting for Pairings"}
+        </div>
+        <div style={{ fontSize: FS.small, color: K.t3, marginBottom: user.isDirector ? 16 : 0 }}>
+          {user.isDirector
+            ? "Nobody can score this round until the groups are drawn."
+            : "Your tournament director will set up groups before the round begins."}
+        </div>
+        {user.isDirector && onGoToAdminCourses && (
+          <button onClick={() => onGoToAdminCourses(round)} style={{
+            padding: "10px 20px", borderRadius: R.md, background: K.acc, border: "none",
+            color: K.bg, fontSize: FS.small, fontWeight: 800, cursor: "pointer",
+          }}>Set up Round {round} →</button>
+        )}
       </div>
     );
   }
@@ -1786,6 +1801,47 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
     </div>
   );
 
+  // ── DRAW GUARD ──
+  // The screen is about to put a score row up for every player in `group`. If
+  // that group is not a foursome out of this round's draw — the whole field in
+  // one group, a player drawn twice, somebody who is no longer on the roster —
+  // then every row below is a card being built against the wrong people, and
+  // it saves as it goes. Scoring stops here and says so instead.
+  //
+  // Placed after the finalized early-return: a signed and locked card keeps
+  // showing as final, because nothing about it is going to change.
+  const _nameOf = (pid) => players.find(p => p.id === pid)?.name || "a player no longer on the roster";
+  const _troubleWithGroup = groupTrouble(group, {
+    rosterIds: players.map(p => p.id),
+    otherGroups: presetGroups.filter(g => !sameGroup(g, group)),
+  });
+  if (blocksScoring(_troubleWithGroup)) {
+    const nameOf = _nameOf;
+    return (
+      <div style={{ padding: "24px 4px" }}>
+        {offRoundBanner}
+        <div style={{ background: K.warn + ALPHA.wash, border: `1px solid ${K.warn}${ALPHA.line}`, borderRadius: R.xl, padding: "22px 20px", textAlign: "center" }}>
+          <div style={{ fontSize: FS.display, marginBottom: 10 }}>⚠️</div>
+          <div style={{ fontSize: FS.body, fontWeight: 800, color: K.warn, marginBottom: 8 }}>Round {round} pairings need a fix</div>
+          <div style={{ fontSize: FS.small, color: K.t2, lineHeight: 1.6, maxWidth: 320, margin: "0 auto" }}>
+            {describeTrouble(_troubleWithGroup, nameOf)}
+          </div>
+          <div style={{ fontSize: FS.small, color: K.t3, lineHeight: 1.6, maxWidth: 320, margin: "10px auto 0" }}>
+            {user.isDirector
+              ? "Scoring is held until the draw is right — a card entered against the wrong group is the expensive kind of mistake."
+              : "Your tournament director has to redraw this round before scoring can open. Nothing you have already posted is lost."}
+          </div>
+          {user.isDirector && onGoToAdminCourses && (
+            <button onClick={() => onGoToAdminCourses(round)} style={{
+              marginTop: 16, padding: "10px 20px", borderRadius: R.md, background: K.acc, border: "none",
+              color: K.bg, fontSize: FS.small, fontWeight: 800, cursor: "pointer",
+            }}>Fix Round {round} pairings →</button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   // ── SCORING GATE ──
   // Non-directors can't enter scores until SCORING_LEAD_MIN before their group's
   // tee time on the round's scheduled date — unless a director has toggled the
@@ -1801,8 +1857,14 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
     const dateStr = (roundDates || {})[round];
     return (
       <div style={{ textAlign: "center", padding: "40px 20px" }}>
-        <div style={{ fontSize: FS.jumbo, marginBottom: 12 }}>⏱️</div>
-        <div style={{ fontSize: FS.lead, fontWeight: 700, color: K.t1, marginBottom: 6 }}>Scoring Not Open Yet</div>
+        <div style={{ fontSize: FS.jumbo, marginBottom: 12 }}>{_myTeeTime ? "⏱️" : "⚠️"}</div>
+        <div style={{ fontSize: FS.lead, fontWeight: 700, color: K.t1, marginBottom: 6 }}>
+          {_myTeeTime ? "Scoring Not Open Yet" : `Round ${round} has no tee times`}
+        </div>
+        {/* Without a tee time there is nothing for the gate to open on, so it
+            stays shut — and "your director will open scoring" reads as a wait
+            for something that is never going to happen on its own. Name the
+            missing setting instead. */}
         <div style={{ fontSize: FS.small, color: K.t3, lineHeight: 1.7, maxWidth: 300, margin: "0 auto" }}>
           {_myTeeTime ? (
             <>
@@ -1812,7 +1874,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
               {dateStr ? <> on <strong style={{ color: K.t2 }}>{fmtRoundDate(dateStr)}</strong></> : null}.
             </>
           ) : (
-            <>Your tournament director will open scoring before the round begins.</>
+            <>Scoring opens {SCORING_LEAD_MIN} minutes before your tee time, and this round has none set. Your tournament director needs to set them in Admin.</>
           )}
         </div>
         {_myGroupIdx >= 0 && (
@@ -1845,6 +1907,30 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
   // just did. Signing is still one tap away in the footer.
   const onCompletedHole = !isSigned && navSource === "manual" && isHoleComplete(currentHole) && !editingCompleted;
 
+  // ── What the DIRECTOR can't see from here ──
+  // A director bypasses the scoring gate, so a round with no tee times looks
+  // completely normal on this screen while every player in the field is stuck
+  // on "Scoring Not Open Yet" — the one setup fault the person who can fix it
+  // is structurally blind to. Same for another group's draw being broken:
+  // this screen is one group, and the round is not.
+  // One slim line, director only, and only when there is something to fix.
+  const _setup = user.isDirector
+    ? roundTrouble({ groups: presetGroups, teeTimes: (teeTimesData || {})[round], rosterIds: players.map(p => p.id) })
+    : { broken: [], missingTeeTimes: [] };
+  const _setupWarning = !user.isDirector ? null : (() => {
+    // A stale draw in THIS group first — it is the one the director is looking
+    // at, and it did not stop the screen, so nothing else will say it.
+    if (_troubleWithGroup) return describeTrouble(_troubleWithGroup, _nameOf);
+    const miss = _setup.missingTeeTimes.length;
+    if (miss > 0) {
+      return miss === _setup.groupCount
+        ? "No tee times set — nobody else can score this round"
+        : `${miss} group${miss === 1 ? "" : "s"} with no tee time — they can't score`;
+    }
+    if (_setup.broken.length > 0) return `Group ${_setup.broken[0].index + 1}'s draw needs a fix`;
+    return null;
+  })();
+
   const handleSign = () => {
     if (!groupKey) return;
     tapBigAction();
@@ -1875,6 +1961,22 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
           this round's draw — so the row was spending the top of the scoring
           screen on an answer already on screen and a control already in the
           chrome. The hole strips start at the top now. */}
+      {/* The director's one line about the round they can't see from here.
+          A whole row is a lot on this screen, so it is 24px tall, it only
+          exists when something is actually wrong, and tapping it lands on the
+          round's setup rather than making anybody go looking. */}
+      {_setupWarning && onGoToAdminCourses && (
+        <div onClick={() => onGoToAdminCourses(round)} style={{
+          display: "flex", alignItems: "center", gap: 6, marginBottom: 8, cursor: "pointer",
+          padding: "5px 10px", borderRadius: R.sm,
+          background: K.warn + ALPHA.wash, border: `1px solid ${K.warn}${ALPHA.hair}`,
+        }}>
+          <span style={{ fontSize: FS.label }}>⚠️</span>
+          <span style={{ flex: 1, minWidth: 0, fontSize: FS.micro, fontWeight: 700, color: K.warn, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{_setupWarning}</span>
+          <span style={{ fontSize: FS.micro, fontWeight: 800, color: K.t3, letterSpacing: 0.5, flexShrink: 0 }}>FIX →</span>
+        </div>
+      )}
+
       {/* Hole navigator - Front 9 / Back 9 */}
       <div style={{ marginBottom: 8 }}>
         {[0, 9].map(start => (
@@ -8413,12 +8515,27 @@ export default function WBCApp() {
     const incoming = JSON.stringify(groups);
     if (existing === incoming) return;
     setPairingsData(prev => ({ ...prev, [rnd]: groups }));
+    // A round's TEE TIMES live on its pairing rows, and this deletes every one
+    // of them before writing the new draw — so the times only survive because
+    // they are copied back out of `teeTimesData` below. That makes client state
+    // the only copy for the length of this function, and if it is empty when a
+    // save lands (a cold load that has not filled it yet, a save raised from a
+    // screen that never subscribed) the round comes back with every tee time
+    // gone — which reads as "admin cleared the tee times", and locks every
+    // non-director out of scoring behind a gate that has nothing to open on.
+    // So: when client state has nothing, ask Firestore what is actually stored
+    // before deleting it.
+    let times = (teeTimesData[rnd] || []);
+    if (!times.some(t => t)) {
+      const existing = await db.get("pairings", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }, { field: "round_number", op: "==", value: rnd }]);
+      times = rowsToTeeTimes(existing || [])[rnd] || times;
+    }
     // Delete old pairings for this round and reinsert
     await db.delete("pairings", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }, { field: "round_number", op: "==", value: rnd }]);
     const rows = [];
     groups.forEach((grp, gi) => {
       grp.forEach(pid => {
-        rows.push({ id: docIds.pairing(_e(), rnd, gi + 1, pid), tournament_id: TOURNAMENT_ID, round_number: rnd, group_number: gi + 1, player_id: pid, tee_time: (teeTimesData[rnd] || [])[gi] || null });
+        rows.push({ id: docIds.pairing(_e(), rnd, gi + 1, pid), tournament_id: TOURNAMENT_ID, round_number: rnd, group_number: gi + 1, player_id: pid, tee_time: times[gi] || null });
       });
     });
     for (const row of rows) await db.upsert("pairings", row);
