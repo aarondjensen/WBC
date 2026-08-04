@@ -1818,41 +1818,11 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
         </div>
       </div>
 
-      {/* Par-3 CTP chip — the standing closest-to-the-pin for this hole, and
-          the way BACK to the prompt.
-          The prompt fires once per group per hole and blocks auto-advance, so
-          a group that skipped it, or answered before somebody remembered the
-          real number, had no route back short of finding a director. Tapping
-          this re-opens it deliberately and ignores the once-per-hole guard.
-          It carries no FINAL state on purpose: a round being settled means
-          this group's card is settled too, and that replaces this whole screen
-          with the finalized card. FINAL is the Betting tab's word. */}
-      {par === 3 && !isGroupFinalized && (() => {
-        const rec = ((ctpData || {})[round] || {})[currentHole + 1];
-        const holder = rec?.playerId ? players.find(p => p.id === rec.playerId) : null;
-        const dist = rec?.distanceFt ? `${rec.distanceFt} ft` : (rec?.distance || "");
-        const reopen = () => {
-          setCtpPickPlayer("");
-          setCtpFeet(rec?.distanceFt ? Math.max(1, Math.min(CTP_MAX_FT, rec.distanceFt)) : 10);
-          setShowCtpForHole(currentHole);
-        };
-        return (
-          <div onClick={reopen} style={{
-            display: "flex", alignItems: "center", gap: 8, marginBottom: 8,
-            padding: "7px 12px", borderRadius: R.md, cursor: "pointer",
-            background: holder ? K.acc + ALPHA.wash : K.inp,
-            border: `1px solid ${holder ? K.acc + ALPHA.line : K.bdr}`,
-          }}>
-            <span style={{ fontSize: FS.small }}>🎯</span>
-            <span style={{ flex: 1, minWidth: 0, fontSize: FS.label, fontWeight: 700, color: holder ? K.acc : K.t3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {holder ? `${holder.name}${dist ? ` · ${dist}` : ""}` : "No CTP tagged yet"}
-            </span>
-            <span style={{ fontSize: FS.micro, fontWeight: 800, color: K.t3, letterSpacing: 0.5, flexShrink: 0 }}>
-              {holder ? "TAP TO BEAT IT" : "TAP TO TAG"}
-            </span>
-          </div>
-        );
-      })()}
+      {/* No CTP row rides above the players on a par 3. The prompt that fires
+          once the hole is scored asks the question and shows the standing
+          distance, so a second copy of it here only bought a row — and on a
+          par 3 that row pushed the last player's score buttons down behind the
+          tab bar. The prompt is the whole story. */}
 
       {/* Completed hole confirmation overlay */}
       {!isSigned && navSource === "manual" && isHoleComplete(currentHole) && !editingCompleted && (<>
