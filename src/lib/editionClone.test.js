@@ -1,78 +1,114 @@
 import { describe, it, expect } from "vitest";
 import {
-  nextEditionYear, defaultCloneSource, reyearName, cloneMeta, cloneSideGames,
+  plannedYear, plannedSource, summaryLine, editionHasContent, newestBuiltEdition,
+  reyearName, cloneMeta, cloneSideGames,
   cloneRosterRow, cloneRoundRow, editionDoc, overwriteWarning,
 } from "./editionClone";
 
-describe("nextEditionYear", () => {
-  it("offers the year after the newest edition", () => {
-    expect(nextEditionYear([{ year: 2025 }, { year: 2024 }], 2026)).toBe(2026);
-    expect(nextEditionYear([{ year: 2025 }, { year: 2026 }], 2026)).toBe(2027);
+// The real shape this screen got wrong once, and must never get wrong again:
+// a finished 2025 labelled DRAFT, and an empty 2026 — the app's original
+// default pointer — labelled PUBLISHED. Every default below has to read the
+// COUNTS and ignore the labels.
+const REAL = [
+  { id: "wbc_2026", year: 2026, status: "published" },
+  { id: "wbc_2025", year: 2025, status: "draft" },
+];
+const REAL_SUMS = {
+  wbc_2026: { players: 0, rounds: 0, scores: 0 },
+  wbc_2025: { players: 16, rounds: 4, scores: 1368 },
+};
+
+describe("editionHasContent", () => {
+  it("is true for a year holding anything at all", () => {
+    expect(editionHasContent({ players: 16, rounds: 0, scores: 0 })).toBe(true);
+    expect(editionHasContent({ players: 0, rounds: 0, scores: 3 })).toBe(true);
   });
 
-  it("never offers a year the tournament has already skipped past", () => {
-    // Last played 2025, it is now 2028 — 2026 is not the year being planned.
-    expect(nextEditionYear([{ year: 2025 }], 2028)).toBe(2028);
-  });
-
-  it("falls back to the current year with no editions at all", () => {
-    expect(nextEditionYear([], 2026)).toBe(2026);
-    expect(nextEditionYear(undefined, 2026)).toBe(2026);
-  });
-
-  it("ignores rows with no usable year", () => {
-    expect(nextEditionYear([{ year: 2025 }, { year: null }, {}], 2026)).toBe(2026);
-  });
-
-  // The case this rule exists for: wbc_2026 is already in the list because a
-  // phone pointed at it, empty, while 2025 is the year that was played.
-  it("offers the draft year that is already claimed but not yet built", () => {
-    const rows = [
-      { id: "wbc_2026", year: 2026, status: "draft" },
-      { id: "wbc_2025", year: 2025, status: "published" },
-    ];
-    expect(nextEditionYear(rows, 2026)).toBe(2026);
-  });
-
-  it("ignores a draft for a year already behind us", () => {
-    const rows = [
-      { id: "wbc_2026", year: 2026, status: "published" },
-      { id: "wbc_2024", year: 2024, status: "draft" },
-    ];
-    expect(nextEditionYear(rows, 2026)).toBe(2027);
-  });
-
-  it("takes the earliest unbuilt year when several are drafted", () => {
-    const rows = [
-      { id: "wbc_2027", year: 2027, status: "draft" },
-      { id: "wbc_2026", year: 2026, status: "draft" },
-    ];
-    expect(nextEditionYear(rows, 2026)).toBe(2026);
+  it("is false for an empty year, and for one we couldn't read", () => {
+    expect(editionHasContent({ players: 0, rounds: 0, scores: 0 })).toBe(false);
+    expect(editionHasContent(undefined)).toBe(false);
   });
 });
 
-describe("defaultCloneSource", () => {
-  const rows = [
-    { id: "wbc_2026", year: 2026, status: "draft" },
-    { id: "wbc_2025", year: 2025, status: "published" },
-    { id: "wbc_2024", year: 2024, status: "archived" },
-  ];
-
-  it("clones from the last year actually played, not the empty draft", () => {
-    expect(defaultCloneSource(rows, 2026)).toBe("wbc_2025");
+describe("newestBuiltEdition", () => {
+  it("picks the year that holds a tournament, not the newest row", () => {
+    expect(newestBuiltEdition(REAL, REAL_SUMS)?.id).toBe("wbc_2025");
   });
 
-  it("never clones from a year at or after the target", () => {
-    expect(defaultCloneSource(rows, 2025)).toBe("wbc_2024");
+  it("knows nothing without counts", () => {
+    expect(newestBuiltEdition(REAL, null)).toBe(null);
+  });
+});
+
+describe("plannedYear", () => {
+  it("offers the year after the last one actually played", () => {
+    // 2026 exists but is empty — that is the year being built, not a year to
+    // skip past. This is the exact bug the counts were added to kill.
+    expect(plannedYear(REAL, REAL_SUMS, 2026)).toBe(2026);
   });
 
-  it("falls back to a draft when there is nothing else behind the target", () => {
-    expect(defaultCloneSource([{ id: "wbc_2025", year: 2025, status: "draft" }], 2026)).toBe("wbc_2025");
+  it("moves on once that year has a tournament in it", () => {
+    const sums = { ...REAL_SUMS, wbc_2026: { players: 16, rounds: 4, scores: 20 } };
+    expect(plannedYear(REAL, sums, 2026)).toBe(2027);
+  });
+
+  it("never offers a year the tournament has already skipped past", () => {
+    const rows = [{ id: "wbc_2025", year: 2025 }];
+    expect(plannedYear(rows, { wbc_2025: { players: 16 } }, 2028)).toBe(2028);
+  });
+
+  it("falls back to one past the newest row when the counts failed", () => {
+    expect(plannedYear(REAL, null, 2026)).toBe(2027);
+  });
+
+  it("falls back to the current year with no editions at all", () => {
+    expect(plannedYear([], REAL_SUMS, 2026)).toBe(2026);
+    expect(plannedYear(undefined, null, 2026)).toBe(2026);
+  });
+
+  it("ignores rows with no usable year", () => {
+    expect(plannedYear([{ id: "a", year: null }, { id: "b" }], null, 2026)).toBe(2026);
+  });
+});
+
+describe("plannedSource", () => {
+  it("copies from the year that has a tournament in it", () => {
+    expect(plannedSource(REAL, REAL_SUMS, 2026)).toBe("wbc_2025");
+  });
+
+  it("never copies from the target year or later", () => {
+    const rows = [...REAL, { id: "wbc_2024", year: 2024, status: "archived" }];
+    const sums = { ...REAL_SUMS, wbc_2024: { players: 14, rounds: 4, scores: 1000 } };
+    expect(plannedSource(rows, sums, 2025)).toBe("wbc_2024");
+  });
+
+  it("falls back to the newest earlier year when nothing behind it has content", () => {
+    const rows = [{ id: "wbc_2025", year: 2025 }];
+    expect(plannedSource(rows, { wbc_2025: { players: 0, rounds: 0, scores: 0 } }, 2026)).toBe("wbc_2025");
+    expect(plannedSource(rows, null, 2026)).toBe("wbc_2025");
   });
 
   it("has no source with nothing behind the target", () => {
-    expect(defaultCloneSource(rows, 2024)).toBe("");
-    expect(defaultCloneSource([], 2026)).toBe("");
+    expect(plannedSource(REAL, REAL_SUMS, 2025)).toBe("");
+    expect(plannedSource([], null, 2026)).toBe("");
+  });
+});
+
+describe("summaryLine", () => {
+  it("says what a year holds", () => {
+    expect(summaryLine({ players: 16, rounds: 4, scores: 1368 })).toBe("16 players · 4 rounds · 1,368 scores");
+  });
+
+  it("names an empty year as empty rather than listing nothing", () => {
+    expect(summaryLine({ players: 0, rounds: 0, scores: 0 })).toBe("Empty");
+  });
+
+  it("leaves out what isn't there, and singularises", () => {
+    expect(summaryLine({ players: 1, rounds: 0, scores: 1 })).toBe("1 player · 1 score");
+  });
+
+  it("is blank for a year whose counts couldn't be read", () => {
+    expect(summaryLine(null)).toBe("");
   });
 });
 
