@@ -44,6 +44,12 @@ export function MoreMenu({ open, onClose, onSelect, isDirector, adminFlag, notif
 
   const items = [
     ...(isDirector ? [{ key: "admin", label: "Admin Settings", flag: adminFlag }] : []),
+    // The record book: every player's WBC Index and the rounds behind it. It
+    // sits with the EVENT rather than with the person because it is about the
+    // tournament's history, not about the phone holding it — and above the
+    // rule, so a player with no Admin entry still opens the menu onto
+    // something that isn't their own settings.
+    { key: "players", label: "Players" },
     { key: "notifications", label: "Notifications", person: true, flag: notifFlag },
     { key: "account", label: "My Account", person: true },
   ];
