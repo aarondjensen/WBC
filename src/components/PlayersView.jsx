@@ -270,8 +270,10 @@ function PlayerDetail({ row, onBack }) {
       {hasRounds && idx.provisional && (
         <Card style={{ marginBottom: 12 }}>
           <div style={{ fontSize: FS.small, color: K.t2, lineHeight: 1.5 }}>
-            Only {idx.window.length} recorded {idx.window.length === 1 ? "round" : "rounds"}, so this is the best {idx.counting.length} of {idx.window.length}
-            {" "}rather than the best {COUNTING} of {WINDOW}. It settles as more rounds are played.
+            Only {idx.window.length} recorded {idx.window.length === 1 ? "round" : "rounds"}, so this is the best
+            {" "}<strong style={{ color: K.t1 }}>{idx.counting.length} of {idx.window.length}</strong> rather than
+            the best {COUNTING} of {WINDOW}. Fewer rounds count on a short sample, so a single bad day is not
+            baked into the number — it settles as more are played.
           </div>
         </Card>
       )}
@@ -307,8 +309,10 @@ function PlayerDetail({ row, onBack }) {
               display: "flex", alignItems: "center", gap: 8,
               marginTop: 8, paddingTop: 8, borderTop: `1px solid ${K.bdr}`,
             }}>
+              {/* A taper this steep bottoms out at one round, and "average of
+                  1" is not a thing anybody says about a single number. */}
               <span style={{ flex: 1, fontSize: FS.label, fontWeight: 800, color: K.t3, letterSpacing: 0.8 }}>
-                AVERAGE OF {idx.counting.length}
+                {idx.counting.length === 1 ? "BEST ROUND" : `AVERAGE OF ${idx.counting.length}`}
               </span>
               <span style={{ fontSize: FS.lead, fontWeight: 900, color: K.acc }}>{fmtIndex(idx.index)}</span>
             </div>
