@@ -70,7 +70,7 @@ const missedLabel = (missed = []) => {
 // The list's four columns: the name, the career index, what this year plays
 // off, and the chevron. Shared by the header and every row, so a heading can
 // never drift out of line with the numbers under it.
-const LIST_COLS = "minmax(0, 1fr) 54px 46px 10px";
+const LIST_COLS = "minmax(0, 1fr) 46px 54px 10px";
 
 // Clearance under the last row. The nav bar's trophy sits in a dome that rises
 // 24px above the bar, so a list that stops at the bar's edge has its final row
@@ -663,18 +663,25 @@ function PlayerRow({ row, onOpen }) {
       }}>
         {row.name}
       </span>
-      <span style={{ textAlign: "right", fontSize: FS.lead, fontWeight: 900, color: idx?.index == null ? K.t3 : K.acc }}>
+      {/* The career index, in the quieter of the two weights. It is what this
+          tab is ABOUT, but it is not the number anybody plays off — so it reads
+          as the reference it is, and the accent is spent on the one that
+          decides strokes on a tee box. It keeps the asterisk either way. */}
+      <span style={{
+        textAlign: "right", fontSize: FS.small, fontWeight: 700,
+        color: idx?.index == null ? K.t3 : K.t2,
+      }}>
         {fmtIndex(idx?.index)}
         {(idx?.stale || idx?.overridden) && <span style={{ color: K.warn }}>*</span>}
       </span>
-      {/* What this player actually plays off this year. It is the edition's own
-          number, never a derived one: the leaderboard computes course handicaps
-          from exactly this value, so showing anything else here would be a
-          screen disagreeing with the scoring. Muted rather than accent, because
-          the WBC Index beside it is the one this tab is about. */}
+      {/* What this player actually plays off this year, and the number that
+          matters once the tournament starts: the leaderboard computes every
+          course handicap from exactly this value. It is the edition's own
+          figure, never derived — a screen showing anything else here would be
+          disagreeing with the scoring. So it carries the emphasis. */}
       <span style={{
-        textAlign: "right", fontSize: FS.small, fontWeight: 700,
-        color: row.year == null ? K.t3 : K.t2,
+        textAlign: "right", fontSize: FS.lead, fontWeight: 900,
+        color: row.year == null ? K.t3 : K.acc,
       }}>
         {row.year == null ? "—" : row.year.toFixed(1)}
       </span>
