@@ -2,7 +2,7 @@ import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } fr
 import { createPortal } from "react-dom";
 import { _app, _db, _auth, onAuthStateChanged, doGoogleSignIn, doAppleSignIn, doSignOut, consumeRedirectResult, deleteAccount, USERS_COLLECTION, NATIVE_APPLE_ENABLED, APPLE_PROVIDER_ENABLED, isNativePlatform, isAndroidNative, AUTH_PROVIDERS_ENABLED, TOURNAMENT_ID, getEditionSlug, getTournamentYear, isDefaultEdition } from "./firebase";
 import { readMembership, isDirectorAccount, resolveMember, joinWithCode, readAccessCode, setAccessCode, setDirector, subscribeMemberships, accountsUnreadable, membershipForPlayer, playerIsDirector } from "./lib/accounts";
-import { K, ON_ACC, FS, fsStep, R, ALPHA, MOTION, FONT, SHADOW, SCRIM } from "./theme";
+import { K, ON_ACC, ON_DANGER, FS, fsStep, R, ALPHA, MOTION, FONT, SHADOW, SCRIM } from "./theme";
 import { SegmentedToggle, StickyTop, SectionLabel, Card, Toast, Btn } from "./components/ui";
 import { calcCH, buildStrokesMap, computeRoundLine, computeIndividualBoard, rankIndividualBoard, rankIndividualBoardIds, WD_SCORE } from "./lib/individualBoard";
 import { fieldFor, potFor, perUnit, computeSkins, allSkins, skinCounts, lowNetRounds } from "./lib/sideGames";
@@ -25,7 +25,7 @@ import { EditionSwitcher } from "./components/EditionSwitcher";
 import { docIds } from "./lib/editionId";
 import { openingHole, nineComplete } from "./lib/holeAdvance";
 import { scoreWindow, nudgeUpTarget, nudgeDownTarget } from "./lib/scoreEntry";
-import { groupTrouble, roundTrouble, describeTrouble, blocksScoring } from "./lib/roundSetup";
+import { groupTrouble, roundTrouble, describeTrouble, blocksScoring, missingTees, describeMissingTees } from "./lib/roundSetup";
 import { groupKey as groupKeyOf, sameGroup, liveRound, roundFinalized, switchableGroups, groupProgress } from "./lib/groupSwitch";
 import { AppHeader, HEADER_SAFE_PAD } from "./components/AppHeader";
 import { GroupSwitcher } from "./components/GroupSwitcher";
@@ -4929,17 +4929,26 @@ function TeeAssigner({ activePlayers, tRounds, courses, teeData, setTeeBulk, fin
               Player tees
             </span>
             <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-              {/* What the list would say if it were open: one tee, or the split. */}
+              {/* What the list would say if it were open: one tee, or the split.
+                  A player with NO assignment used to be counted onto the
+                  default tee here, so a round where two men had nothing read
+                  "All BLUE" — the summary agreeing that everything was fine
+                  while the warning above it said otherwise. They are counted
+                  as what they are now, and said last and in red. */}
               {(() => {
                 const counts = {};
+                let none = 0;
                 activePlayers.forEach(p => {
-                  const t = assignments[p.id] || getDefaultTee(tees)?.name || tees[0]?.name || "—";
+                  const t = assignments[p.id];
+                  if (!t || !tees.some(tb => tb.name === t)) { none++; return; }
                   counts[t] = (counts[t] || 0) + 1;
                 });
                 const names = Object.keys(counts);
+                const summary = names.length === 0 ? "" : names.length === 1 && !none ? `All ${names[0]}` : names.map(n => `${counts[n]} ${n}`).join(" · ");
                 return (
-                  <span style={{ fontSize: FS.label, fontWeight: 700, color: names.length === 1 ? K.t2 : K.acc, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {names.length === 1 ? `All ${names[0]}` : names.map(n => `${counts[n]} ${n}`).join(" · ")}
+                  <span style={{ fontSize: FS.label, fontWeight: 700, color: names.length === 1 && !none ? K.t2 : K.acc, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {summary}
+                    {none > 0 && <span style={{ color: K.danger }}>{summary ? " · " : ""}{none} none</span>}
                   </span>
                 );
               })()}
@@ -4949,19 +4958,25 @@ function TeeAssigner({ activePlayers, tRounds, courses, teeData, setTeeBulk, fin
           <div style={{ overflow: "hidden", display: openTees ? "block" : "none" }}>
             <div>
             {activePlayers.map((p, i) => {
-              const defaultTee = getDefaultTee(tees);
-              const currentTee = assignments[p.id] || defaultTee?.name || tees[0]?.name || "";
+              // No fallback to the default tee. This row used to read
+              // `assignments[p.id] || defaultTee?.name`, which drew the default
+              // box as SELECTED and printed a course handicap off it — so a
+              // player who had never been assigned anything looked, on the one
+              // screen whose job is to show tee assignments, exactly like a
+              // player who had. An empty assignment is now empty: no tee lit,
+              // no CH, and the name in red.
+              const currentTee = assignments[p.id] || "";
               const teeObj = tees.find(t => t.name === currentTee);
-              const ch = teeObj ? calcCH(p.handicap_index, teeObj.slope, teeObj.rating, teeObj.par) : 0;
+              const ch = teeObj ? calcCH(p.handicap_index, teeObj.slope, teeObj.rating, teeObj.par) : null;
               return (
                 <div key={p.id} style={{
                   padding: "5px 12px", display: "flex", justifyContent: "space-between", alignItems: "center",
                   borderBottom: i < activePlayers.length - 1 ? `1px solid ${K.bdr}${ALPHA.wash}` : "none",
                 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                    <span style={{ fontWeight: 600, fontSize: FS.small }}>{p.name}</span>
+                    <span style={{ fontWeight: 600, fontSize: FS.small, color: teeObj ? K.t1 : K.danger }}>{p.name}</span>
                     <span style={{ fontSize: FS.micro, color: K.t2, display: "flex", alignItems: "center", gap: 3 }}>
-                      HI {p.handicap_index} · CH {ch}
+                      HI {p.handicap_index} · CH {teeObj ? ch : <span style={{ color: K.danger, fontWeight: 700 }}>no tee</span>}
                       {chDeltas[p.id] !== undefined && (
                         <span style={{ fontSize: FS.micro, fontWeight: 700, color: chDeltas[p.id] > 0 ? K.ok : K.danger, display: "flex", alignItems: "center", gap: 1 }}>
                           {chDeltas[p.id] > 0 ? "▲" : "▼"}{Math.abs(chDeltas[p.id])}
@@ -5970,13 +5985,21 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
     const groups = (pairingsData || {})[r] || [];
     const teeTimes = (teeTimesData[r] || []);
     const hasPlayers = activePlayers.length > 0;
-    const allTees = hasPlayers && activePlayers.every(p => ((teeData[r] || {})[p.id]));
+    // Who has no tee for this round — the ids, not just a yes/no, because the
+    // console names them. One definition, in lib/roundSetup, so the warning
+    // banner, the round pill and the nav dot cannot disagree about who is
+    // missing; it also catches an assignment pointing at a tee the course no
+    // longer has, which resolves to nothing exactly as a blank does.
+    const noTee = hasCourse && hasPlayers
+      ? missingTees({ players: activePlayers, assignments: teeData[r] || {}, teeNames: (course.tee_boxes || []).map(t => t.name) })
+      : [];
+    const allTees = hasPlayers && noTee.length === 0;
     const groupsDone = groups.length > 0 && groups.flat().length === activePlayers.length;
     const teeTimesDone = groups.length > 0 && groups.every((_, gi) => teeTimes[gi] && teeTimes[gi].trim() !== "");
     const teesDone = hasCourse && !!teesSaved[r] && !teesModified[r] && allTees;
     const pairingsDone = hasCourse && groupsDone && teeTimesDone;
     return {
-      round: r, course, hasCourse, allTees, groupsDone, teeTimesDone,
+      round: r, course, hasCourse, allTees, noTee, groupsDone, teeTimesDone,
       teesDone, pairingsDone,
       allDone: hasCourse && teesDone && pairingsDone,
       finalized: !!finalizedRounds[r],
@@ -6132,16 +6155,21 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
                 <div style={{ fontSize: FS.micro, color: K.t3 }}>Final</div>
               ) : (
                 <div style={{ display: "flex", justifyContent: "center", gap: 4 }}>
-                  {[["T", teesDone], ["P", pairingsDone]].map(([lbl, done]) => (
+                  {/* Two states of not-done, drawn differently. Tees that are
+                      merely unsaved are a step the director has not reached
+                      yet; a player with NO tee is a fault that will produce a
+                      wrong course handicap, so it gets the filled red dot
+                      rather than the outline everything-else-pending wears. */}
+                  {[["T", teesDone, st.noTee.length > 0], ["P", pairingsDone, false]].map(([lbl, done, fault]) => (
                     <div key={lbl} style={{
                       display: "flex", alignItems: "center", gap: 2,
                       fontSize: FS.micro, fontWeight: 700,
-                      color: done ? K.ok : K.danger + ALPHA.panel,
+                      color: done ? K.ok : fault ? K.danger : K.danger + ALPHA.panel,
                     }}>
                       <div style={{
                         width: 5, height: 5, borderRadius: "50%",
-                        background: done ? K.ok : "transparent",
-                        border: `1px solid ${done ? K.ok : K.danger + ALPHA.line}`,
+                        background: done ? K.ok : fault ? K.danger : "transparent",
+                        border: `1px solid ${done ? K.ok : fault ? K.danger : K.danger + ALPHA.line}`,
                       }} />
                       {lbl}
                     </div>
@@ -7069,6 +7097,56 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
                     </button>
                   )}
                 </>
+              );
+            })()}
+
+            {/* ── Nobody plays off the course's default rating ──
+                A player with no tee does not fail, they fall through to the
+                course's own rating and slope — which is an import default, not
+                a box anybody tees off. So the console says who, says what it
+                will cost, and offers the fix in the same breath, because the
+                answer is almost always "the tee everyone else is on".
+
+                It sits ABOVE the tee assigner rather than inside it: the
+                per-player list folds away by default, and a warning that hides
+                behind a disclosure is a warning nobody reads. */}
+            {assigned && !picking && !locked && st.noTee.length > 0 && (() => {
+              const nameOfPid = (pid) => activePlayers.find(p => p.id === pid)?.name || pid;
+              // What to put them on: whatever most of the field is already
+              // playing, falling back to the course's own default pick.
+              const counts = {};
+              activePlayers.forEach(p => { const t = (teeData[editRound] || {})[p.id]; if (t) counts[t] = (counts[t] || 0) + 1; });
+              const tees = assigned.tee_boxes || [];
+              const popular = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0];
+              const fixTee = tees.find(t => t.name === popular)?.name || getDefaultTee(tees)?.name || tees[0]?.name;
+              return (
+                <div style={{ padding: "10px 14px", background: `${K.danger}${ALPHA.wash}`, borderTop: `1px solid ${K.danger}${ALPHA.hair}`, borderBottom: `1px solid ${K.bdr}` }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: K.danger, flexShrink: 0 }} />
+                    <span style={{ fontSize: FS.label, fontWeight: 800, color: K.danger, letterSpacing: 0.6, textTransform: "uppercase" }}>
+                      {st.noTee.length} {st.noTee.length === 1 ? "player has" : "players have"} no tee
+                    </span>
+                  </div>
+                  <div style={{ fontSize: FS.label, color: K.t2, lineHeight: 1.5 }}>
+                    {describeMissingTees(st.noTee, nameOfPid, assigned.name)}
+                  </div>
+                  {fixTee && (
+                    <button
+                      onClick={() => {
+                        const next = { ...(teeData[editRound] || {}) };
+                        st.noTee.forEach(pid => { next[pid] = fixTee; });
+                        setTeeBulk(editRound, next);
+                        if ((teesSaved || {})[editRound]) onTeesModify && onTeesModify(editRound);
+                      }}
+                      style={{
+                        marginTop: 8, padding: "6px 12px", borderRadius: R.sm,
+                        background: K.danger, border: "1px solid transparent", color: ON_DANGER,
+                        fontSize: FS.label, fontWeight: 700, cursor: "pointer",
+                      }}>
+                      Put {st.noTee.length === 1 ? "them" : "them all"} on {fixTee}
+                    </button>
+                  )}
+                </div>
               );
             })()}
 
@@ -8748,6 +8826,24 @@ export default function WBCApp() {
       if (finalizedRounds[r]) continue;
       const tr = tRounds.find(t => t.round_number === r);
       if (!tr) continue;
+      // A player with no tee for a round that is being treated as ready.
+      //
+      // Gated on the round having been signed off OR already carrying scores,
+      // rather than on the assignment simply being absent: before setup nobody
+      // has a tee and a dot that is red from the moment an edition is created
+      // is a dot nobody looks at. Once the director has saved the tees — or
+      // once a card is being posted against them — a missing one is a fault,
+      // and this is the only place in the app that says so without opening
+      // Admin first.
+      const course = courseList.find(c => c.id === tr.course_id);
+      if (course) {
+        const settled = !!teesSaved[r] || activePlayers.some(p => Object.keys(holeData[`${p.id}_${r}`] || {}).length > 0);
+        if (settled && missingTees({
+          players: activePlayers,
+          assignments: teeData[r] || {},
+          teeNames: (course.tee_boxes || []).map(t => t.name),
+        }).length > 0) return true;
+      }
       const allDone = activePlayers.length > 0 && activePlayers.every(p => {
         const wdTp = tPlayers.find(tp => tp.player_id === p.id);
         if (wdTp?.status === "WD") return true; // WD players count as done
@@ -8758,7 +8854,7 @@ export default function WBCApp() {
       if (allDone) return true;
     }
     return false;
-  }, [activePlayers, holeData, finalizedRounds, tRounds, tPlayers, numRounds]);
+  }, [activePlayers, holeData, finalizedRounds, tRounds, tPlayers, numRounds, courseList, teeData, teesSaved]);
 
   // ── The ways in ──
   // Sign in → tournament password → claim a name, each skipped once it has

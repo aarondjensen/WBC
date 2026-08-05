@@ -20,6 +20,17 @@
 // times keeps every non-director locked out with "Scoring Not Open Yet",
 // which reads as the app being broken rather than as a setting nobody filled
 // in. Reporting them as a setup problem is what lets the screen say so.
+//
+// And tee ASSIGNMENTS, for the reason that costs the most. Course handicap is
+// computed as `calcCH(hi, tee?.slope || course.slope, …)` — so a player with no
+// tee row for a round does not fail, they silently fall through to the COURSE's
+// own rating and slope. That number is not a tee anybody plays: it is whatever
+// the import wrote, which for a course fetched from golfcourseapi is
+// `allTees[0]`, the LONGEST tee on the property. On The Loon that is 72.8/139
+// where the field played BLUE at 70.5/134 — about two strokes of course
+// handicap, applied to one man, invisibly, on a card everybody else's is
+// correct on. There should never be a missing assignment, which is exactly why
+// the console has to say so rather than quietly picking something.
 
 // A group is a foursome. Five is not a group, it is two groups that did not
 // get drawn.
@@ -50,11 +61,37 @@ export function groupTrouble(ids, { rosterIds = [], otherGroups = [] } = {}) {
   return null;
 }
 
+// ── missingTees ────────────────────────────────────────────────────
+// Which players have no tee assigned for a round.
+//
+//   players     — the round's field, [{ id, name }]. Withdrawn players are the
+//                 caller's business to exclude; a WD posts no card and needs no
+//                 tee.
+//   assignments — { playerId: teeName } as stored for that round.
+//   teeNames    — the course's tee box names. When it is non-empty, an
+//                 assignment naming a tee the course does not have counts as
+//                 missing: the lookup that resolves it returns undefined and
+//                 falls through to the course exactly as a blank would, so the
+//                 two failures are the same failure and get one answer.
+//
+// Returns the ids, in the order `players` was given, so the console lists names
+// the way the roster reads rather than the way an object happened to enumerate.
+export function missingTees({ players = [], assignments = {}, teeNames = [] } = {}) {
+  const known = new Set(teeNames || []);
+  return (players || [])
+    .filter(p => {
+      const tee = (assignments || {})[p.id];
+      if (!tee || !String(tee).trim()) return true;
+      return known.size > 0 && !known.has(tee);
+    })
+    .map(p => p.id);
+}
+
 // The whole round's draw. `index` on every entry is the index in the draw as
 // stored, NOT a position among the non-empty groups — the tee times array is
 // aligned to the stored draw, and re-indexing here is how a missing tee time
 // gets reported against the wrong group.
-export function roundTrouble({ groups = [], teeTimes = [], rosterIds = [] } = {}) {
+export function roundTrouble({ groups = [], teeTimes = [], rosterIds = [], players = [], teeAssignments = {}, teeNames = [] } = {}) {
   const all = (groups || []).map(g => (g || []).filter(Boolean));
   const drawn = all.map((ids, index) => ({ ids, index })).filter(g => g.ids.length > 0);
   const broken = drawn
@@ -67,7 +104,13 @@ export function roundTrouble({ groups = [], teeTimes = [], rosterIds = [] } = {}
   const missingTeeTimes = drawn
     .filter(({ index }) => !String((teeTimes || [])[index] || "").trim())
     .map(({ index }) => index);
-  return { hasDraw: drawn.length > 0, groupCount: drawn.length, broken, missingTeeTimes };
+  return {
+    hasDraw: drawn.length > 0,
+    groupCount: drawn.length,
+    broken,
+    missingTeeTimes,
+    missingTees: missingTees({ players, assignments: teeAssignments, teeNames }),
+  };
 }
 
 // Which faults are bad enough to STOP a group scoring, and which are only
@@ -85,6 +128,26 @@ export function roundTrouble({ groups = [], teeTimes = [], rosterIds = [] } = {}
 // tee box over; both are worth telling the director about.
 export const BLOCKING_CODES = ["empty", "oversized", "duplicate"];
 export const blocksScoring = (trouble) => !!trouble && BLOCKING_CODES.includes(trouble.code);
+
+// ── describeMissingTees ────────────────────────────────────────────
+// The warning itself. It names every player rather than counting them, because
+// the fix is per-player and a director reading "2 players" has to go and find
+// out which two.
+//
+// The consequence is spelled out rather than left as "incomplete setup". "Tees
+// not assigned" reads like a form field nobody filled in; what actually happens
+// is a wrong course handicap on a real card, and that is the sentence that gets
+// somebody to act before the round is played.
+export function describeMissingTees(pids = [], nameOf = (pid) => pid, courseName = "") {
+  if (!pids.length) return "";
+  const names = pids.map(nameOf);
+  const list = names.length > 2
+    ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`
+    : names.join(" and ");
+  const one = names.length === 1;
+  const whose = courseName ? `${courseName}'s` : "the course's";
+  return `${list} ${one ? "has" : "have"} no tee for this round. Their course handicap will come off ${whose} default rating — usually its longest tee — instead of the box they play. Assign ${one ? "a tee" : "tees"} before the round is scored.`;
+}
 
 // One sentence a director can act on. `nameOf` turns a player id into a name;
 // the default leaves the id, which is still better than nothing on a screen

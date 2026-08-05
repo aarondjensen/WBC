@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { groupTrouble, roundTrouble, describeTrouble, blocksScoring, GROUP_MAX } from "./roundSetup";
+import { groupTrouble, roundTrouble, describeTrouble, blocksScoring, missingTees, describeMissingTees, GROUP_MAX } from "./roundSetup";
 
 const roster = ["a", "b", "c", "d", "e", "f", "g", "h"];
 
@@ -125,5 +125,102 @@ describe("describeTrouble", () => {
   it("keeps GROUP_MAX and the message in step", () => {
     expect(describeTrouble({ code: "oversized", pids: ["a", "b", "c", "d", "e"] }))
       .toContain(String(GROUP_MAX));
+  });
+});
+
+describe("missingTees", () => {
+  const players = [{ id: "a", name: "Aaron" }, { id: "b", name: "Bob" }, { id: "c", name: "Carl" }];
+  const teeNames = ["BLUE", "WHITE"];
+
+  it("passes a round where everybody has a tee", () => {
+    expect(missingTees({ players, assignments: { a: "BLUE", b: "BLUE", c: "WHITE" }, teeNames })).toEqual([]);
+  });
+
+  it("names the player with no assignment at all", () => {
+    expect(missingTees({ players, assignments: { a: "BLUE", c: "BLUE" }, teeNames })).toEqual(["b"]);
+  });
+
+  it("treats a blank assignment as missing", () => {
+    expect(missingTees({ players, assignments: { a: "BLUE", b: "", c: "  " }, teeNames })).toEqual(["b", "c"]);
+  });
+
+  // The failure this exists to catch a second time: a tee name that no longer
+  // resolves — a tee renamed or deleted in the course editor — falls through to
+  // the course rating in exactly the way a blank does.
+  it("counts an assignment naming a tee the course does not have", () => {
+    expect(missingTees({ players, assignments: { a: "BLUE", b: "GOLD", c: "WHITE" }, teeNames })).toEqual(["b"]);
+  });
+
+  it("does not second-guess the name when the course has no tee boxes", () => {
+    expect(missingTees({ players, assignments: { a: "BLUE", b: "GOLD", c: "WHITE" }, teeNames: [] })).toEqual([]);
+  });
+
+  it("reports everybody when nothing has been assigned", () => {
+    expect(missingTees({ players, teeNames })).toEqual(["a", "b", "c"]);
+  });
+
+  it("keeps roster order, not object order", () => {
+    expect(missingTees({ players, assignments: { c: "BLUE" }, teeNames })).toEqual(["a", "b"]);
+  });
+
+  it("has nothing to say about an empty field", () => {
+    expect(missingTees({ players: [], assignments: {}, teeNames })).toEqual([]);
+    expect(missingTees()).toEqual([]);
+  });
+});
+
+describe("roundTrouble — tee assignments", () => {
+  const players = [{ id: "a" }, { id: "b" }];
+  const groups = [["a", "b"]];
+
+  it("reports them alongside the draw's other faults", () => {
+    const r = roundTrouble({
+      groups, teeTimes: ["8:00 AM"], rosterIds: ["a", "b"],
+      players, teeAssignments: { a: "BLUE" }, teeNames: ["BLUE"],
+    });
+    expect(r.missingTees).toEqual(["b"]);
+    expect(r.broken).toEqual([]);
+  });
+
+  it("is empty when every player has a tee", () => {
+    const r = roundTrouble({
+      groups, teeTimes: ["8:00 AM"], rosterIds: ["a", "b"],
+      players, teeAssignments: { a: "BLUE", b: "BLUE" }, teeNames: ["BLUE"],
+    });
+    expect(r.missingTees).toEqual([]);
+  });
+
+  // Callers that predate this — the scoring screen's setup check — pass no
+  // players, and must not start reporting a field of nobody as unassigned.
+  it("says nothing when the caller does not pass a field", () => {
+    expect(roundTrouble({ groups, teeTimes: ["8:00 AM"], rosterIds: ["a", "b"] }).missingTees).toEqual([]);
+  });
+});
+
+describe("describeMissingTees", () => {
+  const nameOf = (pid) => ({ a: "Aaron", b: "Bob", c: "Carl" })[pid] || pid;
+
+  it("names one player and says what it will cost", () => {
+    const s = describeMissingTees(["a"], nameOf, "The Loon");
+    expect(s).toContain("Aaron");
+    expect(s).toContain("has no tee");
+    expect(s).toContain("The Loon's default rating");
+  });
+
+  it("lists several names readably", () => {
+    expect(describeMissingTees(["a", "b", "c"], nameOf)).toContain("Aaron, Bob and Carl");
+  });
+
+  it("agrees its verb with the number of players", () => {
+    expect(describeMissingTees(["a"], nameOf)).toContain("has no tee");
+    expect(describeMissingTees(["a", "b"], nameOf)).toContain("have no tee");
+  });
+
+  it("falls back gracefully with no course name", () => {
+    expect(describeMissingTees(["a"], nameOf)).toContain("the course's default rating");
+  });
+
+  it("is empty when nobody is missing one", () => {
+    expect(describeMissingTees([], nameOf, "The Loon")).toBe("");
   });
 });
