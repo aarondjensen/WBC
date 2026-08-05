@@ -26,6 +26,7 @@ import { docIds } from "./lib/editionId";
 import { openingHole, nineComplete } from "./lib/holeAdvance";
 import { scoreWindow, nudgeUpTarget, nudgeDownTarget } from "./lib/scoreEntry";
 import { groupTrouble, roundTrouble, describeTrouble, blocksScoring, missingTees, describeMissingTees } from "./lib/roundSetup";
+import { indexFor, matchHistoryName } from "./lib/handicap";
 import { groupKey as groupKeyOf, sameGroup, liveRound, roundFinalized, switchableGroups, groupProgress } from "./lib/groupSwitch";
 import { AppHeader, HEADER_SAFE_PAD } from "./components/AppHeader";
 import { GroupSwitcher } from "./components/GroupSwitcher";
@@ -5087,6 +5088,22 @@ function PlayerEditor({ editing, set, onClose, tPlayers, players, memberships, c
   if (!isNew && !p) return null;
 
   const defaultNick = toDisplayName(editing.first, editing.last);
+  // ── The number this field is overriding ──
+  // The WBC Index is the source of truth for what a golfer plays off; the field
+  // below is this edition's copy of it, which a director may depart from. So
+  // the index is shown beside the field rather than left in another tab: an
+  // override you cannot see the original of is just a number somebody typed.
+  //
+  // For a NEW player it resolves off the name being typed, which is what lets a
+  // returning golfer arrive with their own index already offered.
+  const wbcRef = (() => {
+    const subject = p || { name: editing.nick || defaultNick, first_name: editing.first, last_name: editing.last };
+    const histName = matchHistoryName(subject);
+    if (!histName) return null;
+    const idx = indexFor(histName, { override: p?.index_override ?? null });
+    return idx.index == null ? null : idx;
+  })();
+  const wbcDiffers = !!wbcRef && String(parseFloat(editing.hi) || 0) !== String(wbcRef.index);
   const showPicker = isNew && !editing.linked && returning.length > 0;
   const theirMembership = isNew ? null : membershipForPlayer(memberships, claims, editing.pid);
   const isSelf = !!theirMembership && (theirMembership.id === authUid || theirMembership.uid === authUid);
@@ -5283,10 +5300,32 @@ function PlayerEditor({ editing, set, onClose, tPlayers, players, memberships, c
         <div style={{ display: "flex", gap: 8 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <span style={lbl}>Index</span>
-            <input type="number" inputMode="decimal" step="0.1" value={editing.hi} placeholder="0" onChange={e => set({ hi: e.target.value })} style={inp} />
+            <input type="number" inputMode="decimal" step="0.1" value={editing.hi} placeholder={wbcRef ? String(wbcRef.index) : "0"} onChange={e => set({ hi: e.target.value })} style={inp} />
           </div>
-          <div style={{ flex: 1, minWidth: 0 }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <span style={lbl}>WBC Index</span>
+            {wbcRef ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ fontSize: FS.lead, fontWeight: 800, color: K.acc }}>
+                  {wbcRef.index.toFixed(1)}
+                  {(wbcRef.stale || wbcRef.overridden) && <span style={{ color: K.warn }}>*</span>}
+                </span>
+                {wbcDiffers && (
+                  <Btn size="sm" variant="secondary" onClick={() => set({ hi: String(wbcRef.index) })}>Use</Btn>
+                )}
+              </div>
+            ) : (
+              <div style={{ fontSize: FS.small, color: K.t3, paddingTop: 6 }}>no rounds yet</div>
+            )}
+          </div>
         </div>
+        {wbcRef && wbcDiffers && (
+          <div style={{ fontSize: FS.label, color: K.t3, lineHeight: 1.45, marginTop: -4 }}>
+            This edition plays off <strong style={{ color: K.t1 }}>{(parseFloat(editing.hi) || 0).toFixed(1)}</strong>,
+            not the {wbcRef.index.toFixed(1)} their record computes to. That override is what the Players tab shows
+            in its year column.
+          </div>
+        )}
         {!isNew && tournamentStarted && (
           <div style={{ fontSize: FS.label, color: K.warn, lineHeight: 1.45 }}>
             The tournament has started — changing an index re-scores every round, including finalized ones.
@@ -8003,7 +8042,17 @@ export default function WBCApp() {
           // creating an empty 2027 and switching to it would silently import
           // every golfer who has ever played, at index 0, and the director
           // would have to work out which ones to delete.
-          const seeded = playerRows.map(r => ({ id: docIds.tournamentPlayer(_e(), r.id), tournament_id: TOURNAMENT_ID, player_id: r.id, handicap_index: 0, status: "active" }));
+          // Seeded from the WBC Index, not from zero. The index computed off a
+          // golfer's own history is the source of truth for what they play
+          // off; a roster that starts everybody at scratch makes the director
+          // type fourteen numbers that the app already knows, and a missed one
+          // is a player scoring gross by accident. Admin can still override
+          // any of them — that is what the Index field there is for.
+          const seeded = playerRows.map(r => {
+            const hist = matchHistoryName(r);
+            const seedIdx = hist ? indexFor(hist, { override: r.index_override ?? null }).index : null;
+            return { id: docIds.tournamentPlayer(_e(), r.id), tournament_id: TOURNAMENT_ID, player_id: r.id, handicap_index: seedIdx ?? 0, status: "active" };
+          });
           setTPlayers(seeded);
           for (const tp of seeded) await db.upsert("tournament_players", tp);
         }
@@ -9348,7 +9397,7 @@ export default function WBCApp() {
         <div style={{ display: view === "scoring" ? "block" : "none", paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
           <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeTimesData={teeTimesData} roundDates={roundDates} scoringOpen={scoringOpen} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={async (key, signerPid, signerName, present, rnd) => { const nonSigners = (present || []).filter(pid => pid !== signerPid); const autoFinal = nonSigners.length === 0; const optimistic = { signedBy: signerPid, signedByName: signerName, attestedBy: [], present: present || [] }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: optimistic })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), tournament_id: TOURNAMENT_ID, groupKey: key, round: rnd, signedBy: signerPid, signedByName: signerName, present: present || [], attestedBy: [], signedAt: new Date().toISOString() }); if (autoFinal) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onAttestScorecard={async (key, attesterPid, nonSigners) => { const cur = scorecardSigs[key]; if (!cur) return; const attestedBy = [...new Set([...(cur.attestedBy || []), attesterPid])]; const optimistic = { ...cur, attestedBy }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: { ...prev[key], attestedBy } })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), attestedBy }); const allDone = (nonSigners || []).every(pid => attestedBy.includes(pid)); if (allDone) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onUnsignScorecard={async key => { pendingSigsRef.current.delete(key); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); if (finalizedRounds[key]) { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); pendingSigsRef.current.delete(key); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); await saveTournamentState(nf); }} onGoToAdminCourses={(rnd) => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); setAdminSettingsRound(rnd || null); }} markPlayerWD={markPlayerWD} ctpData={ctpData} onSetCtp={onSetCtp} onConfirmCtp={onConfirmCtp} directorPick={directorPick} onGroupChange={setScoringGroup} onSetRound={setRound} />
         </div>
-        {view === "players" && <PlayersView players={allPlayers} registry={registry} meId={user?.id} isDirector={!!user.isDirector} onSetOverride={setIndexOverride} />}
+        {view === "players" && <PlayersView players={allPlayers} registry={registry} meId={user?.id} year={getTournamentYear()} isDirector={!!user.isDirector} onSetOverride={setIndexOverride} />}
         {view === "skins" && <BettingView players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} numRounds={numRounds} getPlayerTee={getPlayerTee} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} marketBets={marketBets} onSaveMarketBet={onSaveMarketBet} leaderboard={getLeaderboard} finalizedRounds={finalizedRounds} pairingsData={pairingsData} />}
         {view === "groups" && <GroupsView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} pairingsData={pairingsData} teeTimesData={teeTimesData} getPlayerTee={getPlayerTee} user={user} />}
         {view === "admin" && (user.isDirector ? <AdminView activePlayers={activePlayers} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
