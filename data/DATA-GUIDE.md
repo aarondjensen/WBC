@@ -90,6 +90,23 @@ For **2012, 2013, 2016–2022** the source spreadsheets do not include hole hand
 
 When a user asks a question that depends on hole-level net (e.g., "most net birdies on par 3s"), filter to years where `real_hole_handicaps == True` for the cleanest answer, OR caveat that the result is approximate for older years. For hole-level **gross** questions (eagles, hole-in-ones, lowest gross score on hole 7, etc.), all years are accurate.
 
+### Two course ratings recovered from the spreadsheets
+
+`courses.csv` originally had a blank `rating` and `slope` for **2013 R4 Forest
+Dunes** and **2024 R4 Pineview Spruce** — the extraction missed them, though
+both are present on the `SETUP` sheet of the year's workbook. They have been
+filled in from there (72.4/139 and 71.1/122). Every row in `courses.csv` now
+carries a rating and a slope, which is what the WBC Index depends on: a round
+at a course with no rating produces no differential.
+
+### The app reads this data through a generated module
+
+`src/data/history.js` is built from `rounds.csv` + `courses.csv` by
+`scripts/build-history.mjs`, and is what the app's Players tab computes the WBC
+Index from (see `src/lib/handicap.js`). **Re-run `npm run build:history` after
+changing either CSV** — most obviously when a finished tournament is exported
+into `rounds.csv` — or the app will keep showing the previous data.
+
 ### 2024 champion net vs par
 
 The 2024 champion (Aaron J) shows `net_vs_par = -4`, but the 2024 leaderboard sheet says `-5`. This is because Binder Park P/N is par 71 in the spreadsheet but the official leaderboard treated it as par 72. The individual round totals match — only the "vs par" baseline differs by 1 stroke.

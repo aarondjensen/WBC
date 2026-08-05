@@ -1,0 +1,202 @@
+// ══════════════════════════════════════════════════════════════════
+//  handicap — the WBC Index.
+// ══════════════════════════════════════════════════════════════════
+//
+// What the number is
+// ──────────────────
+// The average of a player's best 5 SCORE DIFFERENTIALS from their most recent
+// 12 rounds. That is the World Handicap System's shape — best 8 of the last 20
+// there — cut down to what a once-a-year tournament actually produces: 12
+// rounds is three WBCs, and 5 of 12 keeps the same "your good rounds, not your
+// average round" character the 8-of-20 ratio has.
+//
+// A differential is one round expressed on a common scale, so a 92 at
+// Lochenheath (74.4/144) and an 84 at Yarrow (70.2/124) can be compared:
+//
+//     differential = (gross − course rating) × 113 / slope
+//
+// Rating is what a scratch golfer shoots there, so gross − rating is how far
+// off scratch the round was; multiplying by 113/slope (113 being the slope of
+// a course of average difficulty) rescales that to a standard course. PAR IS
+// NOT IN IT — the rating already accounts for it, and adding par again would
+// double-count. Par earns its keep one step later, in the COURSE HANDICAP the
+// tournament plays off (calcCH in individualBoard.js: hi × slope/113 +
+// (rating − par)), which is where the difference between a par-70 and a par-72
+// layout belongs.
+//
+// Why the asterisk exists
+// ───────────────────────
+// The WBC is played once a year, and not everybody plays every year. A golfer
+// who has made 6 of the last 10 trips has a "recent 12" that reaches back a
+// decade — the number is honest arithmetic on real rounds, but it is not a
+// current handicap in the way a weekly league's would be. So the window's SPAN
+// is computed alongside the index, and anything wider than 4 years is flagged
+// (`stale`) for the view to asterisk. Four years is the line because 12 rounds
+// is three tournaments: a player who shows up every year clears it, and one
+// who has been away does not.
+//
+// Everything here is pure. `wbcIndex` takes rounds and returns numbers, so the
+// math is testable without the dataset; the dataset lives in ../data/history.js
+// and is joined onto it by `historyFor`.
+
+import { HISTORY_COURSES, HISTORY_ROUNDS, HISTORY_PLAYERS } from "../data/history.js";
+
+// The three constants the whole thing is: how far back we look, how many of
+// those rounds count, and how wide a window is allowed to be before it needs
+// explaining.
+export const WINDOW = 12;
+export const COUNTING = 5;
+export const SPAN_LIMIT = 4;
+
+// The slope of a course of average difficulty — the constant every differential
+// is rescaled onto.
+const STANDARD_SLOPE = 113;
+
+// One decimal place, which is the precision a handicap is quoted at. Rounding
+// each differential before averaging (rather than only rounding the average)
+// is the WHS order of operations, and it is what makes a hand-check of the five
+// numbers on screen add up to the index printed above them.
+const tenth = (n) => Math.round(n * 10) / 10;
+
+// ── differential ───────────────────────────────────────────────────
+// Null when the course has no rating or slope on file: a round we cannot place
+// on the common scale is not a zero, and averaging it in as one would drag an
+// index down by a stroke and a half.
+export function differential({ gross, rating, slope }) {
+  if (!gross || !rating || !slope) return null;
+  return tenth((gross - rating) * STANDARD_SLOPE / slope);
+}
+
+// Newest first — the order the window is taken from and the order the history
+// list reads in. Within a year, a later round is a later round; 2014 numbers
+// its four rounds 1, 2, 3, 5 in the source data, which sorts correctly anyway.
+const newestFirst = (a, b) => b.year - a.year || b.round - a.round;
+
+// ── historyFor ─────────────────────────────────────────────────────
+// Every recorded round for one player, newest first, each one joined to the
+// course it was played on and carrying its differential.
+//
+// Names are the join key: the historical data and the app's player registry
+// both use FirstName LastInitial ("Aaron J"), and player_id — the identity the
+// Firestore side is keyed on — did not exist when these rounds were played.
+// See `matchHistoryName` for the matching rules.
+export function historyFor(name) {
+  if (!name) return [];
+  return HISTORY_ROUNDS
+    .filter(r => r.player === name)
+    .map(r => {
+      const course = HISTORY_COURSES[`${r.year}-${r.round}`] || null;
+      return {
+        ...r,
+        key: `${r.year}-${r.round}`,
+        course,
+        differential: course ? differential({ gross: r.gross, rating: course.rating, slope: course.slope }) : null,
+      };
+    })
+    .sort(newestFirst);
+}
+
+// ── wbcIndex ───────────────────────────────────────────────────────
+// The index, plus everything the view needs to show its working.
+//
+// `rounds` is any list of rounds carrying `year`, `round` and `differential`;
+// it does not have to come from historyFor. Rounds with no differential are
+// dropped BEFORE the window is taken rather than inside it — a round we cannot
+// score should not use up one of the 12 slots, or a single unrated course would
+// quietly shrink the sample.
+//
+// Returns:
+//   index        the number, or null with fewer than one usable round
+//   window       the rounds it was taken from, newest first (≤ 12)
+//   counting     the ones that made the average, newest first
+//   countingKeys a Set of their keys, for the view to mark them
+//   spanFrom/To  the years the window reaches across
+//   spanYears    inclusive count of those years
+//   stale        the window is wider than SPAN_LIMIT years — asterisk it
+//   provisional  fewer than WINDOW rounds exist, so the sample is short
+//   unrated      rounds excluded for having no course rating
+export function wbcIndex(rounds = []) {
+  const all = [...rounds].sort(newestFirst);
+  const usable = all.filter(r => r.differential != null);
+  const unrated = all.filter(r => r.differential == null);
+  const window = usable.slice(0, WINDOW);
+
+  const empty = {
+    index: null, window: [], counting: [], countingKeys: new Set(),
+    spanFrom: null, spanTo: null, spanYears: 0,
+    stale: false, provisional: true, unrated,
+  };
+  if (!window.length) return empty;
+
+  // Lowest differentials win. The tie-break is the more recent round, so two
+  // identical numbers resolve the same way on every device — and resolve
+  // towards the golfer the player is now.
+  const counting = [...window]
+    .sort((a, b) => a.differential - b.differential || newestFirst(a, b))
+    .slice(0, Math.min(COUNTING, window.length))
+    .sort(newestFirst);
+
+  const avg = counting.reduce((a, r) => a + r.differential, 0) / counting.length;
+  const years = window.map(r => r.year);
+  const spanFrom = Math.min(...years), spanTo = Math.max(...years);
+  const spanYears = spanTo - spanFrom + 1;
+
+  return {
+    index: tenth(avg),
+    window,
+    counting,
+    countingKeys: new Set(counting.map(r => r.key)),
+    spanFrom, spanTo, spanYears,
+    stale: spanYears > SPAN_LIMIT,
+    provisional: window.length < WINDOW,
+    unrated,
+  };
+}
+
+// ── indexFor ───────────────────────────────────────────────────────
+// The one call the view makes for a player: their history and their index.
+export function indexFor(name) {
+  const rounds = historyFor(name);
+  return { name, rounds, ...wbcIndex(rounds) };
+}
+
+// ── matchHistoryName ───────────────────────────────────────────────
+// Find the historical name for an app roster player.
+//
+// The registry stores `name` and, when it has them, `first_name`/`last_name`.
+// Three shapes have to land on "Aaron J":
+//   "Aaron J"       the canonical form, and what the registry uses today
+//   "Aaron J."      the same with the initial punctuated
+//   "Aaron Jensen"  a full surname, which reduces to its first letter
+// Anything else returns null and the player simply has no history — which is
+// the correct answer for a first-timer, and a safer one than a fuzzy match that
+// hands one man another man's rounds.
+const canonical = (first, last) =>
+  `${(first || "").trim()} ${(last || "").trim().replace(/\./g, "").charAt(0)}`.trim().toLowerCase();
+
+export function matchHistoryName(player, names = HISTORY_PLAYERS) {
+  if (!player) return null;
+  const candidates = new Set();
+  const full = (player.name || "").trim();
+  if (full) {
+    candidates.add(full.toLowerCase());
+    const parts = full.split(/\s+/);
+    if (parts.length > 1) candidates.add(canonical(parts[0], parts[parts.length - 1]));
+  }
+  if (player.first_name) candidates.add(canonical(player.first_name, player.last_name));
+  return names.find(n => candidates.has(n.toLowerCase())) || null;
+}
+
+// ── indexTable ─────────────────────────────────────────────────────
+// Every player with recorded rounds, best index first. Players yet to post a
+// round sort last rather than at the top, which is where a null index would
+// otherwise land them.
+export function indexTable(names = HISTORY_PLAYERS) {
+  return names
+    .map(indexFor)
+    .sort((a, b) => {
+      if ((a.index == null) !== (b.index == null)) return a.index == null ? 1 : -1;
+      if (a.index !== b.index) return a.index - b.index;
+      return a.name.localeCompare(b.name);
+    });
+}
