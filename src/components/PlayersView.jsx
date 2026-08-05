@@ -384,40 +384,39 @@ export function PlayersView({ players = [], meId = null }) {
       .filter(n => !taken.has(n))
       .map(n => ({ key: `h_${n}`, name: n, historyName: n, inField: false, isMe: false, idx: indexFor(n) }));
 
-    // "past" is only sayable once there is a roster to be absent from. Before
-    // it loads — or in an edition that has not set one up — every row would
-    // otherwise be tagged as a former player, which is the opposite of true.
+    // "Inactive" is only sayable once there is a roster to be absent from.
+    // Before it loads — or in an edition that has not set one up — every player
+    // would fall into that section, which is the opposite of true, so they all
+    // count as active until the field is known.
     const knowsField = fromRoster.length > 0;
-    // Alphabetical, everybody in one run. The index column is not a
-    // leaderboard — nobody wins the WBC by having the lowest handicap — so
-    // ordering by it invited a reading that isn't there, and it moved a name
-    // every time a round was posted. A list you look yourself up in should keep
-    // people where you left them.
+    // Alphabetical within each section. The index column is not a leaderboard —
+    // nobody wins the WBC by having the lowest handicap — so ordering by it
+    // invited a reading that isn't there, and it moved a name every time a
+    // round was posted. A list you look yourself up in should keep people where
+    // you left them.
     return [...fromRoster, ...fromHistory]
       .map(r => ({ ...r, inField: r.inField || !knowsField }))
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [players, meId]);
+
+  const active = rows.filter(r => r.inField);
+  const inactive = rows.filter(r => !r.inField);
 
   const detail = open ? rows.find(r => r.key === open) : null;
   if (detail) return <PlayerDetail row={detail} onBack={() => setOpen(null)} />;
 
   return (
     <div style={{ fontFamily: FONT, paddingBottom: BOTTOM_PAD }}>
-      {/* What the number is, stated once, at the top of the only screen that
-          shows it. Without this the list is fourteen unexplained decimals. */}
+      {/* What the number is, in one sentence. The formula and the asterisk rule
+          used to be spelled out here too, and both are already on every detail
+          page — one under "How it adds up", the other in the asterisk's own
+          card, next to the rounds they describe. Up here they were a paragraph
+          of definitions between the reader and the list they came for. */}
       <Card style={{ marginBottom: 14 }}>
         <SectionLabel style={{ marginBottom: 6 }}>The WBC Index</SectionLabel>
         <div style={{ fontSize: FS.small, color: K.t2, lineHeight: 1.55 }}>
           The average of a player&apos;s best <strong style={{ color: K.t1 }}>{COUNTING}</strong> score
           differentials from their last <strong style={{ color: K.t1 }}>{WINDOW}</strong> rounds.
-          A differential puts one round on a common scale —
-          {" "}<span style={{ color: K.t1, fontWeight: 700 }}>(gross − course rating) × 113 ÷ slope</span> —
-          so a card at a brutal course counts for what it was worth.
-        </div>
-        <div style={{ fontSize: FS.label, color: K.t3, lineHeight: 1.5, marginTop: 8 }}>
-          Tap a player for their rounds. A <span style={{ color: K.warn, fontWeight: 800 }}>*</span> means
-          those {WINDOW} are not the tournament&apos;s last {WINDOW} — a missed year, a withdrawal, or
-          too few rounds to fill the window.
         </div>
       </Card>
 
@@ -431,45 +430,63 @@ export function PlayersView({ players = [], meId = null }) {
         <span />
       </div>
 
-      {rows.map(row => {
-        const idx = row.idx;
-        return (
-          <button
-            key={row.key}
-            onClick={() => setOpen(row.key)}
-            style={{
-              width: "100%", display: "grid", gridTemplateColumns: "minmax(0, 1fr) 62px 14px",
-              gap: 6, alignItems: "center", textAlign: "left",
-              padding: "10px 12px", marginBottom: 6,
-              background: row.isMe ? `${K.gold}${ALPHA.wash}` : K.card,
-              border: `1px solid ${row.isMe ? `${K.gold}${ALPHA.line}` : K.bdr}`,
-              borderRadius: R.lg, cursor: "pointer", fontFamily: FONT,
-            }}
-          >
-            <span style={{ minWidth: 0 }}>
-              <span style={{
-                display: "block", fontSize: FS.body, fontWeight: 700,
-                color: row.isMe ? K.gold : K.t1,
-                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-              }}>
-                {row.name}
-                {!row.inField && <span style={{ fontSize: FS.micro, fontWeight: 700, color: K.t3 }}> · past</span>}
-              </span>
-              <span style={{ display: "block", fontSize: FS.micro, color: K.t3, marginTop: 2 }}>
-                {idx?.window.length
-                  ? `${idx.rounds.length} recorded · window ${idx.spanFrom === idx.spanTo ? idx.spanFrom : `${idx.spanFrom}–${idx.spanTo}`}`
-                  : "no recorded rounds"}
-              </span>
-            </span>
-            <span style={{ textAlign: "right", fontSize: FS.lead, fontWeight: 900, color: idx?.index == null ? K.t3 : K.acc }}>
-              {fmtIndex(idx?.index)}
-              {idx?.stale && <span style={{ color: K.warn }}>*</span>}
-            </span>
-            <span style={{ textAlign: "right", fontSize: FS.body, color: K.t3 }}>›</span>
-          </button>
-        );
-      })}
+      {active.map(row => <PlayerRow key={row.key} row={row} onOpen={setOpen} />)}
+
+      {/* ── Inactive ──
+          Everyone in the record books who is not in this year's field. They
+          keep their index and their whole career — the tab is a record, not a
+          roster — but they are not who you are looking for when you open it
+          during a tournament, so they sit under their own heading rather than
+          interleaved with the men playing. */}
+      {inactive.length > 0 && (
+        <>
+          <SectionLabel style={{ marginTop: 18, marginBottom: 6 }}>Inactive</SectionLabel>
+          <div style={{ fontSize: FS.label, color: K.t3, lineHeight: 1.5, marginBottom: 8 }}>
+            Not in this year&apos;s field.
+          </div>
+          {inactive.map(row => <PlayerRow key={row.key} row={row} onOpen={setOpen} />)}
+        </>
+      )}
     </div>
+  );
+}
+
+// ── PlayerRow ──────────────────────────────────────────────────────
+// One name in the list. Extracted when the list grew a second section: the
+// active field and the inactive players are the same row, and the alternative
+// was the same forty lines of markup written twice.
+function PlayerRow({ row, onOpen }) {
+  const idx = row.idx;
+  return (
+    <button
+      onClick={() => onOpen(row.key)}
+      style={{
+        width: "100%", display: "grid", gridTemplateColumns: "minmax(0, 1fr) 62px 14px",
+        gap: 6, alignItems: "center", textAlign: "left",
+        padding: "10px 12px", marginBottom: 6,
+        background: row.isMe ? `${K.gold}${ALPHA.wash}` : K.card,
+        border: `1px solid ${row.isMe ? `${K.gold}${ALPHA.line}` : K.bdr}`,
+        borderRadius: R.lg, cursor: "pointer", fontFamily: FONT,
+      }}
+    >
+      <span style={{ minWidth: 0 }}>
+        <span style={{
+          display: "block", fontSize: FS.body, fontWeight: 700,
+          color: row.isMe ? K.gold : K.t1,
+          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+        }}>
+          {row.name}
+        </span>
+        <span style={{ display: "block", fontSize: FS.micro, color: K.t3, marginTop: 2 }}>
+          {idx?.rounds.length ? `${idx.rounds.length} recorded` : "no recorded rounds"}
+        </span>
+      </span>
+      <span style={{ textAlign: "right", fontSize: FS.lead, fontWeight: 900, color: idx?.index == null ? K.t3 : K.acc }}>
+        {fmtIndex(idx?.index)}
+        {idx?.stale && <span style={{ color: K.warn }}>*</span>}
+      </span>
+      <span style={{ textAlign: "right", fontSize: FS.body, color: K.t3 }}>›</span>
+    </button>
   );
 }
 
