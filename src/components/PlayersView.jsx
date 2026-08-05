@@ -33,10 +33,27 @@
 import { useMemo, useState } from "react";
 import { K, FONT, FS, R, ALPHA, MOTION } from "../theme";
 import { Card, SectionLabel } from "./ui";
-import { indexFor, matchHistoryName, WINDOW, COUNTING, SPAN_LIMIT } from "../lib/handicap";
-import { HISTORY_PLAYERS, HISTORY_YEARS } from "../data/history";
+import { indexFor, matchHistoryName, recentRoundSlots, WINDOW, COUNTING } from "../lib/handicap";
+import { HISTORY_PLAYERS } from "../data/history";
 
-const LATEST_YEAR = HISTORY_YEARS[HISTORY_YEARS.length - 1];
+// The tournament's own last 12 rounds — the yardstick the asterisk is measured
+// against, and stable for the life of the bundle since the history is baked in.
+const RECENT = recentRoundSlots();
+
+// "2025-4" → "2025 R4". The keys are internal; a card is read by people.
+const slotLabel = (key) => {
+  if (!key) return "";
+  const [year, round] = String(key).split("-");
+  return `${year} R${round}`;
+};
+
+// The missed rounds, said in the fewest words that stay specific. Past four
+// names the list stops being read, so it names the years instead.
+const missedLabel = (missed = []) => {
+  if (missed.length <= 4) return missed.map(slotLabel).join(", ");
+  const years = [...new Set(missed.map(k => k.split("-")[0]))];
+  return `${missed.length} rounds from ${years.length > 1 ? `${years[years.length - 1]}–${years[0]}` : years[0]}`;
+};
 
 // Clearance under the last row. The nav bar's trophy sits in a dome that rises
 // 24px above the bar, so a list that stops at the bar's edge has its final row
@@ -228,31 +245,28 @@ function PlayerDetail({ row, onBack }) {
           <div style={{ display: "flex", gap: 8 }}>
             <span style={{ color: K.warn, fontWeight: 900, fontSize: FS.lead, lineHeight: 1 }}>*</span>
             <div style={{ fontSize: FS.small, color: K.t2, lineHeight: 1.5 }}>
-              These {idx.window.length} rounds span <strong style={{ color: K.t1 }}>{idx.spanFrom}–{idx.spanTo}</strong> — {idx.spanYears} years.
-              The WBC is played once a year and not every year was played, so this index is honest arithmetic
-              on real rounds but reaches much further back than a current handicap normally would.
-              Anything wider than {SPAN_LIMIT} years gets the asterisk.
-              {idx.spanTo < LATEST_YEAR && <> The most recent round here is from <strong style={{ color: K.t1 }}>{idx.spanTo}</strong>.</>}
+              The WBC's last {WINDOW} rounds are <strong style={{ color: K.t1 }}>{slotLabel(RECENT[RECENT.length - 1])}</strong>
+              {" "}through <strong style={{ color: K.t1 }}>{slotLabel(RECENT[0])}</strong>. These are not those.
+              {idx.missed.length >= WINDOW ? (
+                <> Not one of them is on this card — the most recent round here is
+                  {" "}<strong style={{ color: K.t1 }}>{slotLabel(idx.window[0].key)}</strong>.</>
+              ) : idx.provisional ? (
+                <> {missedLabel(idx.missed)} {idx.missed.length === 1 ? "is" : "are"} missing, and there
+                  {" "}{idx.window.length === 1 ? "is" : "are"} only <strong style={{ color: K.t1 }}>{idx.window.length}</strong> rounds
+                  {" "}on record to put in their place.</>
+              ) : (
+                <> {missedLabel(idx.missed)} {idx.missed.length === 1 ? "is" : "are"} missing, so the window reaches
+                  {" "}back to <strong style={{ color: K.t1 }}>{slotLabel(idx.window[idx.window.length - 1].key)}</strong>.</>
+              )}
+              {" "}It is honest arithmetic on real rounds — it is just not built from the same {WINDOW} as the rest of the field&apos;s.
             </div>
           </div>
         </Card>
       )}
 
-      {/* ── Away from the tournament ── */}
-      {/* The span asterisk catches a window stretched over many years; it does
-          not catch one that is tight but old. Four rounds from 2017 span a
-          single year and get no asterisk, yet "recent 12" plainly needs saying
-          out loud when the most recent of them is nine years back. */}
-      {hasRounds && !idx.stale && idx.spanTo < LATEST_YEAR && (
-        <Card style={{ marginBottom: 12 }}>
-          <div style={{ fontSize: FS.small, color: K.t2, lineHeight: 1.5 }}>
-            The most recent of these rounds is from <strong style={{ color: K.t1 }}>{idx.spanTo}</strong>
-            {" "}— the last WBC on record is {LATEST_YEAR}.
-          </div>
-        </Card>
-      )}
-
       {/* ── A short sample ── */}
+      {/* Separate from the asterisk above, because it says a different thing:
+          that one is about WHICH rounds, this is about how many of them count. */}
       {hasRounds && idx.provisional && (
         <Card style={{ marginBottom: 12 }}>
           <div style={{ fontSize: FS.small, color: K.t2, lineHeight: 1.5 }}>
@@ -374,12 +388,14 @@ export function PlayersView({ players = [], meId = null }) {
     // it loads — or in an edition that has not set one up — every row would
     // otherwise be tagged as a former player, which is the opposite of true.
     const knowsField = fromRoster.length > 0;
-    return [...fromRoster, ...fromHistory].map(r => ({ ...r, inField: r.inField || !knowsField })).sort((a, b) => {
-      const ai = a.idx?.index ?? null, bi = b.idx?.index ?? null;
-      if ((ai == null) !== (bi == null)) return ai == null ? 1 : -1;
-      if (ai !== bi) return ai - bi;
-      return a.name.localeCompare(b.name);
-    });
+    // Alphabetical, everybody in one run. The index column is not a
+    // leaderboard — nobody wins the WBC by having the lowest handicap — so
+    // ordering by it invited a reading that isn't there, and it moved a name
+    // every time a round was posted. A list you look yourself up in should keep
+    // people where you left them.
+    return [...fromRoster, ...fromHistory]
+      .map(r => ({ ...r, inField: r.inField || !knowsField }))
+      .sort((a, b) => a.name.localeCompare(b.name));
   }, [players, meId]);
 
   const detail = open ? rows.find(r => r.key === open) : null;
@@ -400,7 +416,8 @@ export function PlayersView({ players = [], meId = null }) {
         </div>
         <div style={{ fontSize: FS.label, color: K.t3, lineHeight: 1.5, marginTop: 8 }}>
           Tap a player for their rounds. A <span style={{ color: K.warn, fontWeight: 800 }}>*</span> means
-          those {WINDOW} rounds reach back more than {SPAN_LIMIT} years.
+          those {WINDOW} are not the tournament&apos;s last {WINDOW} — a missed year, a withdrawal, or
+          too few rounds to fill the window.
         </div>
       </Card>
 
