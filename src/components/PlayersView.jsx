@@ -44,7 +44,7 @@
 
 import { useMemo, useState } from "react";
 import { K, FONT, FS, R, ALPHA, MOTION } from "../theme";
-import { Card, SectionLabel } from "./ui";
+import { Btn, Card, SectionLabel } from "./ui";
 import { indexFor, matchHistoryName, recentRoundSlots, WINDOW, COUNTING } from "../lib/handicap";
 import { HISTORY_PLAYERS } from "../data/history";
 
@@ -199,9 +199,11 @@ function RoundRow({ r, inWindow, counting }) {
 }
 
 // ── PlayerDetail ───────────────────────────────────────────────────
-function PlayerDetail({ row, onBack }) {
+function PlayerDetail({ row, onBack, isDirector = false, onSetOverride = null }) {
   const idx = row.idx;
   const hasRounds = !!idx && idx.window.length > 0;
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(row.override == null ? "" : String(row.override));
 
   // Career, newest year first. A year's rounds are already in order inside it.
   const byYear = useMemo(() => {
@@ -231,19 +233,25 @@ function PlayerDetail({ row, onBack }) {
         <SectionLabel style={{ marginBottom: 4 }}>{row.name}</SectionLabel>
         <div style={{ fontSize: FS.display, fontWeight: 900, color: idx?.index == null ? K.t3 : K.acc, lineHeight: 1.1 }}>
           {fmtIndex(idx?.index)}
-          {idx?.stale && <span style={{ color: K.warn }}>*</span>}
+          {(idx?.stale || idx?.overridden) && <span style={{ color: K.warn }}>*</span>}
         </div>
         <div style={{ fontSize: FS.label, fontWeight: 700, color: K.t3, letterSpacing: 1.5, marginTop: 4 }}>
           WBC INDEX
         </div>
-        {hasRounds && (
+        {/* What the number on top of this card actually is. A hand-set index
+            says so here rather than only in a card below it — the headline is
+            the thing people quote, and quoting it without knowing it was set
+            by hand is the one misreading this screen can cause. */}
+        {idx?.overridden ? (
+          <div style={{ fontSize: FS.small, color: K.warn, fontWeight: 700, marginTop: 10 }}>set by hand</div>
+        ) : hasRounds && (
           <div style={{ fontSize: FS.small, color: K.t2, marginTop: 10 }}>
             best {idx.counting.length} of {idx.window.length} · {idx.spanFrom === idx.spanTo ? idx.spanFrom : `${idx.spanFrom}–${idx.spanTo}`}
           </div>
         )}
       </Card>
 
-      {!hasRounds && (
+      {!hasRounds && !idx?.overridden && (
         <Card style={{ marginBottom: 12 }}>
           <div style={{ fontSize: FS.small, color: K.t2, lineHeight: 1.5 }}>
             No recorded rounds yet. An index appears after a first WBC is played.
@@ -251,8 +259,87 @@ function PlayerDetail({ row, onBack }) {
         </Card>
       )}
 
+      {/* ── A hand-set index ──
+          The override carries the same asterisk the computed ones do, and this
+          is what it means. It shows the computed number beside it whenever
+          there is one: an index set by hand that hides what the rounds actually
+          say is a number nobody can check, and the reason for setting one is
+          usually a disagreement with those rounds — which is worth being able
+          to see. */}
+      {idx?.overridden && (
+        <Card style={{ marginBottom: 12, borderColor: `${K.warn}${ALPHA.line}`, background: `${K.warn}${ALPHA.wash}` }}>
+          <div style={{ display: "flex", gap: 8 }}>
+            <span style={{ color: K.warn, fontWeight: 900, fontSize: FS.lead, lineHeight: 1 }}>*</span>
+            <div style={{ fontSize: FS.small, color: K.t2, lineHeight: 1.5 }}>
+              This index was <strong style={{ color: K.t1 }}>set by hand</strong> by a director, not
+              computed from the rounds below.
+              {idx.computed != null ? (
+                <> Those rounds come to <strong style={{ color: K.t1 }}>{fmtIndex(idx.computed)}</strong>
+                  {" "}on the usual rule — best {idx.counting.length} of {idx.window.length}.</>
+              ) : (
+                <> There are no recorded rounds to compute one from.</>
+              )}
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {/* The control, for a director and only where there is a registry entry
+          to write to. It sits under the number it changes rather than in the
+          admin console: this is the screen that publishes the index, and a
+          setting that lives away from the thing it sets is a setting nobody
+          finds. */}
+      {isDirector && onSetOverride && (
+        <Card style={{ marginBottom: 12 }} pad={12}>
+          {!editing ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ flex: 1, minWidth: 0, fontSize: FS.label, color: K.t3, lineHeight: 1.4 }}>
+                {idx?.overridden
+                  ? `Hand-set to ${fmtIndex(idx.index)}.`
+                  : "Computed from the rounds below."}
+              </span>
+              <Btn variant="secondary" size="sm" onClick={() => { setDraft(row.override == null ? "" : String(row.override)); setEditing(true); }}>
+                {idx?.overridden ? "Change" : "Set by hand"}
+              </Btn>
+            </div>
+          ) : (
+            <>
+              <div style={{ fontSize: FS.label, color: K.t3, lineHeight: 1.4, marginBottom: 8 }}>
+                A hand-set index replaces the computed one everywhere this tab shows it, and keeps its
+                asterisk. It does not touch the handicap this tournament is played off — that stays in
+                Admin.
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <input
+                  autoFocus
+                  inputMode="decimal"
+                  value={draft}
+                  placeholder={idx?.computed != null ? fmtIndex(idx.computed) : "index"}
+                  onChange={e => setDraft(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter") { onSetOverride(draft); setEditing(false); } }}
+                  style={{
+                    width: 88, padding: "8px 10px", background: K.inp,
+                    border: `1px solid ${K.acc}${ALPHA.line}`, borderRadius: R.sm,
+                    color: K.t1, fontSize: FS.lead, fontWeight: 800, fontFamily: FONT,
+                    textAlign: "center", boxSizing: "border-box",
+                  }}
+                />
+                <Btn size="sm" onClick={() => { onSetOverride(draft); setEditing(false); }}>Save</Btn>
+                <Btn variant="ghost" size="sm" onClick={() => setEditing(false)}>Cancel</Btn>
+                {idx?.overridden && (
+                  <Btn variant="dangerOutline" size="sm" style={{ marginLeft: "auto" }}
+                    onClick={() => { onSetOverride(null); setEditing(false); }}>
+                    Clear
+                  </Btn>
+                )}
+              </div>
+            </>
+          )}
+        </Card>
+      )}
+
       {/* ── The asterisk ── */}
-      {idx?.stale && (
+      {idx?.stale && !idx?.overridden && (
         <Card style={{ marginBottom: 12, borderColor: `${K.warn}${ALPHA.line}`, background: `${K.warn}${ALPHA.wash}` }}>
           <div style={{ display: "flex", gap: 8 }}>
             <span style={{ color: K.warn, fontWeight: 900, fontSize: FS.lead, lineHeight: 1 }}>*</span>
@@ -376,29 +463,56 @@ function PlayerDetail({ row, onBack }) {
 //           signed-in player. The screen works without it: the index comes from
 //           the recorded history, which needs no network at all.
 // meId    — the signed-in player's id, for the gold row.
-export function PlayersView({ players = [], meId = null }) {
+// registry — the `players` career registry, which carries `index_override`.
+//           A row needs its registry id to be able to write one back, and the
+//           registry holds men who are not in this year's field, so it is the
+//           list overrides are keyed against rather than the roster.
+// isDirector / onSetOverride — who may set a hand index, and how.
+export function PlayersView({ players = [], registry = [], meId = null, isDirector = false, onSetOverride = null }) {
   const [open, setOpen] = useState(null);
 
   const rows = useMemo(() => {
+    const overrideOf = (id) => registry.find(p => p.id === id)?.index_override ?? null;
     // The roster first, each matched to its history by name.
     const fromRoster = players.map(p => {
       const historyName = matchHistoryName(p);
+      const override = p.index_override ?? overrideOf(p.id);
       return {
         key: p.id,
+        pid: p.id,
         name: p.name,
         historyName,
         inField: true,
         isMe: !!meId && p.id === meId,
-        idx: historyName ? indexFor(historyName) : null,
+        override,
+        idx: indexFor(historyName, { override }),
       };
     });
     // Then anybody in the record books who isn't in this year's field. The
     // history is a career registry — a man who last played in 2017 still has an
     // index, and hiding it would make the tab a roster rather than a record.
+    //
+    // They are matched back to the registry by name so a hand-set index can be
+    // written for them too: not being in this year's field is exactly the
+    // situation where the computed number is least likely to be right.
     const taken = new Set(fromRoster.map(r => r.historyName).filter(Boolean));
+    const rosterIds = new Set(players.map(p => p.id));
     const fromHistory = HISTORY_PLAYERS
       .filter(n => !taken.has(n))
-      .map(n => ({ key: `h_${n}`, name: n, historyName: n, inField: false, isMe: false, idx: indexFor(n) }));
+      .map(n => {
+        const reg = registry.find(p => !rosterIds.has(p.id) && matchHistoryName(p) === n);
+        const override = reg?.index_override ?? null;
+        return {
+          key: reg?.id || `h_${n}`,
+          pid: reg?.id || null,
+          name: reg?.name || n,
+          historyName: n,
+          inField: false,
+          isMe: false,
+          override,
+          idx: indexFor(n, { override }),
+        };
+      });
 
     // "Inactive" is only sayable once there is a roster to be absent from.
     // Before it loads — or in an edition that has not set one up — every player
@@ -413,13 +527,22 @@ export function PlayersView({ players = [], meId = null }) {
     return [...fromRoster, ...fromHistory]
       .map(r => ({ ...r, inField: r.inField || !knowsField }))
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [players, meId]);
+  }, [players, registry, meId]);
 
   const active = rows.filter(r => r.inField);
   const inactive = rows.filter(r => !r.inField);
 
   const detail = open ? rows.find(r => r.key === open) : null;
-  if (detail) return <PlayerDetail row={detail} onBack={() => setOpen(null)} />;
+  if (detail) {
+    return (
+      <PlayerDetail
+        row={detail}
+        onBack={() => setOpen(null)}
+        isDirector={isDirector}
+        onSetOverride={detail.pid && onSetOverride ? (v) => onSetOverride(detail.pid, v) : null}
+      />
+    );
+  }
 
   return (
     <div style={{ fontFamily: FONT, paddingBottom: BOTTOM_PAD }}>
@@ -506,7 +629,7 @@ function PlayerRow({ row, onOpen }) {
       </span>
       <span style={{ textAlign: "right", fontSize: FS.lead, fontWeight: 900, color: idx?.index == null ? K.t3 : K.acc }}>
         {fmtIndex(idx?.index)}
-        {idx?.stale && <span style={{ color: K.warn }}>*</span>}
+        {(idx?.stale || idx?.overridden) && <span style={{ color: K.warn }}>*</span>}
       </span>
       <span style={{ textAlign: "right", fontSize: FS.body, color: K.t3 }}>›</span>
     </button>

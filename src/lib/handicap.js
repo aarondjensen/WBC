@@ -226,9 +226,36 @@ export function wbcIndex(rounds = [], { recentSlots = recentRoundSlots() } = {})
 
 // ── indexFor ───────────────────────────────────────────────────────
 // The one call the view makes for a player: their history and their index.
-export function indexFor(name) {
+//
+// `override` is a number a director has set by hand, and it REPLACES the
+// computed index without erasing it — `computed` keeps the arithmetic, the
+// window and the counting rounds stay exactly as they were, and the detail page
+// shows both. That is the whole design of the override: a hand-set index that
+// hides its own working is a number nobody can argue with or check, and the
+// reason to set one is usually that the history is thin or wrong, which is
+// worth being able to see side by side.
+//
+// The cases it exists for: a first-timer with no rounds at all, somebody whose
+// real index is known from a home club, and the year a career's data is plainly
+// not describing the golfer any more.
+export function indexFor(name, { override = null } = {}) {
   const rounds = historyFor(name);
-  return { name, rounds, ...wbcIndex(rounds) };
+  const board = wbcIndex(rounds);
+  // An empty string is a cleared field, not a scratch player. `Number("")` is
+  // 0 and 0 is a legal index, so the blank has to be rejected before the number
+  // check rather than by it — and 0 has to survive, which a falsy test would
+  // not have let it do.
+  const overridden = override != null
+    && String(override).trim() !== ""
+    && Number.isFinite(Number(override));
+  return {
+    name,
+    rounds,
+    ...board,
+    computed: board.index,
+    index: overridden ? tenth(Number(override)) : board.index,
+    overridden,
+  };
 }
 
 // ── matchHistoryName ───────────────────────────────────────────────

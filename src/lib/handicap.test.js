@@ -360,3 +360,68 @@ describe("the taper, applied", () => {
     }
   });
 });
+
+// ── A hand-set index ──
+// An override replaces the number without erasing the arithmetic behind it, so
+// the detail page can show a director's figure and what the rounds actually say
+// at the same time.
+describe("indexFor with an override", () => {
+  it("reports the computed index when there is no override", () => {
+    const p = indexFor("Aaron J");
+    expect(p.overridden).toBe(false);
+    expect(p.index).toBe(6.6);
+    expect(p.computed).toBe(6.6);
+  });
+
+  it("replaces the index and says so", () => {
+    const p = indexFor("Aaron J", { override: 8 });
+    expect(p.overridden).toBe(true);
+    expect(p.index).toBe(8);
+  });
+
+  it("keeps the computed index alongside it", () => {
+    const p = indexFor("Aaron J", { override: 8 });
+    expect(p.computed).toBe(6.6);
+  });
+
+  it("leaves the working untouched, so the page can still show it", () => {
+    const plain = indexFor("Aaron J");
+    const over = indexFor("Aaron J", { override: 8 });
+    expect(over.window.map(r => r.key)).toEqual(plain.window.map(r => r.key));
+    expect(over.counting.map(r => r.key)).toEqual(plain.counting.map(r => r.key));
+    expect(over.stale).toBe(plain.stale);
+  });
+
+  it("quotes a hand-set index to the same tenth as a computed one", () => {
+    expect(indexFor("Aaron J", { override: 8.25 }).index).toBe(8.3);
+    expect(indexFor("Aaron J", { override: "12" }).index).toBe(12);
+  });
+
+  it("gives a player with no rounds at all a real index", () => {
+    const p = indexFor("Nobody X", { override: 14.2 });
+    expect(p.computed).toBe(null);
+    expect(p.index).toBe(14.2);
+    expect(p.overridden).toBe(true);
+    expect(p.rounds).toEqual([]);
+  });
+
+  it("treats a cleared override as no override", () => {
+    for (const v of [null, undefined, "", NaN]) {
+      const p = indexFor("Aaron J", { override: v });
+      expect(p.overridden, String(v)).toBe(false);
+      expect(p.index, String(v)).toBe(6.6);
+    }
+  });
+
+  // Zero is a legal handicap index — a scratch player — and must not be read as
+  // "no override" the way a falsy check would.
+  it("accepts a scratch override of zero", () => {
+    const p = indexFor("Aaron J", { override: 0 });
+    expect(p.overridden).toBe(true);
+    expect(p.index).toBe(0);
+  });
+
+  it("accepts a plus handicap", () => {
+    expect(indexFor("Aaron J", { override: -1.4 }).index).toBe(-1.4);
+  });
+});

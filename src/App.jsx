@@ -7797,6 +7797,12 @@ export default function WBCApp() {
   const [tPlayers, setTPlayers] = useState([]);
   const [tRounds, setTRounds] = useState([]);
   const [courseList, setCourseList] = useState([]);
+  // ── The career registry, as state ──
+  // DEMO_PLAYERS holds the same rows, but it is a module-level variable that
+  // nothing re-renders on — which is fine for names read during a render and
+  // useless for anything a screen has to react to. The Players tab reads
+  // `index_override` off here and writes it back, so it needs the real thing.
+  const [registry, setRegistry] = useState([]);
   const [holeData, setHoleData] = useState({});
   const [ctpData, setCtpData] = useState({});
   // Every player's market portfolio, one entry per bettor. See rowsToMarket.
@@ -7924,8 +7930,9 @@ export default function WBCApp() {
     const playerRows = await db.get("players");
     if (playerRows?.length) {
       DEMO_PLAYERS = playerRows
-        .map(r => ({ id: r.id, name: r.name, first_name: r.first_name || "", last_name: r.last_name || "" }))
+        .map(r => ({ id: r.id, name: r.name, first_name: r.first_name || "", last_name: r.last_name || "", index_override: r.index_override ?? null }))
         .sort((a, b) => a.name.localeCompare(b.name));
+      setRegistry(DEMO_PLAYERS);
       // DEMO_PLAYERS is module-level, so replacing it does not by itself
       // re-render anything that reads it. Nudge the state the roster derives
       // from so activePlayers/allPlayers recompute against the new names.
@@ -7963,8 +7970,9 @@ export default function WBCApp() {
         const playerRows = await db.get("players");
         if (playerRows?.length) {
           DEMO_PLAYERS = playerRows
-            .map(r => ({ id: r.id, name: r.name, first_name: r.first_name || "", last_name: r.last_name || "" }))
+            .map(r => ({ id: r.id, name: r.name, first_name: r.first_name || "", last_name: r.last_name || "", index_override: r.index_override ?? null }))
             .sort((a, b) => a.name.localeCompare(b.name));
+          setRegistry(DEMO_PLAYERS);
         }
 
         // Existing uid→player_id claims (wbc_users). Doc id is the uid.
@@ -8677,6 +8685,27 @@ export default function WBCApp() {
     if (tp) await db.upsert("tournament_players", { ...tp, handicap_index: newHI }, "id");
   };
 
+  // ── The hand-set WBC Index ──
+  // A career-level number, so it lives on the `players` registry rather than on
+  // this year's tournament_players row: an index a director corrects is a fact
+  // about the golfer, not about the edition, and putting it on the edition
+  // would mean setting it again every year.
+  //
+  // It is NOT the same number as `handicap_index` above. That one is the index
+  // this tournament is played off and is locked once cards are in (see the
+  // handicap-edit guard in AdminView); this one is what the Players tab
+  // publishes as the golfer's WBC Index. Setting this does not move anybody's
+  // course handicap or reshuffle a leaderboard.
+  //
+  // `null` clears it and the computed index comes back.
+  const setIndexOverride = async (pid, value) => {
+    const v = value == null || String(value).trim() === "" ? null : Number(value);
+    const next = v != null && Number.isFinite(v) ? v : null;
+    DEMO_PLAYERS = DEMO_PLAYERS.map(p => p.id === pid ? { ...p, index_override: next } : p);
+    setRegistry(DEMO_PLAYERS);
+    await db.upsert("players", { id: pid, index_override: next }, "id");
+  };
+
   // `name` is the DISPLAY name ("Aaron J") that every screen outside the admin
   // console renders, and it stays the source of truth for those. first_name /
   // last_name are the full parts, edited only in the player editor, and the
@@ -9319,7 +9348,7 @@ export default function WBCApp() {
         <div style={{ display: view === "scoring" ? "block" : "none", paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
           <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeTimesData={teeTimesData} roundDates={roundDates} scoringOpen={scoringOpen} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={async (key, signerPid, signerName, present, rnd) => { const nonSigners = (present || []).filter(pid => pid !== signerPid); const autoFinal = nonSigners.length === 0; const optimistic = { signedBy: signerPid, signedByName: signerName, attestedBy: [], present: present || [] }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: optimistic })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), tournament_id: TOURNAMENT_ID, groupKey: key, round: rnd, signedBy: signerPid, signedByName: signerName, present: present || [], attestedBy: [], signedAt: new Date().toISOString() }); if (autoFinal) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onAttestScorecard={async (key, attesterPid, nonSigners) => { const cur = scorecardSigs[key]; if (!cur) return; const attestedBy = [...new Set([...(cur.attestedBy || []), attesterPid])]; const optimistic = { ...cur, attestedBy }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: { ...prev[key], attestedBy } })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), attestedBy }); const allDone = (nonSigners || []).every(pid => attestedBy.includes(pid)); if (allDone) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onUnsignScorecard={async key => { pendingSigsRef.current.delete(key); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); if (finalizedRounds[key]) { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); pendingSigsRef.current.delete(key); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); await saveTournamentState(nf); }} onGoToAdminCourses={(rnd) => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); setAdminSettingsRound(rnd || null); }} markPlayerWD={markPlayerWD} ctpData={ctpData} onSetCtp={onSetCtp} onConfirmCtp={onConfirmCtp} directorPick={directorPick} onGroupChange={setScoringGroup} onSetRound={setRound} />
         </div>
-        {view === "players" && <PlayersView players={allPlayers} meId={user?.id} />}
+        {view === "players" && <PlayersView players={allPlayers} registry={registry} meId={user?.id} isDirector={!!user.isDirector} onSetOverride={setIndexOverride} />}
         {view === "skins" && <BettingView players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} numRounds={numRounds} getPlayerTee={getPlayerTee} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} marketBets={marketBets} onSaveMarketBet={onSaveMarketBet} leaderboard={getLeaderboard} finalizedRounds={finalizedRounds} pairingsData={pairingsData} />}
         {view === "groups" && <GroupsView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} pairingsData={pairingsData} teeTimesData={teeTimesData} getPlayerTee={getPlayerTee} user={user} />}
         {view === "admin" && (user.isDirector ? <AdminView activePlayers={activePlayers} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
