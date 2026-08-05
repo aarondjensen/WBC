@@ -50,22 +50,7 @@ import { HISTORY_PLAYERS } from "../data/history";
 
 // The tournament's own last 12 rounds — the yardstick the asterisk is measured
 // against, and stable for the life of the bundle since the history is baked in.
-const RECENT = recentRoundSlots();
-
-// "2025-4" → "2025 R4". The keys are internal; a card is read by people.
-const slotLabel = (key) => {
-  if (!key) return "";
-  const [year, round] = String(key).split("-");
-  return `${year} R${round}`;
-};
-
-// The missed rounds, said in the fewest words that stay specific. Past four
-// names the list stops being read, so it names the years instead.
-const missedLabel = (missed = []) => {
-  if (missed.length <= 4) return missed.map(slotLabel).join(", ");
-  const years = [...new Set(missed.map(k => k.split("-")[0]))];
-  return `${missed.length} rounds from ${years.length > 1 ? `${years[years.length - 1]}–${years[0]}` : years[0]}`;
-};
+const RECENT_SET = new Set(recentRoundSlots());
 
 // The list's four columns: the name, the career index, what this year plays
 // off, and the chevron. Shared by the header and every row, so a heading can
@@ -114,6 +99,10 @@ function WindowChart({ idx }) {
     else groups.push({ year: c.year, count: 1 });
   }
 
+  // Which of these rounds are outside the twelve the rest of the field is
+  // measured on — the reason this player's index wears an asterisk.
+  const outsiders = cols.filter(c => !RECENT_SET.has(c.key)).length;
+
   const grid = { display: "grid", gridTemplateColumns: `repeat(${cols.length}, minmax(0, 1fr))`, gap: 3 };
 
   return (
@@ -147,6 +136,27 @@ function WindowChart({ idx }) {
         ))}
       </div>
 
+      {/* ── Why the index is asterisked, on the rounds that cause it ──
+          A round the rest of the field did not play, marked where it sits.
+          This replaced a paragraph above the chart that named the same rounds
+          in prose — "2024 R4, 2024 R3 … are missing, so the window reaches back
+          to 2014 R1" — which is a sentence you have to hold in your head and
+          then map onto twelve bars. The mark is on the bar.
+
+          Amber, the same colour as the asterisk it explains, so the two read as
+          one statement rather than two warnings. */}
+      {outsiders > 0 && (
+        <div style={{ ...grid, marginTop: 4 }}>
+          {cols.map(c => (
+            <div key={c.key} style={{ display: "flex", justifyContent: "center", height: 6 }}>
+              {!RECENT_SET.has(c.key) && (
+                <span style={{ width: 6, height: 6, borderRadius: "50%", background: K.warn }} />
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* The year rail. Same grid, so a span of three columns lines up with
           exactly the three bars it names. */}
       <div style={{ ...grid, marginTop: 6 }}>
@@ -160,7 +170,7 @@ function WindowChart({ idx }) {
         ))}
       </div>
 
-      <div style={{ display: "flex", gap: 14, marginTop: 12, fontSize: FS.micro, color: K.t3 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", columnGap: 14, rowGap: 5, marginTop: 12, fontSize: FS.micro, color: K.t3 }}>
         <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
           <span style={{ width: 9, height: 9, borderRadius: R.xs, background: K.acc, flexShrink: 0 }} />
           counts toward the index
@@ -169,6 +179,12 @@ function WindowChart({ idx }) {
           <span style={{ width: 9, height: 9, borderRadius: R.xs, background: `${K.acc}${ALPHA.wash}`, border: `1px solid ${K.acc}${ALPHA.line}`, flexShrink: 0 }} />
           in the window, didn&apos;t count
         </span>
+        {outsiders > 0 && (
+          <span style={{ display: "flex", alignItems: "center", gap: 5, color: K.warn }}>
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: K.warn, flexShrink: 0 }} />
+            outside the WBC&apos;s last {WINDOW}
+          </span>
+        )}
       </div>
     </div>
   );
@@ -238,7 +254,7 @@ function PlayerDetail({ row, onBack, year = null, isDirector = false, onSetOverr
         <SectionLabel style={{ marginBottom: 4 }}>{row.name}</SectionLabel>
         <div style={{ fontSize: FS.display, fontWeight: 900, color: idx?.index == null ? K.t3 : K.acc, lineHeight: 1.1 }}>
           {fmtIndex(idx?.index)}
-          {(idx?.stale || idx?.overridden) && <span style={{ color: K.warn }}>*</span>}
+          {idx?.index != null && (idx.stale || idx.overridden) && <span style={{ color: K.warn }}>*</span>}
         </div>
         <div style={{ fontSize: FS.label, fontWeight: 700, color: K.t3, letterSpacing: 1.5, marginTop: 4 }}>
           WBC INDEX
@@ -354,31 +370,6 @@ function PlayerDetail({ row, onBack, year = null, isDirector = false, onSetOverr
               </div>
             </>
           )}
-        </Card>
-      )}
-
-      {/* ── The asterisk ── */}
-      {idx?.stale && !idx?.overridden && (
-        <Card style={{ marginBottom: 12, borderColor: `${K.warn}${ALPHA.line}`, background: `${K.warn}${ALPHA.wash}` }}>
-          <div style={{ display: "flex", gap: 8 }}>
-            <span style={{ color: K.warn, fontWeight: 900, fontSize: FS.lead, lineHeight: 1 }}>*</span>
-            <div style={{ fontSize: FS.small, color: K.t2, lineHeight: 1.5 }}>
-              The WBC's last {WINDOW} rounds are <strong style={{ color: K.t1 }}>{slotLabel(RECENT[RECENT.length - 1])}</strong>
-              {" "}through <strong style={{ color: K.t1 }}>{slotLabel(RECENT[0])}</strong>. These are not those.
-              {idx.missed.length >= WINDOW ? (
-                <> Not one of them is on this card — the most recent round here is
-                  {" "}<strong style={{ color: K.t1 }}>{slotLabel(idx.window[0].key)}</strong>.</>
-              ) : idx.provisional ? (
-                <> {missedLabel(idx.missed)} {idx.missed.length === 1 ? "is" : "are"} missing, and there
-                  {" "}{idx.window.length === 1 ? "is" : "are"} only <strong style={{ color: K.t1 }}>{idx.window.length}</strong> rounds
-                  {" "}on record to put in their place.</>
-              ) : (
-                <> {missedLabel(idx.missed)} {idx.missed.length === 1 ? "is" : "are"} missing, so the window reaches
-                  {" "}back to <strong style={{ color: K.t1 }}>{slotLabel(idx.window[idx.window.length - 1].key)}</strong>.</>
-              )}
-              {" "}It is honest arithmetic on real rounds — it is just not built from the same {WINDOW} as the rest of the field&apos;s.
-            </div>
-          </div>
         </Card>
       )}
 
@@ -672,7 +663,7 @@ function PlayerRow({ row, onOpen }) {
         color: idx?.index == null ? K.t3 : K.t2,
       }}>
         {fmtIndex(idx?.index)}
-        {(idx?.stale || idx?.overridden) && <span style={{ color: K.warn }}>*</span>}
+        {idx?.index != null && (idx.stale || idx.overridden) && <span style={{ color: K.warn }}>*</span>}
       </span>
       {/* What this player actually plays off this year, and the number that
           matters once the tournament starts: the leaderboard computes every
