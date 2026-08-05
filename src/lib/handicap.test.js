@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   differential, wbcIndex, historyFor, indexFor, indexTable, matchHistoryName,
-  recentRoundSlots, WINDOW, COUNTING,
+  recentRoundSlots, countingFor, WINDOW, COUNTING,
 } from "./handicap";
 
 // A round, as wbcIndex wants one. Differentials are handed in directly so the
@@ -76,11 +76,13 @@ describe("wbcIndex", () => {
   });
 
   describe("a short sample", () => {
-    it("uses the rounds that exist and says the sample is short", () => {
+    // Three rounds take the best 1, not the best 3 — averaging everything a
+    // player has ever done is a scoring average, not a handicap.
+    it("takes fewer rounds, on the taper, and says the sample is short", () => {
       const r = wbcIndex([rd(2025, 1, 12), rd(2025, 2, 8), rd(2025, 3, 10)]);
       expect(r.provisional).toBe(true);
-      expect(r.counting).toHaveLength(3);
-      expect(r.index).toBe(10);
+      expect(r.counting).toHaveLength(1);
+      expect(r.index).toBe(8);
     });
     it("is null with nothing to work from", () => {
       const r = wbcIndex([]);
@@ -256,7 +258,7 @@ describe("the recorded history", () => {
     const ray = indexFor("Ray H");
     expect(ray.rounds).toHaveLength(4);
     expect(ray.provisional).toBe(true);
-    expect(ray.counting).toHaveLength(4);
+    expect(ray.counting).toHaveLength(1);
     expect(ray.stale).toBe(true);
   });
 
@@ -273,5 +275,88 @@ describe("the recorded history", () => {
   it("returns nothing for a name with no history", () => {
     expect(historyFor("Nobody X")).toEqual([]);
     expect(indexFor("Nobody X").index).toBe(null);
+  });
+});
+
+// ── The taper ──
+// How many rounds count, for every window size the app can produce. The table
+// is the spec; these are the rows.
+describe("countingFor", () => {
+  it("takes 5 from a full window", () => {
+    expect(countingFor(WINDOW)).toBe(5);
+    expect(COUNTING).toBe(5);
+  });
+
+  it.each([
+    [1, 1], [2, 1], [3, 1], [4, 1],
+    [5, 2], [6, 2],
+    [7, 3], [8, 3],
+    [9, 4], [10, 4], [11, 4],
+    [12, 5],
+  ])("takes %i → %i", (rounds, counts) => {
+    expect(countingFor(rounds)).toBe(counts);
+  });
+
+  it("has nothing to take from nothing", () => {
+    expect(countingFor(0)).toBe(0);
+    expect(countingFor(-1)).toBe(0);
+  });
+
+  it("never takes more than a full window would, however many it is handed", () => {
+    expect(countingFor(20)).toBe(5);
+  });
+
+  it("holds roughly to the 40% the full window is", () => {
+    for (let n = 5; n <= WINDOW; n++) {
+      const share = countingFor(n) / n;
+      expect(share, `${n} rounds`).toBeGreaterThanOrEqual(0.3);
+      expect(share, `${n} rounds`).toBeLessThanOrEqual(0.45);
+    }
+  });
+
+  it("never takes more rounds than exist", () => {
+    for (let n = 1; n <= WINDOW; n++) expect(countingFor(n)).toBeLessThanOrEqual(n);
+  });
+
+  it("never takes fewer as the sample grows", () => {
+    for (let n = 2; n <= WINDOW; n++) expect(countingFor(n)).toBeGreaterThanOrEqual(countingFor(n - 1));
+  });
+});
+
+describe("the taper, applied", () => {
+  const diffs = [22, 30, 26, 40, 24, 34, 28, 36];
+
+  it("takes the best 1 of a four-round career", () => {
+    const r = wbcIndex(diffs.slice(0, 4).map((d, i) => rd(2025, i + 1, d)));
+    expect(r.counting).toHaveLength(1);
+    expect(r.index).toBe(22);
+  });
+
+  it("takes the best 2 of six", () => {
+    const r = wbcIndex(diffs.slice(0, 6).map((d, i) => rd(2025, i + 1, d)));
+    expect(r.counting).toHaveLength(2);
+    expect(r.index).toBe(23);   // 22 and 24
+  });
+
+  it("takes the best 3 of eight", () => {
+    const r = wbcIndex(diffs.map((d, i) => rd(2025, i + 1, d)));
+    expect(r.counting).toHaveLength(3);
+    expect(r.index).toBe(24);   // 22, 24 and 26
+  });
+
+  // The two players in the record books this actually moves.
+  it("brings a four-round career down to its best round", () => {
+    for (const name of ["Ray H", "Steve V"]) {
+      const p = indexFor(name);
+      expect(p.window, name).toHaveLength(4);
+      expect(p.counting, name).toHaveLength(1);
+      expect(p.index, name).toBe(Math.min(...p.window.map(r => r.differential)));
+    }
+  });
+
+  it("leaves a full window alone", () => {
+    for (const name of ["Aaron J", "Bob B", "Matt V"]) {
+      expect(indexFor(name).counting, name).toHaveLength(COUNTING);
+    }
   });
 });

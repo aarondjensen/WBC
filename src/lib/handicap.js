@@ -10,6 +10,8 @@
 // rounds is three WBCs, and 5 of 12 keeps the same "your good rounds, not your
 // average round" character the 8-of-20 ratio has.
 //
+// A short career takes fewer, on the same ratio — see COUNTING_BY_SIZE.
+//
 // A differential is one round expressed on a common scale, so a 92 at
 // Lochenheath (74.4/144) and an 84 at Yarrow (70.2/124) can be compared:
 //
@@ -53,9 +55,41 @@
 import { HISTORY_COURSES, HISTORY_ROUNDS, HISTORY_PLAYERS } from "../data/history.js";
 
 // The two constants the whole thing is: how far back we look, and how many of
-// those rounds count.
+// those rounds count once the window is full.
 export const WINDOW = 12;
-export const COUNTING = 5;
+
+// ── COUNTING_BY_SIZE ───────────────────────────────────────────────
+// How many rounds count, for a window of any size. Indexed by the number of
+// rounds in the window, so COUNTING_BY_SIZE[7] === 3.
+//
+// 5 of 12 is 42%, and the whole table holds roughly to that ratio — but as a
+// TABLE rather than as `round(0.4 × n)`, for two reasons. The arithmetic does
+// not actually land on these numbers (0.4 × 4 is 1.6, which rounds to 2 where
+// the answer is 1), and a golfer checking why their index moved should be able
+// to read the rule off a row rather than reproduce a rounding convention.
+//
+//   rounds    1  2  3  4     5  6     7  8     9 10 11    12
+//   count     1  1  1  1     2  2     3  3     4  4  4     5
+//   share     — 50 33 25    40 33    43 38    44 40 36    42 %
+//
+// The taper matters at the bottom of the table more than the top. Averaging the
+// best 4 of a 4-round career is not a handicap, it is a scoring average with
+// extra steps: it takes a bad day and bakes it into the number permanently.
+// Taking the best 1 of 4 is what a handicap is for — what this player is
+// capable of when it goes right — and it lets a first-timer's index come down
+// as they play rather than sit high until they have twelve cards.
+export const COUNTING_BY_SIZE = [0, 1, 1, 1, 1, 2, 2, 3, 3, 4, 4, 4, 5];
+
+// How many of `n` rounds count. Clamped at both ends: the window never exceeds
+// WINDOW, but a caller handing in more should get the full-window answer rather
+// than undefined.
+export const countingFor = (n) =>
+  n <= 0 ? 0 : COUNTING_BY_SIZE[Math.min(n, WINDOW)];
+
+// What a full window takes — the headline "best 5 of 12". Read off the table
+// rather than typed again, so the sentence on screen cannot come to disagree
+// with the arithmetic behind it.
+export const COUNTING = COUNTING_BY_SIZE[WINDOW];
 
 // The slope of a course of average difficulty — the constant every differential
 // is rescaled onto.
@@ -169,7 +203,7 @@ export function wbcIndex(rounds = [], { recentSlots = recentRoundSlots() } = {})
   // towards the golfer the player is now.
   const counting = [...window]
     .sort((a, b) => a.differential - b.differential || newestFirst(a, b))
-    .slice(0, Math.min(COUNTING, window.length))
+    .slice(0, countingFor(window.length))
     .sort(newestFirst);
 
   const avg = counting.reduce((a, r) => a + r.differential, 0) / counting.length;
