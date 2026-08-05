@@ -32,6 +32,7 @@ import { GroupSwitcher } from "./components/GroupSwitcher";
 import { OffRoundBanner } from "./components/OffRoundBanner";
 import { MoreMenu } from "./components/MoreMenu";
 import { PlayersView } from "./components/PlayersView";
+import { returningPlayers, returningLine } from "./lib/returningPlayers";
 import { TROPHY_SVG_URL, WBC_LOGO, WBC_FAVICON, DEFAULT_NUM_ROUNDS, ROUND_CHOICES, clampRounds } from "./constants";
 import { collection, doc, setDoc, getDocs, query, where, writeBatch, onSnapshot, deleteDoc } from "firebase/firestore";
 import { getMessaging, onMessage, isSupported as isMessagingSupported } from "firebase/messaging";
@@ -5070,14 +5071,23 @@ function PlayerRow({ player, isLast, onOpen, isDirector, account }) {
 // appoint somebody who has never been through the password screen (there is
 // no membership document to flag), and change your own (so the last director
 // can never lock everyone out).
+//
+// `returning` is the other half of setting up a new year: the men who have
+// played before and are not in this field. Typing a returning player's name
+// from memory is the one way to silently break him — his id comes from his
+// display name, so a nickname or a full surname mints a second record while
+// his account claim still points at the first — so the picker hands back the
+// id off his record rather than deriving one. See lib/returningPlayers.
 function PlayerEditor({ editing, set, onClose, tPlayers, players, memberships, claims, authUid,
-                        holeData, numRounds, onSave, onRemove, notify, confirm, tournamentStarted }) {
+                        holeData, numRounds, onSave, onRemove, notify, confirm, tournamentStarted,
+                        returning = [] }) {
   if (!editing) return null;
   const isNew = !!editing.isNew;
   const p = isNew ? null : players.find(x => x.id === editing.pid);
   if (!isNew && !p) return null;
 
   const defaultNick = toDisplayName(editing.first, editing.last);
+  const showPicker = isNew && !editing.linked && returning.length > 0;
   const theirMembership = isNew ? null : membershipForPlayer(memberships, claims, editing.pid);
   const isSelf = !!theirMembership && (theirMembership.id === authUid || theirMembership.uid === authUid);
   const canGrantDirector = !isNew && !!theirMembership && !isSelf;
@@ -5101,6 +5111,18 @@ function PlayerEditor({ editing, set, onClose, tPlayers, players, memberships, c
   // page on focus and never zoom back out. Height is condensed via padding.
   const inp = { fontSize: FS.lead, fontWeight: 600, color: K.t1, width: "100%", boxSizing: "border-box", background: K.inp, border: `1px solid ${K.acc}${ALPHA.line}`, borderRadius: R.sm, padding: "7px 10px", outline: "none", fontFamily: FONT };
 
+  // Picking a returning player fills the form from his record — including the
+  // WBC Index, which is the app's own number for him and the best first guess
+  // at what he plays off. Every box stays editable; the id is the part that is
+  // now settled, and it is the part that was never safe to type.
+  const pickReturning = (r) => set({
+    linked: { id: r.id, name: r.name },
+    first: r.first,
+    last: r.last,
+    nick: r.name === toDisplayName(r.first, r.last) ? "" : r.name,
+    hi: r.index == null ? "" : r.index.toFixed(1),
+  });
+
   const doSave = async () => {
     const first = (editing.first || "").trim();
     const last = (editing.last || "").trim();
@@ -5110,7 +5132,10 @@ function PlayerEditor({ editing, set, onClose, tPlayers, players, memberships, c
     const newDir = !!editing.dir;
 
     if (isNew) {
-      await onSave({ isNew: true, name: newName, first, last, hi: newHI });
+      // pid is the whole point of the picker: with one, the roster row binds
+      // to the record that already exists. Without it the caller derives an id
+      // from the name, which is right for a genuine first-timer.
+      await onSave({ isNew: true, name: newName, first, last, hi: newHI, pid: editing.linked?.id || null });
       notify?.(`Added ${newName}`);
       onClose();
       return;
@@ -5171,9 +5196,63 @@ function PlayerEditor({ editing, set, onClose, tPlayers, players, memberships, c
       </div>
 
       <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 11 }}>
+        {/* ── Played before? ──
+            First thing in the form, because it is the first decision: is this
+            a man coming back, or a man who has never been here? Picking him
+            answers the rest of the form as a side effect. */}
+        {isNew && editing.linked && (
+          <div style={{
+            display: "flex", alignItems: "center", gap: 8, padding: "8px 10px",
+            borderRadius: R.sm, background: `${K.acc}${ALPHA.wash}`, border: `1px solid ${K.acc}${ALPHA.line}`,
+          }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: FS.small, fontWeight: 700, color: K.acc, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                Returning · {editing.linked.name}
+              </div>
+              <div style={{ fontSize: FS.micro, color: K.t3, marginTop: 1 }}>
+                Keeps their career, their index and their sign-in.
+              </div>
+            </div>
+            <Btn variant="secondary" size="sm" style={{ color: K.t2, flexShrink: 0 }}
+              onClick={() => set({ linked: null, first: "", last: "", nick: "", hi: "" })}>Change</Btn>
+          </div>
+        )}
+        {showPicker && (
+          <div>
+            <span style={lbl}>Played before?</span>
+            <div style={{ maxHeight: 168, overflowY: "auto", border: `1px solid ${K.bdr}`, borderRadius: R.sm }}>
+              {returning.map((r, i) => (
+                <button key={r.id} type="button" onClick={() => pickReturning(r)} style={{
+                  width: "100%", textAlign: "left", cursor: "pointer", background: "transparent",
+                  border: "none", borderBottom: i === returning.length - 1 ? "none" : `1px solid ${K.bdr}${ALPHA.hair}`,
+                  padding: "8px 10px", display: "flex", alignItems: "center", gap: 8, fontFamily: FONT,
+                }}>
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ display: "block", fontSize: FS.small, fontWeight: 700, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {r.name}
+                    </span>
+                    <span style={{ display: "block", fontSize: FS.micro, color: K.t3, marginTop: 1 }}>
+                      {returningLine(r)}
+                    </span>
+                  </span>
+                  <span style={{ flexShrink: 0, fontSize: FS.small, fontWeight: 800, color: r.index == null ? K.t3 : K.acc }}>
+                    {r.index == null ? "—" : r.index.toFixed(1)}
+                  </span>
+                </button>
+              ))}
+            </div>
+            <div style={{ fontSize: FS.label, color: K.t3, marginTop: 5, lineHeight: 1.4 }}>
+              Tap a name to bring them back with their record attached — typing it again can
+              file them as a second player. Somebody new, fill in the boxes below.
+            </div>
+          </div>
+        )}
+
         <div style={{ display: "flex", gap: 8 }}>
+          {/* Not autofocused while the picker is up: on a phone the keyboard
+              would slide over the list the director came here to read. */}
           <label style={{ flex: 1, minWidth: 0 }}><span style={lbl}>First name</span>
-            <input autoFocus value={editing.first} onChange={e => set({ first: e.target.value })} style={inp} /></label>
+            <input autoFocus={!showPicker} value={editing.first} onChange={e => set({ first: e.target.value })} style={inp} /></label>
           <label style={{ flex: 1, minWidth: 0 }}><span style={lbl}>Last name</span>
             <input value={editing.last} onChange={e => set({ last: e.target.value })} style={inp} /></label>
         </div>
@@ -5742,7 +5821,15 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
   // names are mapped rather than changed at the call sites, so a caller
   // asking for "course" still lands somewhere sensible.
   const EXTERNAL_TAB = { course: "rounds", players: "players", access: "event", tournament: "event" };
-  const [editingPlayer, setEditingPlayer] = useState(null); // { pid, first, last, nick, hi, dir } | { isNew: true, ... }
+  const [editingPlayer, setEditingPlayer] = useState(null); // { pid, first, last, nick, hi, dir } | { isNew: true, linked, ... }
+
+  // Who could be added back — the player registry plus the record books, minus
+  // this edition's roster. Keyed off tPlayers, which is also what a registry
+  // refresh nudges, so a name added on another phone reaches this list.
+  const returningPool = useMemo(
+    () => returningPlayers({ registry: DEMO_PLAYERS, rosterIds: tPlayers.map(t => t.player_id) }),
+    [tPlayers],
+  );
   const [confirmCourse, setConfirmCourse] = useState(null);
   const [courseSearch, setCourseSearch] = useState("");
   const [courseStateFilter, setCourseStateFilter] = useState("MI");
@@ -7297,9 +7384,10 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
         holeData={holeData} numRounds={numRounds}
         notify={notify} confirm={confirm} tournamentStarted={tournamentStarted}
         onRemove={removePlayer}
+        returning={returningPool}
         onSave={async (v) => {
           if (v.isNew) {
-            await addPlayerToTournament(v.name, v.hi, { first_name: v.first, last_name: v.last });
+            await addPlayerToTournament(v.name, v.hi, { first_name: v.first, last_name: v.last }, v.pid);
             return;
           }
           await updateName(v.pid, v.name, { first_name: v.first, last_name: v.last });
@@ -8522,8 +8610,14 @@ export default function WBCApp() {
   // Returns the derived player id so the caller can key anything else it needs
   // to write for the new player off the SAME value rather than re-deriving it
   // and risking the two drifting apart.
-  const addPlayerToTournament = async (name, hi, parts = null) => {
-    const id = name.toLowerCase().replace(/\s+/g, "_");
+  //
+  // `existingId` is the returning-player path: an id read off a record that
+  // already exists, which must be used AS IT IS rather than re-derived. A
+  // legacy row's id and its display name do not have to agree, and deriving
+  // over the top of one would file a man beside himself — new roster row, same
+  // name, and his account claim still pointing at the record he has left.
+  const addPlayerToTournament = async (name, hi, parts = null, existingId = null) => {
+    const id = existingId ? String(existingId) : name.toLowerCase().replace(/\s+/g, "_");
     const rec = { id, name, ...(parts || {}) };
     if (!DEMO_PLAYERS.find(p => p.id === id)) DEMO_PLAYERS.push({ ...rec });
     else Object.assign(DEMO_PLAYERS.find(p => p.id === id), rec);
