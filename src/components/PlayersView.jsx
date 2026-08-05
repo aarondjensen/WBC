@@ -16,16 +16,22 @@
 //   the last 12, drawn → "which of those counted?"
 //   every round listed → "where did these come from?"
 //
-// The bar chart carries the second layer on its own: twelve columns oldest to
-// newest, the five that made the average filled in accent and the other seven
-// left as outlines. Nothing has to be read to see that the index is an average
-// of the good half of a sample.
+// The bar chart carries the second layer on its own: a column per round in the
+// window, the ones that made the average filled in accent and the rest left as
+// outlines. Nothing has to be read to see that the index is an average of the
+// good half of a sample.
 //
 // The asterisk is the one piece of editorial here. A player who has been to
-// every WBC has twelve rounds spanning three years; a player who comes every
-// third year has twelve rounds spanning eleven. Both indexes are correct
-// arithmetic and they do not mean the same thing, so the second says so — see
-// SPAN_LIMIT in lib/handicap.js for where the line is drawn and why.
+// every WBC is measured on the tournament's last twelve rounds; a player who
+// comes every third year is measured on twelve rounds spanning a decade. Both
+// indexes are correct arithmetic and they do not mean the same thing, so the
+// second says so — see the `stale` rule in lib/handicap.js.
+//
+// One more thing the layout is holding: the WBC's field is twelve, and the
+// active list is sized so all twelve land on one screen. A roster you scroll to
+// see the end of is a roster you compare in two halves. That budget is what
+// decides the row's padding and line-heights, and it is why there is no
+// PLAYER / INDEX column heading above the list.
 //
 // The math lives in lib/handicap.js and the rounds in data/history.js (which is
 // generated — see scripts/build-history.mjs). This file only draws them.
@@ -416,24 +422,18 @@ export function PlayersView({ players = [], meId = null }) {
           page — one under "How it adds up", the other in the asterisk's own
           card, next to the rounds they describe. Up here they were a paragraph
           of definitions between the reader and the list they came for. */}
-      <Card style={{ marginBottom: 14 }}>
-        <SectionLabel style={{ marginBottom: 6 }}>The WBC Index</SectionLabel>
-        <div style={{ fontSize: FS.small, color: K.t2, lineHeight: 1.55 }}>
+      <Card style={{ marginBottom: 10 }} pad={10}>
+        <SectionLabel style={{ marginBottom: 4 }}>The WBC Index</SectionLabel>
+        <div style={{ fontSize: FS.small, color: K.t2, lineHeight: 1.4 }}>
           The average of a player&apos;s best <strong style={{ color: K.t1 }}>{COUNTING}</strong> score
           differentials from their last <strong style={{ color: K.t1 }}>{WINDOW}</strong> rounds.
         </div>
       </Card>
 
-      <div style={{
-        display: "grid", gridTemplateColumns: "minmax(0, 1fr) 62px 14px",
-        gap: 6, alignItems: "end", padding: "0 12px 6px",
-        fontSize: FS.micro, fontWeight: 700, color: K.t3, letterSpacing: 0.5,
-      }}>
-        <span>PLAYER</span>
-        <span style={{ textAlign: "right" }}>INDEX</span>
-        <span />
-      </div>
-
+      {/* No PLAYER / INDEX column heading. A name on the left and one accent
+          number on the right under a card that just said what the number is
+          does not need labelling, and the row it took was the last thing
+          standing between a twelve-man field and one screen. */}
       {active.map(row => <PlayerRow key={row.key} row={row} onOpen={setOpen} />)}
 
       {/* ── Inactive ──
@@ -459,6 +459,14 @@ export function PlayersView({ players = [], meId = null }) {
 // One name in the list. Extracted when the list grew a second section: the
 // active field and the inactive players are the same row, and the alternative
 // was the same forty lines of markup written twice.
+//
+// The height is load-bearing. Twelve players is the WBC's field, and a roster
+// you have to scroll to see all of is a roster you compare in two halves — so
+// the row is sized so the whole field lands on one screen. On the 402×874 phone
+// this was designed against that is a 47px pitch, and the padding and the two
+// line-heights below are what buy it: pinning the line boxes rather than
+// leaving them to the inherited 1.6 is worth 8px a row on its own, which is
+// two rows across the list.
 function PlayerRow({ row, onOpen }) {
   const idx = row.idx;
   return (
@@ -467,7 +475,7 @@ function PlayerRow({ row, onOpen }) {
       style={{
         width: "100%", display: "grid", gridTemplateColumns: "minmax(0, 1fr) 62px 14px",
         gap: 6, alignItems: "center", textAlign: "left",
-        padding: "10px 12px", marginBottom: 6,
+        padding: "6px 12px", marginBottom: 3,
         background: row.isMe ? `${K.gold}${ALPHA.wash}` : K.card,
         border: `1px solid ${row.isMe ? `${K.gold}${ALPHA.line}` : K.bdr}`,
         borderRadius: R.lg, cursor: "pointer", fontFamily: FONT,
@@ -475,13 +483,13 @@ function PlayerRow({ row, onOpen }) {
     >
       <span style={{ minWidth: 0 }}>
         <span style={{
-          display: "block", fontSize: FS.body, fontWeight: 700,
+          display: "block", fontSize: FS.body, fontWeight: 700, lineHeight: 1.2,
           color: row.isMe ? K.gold : K.t1,
           overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
         }}>
           {row.name}
         </span>
-        <span style={{ display: "block", fontSize: FS.micro, color: K.t3, marginTop: 2 }}>
+        <span style={{ display: "block", fontSize: FS.micro, lineHeight: 1.2, color: K.t3 }}>
           {idx?.rounds.length ? `${idx.rounds.length} recorded` : "no recorded rounds"}
         </span>
       </span>
