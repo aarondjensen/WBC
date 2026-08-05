@@ -200,11 +200,19 @@ describe("roundTrouble — tee assignments", () => {
 describe("describeMissingTees", () => {
   const nameOf = (pid) => ({ a: "Aaron", b: "Bob", c: "Carl" })[pid] || pid;
 
-  it("names one player and says what it will cost", () => {
-    const s = describeMissingTees(["a"], nameOf, "The Loon");
+  it("names the player and says what to do about it", () => {
+    const s = describeMissingTees(["a"], nameOf);
     expect(s).toContain("Aaron");
     expect(s).toContain("has no tee");
-    expect(s).toContain("The Loon's default rating");
+    expect(s).toContain("Assign a tee");
+  });
+
+  // There is no default tee and leaving it unassigned is not an option, so the
+  // warning must not describe what the app would fall back to — spelling that
+  // out reads as offering it.
+  it("does not describe a fallback", () => {
+    const s = describeMissingTees(["a", "b"], nameOf);
+    expect(s).not.toMatch(/default|rating|longest/i);
   });
 
   it("lists several names readably", () => {
@@ -216,11 +224,7 @@ describe("describeMissingTees", () => {
     expect(describeMissingTees(["a", "b"], nameOf)).toContain("have no tee");
   });
 
-  it("falls back gracefully with no course name", () => {
-    expect(describeMissingTees(["a"], nameOf)).toContain("the course's default rating");
-  });
-
   it("is empty when nobody is missing one", () => {
-    expect(describeMissingTees([], nameOf, "The Loon")).toBe("");
+    expect(describeMissingTees([], nameOf)).toBe("");
   });
 });
