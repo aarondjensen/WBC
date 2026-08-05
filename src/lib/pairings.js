@@ -10,6 +10,32 @@
 // mutates its input, so a returned value can go straight into setState and the
 // props these are derived from are never written through.
 
+// `pairings` documents — one per player, per round — folded into the shape the
+// whole app reads them in: { [round]: [ [playerId, …], … ] }, groups in
+// group_number order.
+//
+// Lifted out of App.jsx because a SECOND caller needed it: the Tournaments
+// picker has to know whether a past year's rounds were all signed off before
+// it will let a director delete it, and that answer is "every group in every
+// round", which needs the draw. Rows are sorted here rather than at the call
+// site so a caller cannot get the group order wrong by forgetting to.
+export const rowsToPairings = (rows) => {
+  const pd = {};
+  [...(rows || [])]
+    .sort((a, b) => (a.round_number - b.round_number)
+      || (a.group_number - b.group_number)
+      || String(a.player_id || "").localeCompare(String(b.player_id || "")))
+    .forEach(r => {
+      const rnd = r?.round_number;
+      const gi = (r?.group_number || 0) - 1;
+      if (rnd == null || gi < 0 || !r.player_id) return;
+      if (!pd[rnd]) pd[rnd] = [];
+      while (pd[rnd].length <= gi) pd[rnd].push([]);
+      pd[rnd][gi].push(r.player_id);
+    });
+  return pd;
+};
+
 // The saved pairings for a round, padded out to however many groups the
 // current roster needs. A round with nothing saved yields all-empty groups.
 export const groupsForRound = (pairingsData, rnd, numGroups) => {

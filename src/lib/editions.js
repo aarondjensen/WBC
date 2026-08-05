@@ -29,6 +29,9 @@ import { _db, getActiveTournamentId, setActiveTournamentId, getEditionSlug } fro
 import {
   editionDoc, cloneMeta, cloneSideGames, cloneRosterRow, cloneRoundRow,
 } from "./editionClone";
+import { allRoundsFinalized, editionState, deleteVerdict } from "./editionLifecycle";
+import { rowsToPairings } from "./pairings";
+import { clampRounds } from "../constants";
 
 export const EDITIONS_COL = "wbc_editions";
 
@@ -75,16 +78,44 @@ const _count = async (col, tid) => {
   return snap.data().count || 0;
 };
 
-// { [editionId]: { players, rounds, scores } }. An edition whose counts fail
-// is left OUT of the map rather than reported as zero — "we couldn't read it"
-// and "there is nothing in it" are opposite answers, and the second one would
-// have the form offering to clone from a year it just failed to see.
+const _tidFilter = (tid) => [{ field: "tournament_id", op: "==", value: tid }];
+
+// Whether every round of a year that HAS been played is signed off. This is
+// what stands between a finished tournament and the delete button, so it is
+// gathered properly rather than inferred from a label.
+//
+// Two reads at most, and usually one. `finalized_rounds` keyed by round NUMBER
+// — what Admin's Finalize writes — resolves with no draw at all, so the
+// pairings are only fetched when the group-key half of the answer is needed
+// (every group signing its own card, which is how a round played entirely on
+// the course ends).
+const _finalization = async (id) => {
+  const state = (await _get("tournament_state", _tidFilter(id)))[0];
+  const finalizedRounds = state?.finalized_rounds || {};
+  const roundCount = clampRounds(state?.meta?.rounds);
+  if (allRoundsFinalized({ roundCount, finalizedRounds, pairings: {} })) {
+    return { roundCount, finalizedRounds, pairings: {} };
+  }
+  const pairings = rowsToPairings(await _get("pairings", _tidFilter(id)));
+  return { roundCount, finalizedRounds, pairings };
+};
+
+// { [editionId]: { players, rounds, scores, roundCount, finalizedRounds, pairings } }
+//
+// An edition whose reads fail is left OUT of the map rather than reported as
+// zero — "we couldn't read it" and "there is nothing in it" are opposite
+// answers, and the second one would have the form offering to clone from a
+// year it just failed to see, and the delete button offering to bin it.
 export const loadEditionSummaries = async (ids = []) => {
   const out = {};
   await Promise.all((ids || []).filter(Boolean).map(async (id) => {
     try {
       const counts = await Promise.all(SUMMARY_COUNTS.map(([, col]) => _count(col, id)));
-      out[id] = Object.fromEntries(SUMMARY_COUNTS.map(([key], i) => [key, counts[i]]));
+      const summary = Object.fromEntries(SUMMARY_COUNTS.map(([key], i) => [key, counts[i]]));
+      // A year nobody has played cannot be finished, so there is nothing to ask
+      // about it — and asking would cost two reads per empty year.
+      if (summary.scores > 0) Object.assign(summary, await _finalization(id));
+      out[id] = summary;
     } catch { /* leave this edition unsummarised */ }
   }));
   return out;
@@ -113,16 +144,12 @@ export const createEdition = async ({ year, name, id }) => {
   return doc_;
 };
 
-// Move an edition between draft / published / archived. This is how a year
-// stops being the tournament and becomes history: nothing else in the app
-// writes `status`, and the picker is the only place it is read.
-export const EDITION_STATUSES = ["draft", "published", "archived"];
-
-export const setEditionStatus = async (id, status) => {
-  if (!id || !EDITION_STATUSES.includes(status)) return null;
-  await _upsert(EDITIONS_COL, { id, status });
-  return status;
-};
+// There was a setEditionStatus here, and a draft/published/archived pill in
+// the picker to drive it. Both are gone: a year's state is DERIVED from what
+// it holds now (see lib/editionLifecycle.js), which is the only version of it
+// that cannot be stale. The `status` field is still written by editionDoc
+// because every existing document carries one and dropping it mid-flight would
+// leave a half-populated collection — nothing reads it.
 
 // ── Clone an existing edition into another year ─────────────────────
 // Copies only the STRUCTURAL setup the caller opts into. RESULTS ARE NEVER
@@ -224,14 +251,33 @@ const EDITION_DATA_COLS = [
 
 // Delete an edition AND all of its data. Irreversible.
 //
-// Refuses to delete the ACTIVE edition: doing so would pull the running app's
-// data out from under it, leaving a signed-in director staring at an empty
-// tournament with no obvious way back. Switch away first.
+// The guard lives HERE, not on the button. A disabled button is a suggestion —
+// it survives exactly as long as nobody refactors the component around it, and
+// what it is protecting is the only record that a tournament happened. So the
+// check is re-derived from Firestore at the moment of deletion, by the function
+// that does the deleting, and every caller inherits it:
+//
+//   active     refused — it would pull the running app's data out from under
+//              itself. Switch away first.
+//   complete   refused. A finished tournament is the record of the event, and
+//              there is no confirm dialog that makes destroying one a thing
+//              this app should help with. It goes through the Firebase console
+//              or it does not go.
+//   unreadable refused. Not being able to check is not permission.
+//
+// Throws with the reason rather than returning false, so a refusal reaches the
+// director as a sentence instead of a button that quietly did nothing.
 export const deleteEdition = async (id) => {
-  if (!id || id === getActiveTournamentId()) return false;
-  const f = [{ field: "tournament_id", op: "==", value: id }];
+  if (!id) return false;
+  const summary = (await loadEditionSummaries([id]))[id];
+  const verdict = deleteVerdict(editionState(summary), { isActive: id === getActiveTournamentId() });
+  if (!verdict.allowed) {
+    const e = new Error(verdict.why || "That tournament can't be deleted.");
+    e.code = `edition-delete/${verdict.reason}`;
+    throw e;
+  }
   for (const col of EDITION_DATA_COLS) {
-    const rows = await _get(col, f);
+    const rows = await _get(col, _tidFilter(id));
     for (const r of rows) if (r.id) await _deleteDoc(col, r.id);
   }
   await _deleteDoc(EDITIONS_COL, id);

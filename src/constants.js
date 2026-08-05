@@ -6,6 +6,22 @@
 // paths in App.jsx and passing them down as props would have made app identity
 // something the shell hands to its own header.
 
+// ── How many rounds the WBC plays ──
+// Here rather than in App.jsx because a second file needs it: the Tournaments
+// picker counts a past year's finalized rounds against this to decide whether
+// that year is FINISHED — and a finished tournament is the one thing the
+// picker refuses to delete. Two copies of "how many rounds" would mean the
+// guard and the app could disagree about when a year is over.
+export const DEFAULT_NUM_ROUNDS = 4;
+// What Admin offers. Not a free-text field: the only two answers the WBC has
+// ever had are three and four, and a fat-fingered "44" would mean 44 rounds of
+// empty leaderboard columns.
+export const ROUND_CHOICES = [3, 4];
+export const clampRounds = (n) => {
+  const v = parseInt(n, 10);
+  return ROUND_CHOICES.includes(v) ? v : DEFAULT_NUM_ROUNDS;
+};
+
 // ── The app mark ──
 // The golfer at the top of his follow-through. This is WBC's identity — it is
 // the home-screen icon, the pull-to-refresh spinner and the header mark — and

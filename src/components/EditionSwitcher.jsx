@@ -26,11 +26,12 @@ import { Popup, ConfirmModal } from "./Popup";
 import { getActiveTournamentId } from "../firebase";
 import {
   loadEditions, loadEditionSummaries, createEdition, cloneEdition, deleteEdition,
-  setEditionStatus, switchEdition, ensureActiveEditionDoc, EDITION_STATUSES,
+  switchEdition, ensureActiveEditionDoc,
 } from "../lib/editions";
 import {
   plannedYear, plannedSource, summaryLine, editionHasContent, overwriteWarning,
 } from "../lib/editionClone";
+import { editionState, deleteVerdict, STATE_LABEL } from "../lib/editionLifecycle";
 
 // The gutter label on each form row — a fixed width so the two controls
 // below share a left edge.
@@ -190,19 +191,13 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
     runCreate();
   };
 
-  const cycleStatus = async (e) => {
-    const next = EDITION_STATUSES[(EDITION_STATUSES.indexOf(e.status) + 1) % EDITION_STATUSES.length];
-    setEditions(rows => rows.map(r => (r.id === e.id ? { ...r, status: next } : r)));
-    try {
-      await setEditionStatus(e.id, next);
-      notify?.(`${e.name} is ${next}`);
-    } catch (err_) {
-      setEditions(await loadEditions());
-      setErr(err_?.message || "Couldn't change that status");
-    }
-  };
-
-  const statusColor = (s) => s === "published" ? K.acc : s === "archived" ? K.t3 : K.warn;
+  // The year's state, derived from what it holds — never from the stored
+  // `status`, which says whichever thing the code path that created the row
+  // happened to stamp. Until the counts land, every year is "unknown", which
+  // is also what refuses the delete: not being able to check is not
+  // permission.
+  const stateOf = (e) => editionState(summaries?.[e.id]);
+  const stateColor = (s) => s === "complete" ? K.acc : s === "live" ? K.warn : K.t3;
   const cloneSource = editions.find(e => e.id === cloneFrom) || null;
   const hasContent = (e) => editionHasContent(summaries?.[e.id]);
   // The label on a source option: the year, and what is in it. "2025 · 16
@@ -229,6 +224,8 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
           <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
             {editions.map((e) => {
               const isActive = e.id === activeId;
+              const state = stateOf(e);
+              const verdict = deleteVerdict(state, { isActive });
               return (
                 <div key={e.id} style={{
                   display: "flex", alignItems: "center", gap: 10, padding: "11px 12px", borderRadius: R.md,
@@ -245,21 +242,17 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
                     <div style={{ fontSize: FS.label, fontWeight: 600, color: hasContent(e) ? K.t2 : K.t3, marginTop: 3 }}>
                       {summaries ? (summaryLine(summaries[e.id]) || "Couldn't read") : "Counting…"}
                     </div>
-                    {/* The status is a tap target for a director — the only
-                        way a finished year is marked as history — and plain
-                        text for everybody else. */}
-                    {canManage ? (
-                      <button onClick={() => cycleStatus(e)} title="Change status" style={{
-                        marginTop: 5, padding: "2px 7px", borderRadius: R.xs, cursor: "pointer",
-                        background: "transparent", border: `1px solid ${statusColor(e.status)}${ALPHA.line}`,
-                        fontSize: FS.micro, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase",
-                        color: statusColor(e.status),
-                      }}>{e.status}</button>
-                    ) : (
-                      <div style={{ fontSize: FS.micro, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: statusColor(e.status), marginTop: 4 }}>
-                        {e.status}
-                      </div>
-                    )}
+                    {/* DERIVED — Complete / In progress / Not started / Empty —
+                        not the stored `status`. There is nothing to tap here
+                        because there is nothing to set: a year is finished
+                        when its last round is signed off, and it says so the
+                        moment that happens. */}
+                    <div style={{
+                      display: "inline-block", marginTop: 5, padding: "2px 7px", borderRadius: R.xs,
+                      border: `1px solid ${stateColor(state)}${ALPHA.line}`,
+                      fontSize: FS.micro, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase",
+                      color: stateColor(state),
+                    }}>{summaries ? STATE_LABEL[state] : "…"}</div>
                   </div>
                   {isActive ? (
                     <span style={{ fontSize: FS.label, fontWeight: 800, letterSpacing: 0.5, color: ON_ACC, background: K.acc, padding: "5px 10px", borderRadius: R.sm }}>ACTIVE</span>
@@ -267,8 +260,13 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
                     <>
                       <Btn variant="secondary" size="sm" onClick={() => setPending(e)}
                         style={{ letterSpacing: 0.5, color: K.t2, background: K.card }}>Open</Btn>
-                      {canManage && (
-                        <Btn variant="ghost" size="sm" onClick={() => setPendingDelete(e)} title="Delete edition"
+                      {/* No bin at all on a year that may not be deleted —
+                          a finished tournament, or one we couldn't read. A
+                          greyed-out control invites a tap and then explains
+                          itself; an absent one says the answer is settled.
+                          lib/editions.js refuses these regardless. */}
+                      {canManage && verdict.allowed && (
+                        <Btn variant="ghost" size="sm" onClick={() => setPendingDelete(e)} title="Delete this year"
                           style={{ color: K.t3, padding: "5px 6px", flexShrink: 0, lineHeight: 1 }}>🗑</Btn>
                       )}
                     </>
@@ -387,28 +385,43 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
         />
       )}
 
-      {pendingDelete && (
-        <ConfirmModal
-          eyebrow="Delete edition"
-          title={`Delete ${pendingDelete.name}?`}
-          message={`${pendingDelete.name} holds ${summaryLine(summaries?.[pendingDelete.id]) || "an unknown amount of data"}.\n\nThis permanently deletes it and ALL of its roster, round setup, pairings, tee assignments, scores and skins. This can't be undone.\n\nCourses and player records are shared across editions and are left alone.`}
-          confirmLabel="Delete"
-          destructive
-          onConfirm={async () => {
-            const target = pendingDelete;
-            setPendingDelete(null);
-            setBusy(true);
-            try {
-              await deleteEdition(target.id);
-              setEditions(await loadEditions());
-              notify?.(`${target.name} deleted`);
-            } catch (e) {
-              setErr(e?.message || "Couldn't delete that edition");
-            } finally { setBusy(false); }
-          }}
-          onCancel={() => setPendingDelete(null)}
-        />
-      )}
+      {/* Graded by what is actually at stake. A tournament IN PROGRESS is the
+          dangerous one — those scores were made on a course this week and
+          exist nowhere else — so it gets its own eyebrow, its own sentence,
+          and a button that says how many scores it is about to destroy. "Are
+          you sure? / Delete" is the dialog everybody has learned to tap
+          through; a count is not. */}
+      {pendingDelete && (() => {
+        const s = summaries?.[pendingDelete.id];
+        const grave = deleteVerdict(stateOf(pendingDelete), { isActive: pendingDelete.id === activeId }).grave;
+        const scores = Number(s?.scores || 0);
+        return (
+          <ConfirmModal
+            eyebrow={grave ? "This tournament is in progress" : "Delete a year"}
+            title={grave ? `Destroy ${scores.toLocaleString()} scores?` : `Delete ${pendingDelete.name}?`}
+            message={`${pendingDelete.name} holds ${summaryLine(s) || "an unknown amount of data"}.${
+              grave ? `\n\nThis round isn't finished. Every score already posted in ${pendingDelete.name} — including any made today — is deleted, and there is no copy of them anywhere else.` : ""
+            }\n\nThis permanently deletes the year and ALL of its roster, round setup, pairings, tee assignments, scores and skins. It can't be undone.\n\nCourses and player records are shared across years and are left alone.`}
+            confirmLabel={grave ? `Delete ${scores.toLocaleString()} scores` : "Delete"}
+            destructive
+            onConfirm={async () => {
+              const target = pendingDelete;
+              setPendingDelete(null);
+              setBusy(true);
+              try {
+                await deleteEdition(target.id);
+                const rows = await loadEditions();
+                setEditions(rows);
+                setSummaries(await loadEditionSummaries(rows.map(r => r.id)));
+                notify?.(`${target.name} deleted`);
+              } catch (e) {
+                setErr(e?.message || "Couldn't delete that year");
+              } finally { setBusy(false); }
+            }}
+            onCancel={() => setPendingDelete(null)}
+          />
+        );
+      })()}
     </>
   );
 }

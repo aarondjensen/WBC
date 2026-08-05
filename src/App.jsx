@@ -19,7 +19,7 @@ import { usePullToRefresh, hasNewBundle } from "./lib/usePullToRefresh";
 import { NotificationSettings } from "./components/NotificationSettings";
 import { registerForPush, getCachedSubscriptionStatus } from "./lib/notifications";
 import { pairingScoreImpact, orphanedScores, describeScored, totalHoles } from "./lib/scoreGuard";
-import { groupsForRound, assignToGroup, removeFromGroup as removeFromGroupPure, clearGroup, swapIntoGroup } from "./lib/pairings";
+import { groupsForRound, assignToGroup, removeFromGroup as removeFromGroupPure, clearGroup, swapIntoGroup, rowsToPairings } from "./lib/pairings";
 import { Popup, ConfirmModal } from "./components/Popup";
 import { EditionSwitcher } from "./components/EditionSwitcher";
 import { docIds } from "./lib/editionId";
@@ -32,7 +32,7 @@ import { GroupSwitcher } from "./components/GroupSwitcher";
 import { OffRoundBanner } from "./components/OffRoundBanner";
 import { MoreMenu } from "./components/MoreMenu";
 import { PlayersView } from "./components/PlayersView";
-import { TROPHY_SVG_URL, WBC_LOGO, WBC_FAVICON } from "./constants";
+import { TROPHY_SVG_URL, WBC_LOGO, WBC_FAVICON, DEFAULT_NUM_ROUNDS, ROUND_CHOICES, clampRounds } from "./constants";
 import { collection, doc, setDoc, getDocs, query, where, writeBatch, onSnapshot, deleteDoc } from "firebase/firestore";
 import { getMessaging, onMessage, isSupported as isMessagingSupported } from "firebase/messaging";
 
@@ -56,15 +56,9 @@ let DEMO_PLAYERS = [];
 // the saved value before React re-renders updates all of them at once. The
 // alternative was threading a `numRounds` prop through a dozen components that
 // only need it to count to four.
-const DEFAULT_NUM_ROUNDS = 4;
-// What Admin offers. Not a free-text field: the only two answers the WBC has
-// ever had are three and four, and a fat-fingered "44" would mean 44 rounds of
-// empty leaderboard columns.
-const ROUND_CHOICES = [3, 4];
-const clampRounds = (n) => {
-  const v = parseInt(n, 10);
-  return ROUND_CHOICES.includes(v) ? v : DEFAULT_NUM_ROUNDS;
-};
+// DEFAULT_NUM_ROUNDS / ROUND_CHOICES / clampRounds moved to constants.js — the
+// Tournaments picker needs the same numbers to tell a finished year from a
+// live one. Imported at the top of this file.
 let NUM_ROUNDS = DEFAULT_NUM_ROUNDS;
 const setRoundCount = (n) => { NUM_ROUNDS = clampRounds(n); return NUM_ROUNDS; };
 
@@ -223,18 +217,6 @@ const holeDataToRow = (pid, rnd, holeIdx, score, courseId) => ({
   hole_number: holeIdx + 1,
   score: score,
 });
-
-// Convert pairings rows → pairingsData format { round: [[pid,...], ...] }
-const rowsToPairings = (rows) => {
-  const pd = {};
-  rows.forEach(r => {
-    if (!pd[r.round_number]) pd[r.round_number] = [];
-    const gi = r.group_number - 1;
-    while (pd[r.round_number].length <= gi) pd[r.round_number].push([]);
-    pd[r.round_number][gi].push(r.player_id);
-  });
-  return pd;
-};
 
 // ── PAIRING STRATEGY ──
 // Each round can be paired by one of three methods, configurable per-round in the
