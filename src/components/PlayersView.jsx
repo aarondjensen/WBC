@@ -67,6 +67,11 @@ const missedLabel = (missed = []) => {
   return `${missed.length} rounds from ${years.length > 1 ? `${years[years.length - 1]}–${years[0]}` : years[0]}`;
 };
 
+// The list's four columns: the name, the career index, what this year plays
+// off, and the chevron. Shared by the header and every row, so a heading can
+// never drift out of line with the numbers under it.
+const LIST_COLS = "minmax(0, 1fr) 54px 46px 10px";
+
 // Clearance under the last row. The nav bar's trophy sits in a dome that rises
 // 24px above the bar, so a list that stops at the bar's edge has its final row
 // half-covered by a trophy.
@@ -199,7 +204,7 @@ function RoundRow({ r, inWindow, counting }) {
 }
 
 // ── PlayerDetail ───────────────────────────────────────────────────
-function PlayerDetail({ row, onBack, isDirector = false, onSetOverride = null }) {
+function PlayerDetail({ row, onBack, year = null, isDirector = false, onSetOverride = null }) {
   const idx = row.idx;
   const hasRounds = !!idx && idx.window.length > 0;
   const [editing, setEditing] = useState(false);
@@ -247,6 +252,20 @@ function PlayerDetail({ row, onBack, isDirector = false, onSetOverride = null })
         ) : hasRounds && (
           <div style={{ fontSize: FS.small, color: K.t2, marginTop: 10 }}>
             best {idx.counting.length} of {idx.window.length} · {idx.spanFrom === idx.spanTo ? idx.spanFrom : `${idx.spanFrom}–${idx.spanTo}`}
+          </div>
+        )}
+        {/* What they are actually playing off, said here because this card is
+            where somebody looks the number up. When the two differ a director
+            has overridden it in Admin, and the sentence says which is which
+            rather than leaving two figures to be reconciled. */}
+        {row.year != null && (
+          <div style={{
+            fontSize: FS.label, color: K.t3, marginTop: 8, paddingTop: 8,
+            borderTop: `1px solid ${K.bdr}`,
+          }}>
+            Playing off <strong style={{ color: K.t1 }}>{row.year.toFixed(1)}</strong>
+            {year ? ` in ${year}` : " this year"}
+            {idx?.index != null && Math.abs(row.year - idx.index) > 0.05 && " — set in Admin"}
           </div>
         )}
       </Card>
@@ -468,7 +487,7 @@ function PlayerDetail({ row, onBack, isDirector = false, onSetOverride = null })
 //           registry holds men who are not in this year's field, so it is the
 //           list overrides are keyed against rather than the roster.
 // isDirector / onSetOverride — who may set a hand index, and how.
-export function PlayersView({ players = [], registry = [], meId = null, isDirector = false, onSetOverride = null }) {
+export function PlayersView({ players = [], registry = [], meId = null, year = null, isDirector = false, onSetOverride = null }) {
   const [open, setOpen] = useState(null);
 
   const rows = useMemo(() => {
@@ -485,6 +504,10 @@ export function PlayersView({ players = [], registry = [], meId = null, isDirect
         inField: true,
         isMe: !!meId && p.id === meId,
         override,
+        // What this edition has them playing off. Read straight off the roster
+        // row the leaderboard reads, never derived from the index — see
+        // PlayerRow for why.
+        year: Number.isFinite(Number(p.handicap_index)) ? Number(p.handicap_index) : null,
         idx: indexFor(historyName, { override }),
       };
     });
@@ -510,6 +533,7 @@ export function PlayersView({ players = [], registry = [], meId = null, isDirect
           inField: false,
           isMe: false,
           override,
+          year: null,
           idx: indexFor(n, { override }),
         };
       });
@@ -538,6 +562,7 @@ export function PlayersView({ players = [], registry = [], meId = null, isDirect
       <PlayerDetail
         row={detail}
         onBack={() => setOpen(null)}
+        year={year}
         isDirector={isDirector}
         onSetOverride={detail.pid && onSetOverride ? (v) => onSetOverride(detail.pid, v) : null}
       />
@@ -555,10 +580,21 @@ export function PlayersView({ players = [], registry = [], meId = null, isDirect
           Card with its own eyebrow, which on a 667px-tall phone spent 84px —
           a sixth of everything below the header — restating one sentence. The
           words are the same; the chrome around them was the cost. */}
-      <div style={{ fontSize: FS.label, color: K.t3, lineHeight: 1.4, marginBottom: 8, padding: "0 2px" }}>
-        <strong style={{ color: K.t2, fontWeight: 800 }}>The WBC Index</strong> — the average of a
-        player&apos;s best <strong style={{ color: K.t2 }}>{COUNTING}</strong> score differentials from
-        their last <strong style={{ color: K.t2 }}>{WINDOW}</strong> rounds.
+      <div style={{ fontSize: FS.label, color: K.t3, lineHeight: 1.4, marginBottom: 6, padding: "0 2px" }}>
+        Average of the best <strong style={{ color: K.t2 }}>{COUNTING}</strong> differentials
+        from the last <strong style={{ color: K.t2 }}>{WINDOW}</strong> rounds.
+      </div>
+
+      {/* Two numbers a row needs telling apart: the career index this tab is
+          about, and what the golfer is actually playing off this year. */}
+      <div style={{
+        display: "grid", gridTemplateColumns: LIST_COLS, gap: 6, alignItems: "end",
+        padding: "0 12px 4px", fontSize: FS.micro, fontWeight: 700, color: K.t3, letterSpacing: 0.5,
+      }}>
+        <span>PLAYER</span>
+        <span style={{ textAlign: "right" }}>WBC</span>
+        <span style={{ textAlign: "right" }}>{year || "YEAR"}</span>
+        <span />
       </div>
 
       {/* No PLAYER / INDEX column heading. A name on the left and one accent
@@ -612,7 +648,7 @@ function PlayerRow({ row, onOpen }) {
     <button
       onClick={() => onOpen(row.key)}
       style={{
-        width: "100%", display: "grid", gridTemplateColumns: "minmax(0, 1fr) 62px 14px",
+        width: "100%", display: "grid", gridTemplateColumns: LIST_COLS,
         gap: 6, alignItems: "center", textAlign: "left",
         padding: "7px 12px", marginBottom: 2,
         background: row.isMe ? `${K.gold}${ALPHA.wash}` : K.card,
@@ -631,7 +667,18 @@ function PlayerRow({ row, onOpen }) {
         {fmtIndex(idx?.index)}
         {(idx?.stale || idx?.overridden) && <span style={{ color: K.warn }}>*</span>}
       </span>
-      <span style={{ textAlign: "right", fontSize: FS.body, color: K.t3 }}>›</span>
+      {/* What this player actually plays off this year. It is the edition's own
+          number, never a derived one: the leaderboard computes course handicaps
+          from exactly this value, so showing anything else here would be a
+          screen disagreeing with the scoring. Muted rather than accent, because
+          the WBC Index beside it is the one this tab is about. */}
+      <span style={{
+        textAlign: "right", fontSize: FS.small, fontWeight: 700,
+        color: row.year == null ? K.t3 : K.t2,
+      }}>
+        {row.year == null ? "—" : row.year.toFixed(1)}
+      </span>
+      <span style={{ textAlign: "right", fontSize: FS.small, color: K.t3 }}>›</span>
     </button>
   );
 }
