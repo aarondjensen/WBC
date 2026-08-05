@@ -28,10 +28,16 @@
 // second says so — see the `stale` rule in lib/handicap.js.
 //
 // One more thing the layout is holding: the WBC's field is twelve, and the
-// active list is sized so all twelve land on one screen. A roster you scroll to
-// see the end of is a roster you compare in two halves. That budget is what
-// decides the row's padding and line-heights, and it is why there is no
-// PLAYER / INDEX column heading above the list.
+// active list is sized so all twelve land on one screen — on the smallest phone
+// anybody brings, not just the roomiest. A roster you scroll to see the end of
+// is a roster you compare in two halves.
+//
+// That budget is what decides the row's padding and line-heights, why the row
+// is a single line, why there is no PLAYER / INDEX column heading, and why the
+// definition above the list is a caption rather than a bordered card. Each of
+// those was measured, not guessed: on a 375×667 handset the twelve rows plus
+// everything above them come to 507 of the 521px between the header and the nav
+// bar. Anything added up there costs a row.
 //
 // The math lives in lib/handicap.js and the rounds in data/history.js (which is
 // generated — see scripts/build-history.mjs). This file only draws them.
@@ -422,13 +428,15 @@ export function PlayersView({ players = [], meId = null }) {
           page — one under "How it adds up", the other in the asterisk's own
           card, next to the rounds they describe. Up here they were a paragraph
           of definitions between the reader and the list they came for. */}
-      <Card style={{ marginBottom: 10 }} pad={10}>
-        <SectionLabel style={{ marginBottom: 4 }}>The WBC Index</SectionLabel>
-        <div style={{ fontSize: FS.small, color: K.t2, lineHeight: 1.4 }}>
-          The average of a player&apos;s best <strong style={{ color: K.t1 }}>{COUNTING}</strong> score
-          differentials from their last <strong style={{ color: K.t1 }}>{WINDOW}</strong> rounds.
-        </div>
-      </Card>
+      {/* The definition, as a caption rather than a card. It was a bordered
+          Card with its own eyebrow, which on a 667px-tall phone spent 84px —
+          a sixth of everything below the header — restating one sentence. The
+          words are the same; the chrome around them was the cost. */}
+      <div style={{ fontSize: FS.label, color: K.t3, lineHeight: 1.4, marginBottom: 8, padding: "0 2px" }}>
+        <strong style={{ color: K.t2, fontWeight: 800 }}>The WBC Index</strong> — the average of a
+        player&apos;s best <strong style={{ color: K.t2 }}>{COUNTING}</strong> score differentials from
+        their last <strong style={{ color: K.t2 }}>{WINDOW}</strong> rounds.
+      </div>
 
       {/* No PLAYER / INDEX column heading. A name on the left and one accent
           number on the right under a card that just said what the number is
@@ -462,11 +470,19 @@ export function PlayersView({ players = [], meId = null }) {
 //
 // The height is load-bearing. Twelve players is the WBC's field, and a roster
 // you have to scroll to see all of is a roster you compare in two halves — so
-// the row is sized so the whole field lands on one screen. On the 402×874 phone
-// this was designed against that is a 47px pitch, and the padding and the two
-// line-heights below are what buy it: pinning the line boxes rather than
-// leaving them to the inherited 1.6 is worth 8px a row on its own, which is
-// two rows across the list.
+// the row is sized so the whole field lands on one screen, down to the smallest
+// phone anybody brings (a 375×667 SE, which has ~140px less to give than the
+// 402×874 handset this was first fitted to).
+//
+// That budget is why the row is one line. It carried the player's recorded
+// round count underneath, and at 11px of line box plus its own leading that
+// second line cost more than the padding, the gap and the type size put
+// together. The count is not lost — every round is listed on the detail page,
+// which is where somebody counting them is going anyway.
+//
+// lineHeight is pinned rather than left to the app's inherited 1.6, which alone
+// is worth 8px a row: at 15px that is the difference between an 18px line box
+// and a 24px one, twelve times over.
 function PlayerRow({ row, onOpen }) {
   const idx = row.idx;
   return (
@@ -475,23 +491,18 @@ function PlayerRow({ row, onOpen }) {
       style={{
         width: "100%", display: "grid", gridTemplateColumns: "minmax(0, 1fr) 62px 14px",
         gap: 6, alignItems: "center", textAlign: "left",
-        padding: "6px 12px", marginBottom: 3,
+        padding: "7px 12px", marginBottom: 2,
         background: row.isMe ? `${K.gold}${ALPHA.wash}` : K.card,
         border: `1px solid ${row.isMe ? `${K.gold}${ALPHA.line}` : K.bdr}`,
         borderRadius: R.lg, cursor: "pointer", fontFamily: FONT,
       }}
     >
-      <span style={{ minWidth: 0 }}>
-        <span style={{
-          display: "block", fontSize: FS.body, fontWeight: 700, lineHeight: 1.2,
-          color: row.isMe ? K.gold : K.t1,
-          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-        }}>
-          {row.name}
-        </span>
-        <span style={{ display: "block", fontSize: FS.micro, lineHeight: 1.2, color: K.t3 }}>
-          {idx?.rounds.length ? `${idx.rounds.length} recorded` : "no recorded rounds"}
-        </span>
+      <span style={{
+        minWidth: 0, fontSize: FS.body, fontWeight: 700, lineHeight: 1.2,
+        color: row.isMe ? K.gold : K.t1,
+        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+      }}>
+        {row.name}
       </span>
       <span style={{ textAlign: "right", fontSize: FS.lead, fontWeight: 900, color: idx?.index == null ? K.t3 : K.acc }}>
         {fmtIndex(idx?.index)}
