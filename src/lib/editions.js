@@ -24,7 +24,7 @@
 // `tournament_players` that binds a player to an edition with that year's
 // handicap index. So cloning a WBC roster copies the binding rows and leaves
 // the player records alone — the same golfers, a new year's indexes.
-import { collection, doc, getDocs, setDoc, deleteDoc, query, where } from "firebase/firestore";
+import { collection, doc, getDocs, setDoc, deleteDoc, query, where, getCountFromServer } from "firebase/firestore";
 import { _db, getActiveTournamentId, setActiveTournamentId, getEditionSlug } from "../firebase";
 import {
   editionDoc, cloneMeta, cloneSideGames, cloneRosterRow, cloneRoundRow,
@@ -51,6 +51,44 @@ const _deleteDoc = async (col, id) => { await deleteDoc(doc(_db, col, String(id)
 const byYearDesc = (rows) => [...rows].sort((a, b) => (b.year || 0) - (a.year || 0));
 
 export const loadEditions = async () => byYearDesc(await _get(EDITIONS_COL));
+
+// ── How much is actually in each year ───────────────────────────────
+// The picker's ONE reliable signal. `status` is a label somebody's phone
+// stamped — see the note at the top of lib/editionClone.js for how it ends up
+// reading PUBLISHED on an empty year and DRAFT on a finished tournament — so
+// what a year holds has to be counted rather than believed.
+//
+// getCountFromServer, not getDocs: this is a server-side aggregation, so a
+// year with thirteen hundred hole scores costs one small response instead of
+// downloading every score to call `.length` on them. Opening the picker must
+// not pull a tournament's worth of data across a phone's connection.
+const SUMMARY_COUNTS = [
+  ["players", "tournament_players"],
+  ["rounds", "tournament_rounds"],
+  ["scores", "hole_scores"],
+];
+
+const _count = async (col, tid) => {
+  const snap = await getCountFromServer(
+    query(collection(_db, col), where("tournament_id", "==", tid)),
+  );
+  return snap.data().count || 0;
+};
+
+// { [editionId]: { players, rounds, scores } }. An edition whose counts fail
+// is left OUT of the map rather than reported as zero — "we couldn't read it"
+// and "there is nothing in it" are opposite answers, and the second one would
+// have the form offering to clone from a year it just failed to see.
+export const loadEditionSummaries = async (ids = []) => {
+  const out = {};
+  await Promise.all((ids || []).filter(Boolean).map(async (id) => {
+    try {
+      const counts = await Promise.all(SUMMARY_COUNTS.map(([, col]) => _count(col, id)));
+      out[id] = Object.fromEntries(SUMMARY_COUNTS.map(([key], i) => [key, counts[i]]));
+    } catch { /* leave this edition unsummarised */ }
+  }));
+  return out;
+};
 
 // Seed the currently-active edition into the collection if it isn't there yet,
 // so the picker always shows at least the running year. Idempotent — safe to

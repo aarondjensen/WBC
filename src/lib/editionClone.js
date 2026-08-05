@@ -22,41 +22,74 @@
 // Each one is dropped deliberately below, next to why.
 import { docIds } from "./editionId";
 
-// The year a director opening the New-edition form is most likely typing.
+// ── Which years actually happened ──────────────────────────────────
+// Everything below decides what the New-year form opens pointed at, and all
+// of it reads the same thing: how much is IN each edition.
 //
-// A DRAFT for a year still ahead of us is that year, already claimed and not
-// yet built — which is the normal state of the year they came here to build,
-// because `wbc_2026` gets seeded into the list the moment a phone points at
-// it. Offering 2027 instead, because 2026 "exists", would send them past the
-// job they opened the form to do.
+// It used to read `status`, and that was wrong in the way that matters —
+// wrong quietly, and wrong on real data. Nothing set `status` meaningfully
+// before the picker existed: `ensureActiveEditionDoc` stamps "published" on
+// whichever edition a phone happens to point at, so the app's original
+// default (wbc_2026, empty) reads PUBLISHED while a year holding a finished
+// tournament reads DRAFT. A form that trusted those labels offered to clone
+// the empty year into the year after next.
 //
-// Failing that: one past the newest edition, or the current year if that is
-// further out (a tournament that skipped a year should not offer the year it
-// skipped). With no editions at all it is simply this year.
-export const nextEditionYear = (editions = [], currentYear = new Date().getFullYear()) => {
-  const rows = (editions || []).filter(e => Number.isFinite(Number(e?.year)));
-  const drafts = rows
-    .filter(e => e.status === "draft" && Number(e.year) >= currentYear)
-    .map(e => Number(e.year))
-    .sort((a, b) => a - b);
-  if (drafts.length) return drafts[0];
-  const years = rows.map(e => Number(e.year));
-  if (!years.length) return currentYear;
-  return Math.max(Math.max(...years) + 1, currentYear);
+// A count cannot lie in that direction. Sixteen roster rows and thirteen
+// hundred scores are a tournament whatever the row is labelled, and zero of
+// everything is an empty shell whatever the row is labelled.
+//
+// summaries: { [editionId]: { players, rounds, scores } }, or null when the
+// counts could not be read — every function here degrades to the old
+// newest-row behaviour rather than guessing.
+const yearOf = (e) => Number(e?.year);
+const dated = (editions) => (editions || []).filter(e => e?.id && Number.isFinite(yearOf(e)));
+const newestFirst = (rows) => [...rows].sort((a, b) => yearOf(b) - yearOf(a));
+
+export const editionHasContent = (s) =>
+  !!s && ((s.players | 0) > 0 || (s.rounds | 0) > 0 || (s.scores | 0) > 0);
+
+// The newest edition that actually holds a tournament.
+export const newestBuiltEdition = (editions = [], summaries = null) =>
+  (summaries ? newestFirst(dated(editions)).find(e => editionHasContent(summaries[e.id])) : null) || null;
+
+// The year the director is here to build: one past the newest year that has
+// anything in it, or this year if that is further out (a tournament that
+// skipped years should not offer a year it skipped).
+//
+// An EMPTY edition for the target year is deliberately not a reason to skip
+// past it. That row is usually the shell a phone seeded, and it is exactly
+// the year being built — cloning INTO it is supported, so offering it is the
+// honest answer rather than a collision.
+export const plannedYear = (editions = [], summaries = null, currentYear = new Date().getFullYear()) => {
+  const rows = dated(editions);
+  if (!rows.length) return currentYear;
+  const built = newestBuiltEdition(rows, summaries);
+  const base = built ? yearOf(built) : Math.max(...rows.map(yearOf));
+  return Math.max(base + 1, currentYear);
 };
 
-// The edition that form should be cloning FROM: the most recent year before
-// the target that was actually played.
-//
-// Status is what separates "played" from "exists". A draft is usually the
-// empty shell a phone seeded, and cloning from it would copy a roster of
-// nobody over the roster the director wanted — the failure is silent, because
-// a clone that copies nothing looks exactly like a clone that worked.
-export const defaultCloneSource = (editions = [], targetYear) => {
-  const before = (editions || [])
-    .filter(e => e?.id && Number.isFinite(Number(e.year)) && Number(e.year) < Number(targetYear))
-    .sort((a, b) => Number(b.year) - Number(a.year));
-  return (before.find(e => e.status !== "draft") || before[0])?.id || "";
+// The edition to copy FROM: the most recent year before the target that has
+// something in it. Cloning from an empty year copies nothing, and that
+// failure is silent — a clone that copied nothing looks exactly like a clone
+// that worked, right up until the roster screen is empty on the first tee.
+export const plannedSource = (editions = [], summaries = null, targetYear) => {
+  const before = newestFirst(dated(editions).filter(e => yearOf(e) < Number(targetYear)));
+  const built = summaries ? before.find(e => editionHasContent(summaries[e.id])) : null;
+  return (built || before[0])?.id || "";
+};
+
+// What a year has in it, in one line. This is the sentence that makes the
+// list readable: which row is the tournament and which is a shell is the
+// question the status label was answering wrongly.
+export const summaryLine = (s) => {
+  if (!s) return "";
+  if (!editionHasContent(s)) return "Empty";
+  const n = (v) => Number(v || 0).toLocaleString();
+  const bits = [];
+  if (s.players) bits.push(`${n(s.players)} player${s.players === 1 ? "" : "s"}`);
+  if (s.rounds) bits.push(`${n(s.rounds)} round${s.rounds === 1 ? "" : "s"}`);
+  if (s.scores) bits.push(`${n(s.scores)} score${s.scores === 1 ? "" : "s"}`);
+  return bits.join(" · ");
 };
 
 // Move the year in a cloned tournament's name onto the new edition.
