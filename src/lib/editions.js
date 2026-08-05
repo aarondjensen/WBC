@@ -29,6 +29,8 @@ import { _db, getActiveTournamentId, setActiveTournamentId, getEditionSlug } fro
 import {
   editionDoc, cloneMeta, cloneSideGames, cloneRosterRow, cloneRoundRow,
 } from "./editionClone";
+import { editionRounds, indexFor, matchHistoryName } from "./handicap";
+import { editionYear } from "./editionId";
 import { allRoundsFinalized, editionState, deleteVerdict } from "./editionLifecycle";
 import { rowsToPairings } from "./pairings";
 import { clampRounds } from "../constants";
@@ -167,6 +169,56 @@ export const createEdition = async ({ year, name, id }) => {
 // expected to have confirmed that; see EditionSwitcher.
 //
 // options = { players, courses, rounds, tournamentName, buyIns } booleans.
+// ── freshIndexes ───────────────────────────────────────────────────
+// Every player's WBC Index recomputed to include the rounds of ONE edition,
+// keyed by player_id.
+//
+// The index math lives in lib/handicap and knows nothing about Firestore; this
+// is the read that feeds it. Five collections, once, for a director action that
+// happens once a year:
+//
+//   hole_scores      the cards themselves, one row per hole
+//   tournament_rounds  which course each round was played on
+//   courses / tee_boxes  the ratings those cards are measured against
+//   tee_assignments  which tee each player actually played
+//
+// Returns { [playerId]: { index, playedRounds } }. `playedRounds` is what tells
+// the caller whether this player has anything new to say — see rosterHandicap.
+export const freshIndexes = async (sourceId) => {
+  const year = editionYear(sourceId);
+  const f = (tid) => [{ field: "tournament_id", op: "==", value: tid }];
+  const [players, holeScores, tRounds, courses, teeBoxes, teeAssignments] = await Promise.all([
+    _get("players"),
+    _get("hole_scores", f(sourceId)),
+    _get("tournament_rounds", f(sourceId)),
+    _get("courses"),
+    _get("tee_boxes"),
+    _get("tee_assignments", f(sourceId)),
+  ]);
+
+  // Courses carry their tees in a separate collection, and the rating a round
+  // is measured against is the TEE's — so they have to be stitched back
+  // together before the math can resolve one.
+  const withTees = (courses || []).map(c => ({
+    ...c,
+    tee_boxes: (teeBoxes || []).filter(t => t.course_id === c.id),
+  }));
+
+  const byPlayer = editionRounds({ year, holeScores, tRounds, courses: withTees, teeAssignments });
+
+  const out = {};
+  for (const p of players || []) {
+    const extraRounds = byPlayer[p.id] || [];
+    const name = matchHistoryName(p);
+    // Somebody with neither a history name nor a card here has no index to
+    // recompute, and saying so is what makes the caller carry theirs forward.
+    if (!name && !extraRounds.length) continue;
+    const idx = indexFor(name, { override: p.index_override ?? null, extraRounds });
+    out[p.id] = { index: idx.index, playedRounds: extraRounds.length };
+  }
+  return out;
+};
+
 export const cloneEdition = async (sourceId, { year, name, id }, options = {}) => {
   const newTid = id || editionId(year);
   const srcSlug = getEditionSlug(sourceId);
@@ -183,12 +235,19 @@ export const cloneEdition = async (sourceId, { year, name, id }, options = {}) =
 
   await _upsert(EDITIONS_COL, editionDoc({ year, id: newTid, name, sourceId, existing }));
 
-  // Roster — the tournament_players binding rows, carrying each golfer's
-  // handicap index forward as this year's starting point.
+  // Roster — the tournament_players binding rows, each starting on a handicap
+  // that INCLUDES the year being cloned from.
+  //
+  // The source edition has just been played, and its rounds are in Firestore
+  // rather than in the bundled history (which only moves when data/rounds.csv
+  // is re-exported). Reading them here is what stops a new year opening on
+  // indexes that predate four rounds of evidence — see freshIndexes.
   if (options.players) {
     const rows = await _get("tournament_players", f(sourceId));
+    const fresh = await freshIndexes(sourceId);
     for (const tp of rows) {
-      const row = cloneRosterRow(tp, at);
+      const seed = fresh[tp.player_id] || {};
+      const row = cloneRosterRow(tp, { ...at, index: seed.index ?? null, playedRounds: seed.playedRounds || 0 });
       if (row) await _upsert("tournament_players", row);
     }
   }

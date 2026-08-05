@@ -148,19 +148,55 @@ export const cloneSideGames = (sideGames) => {
   return Object.keys(out).length ? out : null;
 };
 
+// ── The handicap a cloned roster row starts on ─────────────────────
+// The year being cloned FROM has just been played, and those rounds change
+// what every man in it is worth. Carrying his old index forward regardless is
+// how 2026 came to be playing off numbers typed a year earlier, before four
+// more rounds existed to argue with them.
+//
+// So a player who completed rounds in the source edition starts the new year on
+// a WBC Index recomputed to include them. Everyone else carries forward:
+//
+//   • a director cloning a year nobody played yet gets their setup back
+//     untouched, rather than every hand-set number replaced by arithmetic
+//   • a player on the roster who never posted a card has nothing new to say
+//     about his index, so it stands
+//   • a first-timer with no history and no completed rounds keeps whatever the
+//     director typed, because the alternative is scratch by accident
+//
+// `index` is the recomputed WBC Index (null when there isn't one) and
+// `playedRounds` is how many complete cards the source edition holds for them.
+export const rosterHandicap = (tp, { index = null, playedRounds = 0 } = {}) => {
+  const carried = Number(tp?.handicap_index);
+  const fallback = Number.isFinite(carried) ? carried : 0;
+  if (!(playedRounds > 0)) return fallback;
+  // `Number(null)` is 0 and 0 is a legal index, so "no index" has to be
+  // rejected before the number check rather than by it — otherwise a
+  // first-timer with nothing to compute from is silently made scratch.
+  if (index == null || String(index).trim() === "") return fallback;
+  const fresh = Number(index);
+  return Number.isFinite(fresh) ? fresh : fallback;
+};
+
 // tournament_players — the roster binding row for the new edition.
 //
 // player_id is a permanent career identity and is deliberately NOT
 // regenerated: it is what ties a golfer to sixteen years of history. The
-// handicap index carries as this year's starting point.
+// handicap index is re-derived from the source year's play — see
+// rosterHandicap — rather than copied.
 //
 // `status` is dropped rather than copied — it holds last year's WD, and a
 // player who withdrew from 2025 starts 2026 in the field like everyone else.
-export const cloneRosterRow = (tp, { slug, tournamentId } = {}) => {
+export const cloneRosterRow = (tp, { slug, tournamentId, index = null, playedRounds = 0 } = {}) => {
   const pid = tp?.player_id;
   if (!pid) return null;
   const { status: _wd, id: _oldId, ...rest } = tp;
-  return { ...rest, id: docIds.tournamentPlayer(slug, pid), tournament_id: tournamentId };
+  return {
+    ...rest,
+    id: docIds.tournamentPlayer(slug, pid),
+    tournament_id: tournamentId,
+    handicap_index: rosterHandicap(tp, { index, playedRounds }),
+  };
 };
 
 // tournament_rounds — which course each round is played on.
