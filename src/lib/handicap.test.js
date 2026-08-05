@@ -1,16 +1,12 @@
 import { describe, it, expect } from "vitest";
 import {
   differential, wbcIndex, historyFor, indexFor, indexTable, matchHistoryName,
-  WINDOW, COUNTING, SPAN_LIMIT,
+  recentRoundSlots, WINDOW, COUNTING,
 } from "./handicap";
 
 // A round, as wbcIndex wants one. Differentials are handed in directly so the
 // window/selection rules can be tested without doing the arithmetic twice.
 const rd = (year, round, differential) => ({ year, round, key: `${year}-${round}`, differential });
-
-// n rounds, one per year going back from `to`, all the same differential.
-const yearly = (to, n, diff = 10) =>
-  Array.from({ length: n }, (_, i) => rd(to - i, 1, diff));
 
 describe("differential", () => {
   it("is the round rescaled onto a slope-113 course", () => {
@@ -94,35 +90,61 @@ describe("wbcIndex", () => {
     });
   });
 
-  describe("the span asterisk", () => {
-    it("stays off for a player who has been every year", () => {
-      // Three tournaments of four rounds — 2023, 2024, 2025.
-      const rounds = [2023, 2024, 2025].flatMap(y => [1, 2, 3, 4].map(n => rd(y, n, 10)));
-      const r = wbcIndex(rounds);
+  // ── The asterisk ──
+  // A window is unmarked only when it is the tournament's own last 12 rounds,
+  // round for round. Every other shape gets the mark.
+  describe("the asterisk", () => {
+    // Three tournaments of four rounds — the yardstick these tests measure to.
+    const slots = [2025, 2024, 2023].flatMap(y => [4, 3, 2, 1].map(n => `${y}-${n}`));
+    const played = (years) => years.flatMap(y => [1, 2, 3, 4].map(n => rd(y, n, 10)));
+
+    it("stays off for a player who played every one of them", () => {
+      const r = wbcIndex(played([2023, 2024, 2025]), { recentSlots: slots });
+      expect(r.missed).toEqual([]);
+      expect(r.stale).toBe(false);
       expect(r.spanFrom).toBe(2023);
       expect(r.spanTo).toBe(2025);
-      expect(r.spanYears).toBe(3);
-      expect(r.stale).toBe(false);
     });
-    it("goes on once the recent 12 reach back further than four years", () => {
-      const r = wbcIndex(yearly(2025, 12));
-      expect(r.spanYears).toBe(12);
+
+    it("goes on when a missed year pushes the window further back", () => {
+      // Skipped 2024, so 2022 is pulled in to fill the twelve.
+      const r = wbcIndex(played([2022, 2023, 2025]), { recentSlots: slots });
       expect(r.stale).toBe(true);
+      expect(r.missed).toEqual(["2024-4", "2024-3", "2024-2", "2024-1"]);
     });
-    it("sits exactly on the line at four years", () => {
-      const rounds = [2022, 2023, 2024, 2025].flatMap(y => [1, 2, 3].map(n => rd(y, n, 10)));
-      const r = wbcIndex(rounds);
-      expect(r.spanYears).toBe(SPAN_LIMIT);
+
+    it("goes on for a single withdrawn round", () => {
+      const rounds = played([2023, 2024, 2025]).filter(r => r.key !== "2025-4");
+      const r = wbcIndex([...rounds, rd(2022, 4, 10)], { recentSlots: slots });
+      expect(r.stale).toBe(true);
+      expect(r.missed).toEqual(["2025-4"]);
+    });
+
+    // The case a span rule could not see: four rounds inside one year, but that
+    // year is nine years ago. One year of span, entirely outside the recent 12.
+    it("goes on for a career that ended years ago", () => {
+      const r = wbcIndex(played([2017]), { recentSlots: slots });
+      expect(r.spanYears).toBe(1);
+      expect(r.stale).toBe(true);
+      expect(r.missed).toHaveLength(12);
+    });
+
+    // And the other case it could not see: recent rounds, but not twelve of
+    // them, so the sample is not the same sample everyone else's index uses.
+    it("goes on for a short career, even a current one", () => {
+      const r = wbcIndex(played([2025]), { recentSlots: slots });
+      expect(r.window).toHaveLength(4);
+      expect(r.stale).toBe(true);
+      expect(r.missed).toHaveLength(8);
+    });
+
+    it("ignores rounds older than the window when judging it", () => {
+      const r = wbcIndex([...played([2023, 2024, 2025]), rd(2012, 1, 10)], { recentSlots: slots });
       expect(r.stale).toBe(false);
     });
-    it("measures the window, not the whole career", () => {
-      const rounds = [
-        ...[2024, 2025].flatMap(y => [1, 2, 3, 4, 5, 6].map(n => rd(y, n, 10))),
-        rd(2012, 1, 10),
-      ];
-      const r = wbcIndex(rounds);
-      expect(r.spanFrom).toBe(2024);
-      expect(r.stale).toBe(false);
+
+    it("has nothing to compare against with no slots, so marks nothing", () => {
+      expect(wbcIndex(played([2017]), { recentSlots: [] }).stale).toBe(false);
     });
   });
 
@@ -190,10 +212,18 @@ describe("the recorded history", () => {
     expect(rounds[rounds.length - 1].year).toBe(2012);
   });
 
-  it("gives the every-year regulars a window inside the span limit", () => {
-    for (const name of ["Bob B", "Brian K", "Scott R", "Eric O"]) {
+  it("knows the tournament's own last 12 rounds", () => {
+    const slots = recentRoundSlots();
+    expect(slots).toHaveLength(WINDOW);
+    expect(slots[0]).toBe("2025-4");
+    expect(slots[slots.length - 1]).toBe("2023-1");
+  });
+
+  it("leaves the every-year regulars unmarked", () => {
+    for (const name of ["Bob B", "Brian K", "Scott R", "Eric O", "Aaron J"]) {
       const p = indexFor(name);
       expect(p.window, name).toHaveLength(WINDOW);
+      expect(p.missed, name).toEqual([]);
       expect(p.stale, name).toBe(false);
     }
   });
@@ -202,14 +232,32 @@ describe("the recorded history", () => {
     const matt = indexFor("Matt V");
     expect(matt.window).toHaveLength(WINDOW);
     expect(matt.stale).toBe(true);
-    expect(matt.spanYears).toBeGreaterThan(SPAN_LIMIT);
+    expect(matt.missed.length).toBeGreaterThan(0);
   });
 
-  it("calls a four-round career provisional", () => {
+  // John C withdrew from the last round of 2025, so his window reaches one
+  // round further back than the field's and is not the same twelve.
+  it("asterisks a single withdrawn round", () => {
+    const john = indexFor("John C");
+    expect(john.window).toHaveLength(WINDOW);
+    expect(john.missed).toContain("2025-4");
+    expect(john.stale).toBe(true);
+  });
+
+  // Steve V's four rounds are all from 2017 — one year of span, and the case
+  // the old span rule waved through.
+  it("asterisks a career that ended years ago", () => {
+    const steve = indexFor("Steve V");
+    expect(steve.spanYears).toBe(1);
+    expect(steve.stale).toBe(true);
+  });
+
+  it("calls a four-round career provisional, and marks it too", () => {
     const ray = indexFor("Ray H");
     expect(ray.rounds).toHaveLength(4);
     expect(ray.provisional).toBe(true);
     expect(ray.counting).toHaveLength(4);
+    expect(ray.stale).toBe(true);
   });
 
   it("ranks the table best index first, unplayed last", () => {

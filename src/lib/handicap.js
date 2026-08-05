@@ -28,25 +28,34 @@
 // ───────────────────────
 // The WBC is played once a year, and not everybody plays every year. A golfer
 // who has made 6 of the last 10 trips has a "recent 12" that reaches back a
-// decade — the number is honest arithmetic on real rounds, but it is not a
-// current handicap in the way a weekly league's would be. So the window's SPAN
-// is computed alongside the index, and anything wider than 4 years is flagged
-// (`stale`) for the view to asterisk. Four years is the line because 12 rounds
-// is three tournaments: a player who shows up every year clears it, and one
-// who has been away does not.
+// decade — honest arithmetic on real rounds, but not the same 12 rounds as the
+// man beside him on the list, so the two indexes are not quite comparable.
 //
-// Everything here is pure. `wbcIndex` takes rounds and returns numbers, so the
-// math is testable without the dataset; the dataset lives in ../data/history.js
-// and is joined onto it by `historyFor`.
+// The test is exact rather than a tolerance: a player's window is compared to
+// the TOURNAMENT's last 12 rounds — 2023 R1 through 2025 R4 as this is written
+// — and anything that is not that set, round for round, is flagged (`stale`)
+// for the view to asterisk. That catches every way a window can differ, with
+// one rule and no threshold to argue about:
+//
+//   • missed a year, so the window reaches back past it
+//   • withdrew from a round, so it reaches back one round further
+//   • has not played 12 rounds yet, so the window is short
+//   • has not played recently, so the window is old
+//
+// The last two are the ones a span-based rule missed. Four rounds all from 2017
+// span a single year and would have passed a "no wider than 4 years" test while
+// being nine years stale.
+//
+// `wbcIndex` takes rounds and the slots to compare against and returns numbers,
+// so the math is testable without the dataset; the dataset lives in
+// ../data/history.js and is joined onto it by `historyFor`.
 
 import { HISTORY_COURSES, HISTORY_ROUNDS, HISTORY_PLAYERS } from "../data/history.js";
 
-// The three constants the whole thing is: how far back we look, how many of
-// those rounds count, and how wide a window is allowed to be before it needs
-// explaining.
+// The two constants the whole thing is: how far back we look, and how many of
+// those rounds count.
 export const WINDOW = 12;
 export const COUNTING = 5;
-export const SPAN_LIMIT = 4;
 
 // The slope of a course of average difficulty — the constant every differential
 // is rescaled onto.
@@ -71,6 +80,21 @@ export function differential({ gross, rating, slope }) {
 // list reads in. Within a year, a later round is a later round; 2014 numbers
 // its four rounds 1, 2, 3, 5 in the source data, which sorts correctly anyway.
 const newestFirst = (a, b) => b.year - a.year || b.round - a.round;
+
+// ── recentRoundSlots ───────────────────────────────────────────────
+// The tournament's last `n` rounds — the yardstick every player's window is
+// measured against. Not a player's rounds: the ROUNDS THAT WERE PLAYED, whoever
+// turned up for them. Newest first, as `year-round` keys.
+//
+// Derived from the rounds actually scored rather than from the course table, so
+// a round nobody has a card for cannot become a slot everybody is missing.
+export function recentRoundSlots(n = WINDOW) {
+  return [...new Set(HISTORY_ROUNDS.map(r => `${r.year}-${r.round}`))]
+    .map(key => { const [year, round] = key.split("-").map(Number); return { key, year, round }; })
+    .sort(newestFirst)
+    .slice(0, n)
+    .map(s => s.key);
+}
 
 // ── historyFor ─────────────────────────────────────────────────────
 // Every recorded round for one player, newest first, each one joined to the
@@ -105,6 +129,10 @@ export function historyFor(name) {
 // score should not use up one of the 12 slots, or a single unrated course would
 // quietly shrink the sample.
 //
+// `recentSlots` is the tournament's own last 12 rounds — see recentRoundSlots.
+// It defaults to the real dataset's, which is what every caller in the app
+// wants; tests hand in their own so the comparison can be exercised without it.
+//
 // Returns:
 //   index        the number, or null with fewer than one usable round
 //   window       the rounds it was taken from, newest first (≤ 12)
@@ -112,19 +140,27 @@ export function historyFor(name) {
 //   countingKeys a Set of their keys, for the view to mark them
 //   spanFrom/To  the years the window reaches across
 //   spanYears    inclusive count of those years
-//   stale        the window is wider than SPAN_LIMIT years — asterisk it
+//   stale        the window is not the tournament's last 12 exactly — asterisk
+//   missed       the tournament rounds inside those 12 this player did not post
 //   provisional  fewer than WINDOW rounds exist, so the sample is short
 //   unrated      rounds excluded for having no course rating
-export function wbcIndex(rounds = []) {
+export function wbcIndex(rounds = [], { recentSlots = recentRoundSlots() } = {}) {
   const all = [...rounds].sort(newestFirst);
   const usable = all.filter(r => r.differential != null);
   const unrated = all.filter(r => r.differential == null);
   const window = usable.slice(0, WINDOW);
 
+  // Which of the tournament's recent rounds are absent from this window. A
+  // player who played every one of them has nothing missed and nothing extra —
+  // and since the window is capped at the same size, "missed nothing" and "is
+  // exactly the recent 12" are the same statement.
+  const held = new Set(window.map(r => r.key));
+  const missed = (recentSlots || []).filter(k => !held.has(k));
+
   const empty = {
     index: null, window: [], counting: [], countingKeys: new Set(),
     spanFrom: null, spanTo: null, spanYears: 0,
-    stale: false, provisional: true, unrated,
+    stale: (recentSlots || []).length > 0, missed, provisional: true, unrated,
   };
   if (!window.length) return empty;
 
@@ -147,7 +183,8 @@ export function wbcIndex(rounds = []) {
     counting,
     countingKeys: new Set(counting.map(r => r.key)),
     spanFrom, spanTo, spanYears,
-    stale: spanYears > SPAN_LIMIT,
+    stale: missed.length > 0,
+    missed,
     provisional: window.length < WINDOW,
     unrated,
   };
