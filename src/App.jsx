@@ -3694,7 +3694,15 @@ const isoAddDays = (iso, n) => {
   const dt = new Date(y, m - 1, d + n);
   return isoOf(dt.getFullYear(), dt.getMonth(), dt.getDate());
 };
-function DateRangeCalendar({ start, end, onChange }) {
+// `mode="day"` picks a single date instead of a range — same grid, same month
+// paging, one tap. It exists because the round's play date used to fall back to
+// an <input type="date"> when the event had no dates set, and a native date
+// field inside a modal is the worst place for one: iOS lays the control out to
+// its own idea of a width, and tapping it raises the OS picker over a modal
+// that dismisses on the touch behind it. The picker flashed and vanished, and
+// the field ran off the side of the screen. Our own grid does neither.
+function DateRangeCalendar({ start, end, onChange, mode = "range" }) {
+  const day = mode === "day";
   // Which end of the range the next tap sets. Starting a NEW range whenever
   // both are set is what makes a mis-tap cheap: tap any day and you are picking
   // a fresh range, rather than having to clear something first.
@@ -3712,8 +3720,10 @@ function DateRangeCalendar({ start, end, onChange }) {
     return { y: d.getFullYear(), m: d.getMonth() };
   })();
 
-  const maxEnd = start ? isoAddDays(start, MAX_EVENT_DAYS - 1) : null;
+  const maxEnd = day ? null : (start ? isoAddDays(start, MAX_EVENT_DAYS - 1) : null);
   const tap = (iso) => {
+    // One tap, one date, done — tapping the day already chosen clears it.
+    if (day) { setMonthOffset(0); onChange(iso === start ? "" : iso, ""); return; }
     // Paging is relative to the start date, so once a tap moves the start the
     // offset has to go back to zero or the view jumps by however far they had
     // paged to reach the day they just tapped.
@@ -3761,8 +3771,8 @@ function DateRangeCalendar({ start, end, onChange }) {
           if (!d) return <div key={i} />;
           const iso = isoOf(view.y, view.m, d);
           const isStart = iso === start;
-          const isEnd = iso === end;
-          const between = start && end && iso > start && iso < end;
+          const isEnd = !day && iso === end;
+          const between = !day && start && end && iso > start && iso < end;
           const beyond = picking === "end" && start && maxEnd && iso > maxEnd;
           const edge = isStart || isEnd;
           return (
@@ -3780,7 +3790,9 @@ function DateRangeCalendar({ start, end, onChange }) {
         })}
       </div>
       <div style={{ marginTop: 6, fontSize: FS.label, color: K.t3, textAlign: "center" }}>
-        {!start
+        {day
+          ? (start ? fmtRoundDate(start) : "Tap the day this round is played")
+          : !start
           ? "Tap the first day of the tournament"
           : picking === "end"
             ? "Now tap the last day"
@@ -4592,8 +4604,7 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
               </div>
               {chips.length === 0 ? (
                 <>
-                  <input type="date" value={mine} onChange={e => pick(e.target.value)}
-                    style={{ width: "100%", background: K.inp, border: `1px solid ${ac}${ALPHA.hair}`, borderRadius: R.sm, color: K.t1, fontSize: FS.lead, fontWeight: 600, padding: "10px 12px", colorScheme: "dark", boxSizing: "border-box" }} />
+                  <DateRangeCalendar mode="day" start={mine} end="" onChange={(d) => pick(d)} />
                   <div style={{ fontSize: FS.label, color: K.t3, marginTop: 8, lineHeight: 1.5 }}>
                     Set the tournament dates in Event and this becomes a list of the days it runs.
                   </div>
