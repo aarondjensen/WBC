@@ -134,19 +134,19 @@ export const blocksScoring = (trouble) => !!trouble && BLOCKING_CODES.includes(t
 // the fix is per-player and a director reading "2 players" has to go and find
 // out which two.
 //
-// The consequence is spelled out rather than left as "incomplete setup". "Tees
-// not assigned" reads like a form field nobody filled in; what actually happens
-// is a wrong course handicap on a real card, and that is the sentence that gets
-// somebody to act before the round is played.
-export function describeMissingTees(pids = [], nameOf = (pid) => pid, courseName = "") {
+// It says nothing about what the app would do instead, on purpose. There is no
+// default tee and there is no acceptable answer other than assigning one, so
+// describing the fallback would be offering it — it reads as "here is what
+// happens if you leave this", which is not a choice on the table. The round
+// does not start until somebody has a tee.
+export function describeMissingTees(pids = [], nameOf = (pid) => pid) {
   if (!pids.length) return "";
   const names = pids.map(nameOf);
   const list = names.length > 2
     ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`
     : names.join(" and ");
   const one = names.length === 1;
-  const whose = courseName ? `${courseName}'s` : "the course's";
-  return `${list} ${one ? "has" : "have"} no tee for this round. Their course handicap will come off ${whose} default rating — usually its longest tee — instead of the box they play. Assign ${one ? "a tee" : "tees"} before the round is scored.`;
+  return `${list} ${one ? "has" : "have"} no tee for this round. Assign ${one ? "a tee" : "tees"} before it starts.`;
 }
 
 // One sentence a director can act on. `nameOf` turns a player id into a name;

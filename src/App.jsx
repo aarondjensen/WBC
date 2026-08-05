@@ -7131,7 +7131,7 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
                     </span>
                   </div>
                   <div style={{ fontSize: FS.label, color: K.t2, lineHeight: 1.5 }}>
-                    {describeMissingTees(st.noTee, nameOfPid, assigned.name)}
+                    {describeMissingTees(st.noTee, nameOfPid)}
                   </div>
                   {fixTee && (
                     <button
