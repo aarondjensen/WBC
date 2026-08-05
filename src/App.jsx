@@ -5483,7 +5483,10 @@ function TournamentPanel({ meta, onSave, notify, confirm, scoredRounds = [] }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <EditionSwitcher open={showEditions} onClose={() => setShowEditions(false)} notify={notify} />
+      {/* The same sheet the More menu opens, from the other door. This one is
+          inside AdminView, which only a director renders, so it always
+          manages. */}
+      <EditionSwitcher open={showEditions} onClose={() => setShowEditions(false)} notify={notify} canManage />
 
       {/* Active edition — switch year or start a new one. First card on the
           tab because it decides which tournament everything BELOW it is
@@ -5498,7 +5501,7 @@ function TournamentPanel({ meta, onSave, notify, confirm, scoredRounds = [] }) {
           display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
         }}>
           <span>Edition · <span style={{ color: K.acc }}>{TOURNAMENT_ID}</span></span>
-          <span style={{ fontSize: FS.label, color: K.t3, flexShrink: 0 }}>Switch / new ›</span>
+          <span style={{ fontSize: FS.label, color: K.t3, flexShrink: 0 }}>Open / clone a year ›</span>
         </button>
       </div>
 
@@ -7485,6 +7488,10 @@ export default function WBCApp() {
   const [accountOpen, setAccountOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
+  // Every year the tournament has been run in this app. A sheet rather than a
+  // view because opening one RELOADS the app onto that edition (see
+  // lib/editions.js), so there is nothing to route back from.
+  const [editionsOpen, setEditionsOpen] = useState(false);
   // The bar's real height, measured rather than guessed: the menu sits flush
   // on top of it, and the bar's height moves with the device's bottom inset.
   const navRef = useRef(null);
@@ -8991,13 +8998,26 @@ export default function WBCApp() {
         isDirector={!!user.isDirector}
         adminFlag={adminActionNeeded && user.isDirector}
         notifFlag={notifPerm !== "granted" && !user.isGuest}
+        activeYear={getTournamentYear()}
         navH={navH}
         onSelect={(key) => {
           if (key === "admin") { setView("admin"); return; }
           if (key === "players") { setView("players"); return; }
+          if (key === "editions") { setEditionsOpen(true); return; }
           if (key === "notifications") { setNotifOpen(true); return; }
           if (key === "account") { setDeleteErr(""); setDeleteStage(null); setAccountOpen(true); }
         }}
+      />
+
+      {/* Tournaments — the years, off the More menu. Open to everybody
+          (reading a past year is what the entry is for, and firestore.rules
+          allows the read to any member); only a director gets the New-year
+          form, the status pill and the delete. */}
+      <EditionSwitcher
+        open={editionsOpen}
+        onClose={() => setEditionsOpen(false)}
+        notify={notify}
+        canManage={!!user.isDirector}
       />
 
       {/* Notifications, in their own sheet rather than a section buried inside
