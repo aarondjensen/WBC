@@ -26,6 +26,9 @@
 // the player records alone — the same golfers, a new year's indexes.
 import { collection, doc, getDocs, setDoc, deleteDoc, query, where } from "firebase/firestore";
 import { _db, getActiveTournamentId, setActiveTournamentId, getEditionSlug } from "../firebase";
+import {
+  editionDoc, cloneMeta, cloneSideGames, cloneRosterRow, cloneRoundRow,
+} from "./editionClone";
 
 export const EDITIONS_COL = "wbc_editions";
 
@@ -67,58 +70,61 @@ export const editionId = (year) => `wbc_${year}`;
 
 // Create a new, empty draft edition. Cloning is `cloneEdition`.
 export const createEdition = async ({ year, name, id }) => {
-  const eid = id || editionId(year);
-  const doc_ = {
-    id: eid,
-    year: Number(year),
-    name: name?.trim() || `WBC ${year}`,
-    status: "draft",
-    created_from: null,
-  };
+  const doc_ = editionDoc({ year, id: id || editionId(year), name });
   await _upsert(EDITIONS_COL, doc_);
   return doc_;
 };
 
-// ── Clone an existing edition into a new draft ──────────────────────
+// Move an edition between draft / published / archived. This is how a year
+// stops being the tournament and becomes history: nothing else in the app
+// writes `status`, and the picker is the only place it is read.
+export const EDITION_STATUSES = ["draft", "published", "archived"];
+
+export const setEditionStatus = async (id, status) => {
+  if (!id || !EDITION_STATUSES.includes(status)) return null;
+  await _upsert(EDITIONS_COL, { id, status });
+  return status;
+};
+
+// ── Clone an existing edition into another year ─────────────────────
 // Copies only the STRUCTURAL setup the caller opts into. RESULTS ARE NEVER
 // CLONED — scores, pairings, tee assignments, skins/CTP, scorecard signatures
 // and finalization state always start empty. A new year begins with nobody
 // having played a hole; anything else would show last year's leaderboard under
-// this year's name.
+// this year's name. What each row keeps and what it drops is decided in
+// lib/editionClone.js, where it can be tested without Firebase.
 //
-// options = { players, courses, rounds, tournamentName } booleans.
+// The target does not have to be new. `wbc_2026` gets seeded into the list the
+// moment a director's phone points at it, so the year they are about to build
+// usually already exists as an empty row — refusing to clone into it would
+// mean deleting a year in order to create it. Cloning into a year that already
+// holds data is an OVERWRITE of the parts being copied, and the caller is
+// expected to have confirmed that; see EditionSwitcher.
+//
+// options = { players, courses, rounds, tournamentName, buyIns } booleans.
 export const cloneEdition = async (sourceId, { year, name, id }, options = {}) => {
   const newTid = id || editionId(year);
   const srcSlug = getEditionSlug(sourceId);
   const newSlug = getEditionSlug(newTid);
   const f = (tid) => [{ field: "tournament_id", op: "==", value: tid }];
+  const at = { slug: newSlug, tournamentId: newTid };
 
-  await _upsert(EDITIONS_COL, {
-    id: newTid,
-    year: Number(year),
-    name: name?.trim() || `WBC ${year}`,
-    status: "draft",
-    created_from: sourceId,
-  });
+  // One read of the index for both ends of the clone: the target (whose own
+  // status and name must survive it) and the source (whose YEAR is what the
+  // cloned tournament name gets re-yeared off).
+  const index = await _get(EDITIONS_COL);
+  const existing = index.find(e => e.id === newTid) || null;
+  const source = index.find(e => e.id === sourceId) || null;
+
+  await _upsert(EDITIONS_COL, editionDoc({ year, id: newTid, name, sourceId, existing }));
 
   // Roster — the tournament_players binding rows, carrying each golfer's
-  // handicap index forward as this year's starting point. player_id is a
-  // permanent career identity and is deliberately NOT regenerated: it is what
-  // ties a golfer to their history across every edition.
-  //
-  // `status` is dropped rather than copied: it carries last year's WD, and a
-  // player who withdrew from 2026 starts 2027 in the field like everyone else.
+  // handicap index forward as this year's starting point.
   if (options.players) {
     const rows = await _get("tournament_players", f(sourceId));
     for (const tp of rows) {
-      const pid = tp.player_id;
-      if (!pid) continue;
-      const { status: _drop, ...rest } = tp;
-      await _upsert("tournament_players", {
-        ...rest,
-        id: `tp_${newSlug}_${pid}`,
-        tournament_id: newTid,
-      });
+      const row = cloneRosterRow(tp, at);
+      if (row) await _upsert("tournament_players", row);
     }
   }
 
@@ -127,34 +133,38 @@ export const cloneEdition = async (sourceId, { year, name, id }, options = {}) =
   // edition-scoped is which course each ROUND plays, which is `rounds` below.
   // The option is accepted and ignored so the caller's shape stays stable.
 
-  // Round setup — which course each round is played on. The course_id points
-  // at the shared registry and carries over as-is.
+  // Round setup — which course each round is played on.
   if (options.rounds) {
     const rows = await _get("tournament_rounds", f(sourceId));
     for (const r of rows) {
-      const { id: _old, ...rest } = r;
-      await _upsert("tournament_rounds", {
-        ...rest,
-        id: `tr_${newSlug}_r${r.round_number}`,
-        tournament_id: newTid,
-      });
+      const row = cloneRoundRow(r, at);
+      if (row) await _upsert("tournament_rounds", row);
     }
   }
 
-  // Tournament name/location, off the tournament_state singleton. Only `meta`
-  // is carried: the rest of that document is results state (finalized rounds,
-  // saved tees, round dates, scoring-open flags) and must start clean.
-  if (options.tournamentName) {
+  // The two halves of the tournament_state singleton worth carrying — the
+  // tournament's identity, and what a seat in each betting game costs. Written
+  // as ONE upsert so a clone can't land half of them. Everything else on that
+  // document is results state (finalized rounds, saved tees, round dates,
+  // scoring-open flags) and must start clean.
+  if (options.tournamentName || options.buyIns) {
     const rows = await _get("tournament_state", f(sourceId));
-    const meta = rows[0]?.meta;
-    if (meta) {
-      await _upsert("tournament_state", {
-        id: `ts_${newTid}`, tournament_id: newTid, meta,
-      });
+    const src = rows[0];
+    const patch = {};
+    if (options.tournamentName) {
+      const meta = cloneMeta(src?.meta, { fromYear: source?.year, toYear: Number(year) });
+      if (meta) patch.meta = meta;
+    }
+    if (options.buyIns) {
+      const sideGames = cloneSideGames(src?.side_games);
+      if (sideGames) patch.side_games = sideGames;
+    }
+    if (Object.keys(patch).length) {
+      await _upsert("tournament_state", { id: `ts_${newTid}`, tournament_id: newTid, ...patch });
     }
   }
 
-  return { id: newTid, year: Number(year), name, created_from: sourceId, srcSlug };
+  return { id: newTid, year: Number(year), name, created_from: sourceId, srcSlug, existed: !!existing };
 };
 
 // Every tournament-scoped collection, purged when an edition is deleted.

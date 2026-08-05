@@ -22,7 +22,7 @@
 import { useRef, useState } from "react";
 import { K, FONT, FS, R, ALPHA, SHADOW } from "../theme";
 
-export function MoreMenu({ open, onClose, onSelect, isDirector, adminFlag, notifFlag, navH = 62 }) {
+export function MoreMenu({ open, onClose, onSelect, isDirector, adminFlag, notifFlag, activeYear, navH = 62 }) {
   const startYRef = useRef(null);
   const [dragY, setDragY] = useState(0);
 
@@ -50,6 +50,12 @@ export function MoreMenu({ open, onClose, onSelect, isDirector, adminFlag, notif
     // rule, so a player with no Admin entry still opens the menu onto
     // something that isn't their own settings.
     { key: "players", label: "Players" },
+    // Every year the tournament has been run in this app. It sits with the
+    // EVENT, directly under the record book, because it answers the same
+    // question from the other side: Players is one golfer across the years,
+    // this is one year across the golfers. The active year rides on the row
+    // so the menu says which tournament is on screen without opening it.
+    { key: "editions", label: "Tournaments", value: activeYear ? String(activeYear) : null },
     { key: "notifications", label: "Notifications", person: true, flag: notifFlag },
     { key: "account", label: "My Account", person: true },
   ];
@@ -103,6 +109,9 @@ export function MoreMenu({ open, onClose, onSelect, isDirector, adminFlag, notif
             }}
           >
             <span>{item.label}</span>
+            {item.value && (
+              <span style={{ fontSize: FS.small, fontWeight: 700, color: K.t3, flexShrink: 0 }}>{item.value}</span>
+            )}
             {item.flag && <span style={{ width: 6, height: 6, borderRadius: "50%", background: K.acc, flexShrink: 0 }} />}
           </button>
         ))}
