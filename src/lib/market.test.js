@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   MARKET_OPENING_SHARES, MARKET_MID_SHARES, midRoundFor,
   normalizeLots, totalShares, sharesOn, setLotShares,
-  roundStarted, roundComplete, marketWindows, teeOffAt, countdown, countdownTick,
+  roundStarted, roundComplete, marketWindows, teeOffAt, countdown, countdownTick, openingSharesLeft,
   lotsFor, allLots, marketBoard, marketHoldings, marketPayouts, eligibleBets, rebuyers, marketRoster,
 } from "./market";
 
@@ -253,7 +253,8 @@ describe("the opening bell", () => {
 
   it("shuts ON the tee time, not a minute after", () => {
     expect(win({ now: bell })).toMatchObject({ open: false, closed: true });
-    expect(win({ now: bell }).note).toMatch(/on the tee/);
+    // One closed sentence whatever shut it — the bell or the first score.
+    expect(win({ now: bell }).note).toMatch(/tournament in progress/i);
   });
 
   it("stays shut once the field is out", () => {
@@ -464,5 +465,37 @@ describe("marketRoster", () => {
 
   it("survives missing arguments", () => {
     expect(marketRoster({})).toEqual({ rows: [], outstanding: 0 });
+  });
+});
+
+describe("openingSharesLeft", () => {
+  it("is the full twenty for somebody who has never opened the book", () => {
+    expect(openingSharesLeft([], "aaron_j")).toBe(20);
+    expect(openingSharesLeft(null, "aaron_j")).toBe(20);
+  });
+
+  it("counts down as the book fills", () => {
+    const bets = [{ pid: "aaron_j", opening: [{ pid: "brad_k", shares: 12 }, { pid: "cole_m", shares: 3 }] }];
+    expect(openingSharesLeft(bets, "aaron_j")).toBe(5);
+  });
+
+  it("is zero once the window is spent", () => {
+    const bets = [{ pid: "aaron_j", opening: [{ pid: "brad_k", shares: 20 }] }];
+    expect(openingSharesLeft(bets, "aaron_j")).toBe(0);
+  });
+
+  it("ignores the halfway lots — they are a different window", () => {
+    const bets = [{ pid: "aaron_j", opening: [{ pid: "brad_k", shares: 20 }], mid: [{ pid: "cole_m", shares: 4 }] }];
+    expect(openingSharesLeft(bets, "aaron_j")).toBe(0);
+  });
+
+  it("never goes negative on a hand-edited document", () => {
+    const bets = [{ pid: "aaron_j", opening: [{ pid: "brad_k", shares: 40 }] }];
+    expect(openingSharesLeft(bets, "aaron_j")).toBe(0);
+  });
+
+  it("does not confuse one player's book for another's", () => {
+    const bets = [{ pid: "brad_k", opening: [{ pid: "cole_m", shares: 20 }] }];
+    expect(openingSharesLeft(bets, "aaron_j")).toBe(20);
   });
 });

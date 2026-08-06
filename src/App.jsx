@@ -9,7 +9,7 @@ import { fieldFor, potFor, perUnit, computeSkins, allSkins, skinCounts, lowNetRo
 import { teeTimesByPlayer, roundInPlay, thruStatus } from "./lib/thruStatus";
 import {
   MARKET_OPENING_SHARES, MARKET_MID_SHARES, marketWindows, normalizeLots, totalShares,
-  countdown, countdownTick,
+  countdown, countdownTick, openingSharesLeft,
   sharesOn, setLotShares, lotsFor, allLots, marketBoard, marketHoldings, marketPayouts, roundComplete,
   eligibleBets, rebuyers, marketRoster, teeOffAt,
 } from "./lib/market";
@@ -3781,15 +3781,17 @@ function BettingView({
                   <div key={pid} style={{ borderBottom: `1px solid ${K.bdr}${ALPHA.hair}` }}>
                     <div onClick={() => setExpandedPlayer(isExpanded ? null : pid)}
                       style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", cursor: "pointer" }}>
+                      {/* The leaderboard's chevron — a ▼ that turns over
+                          rather than a ▶ that swings, scaled below the type
+                          scale's floor because this is an affordance and not
+                          data — but LEADING the row rather than trailing the
+                          name. On the board it sits after the name because
+                          the name is the row; here the row is a name and two
+                          numbers, and the mark belongs where the eye starts. */}
+                      <span style={{ fontSize: FS.micro, flexShrink: 0, color: isExpanded ? K.acc : K.t2, transition: `transform ${MOTION}`, display: "inline-block", transform: `${isExpanded ? "rotate(180deg)" : "rotate(0)"} scale(0.75)` }}>▼</span>
                       <span style={{ flex: 1, minWidth: 0, fontSize: FS.small, fontWeight: 700, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {players.find(p => p.id === pid)?.name || pid}
                       </span>
-                      {/* The leaderboard's chevron, exactly: a ▼ that turns
-                          over rather than a ▶ that swings, scaled below the
-                          type scale's floor because this is an affordance and
-                          not data, and sitting AFTER the name where the board
-                          puts it — between the name and the row's numbers. */}
-                      <span style={{ fontSize: FS.micro, flexShrink: 0, color: isExpanded ? K.acc : K.t2, transition: `transform ${MOTION}`, display: "inline-block", transform: `${isExpanded ? "rotate(180deg)" : "rotate(0)"} scale(0.75)` }}>▼</span>
                       <span style={{ fontSize: FS.body, fontWeight: 700, color: K.acc, flexShrink: 0, width: 48, textAlign: "center" }}>{count}</span>
                       <span style={{ fontSize: FS.small, color: K.t3, flexShrink: 0, width: 66, textAlign: "center" }}>{money(count * perSkin)}</span>
                     </div>
@@ -3839,7 +3841,14 @@ function BettingView({
                     to. */}
                 {ctpLeaders.length > 0 && (
                   <div style={{ background: K.card, borderRadius: R.lg, border: `1px solid ${K.bdr}`, marginBottom: 10, overflow: "hidden" }}>
-                    <div style={{ padding: "8px 14px", borderBottom: `1px solid ${K.bdr}`, fontSize: FS.label, fontWeight: 700, color: K.gold, letterSpacing: 1 }}>CTP LEADERS</div>
+                    {/* The same two headings the skins card carries, at the
+                        same widths, so the two leader boards in this tab read
+                        as one idea rather than two layouts. */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", borderBottom: `1px solid ${K.bdr}`, fontSize: FS.label, fontWeight: 700, color: K.gold, letterSpacing: 1 }}>
+                      <span style={{ flex: 1, minWidth: 0 }}>CTP LEADERS</span>
+                      <span style={{ fontSize: FS.micro, color: K.t3, letterSpacing: 0.5, flexShrink: 0, width: 48, textAlign: "center" }}>COUNT</span>
+                      <span style={{ fontSize: FS.micro, color: K.t3, letterSpacing: 0.5, flexShrink: 0, width: 66, textAlign: "center" }}>$</span>
+                    </div>
                     {ctpLeaders.map(({ pid, count }) => {
                       const isOpen = openCtpPlayer === pid;
                       const mine = ctpTags
@@ -3849,12 +3858,18 @@ function BettingView({
                         <div key={pid} style={{ borderBottom: `1px solid ${K.bdr}${ALPHA.hair}` }}>
                           <div onClick={() => setOpenCtpPlayer(isOpen ? null : pid)}
                             style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", cursor: "pointer" }}>
-                            <span style={{ flex: 1, minWidth: 0, fontSize: FS.body, fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {/* Chevron first, then the name — the affordance
+                                sits where the eye starts the row rather than
+                                at the far end of a name it has to read past. */}
+                            <span style={{ fontSize: FS.micro, flexShrink: 0, color: isOpen ? K.acc : K.t2, transition: `transform ${MOTION}`, display: "inline-block", transform: `${isOpen ? "rotate(180deg)" : "rotate(0)"} scale(0.75)` }}>▼</span>
+                            <span style={{ flex: 1, minWidth: 0, fontSize: FS.small, fontWeight: 700, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                               {players.find(p => p.id === pid)?.name || pid}
                             </span>
-                            <span style={{ fontSize: FS.micro, flexShrink: 0, color: isOpen ? K.acc : K.t2, transition: `transform ${MOTION}`, display: "inline-block", transform: `${isOpen ? "rotate(180deg)" : "rotate(0)"} scale(0.75)` }}>▼</span>
-                            <span style={{ fontSize: FS.body, fontWeight: 700, color: K.acc, flexShrink: 0 }}>{count} CTP{count !== 1 ? "s" : ""}</span>
-                            <span style={{ fontSize: FS.small, color: K.t3, flexShrink: 0, minWidth: 54, textAlign: "right" }}>{money(count * perPin)}</span>
+                            {/* The count alone. The heading says what it is,
+                                so the row does not have to say "CTPs" once
+                                per line down the column. */}
+                            <span style={{ fontSize: FS.body, fontWeight: 700, color: K.acc, flexShrink: 0, width: 48, textAlign: "center" }}>{count}</span>
+                            <span style={{ fontSize: FS.small, color: K.t3, flexShrink: 0, width: 66, textAlign: "center" }}>{money(count * perPin)}</span>
                           </div>
                           {isOpen && (
                             <div style={{ padding: "2px 14px 8px", borderTop: `1px solid ${K.bdr}${ALPHA.tint}` }}>
@@ -4092,16 +4107,25 @@ function BettingView({
                     padding: "7px 4px", textAlign: "right", fontSize: FS.small, fontWeight: 600,
                     color: K.t2, borderTop: `1px solid ${K.bdr}${ALPHA.hair}`, ...extra,
                   });
-                  // The round number and its chevron. Same glyph and rotation
-                  // the skins leaders use, so an expandable row looks the same
-                  // wherever it appears in this tab.
-                  const rdCell = (extra = {}) => (
-                    <td onClick={toggle} style={cell({ textAlign: "left", paddingLeft: 10, cursor: "pointer", ...extra })}>
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
-                        <span style={{ fontSize: FS.label, fontWeight: 800, color: open ? K.acc : K.t3 }}>{r.round}</span>
-                        <span style={{ fontSize: FS.micro, flexShrink: 0, color: open ? K.acc : K.t2, transition: `transform ${MOTION}`, display: "inline-block", transform: `${open ? "rotate(180deg)" : "rotate(0)"} scale(0.75)` }}>▼</span>
-                      </span>
-                    </td>
+                  // ── The round's own header strip ──
+                  // Round, chevron and COURSE, on a line of their own above
+                  // the winner. The course used to sit under the winner's
+                  // name, which read as though it belonged to him rather than
+                  // to the day — and on a tie it could only be printed under
+                  // one of the two men who played it.
+                  const headerRow = (
+                    <tr key={`${r.round}_h`} onClick={toggle} style={{ background: `${K.bdr}${ALPHA.wash}`, cursor: "pointer" }}>
+                      <td style={cell({ textAlign: "left", paddingLeft: 10, padding: "5px 4px 5px 10px" })}>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+                          <span style={{ fontSize: FS.label, fontWeight: 800, color: open ? K.acc : K.t3 }}>{r.round}</span>
+                          {/* The leaderboard's chevron, same as everywhere. */}
+                          <span style={{ fontSize: FS.micro, flexShrink: 0, color: open ? K.acc : K.t2, transition: `transform ${MOTION}`, display: "inline-block", transform: `${open ? "rotate(180deg)" : "rotate(0)"} scale(0.75)` }}>▼</span>
+                        </span>
+                      </td>
+                      <td colSpan={6} style={cell({ textAlign: "left", padding: "5px 12px 5px 4px", fontSize: FS.micro, fontWeight: 700, letterSpacing: 0.4, color: K.t3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })}>
+                        {courseName || "No course set"}
+                      </td>
+                    </tr>
                   );
                   // The whole field for the day, lowest net first. It answers
                   // the question the winner's name provokes — by how much —
@@ -4151,32 +4175,26 @@ function BettingView({
                   });
 
                   if (!r.decided) return [
+                    headerRow,
                     <tr key={r.round} style={{ background: band }}>
-                      {rdCell()}
+                      <td style={cell({ paddingLeft: 10 })} />
                       <td colSpan={6} onClick={toggle} style={cell({ textAlign: "left", color: K.t3, paddingRight: 12, cursor: "pointer" })}>
-                        {roundSetup(r.round).course ? "Nobody has finished yet" : "No course set"}
-                        {courseName && <span style={{ display: "block", fontSize: FS.micro, color: K.t3, fontWeight: 600 }}>{courseName}</span>}
+                        {roundSetup(r.round).course ? "Nobody has finished yet" : "No scores yet"}
                       </td>
                     </tr>,
                     ...fieldRows,
                   ];
 
                   return [
+                    headerRow,
                     ...r.winners.map((w, wi) => (
                       <tr key={`${r.round}_${w.pid}`} style={{ background: band }}>
-                        {/* The round number prints once. A tie's second row
-                            leaves it blank rather than repeating it, which is
-                            what makes the pair read as one day. */}
-                        {wi === 0 ? rdCell() : <td style={cell({ borderTop: "none" })} />}
-                        <td onClick={toggle} style={cell({ textAlign: "left", fontWeight: 700, color: K.t1, borderTop: wi > 0 ? "none" : undefined, cursor: "pointer", minWidth: 0 })}>
-                          <span style={{ display: "block", fontSize: FS.small, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{w.name}</span>
-                          {/* The course, under the first winner only. It is
-                              the one thing a round number does not say and
-                              the thing that explains the scores under it —
-                              a 78 at The Loon is not a 78 at the Tribute. */}
-                          {wi === 0 && courseName && (
-                            <span style={{ display: "block", fontSize: FS.micro, color: K.t3, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{courseName}</span>
-                          )}
+                        {/* The round number lives on the header strip above,
+                            so the winner rows start at the name — and a tie's
+                            two lines are simply two names under one day. */}
+                        <td style={cell({ paddingLeft: 10, borderTop: wi > 0 ? "none" : undefined })} />
+                        <td onClick={toggle} style={cell({ textAlign: "left", fontSize: FS.small, fontWeight: 700, color: K.t1, borderTop: wi > 0 ? "none" : undefined, cursor: "pointer", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })}>
+                          {w.name}
                         </td>
                         <td style={cell({ borderTop: wi > 0 ? "none" : undefined })}>{w.gross}</td>
                         <td style={cell({ borderTop: wi > 0 ? "none" : undefined })}>{w.strokes}</td>
@@ -4324,15 +4342,14 @@ function BettingView({
                     </span>
                   )}
                 </div>
-                {/* The halfway window is a second buy-in, so its chip has to
-                    say what it costs. Without that line it reads as ten free
-                    shares for the field — and since nothing is prepaid, the
-                    only thing standing between a player and a debt they did
-                    not mean to take on is this sentence. */}
+                {/* How many are in, and nothing else. The price used to lead
+                    this line — the halfway window is a second buy-in and
+                    nothing is prepaid — but the book itself says what it
+                    costs before the first tap, which is the place a player
+                    is actually deciding. */}
                 {w.key === "mid" && (
                   <div style={{ fontSize: FS.label, color: K.t3, marginTop: 4, lineHeight: 1.4 }}>
-                    {rebuyAmount > 0 ? `$${rebuyAmount} if you place any` : "No rebuy price set"}
-                    {" · "}{rebuyField.length} in so far
+                    {rebuyField.length} in so far
                   </div>
                 )}
               </div>
@@ -4457,6 +4474,14 @@ function BettingView({
                       <Btn variant="secondary" size="sm" disabled={!canPlace || remaining <= 0}
                         style={{ padding: "3px 10px", minWidth: 32 }}
                         onClick={() => bump(p.id, 1)}>+</Btn>
+                      {/* Five at a time. Twenty shares in fives is four taps
+                          where the single stepper wanted twenty, and 5/10/15/20
+                          is how the field actually talks about a book. It
+                          clamps through the same setLotShares as everything
+                          else, so tapping it with three left adds three. */}
+                      <Btn variant="secondary" size="sm" disabled={!canPlace || remaining <= 0}
+                        style={{ padding: "3px 8px", minWidth: 32 }}
+                        onClick={() => bump(p.id, 5)}>+5</Btn>
                     </div>
                   );
                 })}
@@ -4464,7 +4489,7 @@ function BettingView({
 
               {canPlace && (
                 <div style={{ marginTop: 10 }}>
-                  <Btn block disabled={!dirty} onClick={commitBook}>{dirty ? "Place shares" : "Placed"}</Btn>
+                  <Btn block disabled={!dirty} onClick={commitBook}>{dirty ? "Wager shares" : "Wagered"}</Btn>
                   {/* The two ways back, under the commit rather than beside
                       it: three block buttons do not fit a phone, and these
                       are the undo pair, not alternatives to saving.
@@ -9802,6 +9827,23 @@ export default function WBCApp() {
   // likely there rather than impossible.
   const NAV_BOTTOM_PAD = "max(16px, calc(env(safe-area-inset-bottom, 0px) + 6px))";
 
+  // ── The nudge on the Betting tab ───────────────────────────────────
+  // A red dot while YOU still have opening shares unplaced and the bell has
+  // not rung. Unplaced shares are not a smaller bet — they are no bet at all
+  // on those shares — and the window shuts on a clock, so the only thing
+  // between a man who meant to finish his book and a wasted buy-in is being
+  // told. It goes quiet the moment the book is full or the field tees off,
+  // because after that there is nothing he can do about it.
+  const marketNudge = (() => {
+    if (!user || user.isGuest) return false;
+    const ids = sideGames?.market?.in;
+    if (ids != null && !ids.includes(user.id)) return false;
+    if (openingSharesLeft(marketBets, user.id) === 0) return false;
+    return marketWindows({
+      holeData, players: allPlayers, numRounds, firstTeeAt, now: Date.now(),
+    }).opening.open;
+  })();
+
   const navItems = [
     { key: "groups", label: "Pairings", icon: "pairings" },
     { key: "scoring", label: "Scoring", icon: "score" },
@@ -10153,7 +10195,9 @@ export default function WBCApp() {
                 }} />
               )}
               {navIcon()}
-              {item.key === "more" && ((adminActionNeeded && user.isDirector) || (notifPerm !== "granted" && !user.isGuest)) && (
+              {(item.key === "more"
+                  ? ((adminActionNeeded && user.isDirector) || (notifPerm !== "granted" && !user.isGuest))
+                  : item.key === "skins" && marketNudge) && (
                 <span style={{
                   position: "absolute", top: 6, right: "50%", marginRight: -14,
                   width: 8, height: 8, borderRadius: "50%", background: K.danger,

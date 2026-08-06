@@ -197,8 +197,7 @@ export function marketWindows({ holeData, players, numRounds, firstTeeAt = null,
     open: !shut,
     closed: shut,
     at: firstTeeAt,
-    note: belled ? "Closed — the field is on the tee."
-      : started1 ? "Closed — Round 1 is under way."
+    note: shut ? "Closed — tournament in progress."
       : firstTeeAt != null ? "Open until the first tee time."
       : "Open until the first score of Round 1.",
   };
@@ -249,6 +248,18 @@ export const allLots = (bet) => normalizeLots([...(bet?.opening || []), ...(bet?
 // `inMarket` is a predicate so the caller keeps the null-means-everybody rule
 // in one place (see lib/sideGames fieldFor).
 export const eligibleBets = ({ bets, inMarket }) => (bets || []).filter(b => inMarket(b.pid));
+
+// How many of the opening 20 a player has NOT placed yet. Zero once the book
+// is full, and 20 for somebody who has never opened it.
+//
+// This is what the nudge on the Betting tab counts. Unplaced shares are not a
+// smaller bet — they are no bet at all on those shares, and the window shuts
+// on a clock rather than on a reminder, so a man who meant to finish his book
+// in the car park and forgot has simply thrown that part of his buy-in away.
+export function openingSharesLeft(bets, pid) {
+  const bet = (bets || []).find(b => b.pid === pid);
+  return Math.max(0, MARKET_OPENING_SHARES - totalShares(lotsFor(bet, "opening")));
+}
 
 // ── Who owes the halfway rebuy ─────────────────────────────────────
 // The second window is a second BUY-IN, and it is INCURRED, not prepaid:
