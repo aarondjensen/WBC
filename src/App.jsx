@@ -460,6 +460,11 @@ const mergeSideGames = (raw) => {
 // leaderboard, the scorecards and the finalize preview alike.
 const fmtPar = n => n == null ? "—" : n === 0 ? "E" : n > 0 ? `+${n}` : `${n}`;
 
+// Gap the tee sheet fills in with when the director types one group's time and
+// the rest are still blank. A director who spaces two groups differently keeps
+// their own spacing — this is only the starting assumption.
+const TEE_INTERVAL_MIN = 10;
+
 // ── SCORING GATE HELPERS ──
 // Minutes before tee time that scoring input unlocks for non-directors.
 const SCORING_LEAD_MIN = 30;
@@ -4489,12 +4494,12 @@ function PairingsEditor({ activePlayers, pairingsData, setPairings, tRounds, cou
     // Auto-propagate to subsequent groups
     const newMins = parseTime(normalized);
     if (newMins != null && gi < numGroups - 1) {
-      let interval = 8;
+      let interval = TEE_INTERVAL_MIN;
       if (gi > 0) {
         const prevMins = parseTime(current[gi - 1]);
         if (prevMins != null) {
           interval = newMins - prevMins;
-          if (interval <= 0) interval = 8;
+          if (interval <= 0) interval = TEE_INTERVAL_MIN;
         }
       }
       for (let i = gi + 1; i < numGroups; i++) {
