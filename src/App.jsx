@@ -32,6 +32,7 @@ import { scoreWindow, nudgeUpTarget, nudgeDownTarget } from "./lib/scoreEntry";
 import { groupTrouble, roundTrouble, describeTrouble, blocksScoring, missingTees, describeMissingTees } from "./lib/roundSetup";
 import { indexFor, matchHistoryName } from "./lib/handicap";
 import { groupKey as groupKeyOf, sameGroup, liveRound, roundFinalized, switchableGroups, groupProgress } from "./lib/groupSwitch";
+import { groupTeeOrder, tagAheadOfPlay } from "./lib/ctp";
 import { AppHeader, HEADER_SAFE_PAD } from "./components/AppHeader";
 import { GroupSwitcher } from "./components/GroupSwitcher";
 import { OffRoundBanner } from "./components/OffRoundBanner";
@@ -381,6 +382,14 @@ const rowsToCtp = (rows) => {
       distanceFt: ft,
       distance: r.distance || (ft ? `${ft} ft` : ""),
       taggedByName: r.tagged_by_name || "",
+      // WHICH GROUP tagged it, and where that group tees off. The name alone
+      // says who typed; this says where they were in the field, which is the
+      // only way a group entering late can be told that the number in front
+      // of them came from BEHIND them. Null on a director's override and on
+      // any tag written before this was recorded — see lib/ctp, where an
+      // unknown order deliberately says nothing.
+      taggedGroupKey: r.tagged_group_key || null,
+      taggedGroupOrder: Number.isInteger(r.tagged_group_order) ? r.tagged_group_order : null,
       // Who has walked off this green, seen the standing tag and let it
       // stand. See onConfirmCtp — it is the other half of the on-course
       // prompt, and the only record that a group answered rather than
@@ -2535,6 +2544,19 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
         const leaderPl = leader ? players.find(p => p.id === leader.playerId) : null;
         const leaderDist = leader ? (leader.distanceFt ? `${leader.distanceFt} ft` : (leader.distance || "")) : "";
         const closeAndAdvance = () => { setShowCtpForHole(null); setCtpPickPlayer(""); };
+        // Was this tag made by a group PLAYING BEHIND us? A group that walks
+        // off a par 3 to make its tee time and puts the hole in fifteen
+        // minutes later is shown a "current CTP" that did not exist when they
+        // were on the green. Without saying so, the number reads as the group
+        // ahead of them — and the tie rule, which hands the pin to whoever
+        // tagged first, quietly runs backwards. See lib/ctp.
+        const myTeeOrder = groupTeeOrder(pairingsData, round, group);
+        const outOfOrder = leader ? tagAheadOfPlay({
+          leaderOrder: leader.taggedGroupOrder,
+          leaderKey: leader.taggedGroupKey,
+          myOrder: myTeeOrder,
+          myKey: _groupKey,
+        }) : null;
         // Beating the standing tag is a strictly-shorter distance. Equal isn't closer —
         // ties keep the earlier group's tag (first to hole it holds the pin).
         // Undecided is not "beats it": until a distance is chosen there is
@@ -2548,7 +2570,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
         const save = async () => {
           if (!canTag) return;
           tapBigAction();
-          try { await onSetCtp?.(round, holeNum, ctpPickPlayer, ctpFeet); } catch {}
+          try { await onSetCtp?.(round, holeNum, ctpPickPlayer, ctpFeet, { key: _groupKey, order: myTeeOrder }); } catch {}
           closeAndAdvance();
         };
         // Wheel: park it on ctpFeetStart when the scroll node mounts, then derive feet
@@ -2581,13 +2603,33 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
 
               {/* Current-leader bar — the number to beat, tagged by an earlier group */}
               {leader && leaderPl && (
-                <div style={{ display: "flex", alignItems: "center", gap: 8, background: K.warn + ALPHA.wash, border: `1px solid ${K.warn}${ALPHA.line}`, borderRadius: R.md, padding: "8px 10px", marginBottom: 12 }}>
-                  <span style={{ fontSize: FS.body }}>⛳</span>
-                  <span style={{ flex: 1, minWidth: 0 }}>
-                    <span style={{ display: "block", fontSize: FS.micro, fontWeight: 800, color: K.warn, letterSpacing: 1.2, textTransform: "uppercase" }}>Current CTP</span>
-                    <span style={{ fontSize: FS.small, fontWeight: 700, color: K.t1 }}>{leaderPl.name}</span>
-                  </span>
-                  {leaderDist && <span style={{ fontSize: FS.small, fontWeight: 800, color: K.warn }}>{leaderDist}</span>}
+                <div style={{ background: K.warn + ALPHA.wash, border: `1px solid ${K.warn}${ALPHA.line}`, borderRadius: R.md, marginBottom: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px" }}>
+                    <span style={{ fontSize: FS.body }}>⛳</span>
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ display: "block", fontSize: FS.micro, fontWeight: 800, color: K.warn, letterSpacing: 1.2, textTransform: "uppercase" }}>Current CTP</span>
+                      <span style={{ fontSize: FS.small, fontWeight: 700, color: K.t1 }}>{leaderPl.name}</span>
+                    </span>
+                    {leaderDist && <span style={{ fontSize: FS.small, fontWeight: 800, color: K.warn }}>{leaderDist}</span>}
+                  </div>
+                  {/* Tagged out of order — the group BEHIND us got in first.
+                      Inside this bar rather than above it, because it is not a
+                      second thing to read: it is what this number is. A group
+                      that walked off to make its tee time is being shown a tag
+                      from players who were still waiting to hit, and left to
+                      itself the bar reads as the group ahead of them.
+                      Two amber boxes stacked also read as one wall of shouting
+                      on a phone in sunlight — the app's face is all caps, so
+                      the copy stays short and there is only ever one box. */}
+                  {outOfOrder && (
+                    <div style={{ borderTop: `1px solid ${K.warn}${ALPHA.hair}`, padding: "7px 10px 8px", display: "flex", gap: 6 }}>
+                      <span style={{ fontSize: FS.label }}>⏱</span>
+                      <span style={{ fontSize: FS.label, color: K.t2, lineHeight: 1.45, minWidth: 0 }}>
+                        <span style={{ fontWeight: 800, color: K.warn }}>{outOfOrder.label} tagged this after you finished.</span>
+                        {" "}Tag it if you were closer — a tie stays theirs.
+                      </span>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -9476,14 +9518,19 @@ export default function WBCApp() {
   //
   // distance_ft is written EXPLICITLY (null when unknown) rather than omitted: db.upsert
   // uses setDoc(merge:true), so an omitted field would silently retain the previous
-  // player's distance and attach it to the new winner.
-  const onSetCtp = async (rnd, hole, pid, distanceFt = null) => {
+  // player's distance and attach it to the new winner. The tagging GROUP is written the
+  // same way and for the same reason: a director's override off the Betting tab carries
+  // no group, and inheriting the last group's tee order would have the prompt telling
+  // the next group the field is out of order on the strength of a stale field.
+  const onSetCtp = async (rnd, hole, pid, distanceFt = null, taggedGroup = null) => {
     const ft = (distanceFt === null || distanceFt === undefined || distanceFt === "") ? null : Number(distanceFt);
     const distance = ft ? `${ft} ft` : "";
     const taggedByName = user?.name || "";
+    const taggedGroupKey = taggedGroup?.key || null;
+    const taggedGroupOrder = Number.isInteger(taggedGroup?.order) ? taggedGroup.order : null;
     setCtpData(prev => ({
       ...prev,
-      [rnd]: { ...(prev[rnd] || {}), [hole]: { playerId: pid, distanceFt: ft, distance, taggedByName, confirmedBy: [] } },
+      [rnd]: { ...(prev[rnd] || {}), [hole]: { playerId: pid, distanceFt: ft, distance, taggedByName, taggedGroupKey, taggedGroupOrder, confirmedBy: [] } },
     }));
     // Store CTP as a skin type in the skins table.
     // tournament_id was previously MISSING — which meant these docs were invisible to
@@ -9502,6 +9549,8 @@ export default function WBCApp() {
       distance,
       tagged_by: user?.id || null,
       tagged_by_name: taggedByName,
+      tagged_group_key: taggedGroupKey,
+      tagged_group_order: taggedGroupOrder,
       tagged_at: new Date().toISOString(),
       // Cleared, not merged: a confirmation was agreement with a distance
       // that has just been beaten, and carrying it onto the new tag would
