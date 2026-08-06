@@ -5,7 +5,7 @@ import {
   archiveProject, archiveBase, mediaDocId, storagePaths, archivePaths, photoId,
   resizePlan, squareCropPlan, validateSource,
   takenTime, sortByTaken, groupByRound, UNROUNDED_LABEL, canDelete,
-  photoUploadsAllowed, uploadsDisabledReason,
+  photoUploadsAllowed, uploadsDisabledReason, ENCODINGS, MAX_UPLOAD_BYTES,
 } from "./media";
 
 describe("archive naming", () => {
@@ -33,6 +33,15 @@ describe("mediaDocId / paths", () => {
     expect(storagePaths("2026", "abc")).toEqual({
       full: "editions/2026/abc.webp",
       thumb: "editions/2026/abc_thumb.webp",
+    });
+  });
+
+  it("carries the extension of whatever the browser actually encoded", () => {
+    // Safari can refuse WebP and hand back JPEG; the path has to follow, or
+    // the file is served with the wrong content type for as long as it exists.
+    expect(storagePaths("2026", "abc", "jpg")).toEqual({
+      full: "editions/2026/abc.jpg",
+      thumb: "editions/2026/abc_thumb.jpg",
     });
   });
 
@@ -303,6 +312,27 @@ describe("canDelete", () => {
 
   it("refuses a missing item rather than throwing", () => {
     expect(canDelete(null, { uid: "me", isDirector: true })).toBe(false);
+  });
+});
+
+describe("ENCODINGS / MAX_UPLOAD_BYTES", () => {
+  it("prefers WebP but keeps a fallback, because Safari may not encode it", () => {
+    expect(ENCODINGS[0].type).toBe("image/webp");
+    expect(ENCODINGS.length).toBeGreaterThan(1);
+    expect(ENCODINGS.at(-1).type).toBe("image/jpeg");
+  });
+
+  it("gives every encoding a file extension to travel with", () => {
+    for (const e of ENCODINGS) {
+      expect(e.ext).toMatch(/^[a-z0-9]+$/);
+      expect(e.type).toMatch(/^image\//);
+    }
+  });
+
+  it("agrees with the cap written into storage.rules", () => {
+    // storage.rules: request.resource.size < 2 * 1024 * 1024.
+    // If these drift, uploads fail as opaque permission errors.
+    expect(MAX_UPLOAD_BYTES).toBe(2 * 1024 * 1024);
   });
 });
 

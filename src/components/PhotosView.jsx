@@ -35,7 +35,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { K, FONT, FS, R, ALPHA } from "../theme";
 import { Btn, Card, SectionLabel } from "./ui";
 import { Popup } from "./Popup";
-import { groupByRound, canDelete, validateSource } from "../lib/media";
+import { groupByRound, canDelete, validateSource, uploadFailureMessage } from "../lib/media";
 
 // Grid geometry. Three across is what fits a 375px handset with a gap that
 // still reads as a gap; the cells stay square via aspectRatio so a slow
@@ -196,24 +196,33 @@ export function PhotosView({
 
     setBusy(true);
     let done = 0;
-    let failed = 0;
+    const failures = [];
     for (const file of usable) {
       setProgress(`${done + 1} of ${usable.length}`);
       try {
         await onUpload(file);
         done += 1;
       } catch (err) {
-        // Keep going. A batch of twenty that stops dead on the one HEIC the
+        // Keep going. A batch of twenty that stops dead on the one photo the
         // browser could not decode is worse than nineteen uploaded photos and
         // a count of what did not make it.
-        failed += 1;
+        failures.push(err);
         console.error("photo upload failed:", err);
       }
     }
     setBusy(false);
     setProgress(null);
-    if (failed) notify?.(`${done} added, ${failed} couldn't be read.`);
-    else notify?.(done === 1 ? "Photo added." : `${done} photos added.`);
+
+    if (!failures.length) {
+      notify?.(done === 1 ? "Photo added." : `${done} photos added.`);
+      return;
+    }
+    // Say what actually went wrong. This used to report "couldn't be read" for
+    // every failure — decode, encode, network, permissions all collapsed into
+    // one wrong sentence, on a phone with no console to check. The thrown
+    // messages are written to be read by whoever is holding it; a Firebase
+    // error code is not, so those get translated.
+    notify?.(`${done ? `${done} added. ` : ""}${uploadFailureMessage(failures[0], failures.length)}`);
   };
 
   const remove = async (item) => {
