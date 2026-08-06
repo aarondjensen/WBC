@@ -441,6 +441,11 @@ const mergeSideGames = (raw) => {
     out[k] = {
       amount: Number(g.amount) || 0,
       in: Array.isArray(g.in) ? g.in : null,
+      // Who has actually handed the money over. Separate from `in` because
+      // tagging the field and collecting from it are days apart, and unlike
+      // `in` a missing list means NOBODY — paying is an affirmative act, so
+      // there is no everybody-by-default here.
+      paid: Array.isArray(g.paid) ? g.paid : [],
       // Skins is the only one with a hand-typed pot to preserve: it is the
       // game WBC was already playing before any of this existed.
       ...(k === "skins" ? { pot: Number(g.pot) || 0 } : {}),
@@ -1073,7 +1078,12 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                             minWidth:0 keeps the ellipsis working inside a flex
                             item that is now allowed to grow. */}
                         <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
-                        <span style={{ fontSize: fsStep(rowStyle.fontSize, -2), flexShrink: 0, color: isExpanded ? K.acc : K.t2, transition: `transform ${MOTION}`, display: "inline-block", transform: isExpanded ? "rotate(180deg)" : "rotate(0)" }}>▼</span>
+                        {/* FS.micro flat, not a step off the row size: this is
+                            an affordance, not data, and stepping it meant it
+                            grew whenever the board had room to grow — which is
+                            backwards for the quietest mark in the row. Micro is
+                            the rung the scale keeps for exactly this. */}
+                        <span style={{ fontSize: FS.micro, flexShrink: 0, color: isExpanded ? K.acc : K.t2, transition: `transform ${MOTION}`, display: "inline-block", transform: isExpanded ? "rotate(180deg)" : "rotate(0)" }}>▼</span>
                       </div>
                       {/* Total */}
                       {/* Full-strength ink, not the t2 the row's other numbers
@@ -3324,6 +3334,10 @@ function BettingView({
             amount: sideGames?.[k]?.amount || 0,
             // The rebuy column is a readout of who has placed halfway shares,
             // not a list anybody keeps. Everything else is the director's.
+            paid: sideGames?.[k]?.paid ?? [],
+            // The rebuy column is a readout of who has placed halfway shares,
+            // not a list anybody keeps, so its membership cannot be tagged —
+            // only its payment.
             ...(k === "rebuy"
               ? { ids: rebuyField.map(p => p.id), derived: true }
               : { ids: sideGames?.[k]?.in ?? null }),
@@ -6529,6 +6543,7 @@ function AdminView({ activePlayers, rosterPlayers, sideGames, onUpdateSideGames,
                 // so its count comes off the bets — the same list the pot is
                 // counted from. Everything else is the director's own list.
                 ids: k === "rebuy" ? rebuyIds : (sideGames?.[k]?.in ?? null),
+                paid: sideGames?.[k]?.paid ?? [],
               }))}
               onChange={onUpdateSideGames}
             />
@@ -7978,11 +7993,11 @@ export default function WBCApp() {
   // this existed was. An empty array is a different answer (nobody), so the
   // two must not be collapsed. See components/BuyIns.
   const [sideGames, setSideGames] = useState({
-    skins: { amount: 0, in: null, pot: 0 },
-    ctp: { amount: 0, in: null },
-    lownet: { amount: 0, in: null },
-    market: { amount: 0, in: null },
-    rebuy: { amount: 0, in: null },
+    skins: { amount: 0, in: null, pot: 0, paid: [] },
+    ctp: { amount: 0, in: null, paid: [] },
+    lownet: { amount: 0, in: null, paid: [] },
+    market: { amount: 0, in: null, paid: [] },
+    rebuy: { amount: 0, in: null, paid: [] },
   });
   const [pairingsData, setPairingsData] = useState({});
   const [teeData, setTeeData] = useState({});
