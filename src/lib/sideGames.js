@@ -244,6 +244,39 @@ export function lowNetRounds({ players, rounds, lineFor }) {
   });
 }
 
+// The whole field for one round, best net first — what the ledger's chevron
+// opens onto. `lowNetRounds` answers "who took the day"; this answers "by how
+// much, and who was close", which is the question the winner's name provokes.
+//
+// The sort is in two blocks rather than one. A card still on the course has no
+// net worth ranking — the man on the 14th sitting at −4 is not leading anybody
+// — so finished rounds are ordered by net and everybody still out follows,
+// deepest into their round first. Mixing them would put a half-finished card
+// at the top of a list of finished ones, which is the same lie `lowNetRounds`
+// refuses to tell by only counting complete rounds.
+//
+// A withdrawal keeps its place among the unfinished: the holes it played are
+// real, it just has no round to rank.
+export function lowNetRoundField({ players, round, lineFor }) {
+  return (players || []).map(p => {
+    const line = lineFor(p.id, round);
+    if (!line || !line.played) return null;
+    const complete = !line.wd && line.thru === 18;
+    const strokes = line.grossToPar - line.netToPar;
+    return {
+      pid: p.id, name: p.name,
+      complete, wd: !!line.wd, thru: line.thru,
+      gross: line.gross, strokes,
+      net: line.netToPar,
+      netScore: line.gross - strokes,
+    };
+  }).filter(Boolean).sort((a, b) => {
+    if (a.complete !== b.complete) return a.complete ? -1 : 1;
+    if (a.complete) return a.net - b.net || String(a.name).localeCompare(String(b.name));
+    return b.thru - a.thru || String(a.name).localeCompare(String(b.name));
+  });
+}
+
 // pid → skins won, for the leaderboard.
 export function skinCounts(skins) {
   const counts = {};

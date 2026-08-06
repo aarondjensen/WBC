@@ -5,7 +5,7 @@ import { readMembership, isDirectorAccount, resolveMember, joinWithCode, readAcc
 import { K, ON_ACC, ON_DANGER, FS, fsStep, R, ALPHA, MOTION, FONT, SHADOW, SCRIM } from "./theme";
 import { SegmentedToggle, StickyTop, SectionLabel, Card, Toast, Btn } from "./components/ui";
 import { calcCH, buildStrokesMap, computeRoundLine, computeIndividualBoard, rankIndividualBoard, rankIndividualBoardIds, WD_SCORE } from "./lib/individualBoard";
-import { fieldFor, potFor, perUnit, computeSkins, allSkins, skinCounts, lowNetRounds } from "./lib/sideGames";
+import { fieldFor, potFor, perUnit, computeSkins, allSkins, skinCounts, lowNetRounds, lowNetRoundField } from "./lib/sideGames";
 import { teeTimesByPlayer, roundInPlay, thruStatus } from "./lib/thruStatus";
 import {
   MARKET_OPENING_SHARES, MARKET_MID_SHARES, marketWindows, normalizeLots, totalShares,
@@ -3007,6 +3007,9 @@ function BettingView({
   const [tab, setTab] = useState("skins");
   const [expandedPlayer, setExpandedPlayer] = useState(null);
   const [grossMode, setGrossMode] = useState(true);
+  // Which round's full field is open in the Low Net ledger. One at a time —
+  // four open rounds is the same wall of numbers the ledger exists to avoid.
+  const [openNetRound, setOpenNetRound] = useState(null);
   // Each tab keeps its OWN round and its own open drawer. Sharing them would
   // mean opening one tab silently rearranged the other.
   const [skinsRound, setSkinsRound] = useState(null);
@@ -4007,13 +4010,13 @@ function BettingView({
                     the block of numbers reads as a block. WINNER takes the
                     slack; PAYS is the widest because "$15.63" is the longest
                     string on the row. */}
-                <col style={{ width: 24 }} />
+                <col style={{ width: 34 }} />
                 <col />
                 <col style={{ width: 36 }} />
                 <col style={{ width: 32 }} />
                 <col style={{ width: 34 }} />
                 <col style={{ width: 32 }} />
-                <col style={{ width: 58 }} />
+                <col style={{ width: 54 }} />
               </colgroup>
               <thead>
                 <tr style={{ background: `${K.bdr}${ALPHA.wash}` }}>
@@ -4021,7 +4024,7 @@ function BettingView({
                     <th key={label} style={{
                       textAlign: align, fontSize: FS.micro, fontWeight: 700, letterSpacing: 0.5, color: K.t3,
                       padding: "5px 4px", borderBottom: `1px solid ${K.bdr}${ALPHA.line}`,
-                      paddingLeft: i === 0 ? 12 : 4, paddingRight: i === all.length - 1 ? 12 : 4,
+                      paddingLeft: i === 0 ? 10 : 4, paddingRight: i === all.length - 1 ? 12 : 4,
                     }}>{label}</th>
                   ))}
                 </tr>
@@ -4030,6 +4033,9 @@ function BettingView({
                 {lowNetRows.map((r, ri) => {
                   const settled = roundSettled(r.round);
                   const share = r.winners.length > 0 ? lowNetPerRound / r.winners.length : 0;
+                  const courseName = roundSetup(r.round).course?.name || "";
+                  const open = openNetRound === r.round;
+                  const toggle = () => setOpenNetRound(open ? null : r.round);
                   // Banded by ROUND rather than by row, so a tie's two lines
                   // read as one day rather than as two separate results.
                   const band = ri % 2 === 1 ? `${K.bdr}${ALPHA.wash}` : "transparent";
@@ -4037,45 +4043,114 @@ function BettingView({
                     padding: "7px 4px", textAlign: "right", fontSize: FS.small, fontWeight: 600,
                     color: K.t2, borderTop: `1px solid ${K.bdr}${ALPHA.hair}`, ...extra,
                   });
-                  if (!r.decided) return (
-                    <tr key={r.round} style={{ background: band }}>
-                      <td style={cell({ textAlign: "left", paddingLeft: 12, fontSize: FS.label, fontWeight: 800, color: K.t3 })}>{r.round}</td>
-                      <td colSpan={6} style={cell({ textAlign: "left", color: K.t3, paddingRight: 12 })}>
-                        {roundSetup(r.round).course ? "Nobody has finished yet" : "No course set"}
-                      </td>
-                    </tr>
+                  // The round number and its chevron. Same glyph and rotation
+                  // the skins leaders use, so an expandable row looks the same
+                  // wherever it appears in this tab.
+                  const rdCell = (extra = {}) => (
+                    <td onClick={toggle} style={cell({ textAlign: "left", paddingLeft: 10, cursor: "pointer", ...extra })}>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+                        <span style={{ fontSize: FS.micro, color: open ? K.acc : K.t3, transition: `transform ${MOTION}`, display: "inline-block", transform: `${open ? "rotate(90deg)" : "rotate(0)"} scale(0.8)` }}>▶</span>
+                        <span style={{ fontSize: FS.label, fontWeight: 800, color: open ? K.acc : K.t3 }}>{r.round}</span>
+                      </span>
+                    </td>
                   );
-                  return r.winners.map((w, wi) => (
-                    <tr key={`${r.round}_${w.pid}`} style={{ background: band }}>
-                      {/* The round number prints once. A tie's second row
-                          leaves it blank rather than repeating it, which is
-                          what makes the pair read as one day. */}
-                      <td style={cell({ textAlign: "left", paddingLeft: 12, fontSize: FS.label, fontWeight: 800, color: K.t3, borderTop: wi > 0 ? "none" : undefined })}>
-                        {wi === 0 ? r.round : ""}
+                  // The whole field for the day, lowest net first. It answers
+                  // the question the winner's name provokes — by how much —
+                  // and on a round still being played it is the only thing
+                  // this tab can say at all.
+                  const fieldRows = !open ? [] : lowNetRoundField({ players: lowNetField, round: r.round, lineFor }).map(f => {
+                    const won = r.winners.some(w => w.pid === f.pid);
+                    const sub = (extra = {}) => cell({
+                      fontSize: FS.label, borderTop: "none", color: K.t3,
+                      background: `${K.bdr}${ALPHA.wash}`, padding: "5px 4px", ...extra,
+                    });
+                    return (
+                      <tr key={`${r.round}_f_${f.pid}`}>
+                        <td style={sub({ paddingLeft: 10 })} />
+                        {/* The winner is gilded rather than left out. Seeing
+                            the name that took the money sitting one line above
+                            the man who missed it by a shot is the entire
+                            reason to open this. */}
+                        <td className="wbc-name" style={sub({ textAlign: "left", color: won ? K.gold : K.t2, fontWeight: won ? 800 : 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })}>
+                          {f.name}
+                        </td>
+                        <td style={sub()}>{f.gross}</td>
+                        <td style={sub()}>{f.strokes}</td>
+                        {/* A card still out has a gross and no round. Printing
+                            its net would rank a man on the 14th against men
+                            who have signed — the same thing lowNetRounds
+                            refuses to do. */}
+                        <td style={sub({ color: f.complete ? (f.net < 0 ? K.under : K.t2) : K.t3, fontWeight: 700 })}>
+                          {f.complete ? f.netScore : "–"}
+                        </td>
+                        {/* A card still out takes BOTH trailing cells for its
+                            standing. "THRU 16" does not fit the PAYS column
+                            alone and wrapped onto two lines; the ± beside it
+                            is empty on these rows anyway. */}
+                        {f.complete ? (
+                          <>
+                            <td style={sub({ color: f.net < 0 ? K.under : K.t3, fontWeight: 700 })}>{fmtPar(f.net)}</td>
+                            <td style={sub({ paddingRight: 12 })} />
+                          </>
+                        ) : (
+                          <td colSpan={2} style={sub({ paddingRight: 12, fontSize: FS.micro, fontWeight: 700, letterSpacing: 0.3, whiteSpace: "nowrap" })}>
+                            {f.wd ? "WD" : `THRU ${f.thru}`}
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  });
+
+                  if (!r.decided) return [
+                    <tr key={r.round} style={{ background: band }}>
+                      {rdCell()}
+                      <td colSpan={6} onClick={toggle} style={cell({ textAlign: "left", color: K.t3, paddingRight: 12, cursor: "pointer" })}>
+                        {roundSetup(r.round).course ? "Nobody has finished yet" : "No course set"}
+                        {courseName && <span style={{ display: "block", fontSize: FS.micro, color: K.t3, fontWeight: 600 }}>{courseName}</span>}
                       </td>
-                      <td className="wbc-name" style={cell({ textAlign: "left", fontSize: FS.small, fontWeight: 700, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", borderTop: wi > 0 ? "none" : undefined })}>
-                        {w.name}
-                      </td>
-                      <td style={cell({ borderTop: wi > 0 ? "none" : undefined })}>{w.gross}</td>
-                      <td style={cell({ borderTop: wi > 0 ? "none" : undefined })}>{w.strokes}</td>
-                      {/* The net as a SCORE — how a low net gets read out in
-                          a car park — and the to-par beside it. BOTH take the
-                          under-par red: a 67 on a par 72 is a number under
-                          par whether it is written as 67 or as −5, and
-                          colouring only one of them made the pair look like
-                          two different facts. */}
-                      <td style={cell({ fontSize: FS.body, fontWeight: 800, color: w.net < 0 ? K.under : K.t1, borderTop: wi > 0 ? "none" : undefined })}>{w.netScore}</td>
-                      <td style={cell({ fontWeight: 800, color: w.net < 0 ? K.under : K.t1, borderTop: wi > 0 ? "none" : undefined })}>{fmtPar(w.net)}</td>
-                      {/* A day still being played can change hands as the
-                          last group comes in, so the money is held rather
-                          than printed as though it had been paid. */}
-                      <td style={cell({ paddingRight: 12, borderTop: wi > 0 ? "none" : undefined })}>
-                        {settled
-                          ? money(share)
-                          : <span style={{ fontSize: FS.micro, fontWeight: 800, letterSpacing: 0.5, color: K.warn }}>OUT</span>}
-                      </td>
-                    </tr>
-                  ));
+                    </tr>,
+                    ...fieldRows,
+                  ];
+
+                  return [
+                    ...r.winners.map((w, wi) => (
+                      <tr key={`${r.round}_${w.pid}`} style={{ background: band }}>
+                        {/* The round number prints once. A tie's second row
+                            leaves it blank rather than repeating it, which is
+                            what makes the pair read as one day. */}
+                        {wi === 0 ? rdCell() : <td style={cell({ borderTop: "none" })} />}
+                        <td onClick={toggle} style={cell({ textAlign: "left", fontWeight: 700, color: K.t1, borderTop: wi > 0 ? "none" : undefined, cursor: "pointer", minWidth: 0 })}>
+                          <span className="wbc-name" style={{ display: "block", fontSize: FS.small, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{w.name}</span>
+                          {/* The course, under the first winner only. It is
+                              the one thing a round number does not say and
+                              the thing that explains the scores under it —
+                              a 78 at The Loon is not a 78 at the Tribute. */}
+                          {wi === 0 && courseName && (
+                            <span style={{ display: "block", fontSize: FS.micro, color: K.t3, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{courseName}</span>
+                          )}
+                        </td>
+                        <td style={cell({ borderTop: wi > 0 ? "none" : undefined })}>{w.gross}</td>
+                        <td style={cell({ borderTop: wi > 0 ? "none" : undefined })}>{w.strokes}</td>
+                        {/* The net as a SCORE — how a low net gets read out in
+                            a car park — and the to-par beside it. BOTH take the
+                            under-par red: a 67 on a par 72 is a number under
+                            par whether it is written as 67 or as −5, and
+                            colouring only one of them made the pair look like
+                            two different facts. */}
+                        <td style={cell({ fontSize: FS.body, fontWeight: 800, color: w.net < 0 ? K.under : K.t1, borderTop: wi > 0 ? "none" : undefined })}>{w.netScore}</td>
+                        <td style={cell({ fontWeight: 800, color: w.net < 0 ? K.under : K.t1, borderTop: wi > 0 ? "none" : undefined })}>{fmtPar(w.net)}</td>
+                        {/* A day still being played can change hands as the
+                            last group comes in, so the money is held rather
+                            than printed as though it had been paid. */}
+                        <td style={cell({ paddingRight: 12, borderTop: wi > 0 ? "none" : undefined })}>
+                          {settled
+                            ? money(share)
+                            : <span style={{ fontSize: FS.micro, fontWeight: 800, letterSpacing: 0.5, color: K.warn }}>OUT</span>}
+                        </td>
+                      </tr>
+                    )),
+                    ...fieldRows,
+                  ];
                 })}
               </tbody>
             </table>
