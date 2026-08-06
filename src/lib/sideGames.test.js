@@ -386,3 +386,49 @@ describe("togglePaid", () => {
     expect(togglePaid(undefined, "a")).toEqual(["a"]);
   });
 });
+
+// The three-state cycle a cell runs, expressed on the data it moves. The
+// component owns the taps; these are the transitions they have to produce.
+describe("the owed → paid → out cycle", () => {
+  const roster = players;
+  const game = (ids, paid) => [{ key: "skins", amount: 20, ids, paid }];
+
+  it("in with nobody paid bills everybody and collects nothing", () => {
+    const sheet = buyInSheet({ players: roster, games: game(null, []) });
+    expect(sheet.grand).toBe(60);
+    expect(sheet.outstanding).toBe(60);
+    expect(sheet.totals.skins).toMatchObject({ count: 3, paidCount: 0, allPaid: false });
+  });
+
+  it("paying moves money off the outstanding line, never off the owed one", () => {
+    const sheet = buyInSheet({ players: roster, games: game(null, ["a", "b"]) });
+    expect(sheet.grand).toBe(60);
+    expect(sheet.outstanding).toBe(20);
+    expect(sheet.totals.skins).toMatchObject({ paidCount: 2, paidAmount: 40, allPaid: false });
+  });
+
+  it("everybody paid clears the outstanding line", () => {
+    const sheet = buyInSheet({ players: roster, games: game(null, ["a", "b", "c"]) });
+    expect(sheet.outstanding).toBe(0);
+    expect(sheet.totals.skins.allPaid).toBe(true);
+  });
+
+  // The trap the third tap has to avoid: dropping a man from `in` while
+  // leaving his paid flag behind would mark him settled the instant anybody
+  // put him back in.
+  it("a man taken out and put back in is owing again, not paid", () => {
+    const out = { ids: ["b", "c"], paid: ["b"] };   // 'a' removed from both
+    const back = { ids: ["a", "b", "c"], paid: ["b"] };
+    expect(buyInSheet({ players: roster, games: [{ key: "skins", amount: 20, ...out }] }).rows
+      .find(r => r.pid === "a")).toMatchObject({ owes: 0, unpaid: 0 });
+    expect(buyInSheet({ players: roster, games: [{ key: "skins", amount: 20, ...back }] }).rows
+      .find(r => r.pid === "a")).toMatchObject({ owes: 20, unpaid: 20, paid: { skins: false } });
+  });
+
+  it("a paid flag on somebody who is not in bills nothing", () => {
+    const sheet = buyInSheet({ players: roster, games: game(["a"], ["a", "b"]) });
+    expect(sheet.grand).toBe(20);
+    expect(sheet.outstanding).toBe(0);
+    expect(sheet.totals.skins).toMatchObject({ count: 1, paidCount: 1 });
+  });
+});
