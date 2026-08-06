@@ -9,6 +9,7 @@ import { fieldFor, potFor, perUnit, computeSkins, allSkins, skinCounts, lowNetRo
 import { teeTimesByPlayer, roundInPlay, thruStatus } from "./lib/thruStatus";
 import {
   MARKET_OPENING_SHARES, MARKET_MID_SHARES, marketWindows, normalizeLots, totalShares,
+  countdown, countdownTick,
   sharesOn, setLotShares, lotsFor, allLots, marketBoard, marketHoldings, marketPayouts, roundComplete,
   eligibleBets, rebuyers, marketRoster, teeOffAt,
 } from "./lib/market";
@@ -3176,15 +3177,25 @@ function BettingView({
   );
   const windows = marketWindows({ holeData, players, numRounds, firstTeeAt, now });
   const bellPending = firstTeeAt != null && windows.opening.open;
-  // Half a minute is plenty: the bell is a tee time, not a stopwatch, and a
-  // market that shuts within thirty seconds of 7:00 is shut at 7:00 as far as
-  // anybody standing on the tee is concerned. The interval only exists while
-  // there is a bell left to ring, so a finished tournament costs nothing.
+  // The countdown itself. Null once there is nothing left to count — a bell
+  // already rung, or a tournament with no tee sheet to ring one from.
+  const bell = bellPending ? countdown(firstTeeAt - now) : null;
+  // The clock runs for as long as there is a bell left to ring, so `now` can
+  // never go stale enough to leave the market taking shares after the field
+  // has teed off. What the market tab decides is only the RATE: seconds tick
+  // in the last hour while somebody is watching them, and everything else
+  // settles for thirty, which is already twice as often as the label above an
+  // hour can change. A per-second re-render of the whole Betting view behind
+  // a tab nobody is on is battery spent on nothing.
+  //
+  // Depending on `bellFast` rather than on the remaining milliseconds is what
+  // stops the effect tearing down and rebuilding the interval every tick.
+  const bellFast = bell != null && bell.urgent && tab === "market";
   useEffect(() => {
     if (!bellPending) return;
-    const t = setInterval(() => setNow(Date.now()), 30_000);
+    const t = setInterval(() => setNow(Date.now()), countdownTick(bellFast ? 0 : Infinity));
     return () => clearInterval(t);
-  }, [bellPending]);
+  }, [bellPending, bellFast]);
   const eventComplete = roundList.length > 0 && roundList.every(r => roundComplete(holeData, players, r));
   // ── The market is SEALED until the tournament is over ──
   // Everything a player could read another player's hand off — the board, the
@@ -3963,9 +3974,25 @@ function BettingView({
                 </div>
                 <div style={{ fontSize: FS.small, fontWeight: 700, color: K.t1, marginTop: 2 }}>{w.label}</div>
                 <div style={{ fontSize: FS.label, color: w.open ? K.acc : K.t3, marginTop: 2, lineHeight: 1.4 }}>
-                  {w.note}
-                  {/* The deadline itself. "Open until the first tee time" is
-                      not a time anybody can act on. */}
+                  {/* A running clock in place of the note while there is one to
+                      run. "Open until the first tee time" is not something a
+                      man deciding whether to think it over can act on; "12:04"
+                      is. Once it has rung, the note takes the line back and
+                      says why the window is shut. */}
+                  {w.key === "opening" && bell ? "Closes in" : w.note}
+                  {w.key === "opening" && bell && (
+                    <span style={{
+                      display: "block", marginTop: 1,
+                      fontSize: FS.body, fontWeight: 800, letterSpacing: 0.5,
+                      fontVariantNumeric: "tabular-nums",
+                      // The last hour turns the clock amber. By then it is not
+                      // information any more, it is a deadline.
+                      color: bell.urgent ? K.warn : K.acc,
+                    }}>{bell.label}</span>
+                  )}
+                  {/* The deadline itself. The countdown says how long; this
+                      says when, which is the one a player checks against the
+                      tee sheet on the noticeboard. */}
                   {w.key === "opening" && w.at != null && (
                     <span style={{ display: "block", color: K.t3 }}>
                       First tee {minutesToTimeStr(new Date(w.at).getHours() * 60 + new Date(w.at).getMinutes())}
