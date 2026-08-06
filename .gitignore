@@ -22,3 +22,14 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# ── Firebase service-account keys ──
+# `npm run import:history -- --write` needs one, and the console downloads it as
+# <project>-firebase-adminsdk-<hash>.json straight into whatever folder you point
+# at. It is full read/write on the whole database with no rules in front of it —
+# committing one is worse than a leaked password, because rotating it means
+# revoking a key every deploy might depend on. None of these ever belong in git.
+*firebase-adminsdk*.json
+*serviceAccount*.json
+*service-account*.json
+*serviceAccountKey*.json
