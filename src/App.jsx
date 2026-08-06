@@ -3771,8 +3771,8 @@ function BettingView({
                   so the three line up. */}
               <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", borderBottom: `1px solid ${K.bdr}`, fontSize: FS.label, fontWeight: 700, color: K.gold, letterSpacing: 1 }}>
                 <span style={{ flex: 1, minWidth: 0 }}>SKINS LEADERS</span>
-                <span style={{ fontSize: FS.micro, color: K.t3, letterSpacing: 0.5, flexShrink: 0, minWidth: 34, textAlign: "right" }}>COUNT</span>
-                <span style={{ fontSize: FS.micro, color: K.t3, letterSpacing: 0.5, flexShrink: 0, minWidth: 56, textAlign: "right" }}>$</span>
+                <span style={{ fontSize: FS.micro, color: K.t3, letterSpacing: 0.5, flexShrink: 0, width: 48, textAlign: "center" }}>COUNT</span>
+                <span style={{ fontSize: FS.micro, color: K.t3, letterSpacing: 0.5, flexShrink: 0, width: 66, textAlign: "center" }}>$</span>
               </div>
               {Object.entries(skinTotals).sort((a, b) => b[1] - a[1]).map(([pid, count]) => {
                 const isExpanded = expandedPlayer === pid;
@@ -3780,7 +3780,7 @@ function BettingView({
                   <div key={pid} style={{ borderBottom: `1px solid ${K.bdr}${ALPHA.hair}` }}>
                     <div onClick={() => setExpandedPlayer(isExpanded ? null : pid)}
                       style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", cursor: "pointer" }}>
-                      <span style={{ flex: 1, minWidth: 0, fontSize: FS.body, fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <span style={{ flex: 1, minWidth: 0, fontSize: FS.small, fontWeight: 700, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {players.find(p => p.id === pid)?.name || pid}
                       </span>
                       {/* The leaderboard's chevron, exactly: a ▼ that turns
@@ -3789,8 +3789,8 @@ function BettingView({
                           not data, and sitting AFTER the name where the board
                           puts it — between the name and the row's numbers. */}
                       <span style={{ fontSize: FS.micro, flexShrink: 0, color: isExpanded ? K.acc : K.t2, transition: `transform ${MOTION}`, display: "inline-block", transform: `${isExpanded ? "rotate(180deg)" : "rotate(0)"} scale(0.75)` }}>▼</span>
-                      <span style={{ fontSize: FS.body, fontWeight: 700, color: K.acc, flexShrink: 0, minWidth: 34, textAlign: "right" }}>{count}</span>
-                      <span style={{ fontSize: FS.small, color: K.t3, flexShrink: 0, minWidth: 56, textAlign: "right" }}>{money(count * perSkin)}</span>
+                      <span style={{ fontSize: FS.body, fontWeight: 700, color: K.acc, flexShrink: 0, width: 48, textAlign: "center" }}>{count}</span>
+                      <span style={{ fontSize: FS.small, color: K.t3, flexShrink: 0, width: 66, textAlign: "center" }}>{money(count * perSkin)}</span>
                     </div>
                     {isExpanded && renderInlineScorecard(pid)}
                   </div>
