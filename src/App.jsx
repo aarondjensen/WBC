@@ -671,7 +671,12 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
       if (!containerRef.current) return;
       // Card has padding 12px each side, grid padding 12px each side
       const containerW = containerRef.current.offsetWidth;
-      const gridW = containerW - 24; // 12px padding each side
+      // offsetWidth counts the board's own 1px border on each side, and the
+      // grid rows sit inside that with 12px of padding each side. Subtracting
+      // only the padding left the arithmetic 2px richer than the space that
+      // actually exists, and the 1fr gap quietly paid the difference — which
+      // is how a guaranteed minimum gap of 8 came out as 6 on a 360px phone.
+      const gridW = containerW - 2 - 24; // 1px border + 12px padding, each side
       // Total's centre sits at num + playerW + total/2 from the grid's content
       // edge, and the grid is inset equally on both sides — so centring Total
       // in the grid centres it in the viewport, under the trophy behind it.
@@ -978,9 +983,19 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
           // on the screen. The band still leads on its background tint rather
           // than on having a heavier edge. None on R1 — its left edge is
           // already the gap.
+          //
+          // Drawn as an inset shadow rather than a border because a border is
+          // LAYOUT. Under border-box it ate a pixel off the left of every cell
+          // that had one, which R1 did not — so R1 centred its number in 24px
+          // while R2-R4 centred theirs in 23px starting a pixel over, and the
+          // four columns came out spaced 24.5, 24, 24. The same pixel pushed
+          // every number half a pixel right of its own track, giving each cell
+          // 12.5 of air on one side of its value and 11.5 on the other. A
+          // shadow paints the identical line and costs no width, so all four
+          // tracks are the same box and the numbers sit dead centre in them.
           const roundCell = (i) => ({
             alignSelf: "stretch", display: "flex", alignItems: "center", justifyContent: "center",
-            borderLeft: i === 0 ? undefined : `1px solid ${K.bdr}`,
+            boxShadow: i === 0 ? undefined : `inset 1px 0 0 ${K.bdr}`,
           });
           return (
             <>
