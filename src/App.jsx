@@ -6786,25 +6786,7 @@ function AdminView({ activePlayers, rosterPlayers, sideGames, onUpdateSideGames,
                       <div style={{ fontSize: FS.micro, fontWeight: 700, color: K.t3, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>Search results</div>
                   {searchLoading && <div style={{ textAlign: "center", padding: 12, color: K.t3, fontSize: FS.label }}>Searching GolfCourseAPI...</div>}
                   {!searchLoading && courseSearch.trim().length >= 2 && searchResults.length === 0 && !manualCourse && (
-                    <div style={{ textAlign: "center", padding: "10px 0" }}>
-                      <div style={{ color: K.t3, fontSize: FS.label, marginBottom: 8 }}>No courses found</div>
-                      <button onClick={() => setManualCourse({
-                        id: `manual_${Date.now()}`,
-                        name: courseSearch.trim(),
-                        city: "", state: courseStateFilter || "",
-                        par: 72, slope: 113, rating: 72.0,
-                        hole_pars: Array(18).fill(4),
-                        hole_handicaps: Array(18).fill(0).map((_,i)=>i+1),
-                        tee_boxes: [
-                          { name: "Black", color: "#222222", rating: 74.0, slope: 130, par: 72, yardage: 6800 },
-                          { name: "Blue",  color: "#1a56db", rating: 72.0, slope: 120, par: 72, yardage: 6400 },
-                          { name: "White", color: "#e5e7eb", rating: 70.0, slope: 113, par: 72, yardage: 6000 },
-                          { name: "Red",   color: "#e02424", rating: 68.0, slope: 108, par: 72, yardage: 5400 },
-                        ],
-                      })} style={{ padding: "7px 16px", borderRadius: R.sm, background: "transparent", border: `1px solid ${ac}`, color: ac, fontSize: FS.label, fontWeight: 700, cursor: "pointer" }}>
-                        + Add Course Manually
-                      </button>
-                    </div>
+                    <div style={{ textAlign: "center", padding: "10px 0", color: K.t3, fontSize: FS.label }}>No courses found</div>
                   )}
                   {!searchLoading && manualCourse && (() => {
                     const mc = manualCourse;
@@ -6963,6 +6945,32 @@ function AdminView({ activePlayers, rosterPlayers, sideGames, onUpdateSideGames,
                       </div>
                     </button>
                   ))}
+                  {/* Adding by hand is offered whenever a search is on, not only
+                      when it came back empty. The API returning SOMETHING is not
+                      the same as it returning the course you are playing, and the
+                      old shape — button only when there were no results at all —
+                      left a director who could see three wrong courses with no
+                      way through except typing a nonsense query to clear them. */}
+                  {!searchLoading && courseSearch.trim().length >= 2 && !manualCourse && (
+                    <div style={{ textAlign: "center", padding: "4px 0 2px" }}>
+                      <button onClick={() => setManualCourse({
+                        id: `manual_${Date.now()}`,
+                        name: courseSearch.trim(),
+                        city: "", state: courseStateFilter || "",
+                        par: 72, slope: 113, rating: 72.0,
+                        hole_pars: Array(18).fill(4),
+                        hole_handicaps: Array(18).fill(0).map((_,i)=>i+1),
+                        tee_boxes: [
+                          { name: "Black", color: "#222222", rating: 74.0, slope: 130, par: 72, yardage: 6800 },
+                          { name: "Blue",  color: "#1a56db", rating: 72.0, slope: 120, par: 72, yardage: 6400 },
+                          { name: "White", color: "#e5e7eb", rating: 70.0, slope: 113, par: 72, yardage: 6000 },
+                          { name: "Red",   color: "#e02424", rating: 68.0, slope: 108, par: 72, yardage: 5400 },
+                        ],
+                      })} style={{ padding: "7px 16px", borderRadius: R.sm, background: "transparent", border: `1px solid ${ac}`, color: ac, fontSize: FS.label, fontWeight: 700, cursor: "pointer" }}>
+                        + Add “{courseSearch.trim()}” by hand
+                      </button>
+                    </div>
+                  )}
                   {/* Local DB prompt modal */}
                   {localDbPrompt && (() => {
                     const { sbCourse } = localDbPrompt;
