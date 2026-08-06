@@ -32,7 +32,7 @@
 // For an imported archive that last group is usually the whole year, so it is
 // not styled as leftovers.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { K, FONT, FS, R, ALPHA } from "../theme";
+import { K, FONT, FS, R, ALPHA, MOTION } from "../theme";
 import { Btn, Card, SectionLabel } from "./ui";
 import { Popup } from "./Popup";
 import { groupByRound, canDelete, validateSource, uploadFailureMessage } from "../lib/media";
@@ -77,6 +77,59 @@ function Tile({ item, onOpen }) {
         />
       )}
     </button>
+  );
+}
+
+// ── PendingTile ────────────────────────────────────────────────────
+// A photo that has been picked but is not in Firestore yet, drawn in the same
+// cell shape as a real one so the grid does not jump when it lands.
+//
+// Two states, because the two halves of an upload feel different and only one
+// of them can be measured:
+//
+//   preparing  decoding and re-encoding, on the phone. No byte count exists
+//              for it, so the tile breathes — a slow pulse that says "working"
+//              without claiming progress it cannot know.
+//   uploading  bytes on the wire, which Firebase reports, so this gets a real
+//              determinate bar. On course wifi it is the part worth watching.
+//
+// A fake progress bar for the first phase would be worse than none: it would
+// sit at some invented percentage during the slowest part and then jump.
+function PendingTile({ item }) {
+  const uploading = item.phase === "uploading";
+  return (
+    <div style={{
+      position: "relative", aspectRatio: "1 / 1", borderRadius: R.sm,
+      overflow: "hidden", background: K.inp,
+    }}>
+      <style>{`@keyframes wbcPhotoPulse { 0%,100% { opacity: 0.34; } 50% { opacity: 0.62; } }`}</style>
+      <img
+        src={item.preview}
+        alt=""
+        style={{
+          width: "100%", height: "100%", objectFit: "cover", display: "block",
+          // The preview sits back so it reads as not-yet-real, and breathes
+          // until there is a number worth showing.
+          opacity: uploading ? 0.68 : undefined,
+          animation: uploading ? "none" : "wbcPhotoPulse 1.4s ease-in-out infinite",
+        }}
+      />
+      {/* The bar rides the bottom edge of the cell rather than floating in the
+          middle: at three tiles across the cell is small, and anything centred
+          covers the photo it is describing. */}
+      <div style={{
+        position: "absolute", left: 0, right: 0, bottom: 0, height: 3,
+        background: `${K.bg}${ALPHA.panel}`,
+      }}>
+        <div style={{
+          width: uploading ? `${Math.round(item.fraction * 100)}%` : "100%",
+          height: "100%",
+          background: K.acc,
+          opacity: uploading ? 1 : 0.45,
+          transition: `width ${MOTION} linear`,
+        }} />
+      </div>
+    </div>
   );
 }
 
@@ -163,8 +216,18 @@ export function PhotosView({
 }) {
   const [open, setOpen] = useState(null);
   const [busy, setBusy] = useState(false);
-  const [progress, setProgress] = useState(null);
+  // Photos picked but not yet in Firestore, drawn as real tiles from local
+  // object URLs. See onFiles.
+  const [pending, setPending] = useState([]);
   const fileRef = useRef(null);
+
+  // Object URLs are a memory allocation, not a string — a batch of twenty
+  // 4MB photos left unrevoked is 80MB held until the tab dies. onFiles revokes
+  // each as it finishes; this catches the case where the screen is closed
+  // mid-upload.
+  const pendingRef = useRef(pending);
+  useEffect(() => { pendingRef.current = pending; }, [pending]);
+  useEffect(() => () => pendingRef.current.forEach(p => URL.revokeObjectURL(p.preview)), []);
 
   const groups = useMemo(() => groupByRound(items), [items]);
   // The flattened list the lightbox pages through — the same order the groups
@@ -194,13 +257,28 @@ export function PhotosView({
     const usable = files.filter(f => validateSource(f).ok);
     if (!usable.length) return;
 
+    // A tile per picked photo, on screen before a single byte moves, showing
+    // the photo itself from a local object URL. The point is that the grid
+    // answers "did it take my photo?" immediately — a spinner in a button
+    // leaves somebody staring at an unchanged screen wondering whether the tap
+    // registered, and on a tee box the next thing they do is tap again.
+    const queued = usable.map((file, i) => ({
+      key: `${Date.now()}_${i}_${file.name || i}`,
+      file,
+      preview: URL.createObjectURL(file),
+      fraction: 0,
+      phase: "queued",
+    }));
+    setPending(queued);
+
     setBusy(true);
     let done = 0;
     const failures = [];
-    for (const file of usable) {
-      setProgress(`${done + 1} of ${usable.length}`);
+    for (const p of queued) {
+      const track = (fraction, phase) =>
+        setPending(cur => cur.map(x => (x.key === p.key ? { ...x, fraction, phase } : x)));
       try {
-        await onUpload(file);
+        await onUpload(p.file, track);
         done += 1;
       } catch (err) {
         // Keep going. A batch of twenty that stops dead on the one photo the
@@ -209,9 +287,12 @@ export function PhotosView({
         failures.push(err);
         console.error("photo upload failed:", err);
       }
+      // Drop the placeholder either way. On success the real tile arrives from
+      // Firestore a moment later; on failure the message says what happened.
+      URL.revokeObjectURL(p.preview);
+      setPending(cur => cur.filter(x => x.key !== p.key));
     }
     setBusy(false);
-    setProgress(null);
 
     if (!failures.length) {
       notify?.(done === 1 ? "Photo added." : `${done} photos added.`);
@@ -266,7 +347,7 @@ export function PhotosView({
               style={{ display: "none" }}
             />
             <Btn size="sm" disabled={busy} onClick={pick}>
-              {busy ? (progress || "Adding…") : "Add photos"}
+              {pending.length ? `Adding ${pending.length}…` : busy ? "Adding…" : "Add photos"}
             </Btn>
           </>
         )}
@@ -286,7 +367,22 @@ export function PhotosView({
         </Card>
       )}
 
-      {!items.length ? (
+      {/* Photos on their way up, above the finished ones. They sit outside the
+          round groups on purpose — an in-flight photo has no round tag yet,
+          and filing it under a heading it might not end up in would move it
+          twice. */}
+      {pending.length > 0 && (
+        <div style={{ marginBottom: 18 }}>
+          <SectionLabel color={K.acc}>
+            Adding {pending.length} {pending.length === 1 ? "photo" : "photos"}
+          </SectionLabel>
+          <div style={{ display: "grid", gridTemplateColumns: `repeat(${COLS}, 1fr)`, gap: GAP }}>
+            {pending.map(p => <PendingTile key={p.key} item={p} />)}
+          </div>
+        </div>
+      )}
+
+      {!items.length && !pending.length ? (
         <Card style={{ textAlign: "center", padding: 24 }}>
           <div style={{ fontSize: FS.body, color: K.t2, marginBottom: canPost ? 10 : 0 }}>
             {isGuest
