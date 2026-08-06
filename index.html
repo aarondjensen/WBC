@@ -32,8 +32,12 @@
          shade the moment the app appears. Three values used to disagree here
          (#080f1e, #030810, K.bg) and each hand-off was a visible flash. */
       html, body, #root { height: 100%; overflow: hidden; background: #080f1a; }
-      body { font-family: 'Montserrat', sans-serif; }
-      input, button, textarea, select { font-family: inherit; }
+      /* Mirrors src/index.css — see the note there. Both copies exist so the
+         first paint and the mounted app agree; they have to move together. */
+      body { font-family: 'Montserrat', sans-serif; text-transform: uppercase; }
+      input, button, textarea, select { font-family: inherit; text-transform: inherit; }
+      input:not([type="button"]):not([type="submit"]):not([type="reset"]),
+      textarea { text-transform: none; }
     </style>
     <script>
       // Is a text field focused — i.e. is an on-screen keyboard up? See the
