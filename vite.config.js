@@ -12,6 +12,14 @@ export default defineConfig({
     //
     // Run the rules suite deliberately, with the emulator up:
     //   firebase emulators:exec --only firestore "npx vitest run firestore.rules.test.mjs"
-    include: ['src/**/*.{test,spec}.{js,jsx}'],
+    //
+    // `scripts/` is included for one test that needs no emulator and no
+    // credential: import-history.smoke.test.js executes the import script under
+    // plain `node` and reads its dry-run output. That script shipped broken on
+    // Windows — it ran through vite-node, a transitive dependency whose binary
+    // npm does not reliably link — and every test stayed green, because they all
+    // ran under vitest, which resolves imports the script's own runtime could
+    // not. A test of the LOGIC could never have caught it.
+    include: ['src/**/*.{test,spec}.{js,jsx}', 'scripts/**/*.{test,spec}.{js,jsx}'],
   },
 })

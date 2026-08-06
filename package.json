@@ -11,7 +11,7 @@
     "test": "vitest",
     "test:run": "vitest run",
     "build:history": "node scripts/build-history.mjs",
-    "import:history": "vite-node scripts/import-history.mjs"
+    "import:history": "node scripts/import-history.mjs"
   },
   "dependencies": {
     "@capacitor-firebase/authentication": "^8.3.0",
