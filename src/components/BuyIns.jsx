@@ -13,6 +13,11 @@
 //  numbers that actually matter — what this man owes, and what should be in
 //  the envelope when everybody has paid.
 //
+//  The card carries no instructions. Every affordance in it is a tap on the
+//  thing it changes — a heading, a name, a cell — and a director who has used
+//  it once does not need the sentence again every time they open it. The
+//  column marked `auto` says so in the heading itself.
+//
 //  Three ways in, in descending order of how often they get used:
 //    • A COLUMN header toggles that whole buy-in. "Everybody is in for skins"
 //      is one tap, and it is the first thing that happens every year.
@@ -160,19 +165,6 @@ export function BuyInTracker({ players, games, onChange }) {
       {/* ── The sheet ── */}
       <div style={{ padding: "8px 12px 0", fontSize: FS.label, fontWeight: 800, color: K.t3, letterSpacing: 0.8 }}>
         WHO IS IN
-      </div>
-      {/* The prices, read-only, so the sheet still explains its own OWES
-          column — and says where they are changed rather than leaving the
-          director hunting for a field that used to be here. */}
-      <div style={{ fontSize: FS.label, color: K.t3, padding: "2px 12px 6px", lineHeight: 1.5 }}>
-        {games.map(g => `${g.short} $${g.amount || 0}`).join(" · ")}
-        <span style={{ color: K.t3 }}> — set in Admin → Betting.</span>
-      </div>
-      <div style={{ fontSize: FS.label, color: K.t3, padding: "0 12px 8px", lineHeight: 1.4 }}>
-        Tap a heading for the whole column, a name to drop a player entirely.
-        {games.some(g => g.derived) && (
-          <> Columns marked <span style={{ color: K.acc, fontWeight: 700 }}>auto</span> fill themselves.</>
-        )}
       </div>
 
       {/* Column headings double as the all-in / all-out toggle. */}
