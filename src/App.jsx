@@ -3607,7 +3607,11 @@ function BettingView({
                   <span style={{ fontSize: FS.micro, fontWeight: 700, color: K.t3, flexShrink: 0 }}>THRU {round.played}</span>
                 )}
                 <span style={{ fontSize: FS.label, fontWeight: 800, color: K.t1, flexShrink: 0 }}>{round.gross}</span>
-                <span style={{ fontSize: FS.micro, fontWeight: 700, color: round.toPar < 0 ? K.acc : K.t3, flexShrink: 0, minWidth: 18, textAlign: "right" }}>
+                {/* Under par is RED, the same rule the leaderboard total
+                    follows. A negative number in golf is red — teal here
+                    was the app saying "accent" where the game says "under
+                    par", and the two are not the same thing. */}
+                <span style={{ fontSize: FS.micro, fontWeight: 800, color: round.toPar < 0 ? K.under : K.t3, flexShrink: 0, minWidth: 18, textAlign: "right" }}>
                   {toParStr(round.toPar)}
                 </span>
               </div>
@@ -3979,68 +3983,98 @@ function BettingView({
           {/* Every round on one screen rather than behind pills: there are
               four of them, each is one line, and the question this tab
               answers — who took which day — is a comparison across them.
-              No leaders card above it: with four rounds the totals are a
-              sum anybody can do off these rows, and a second card repeating
-              the same names was a longer way to say it.
 
-              And no rules under it. The rows say what happened — a name, a
-              net, a share, "ea" when it was split — and the two rules worth
-              knowing are visible in what they produce: a tie prints two
-              names and half the money each, and a round nobody has finished
-              prints that instead of a leader. See lib/sideGames lowNetRounds
-              for why a card walked in early does not count. */}
+              A LEDGER, not a list. Gross, strokes and net each get a column
+              and line up down the page, which is what turns "who won Rd 2"
+              into "Rd 2 was tied off a 78 and an 85" without anybody doing
+              arithmetic. The old row stacked those three numbers into a grey
+              sub-line under the name, where they could not be compared with
+              the round above.
+
+              A tie is simply a second row under the same round number,
+              carrying that man's OWN gross and strokes — two players tie on
+              the net off different cards, so the single "2 tied on 71 net"
+              the old row printed was true of the pair and a lie about each
+              of them. */}
           <div style={{ background: K.card, borderRadius: R.lg, border: `1px solid ${K.bdr}`, overflow: "hidden" }}>
             <div style={{ display: "flex", padding: "8px 14px", borderBottom: `1px solid ${K.bdr}`, fontSize: FS.label, fontWeight: 700, color: K.gold, letterSpacing: 1 }}>
               <span style={{ flex: 1 }}>BY ROUND</span>
-              <span style={{ color: K.t3 }}>NET · PAYS</span>
+              <span style={{ color: K.t3 }}>{lowNetRows.filter(r => r.decided).length} OF {roundList.length}</span>
             </div>
-            {lowNetRows.map(r => {
-              const settled = roundSettled(r.round);
-              const share = r.winners.length > 0 ? lowNetPerRound / r.winners.length : 0;
-              return (
-                <div key={r.round} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 14px", borderBottom: `1px solid ${K.bdr}${ALPHA.hair}` }}>
-                  <span style={{ fontSize: FS.label, fontWeight: 800, color: K.t3, width: 32, flexShrink: 0 }}>Rd {r.round}</span>
-                  {r.decided ? (
-                    <>
-                      <span style={{ flex: 1, minWidth: 0, fontSize: FS.small, fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {r.winners.map(w => w.name).join(", ")}
-                        {/* A day still being played can change hands as the
-                            last group comes in, so it says so rather than
-                            reading like a result. */}
-                        {!settled && <span style={{ color: K.warn, fontWeight: 700 }}> · still out</span>}
-                        {/* The gross it came off, so the number can be
-                            checked against the card rather than taken on
-                            trust — this is the line that gets argued about.
-                            Only for a lone winner: two men tie on the NET,
-                            off different grosses and different strokes, so
-                            one gross printed under both names is a sum that
-                            does not work for either of them. */}
-                        <span style={{ display: "block", fontSize: FS.label, color: K.t3, fontWeight: 600 }}>
-                          {r.winners.length === 1
-                            ? `${r.winners[0].gross} gross · ${r.winners[0].strokes} stroke${r.winners[0].strokes !== 1 ? "s" : ""}`
-                            : `${r.winners.length} tied on ${r.winners[0].netScore} net`}
-                        </span>
-                      </span>
-                      {/* The net as a SCORE, which is how a low net is read
-                          out, with the to-par under it — the figure the
-                          leaderboard ranks on and the one that decided the
-                          round. */}
-                      <span style={{ textAlign: "right", flexShrink: 0 }}>
-                        <span style={{ display: "block", fontSize: FS.body, fontWeight: 800, color: K.acc }}>{r.winners[0].netScore}</span>
-                        <span style={{ display: "block", fontSize: FS.label, color: K.t3, fontWeight: 700 }}>{fmtPar(r.net)}</span>
-                      </span>
-                      <span style={{ fontSize: FS.small, color: K.t3, flexShrink: 0, minWidth: 64, textAlign: "right" }}>
-                        {money(share)}{r.winners.length > 1 ? " ea" : ""}
-                      </span>
-                    </>
-                  ) : (
-                    <span style={{ flex: 1, fontSize: FS.small, color: K.t3 }}>
-                      {roundSetup(r.round).course ? "Nobody has finished yet" : "No course set"}
-                    </span>
-                  )}
-                </div>
-              );
-            })}
+            <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+              <colgroup>
+                <col style={{ width: 26 }} />
+                <col />
+                <col style={{ width: 30 }} />
+                <col style={{ width: 28 }} />
+                <col style={{ width: 32 }} />
+                <col style={{ width: 30 }} />
+                <col style={{ width: 56 }} />
+              </colgroup>
+              <thead>
+                <tr style={{ background: `${K.bdr}${ALPHA.wash}` }}>
+                  {[["RD", "left"], ["WINNER", "left"], ["GRS", "right"], ["STK", "right"], ["NET", "right"], ["±", "right"], ["PAYS", "right"]].map(([label, align], i, all) => (
+                    <th key={label} style={{
+                      textAlign: align, fontSize: FS.micro, fontWeight: 700, letterSpacing: 0.5, color: K.t3,
+                      padding: "5px 3px", borderBottom: `1px solid ${K.bdr}${ALPHA.line}`,
+                      paddingLeft: i === 0 ? 12 : 3, paddingRight: i === all.length - 1 ? 12 : 3,
+                    }}>{label}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {lowNetRows.map((r, ri) => {
+                  const settled = roundSettled(r.round);
+                  const share = r.winners.length > 0 ? lowNetPerRound / r.winners.length : 0;
+                  // Banded by ROUND rather than by row, so a tie's two lines
+                  // read as one day rather than as two separate results.
+                  const band = ri % 2 === 1 ? `${K.bdr}${ALPHA.wash}` : "transparent";
+                  const cell = (extra = {}) => ({
+                    padding: "7px 3px", textAlign: "right", fontSize: FS.small, fontWeight: 600,
+                    color: K.t2, borderTop: `1px solid ${K.bdr}${ALPHA.hair}`, ...extra,
+                  });
+                  if (!r.decided) return (
+                    <tr key={r.round} style={{ background: band }}>
+                      <td style={cell({ textAlign: "left", paddingLeft: 12, fontSize: FS.label, fontWeight: 800, color: K.t3 })}>{r.round}</td>
+                      <td colSpan={6} style={cell({ textAlign: "left", color: K.t3, paddingRight: 12 })}>
+                        {roundSetup(r.round).course ? "Nobody has finished yet" : "No course set"}
+                      </td>
+                    </tr>
+                  );
+                  return r.winners.map((w, wi) => (
+                    <tr key={`${r.round}_${w.pid}`} style={{ background: band }}>
+                      {/* The round number prints once. A tie's second row
+                          leaves it blank rather than repeating it, which is
+                          what makes the pair read as one day. */}
+                      <td style={cell({ textAlign: "left", paddingLeft: 12, fontSize: FS.label, fontWeight: 800, color: K.t3, borderTop: wi > 0 ? "none" : undefined })}>
+                        {wi === 0 ? r.round : ""}
+                      </td>
+                      <td className="wbc-name" style={cell({ textAlign: "left", fontSize: FS.small, fontWeight: 700, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", borderTop: wi > 0 ? "none" : undefined })}>
+                        {w.name}
+                      </td>
+                      <td style={cell({ borderTop: wi > 0 ? "none" : undefined })}>{w.gross}</td>
+                      <td style={cell({ borderTop: wi > 0 ? "none" : undefined })}>{w.strokes}</td>
+                      {/* The net as a SCORE — how a low net gets read out in
+                          a car park — with the to-par beside it. */}
+                      <td style={cell({ fontSize: FS.body, fontWeight: 800, color: K.t1, borderTop: wi > 0 ? "none" : undefined })}>{w.netScore}</td>
+                      {/* Under par prints RED, the same rule the leaderboard
+                          total follows (K.under below zero, full ink at or
+                          above it). It is the one number here that is
+                          negative, and a negative number in golf is red. */}
+                      <td style={cell({ fontWeight: 800, color: w.net < 0 ? K.under : K.t1, borderTop: wi > 0 ? "none" : undefined })}>{fmtPar(w.net)}</td>
+                      {/* A day still being played can change hands as the
+                          last group comes in, so the money is held rather
+                          than printed as though it had been paid. */}
+                      <td style={cell({ paddingRight: 12, borderTop: wi > 0 ? "none" : undefined })}>
+                        {settled
+                          ? money(share)
+                          : <span style={{ fontSize: FS.micro, fontWeight: 800, letterSpacing: 0.5, color: K.warn }}>OUT</span>}
+                      </td>
+                    </tr>
+                  ));
+                })}
+              </tbody>
+            </table>
           </div>
 
         </div>
