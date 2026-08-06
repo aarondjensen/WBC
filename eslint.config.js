@@ -106,6 +106,14 @@ export default defineConfig([
       globals: { ...globals.node },
     },
   },
+  // Build and import tooling — Node ESM. Run from a terminal, never bundled,
+  // so `process` and `node:` builtins are the environment rather than a smell.
+  {
+    files: ['scripts/**/*.{js,mjs}'],
+    languageOptions: {
+      globals: { ...globals.node },
+    },
+  },
   // Firebase Cloud Functions — Node CommonJS, deployed separately with its own
   // package.json, so it never sees the browser globals or ESM syntax above.
   {

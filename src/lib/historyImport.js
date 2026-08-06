@@ -61,7 +61,16 @@
 // order (DATA-GUIDE.md). The right NUMBER of strokes is given out, so round
 // totals are unaffected; only which holes show a stroke can be wrong. Gross is
 // exact everywhere.
-import { docIds, editionIdForYear, editionSlug } from "./editionId";
+// The `.js` is deliberate, and the only import in src/lib carrying one. Vite
+// resolves both forms identically, but scripts/import-history.mjs runs this
+// module under PLAIN NODE, whose ESM resolver requires the extension. Without
+// it the import script dies with ERR_MODULE_NOT_FOUND before it reads a row.
+//
+// The alternative was running the script through vite-node, which is what it
+// did first — and that broke on a clean Windows checkout, because vite-node is
+// a TRANSITIVE dependency (vitest brings it) whose binary npm does not reliably
+// link. One character here beats a dependency that is only sometimes there.
+import { docIds, editionIdForYear, editionSlug } from "./editionId.js";
 
 // The WD sentinel, re-stated rather than imported from individualBoard: this
 // module is about what a document holds, and importing the board to name a
