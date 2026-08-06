@@ -1070,7 +1070,12 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                             minWidth:0 keeps the ellipsis working inside a flex
                             item that is now allowed to grow. */}
                         <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
-                        <span style={{ fontSize: fsStep(rowStyle.fontSize, -2), flexShrink: 0, color: isExpanded ? K.acc : K.t2, transition: `transform ${MOTION}`, display: "inline-block", transform: isExpanded ? "rotate(180deg)" : "rotate(0)" }}>▼</span>
+                        {/* FS.micro flat, not a step off the row size: this is
+                            an affordance, not data, and stepping it meant it
+                            grew whenever the board had room to grow — which is
+                            backwards for the quietest mark in the row. Micro is
+                            the rung the scale keeps for exactly this. */}
+                        <span style={{ fontSize: FS.micro, flexShrink: 0, color: isExpanded ? K.acc : K.t2, transition: `transform ${MOTION}`, display: "inline-block", transform: isExpanded ? "rotate(180deg)" : "rotate(0)" }}>▼</span>
                       </div>
                       {/* Total */}
                       {/* Full-strength ink, not the t2 the row's other numbers
