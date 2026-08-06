@@ -158,7 +158,7 @@ function ChevronButton({ side, onClick }) {
 
 // ── PhotosView ─────────────────────────────────────────────────────
 export function PhotosView({
-  items, year, uid, isDirector, isGuest, canPost,
+  items, year, uid, isDirector, isGuest, canPost, uploadsBlockedReason = "",
   onUpload, onDelete, notify,
 }) {
   const [open, setOpen] = useState(null);
@@ -262,6 +262,20 @@ export function PhotosView({
           </>
         )}
       </div>
+
+      {/* The budget circuit breaker, said out loud. A vanished Add button with
+          no explanation reads as a bug, and the first thing somebody does
+          about a bug is try again — so the reason is on screen, and it says
+          what still works. Browsing is deliberately unaffected. */}
+      {uploadsBlockedReason && !isGuest && (
+        <Card style={{ marginBottom: 12, borderColor: `${K.warn}${ALPHA.line}` }} pad={12}>
+          <div style={{ fontSize: FS.small, color: K.t2, lineHeight: 1.45 }}>
+            {uploadsBlockedReason}
+            <br />
+            <span style={{ color: K.t3 }}>Browsing and removing photos still work.</span>
+          </div>
+        </Card>
+      )}
 
       {!items.length ? (
         <Card style={{ textAlign: "center", padding: 24 }}>

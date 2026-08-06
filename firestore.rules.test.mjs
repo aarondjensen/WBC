@@ -147,6 +147,33 @@ await check("member can delete their own live photo", () =>
 await check("anon can read the gallery", () =>
   assertSucceeds(getDoc(doc(anon, "wbc_media/med_2026_theirs"))));
 
+// The budget circuit breaker. A member must not be able to clear a breaker a
+// budget tripped — that is the difference between a cap and a suggestion.
+await check("anybody can read whether photo uploads are on", () =>
+  assertSucceeds(getDoc(doc(anon, "wbc_config/photos"))));
+await check("member CANNOT clear the budget circuit breaker", () =>
+  assertFails(setDoc(doc(mike, "wbc_config/photos"), { uploadsDisabled: false })));
+
+// Tripped, the breaker must actually stop a create — not merely hide a button.
+// Deleting has to keep working while it is tripped: removing photos is how the
+// bill comes back down, so a breaker that blocked deletes would be backwards.
+await env.withSecurityRulesDisabled(async (ctx) => {
+  const f = ctx.firestore();
+  await setDoc(doc(f, "wbc_config/photos"), { uploadsDisabled: true });
+  await setDoc(doc(f, "wbc_media/med_2026_before"), { uploadedBy: "uid_mike", host: "storage", edition: "2026" });
+});
+await check("breaker tripped: member CANNOT post a photo", () =>
+  assertFails(setDoc(doc(mike, "wbc_media/med_2026_blocked"), { uploadedBy: "uid_mike", host: "storage", edition: "2026" })));
+await check("breaker tripped: member CAN still delete their own photo", () =>
+  assertSucceeds(deleteDoc(doc(mike, "wbc_media/med_2026_before"))));
+await check("breaker tripped: gallery still readable", () =>
+  assertSucceeds(getDoc(doc(anon, "wbc_media/med_2026_theirs"))));
+await env.withSecurityRulesDisabled(async (ctx) => {
+  await setDoc(doc(ctx.firestore(), "wbc_config/photos"), { uploadsDisabled: false });
+});
+await check("breaker cleared: member can post again", () =>
+  assertSucceeds(setDoc(doc(mike, "wbc_media/med_2026_after"), { uploadedBy: "uid_mike", host: "storage", edition: "2026" })));
+
 // The director-owned half: no player screen reaches these, and a member
 // without the crown must not either.
 await check("member CANNOT write players", () =>
@@ -222,6 +249,8 @@ await check("director can delete out of the archive", () =>
   assertSucceeds(deleteDoc(doc(aaron, "wbc_media/med_2019_archived"))));
 await check("director can remove a photo somebody else posted", () =>
   assertSucceeds(deleteDoc(doc(aaron, "wbc_media/med_2026_carls"))));
+await check("director can clear the budget circuit breaker by hand", () =>
+  assertSucceeds(setDoc(doc(aaron, "wbc_config/photos"), { uploadsDisabled: false })));
 
 await env.cleanup();
 for (const [s, n, e] of results) console.log(s.padEnd(5), n, e ? `— ${e}` : "");
