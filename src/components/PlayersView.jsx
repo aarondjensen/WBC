@@ -42,7 +42,7 @@
 // The math lives in lib/handicap.js and the rounds in data/history.js (which is
 // generated — see scripts/build-history.mjs). This file only draws them.
 
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { K, FONT, FS, R, ALPHA, MOTION } from "../theme";
 import { Btn, Card, SectionLabel } from "./ui";
 import { indexFor, matchHistoryName, recentRoundSlots, WINDOW, COUNTING } from "../lib/handicap";
@@ -245,6 +245,17 @@ function PlayerDetail({ row, onBack, year = null, isDirector = false, onSetOverr
 
   const windowKeys = useMemo(() => new Set((idx?.window || []).map(r => r.key)), [idx]);
 
+  // The last round still inside the window, and only when something older
+  // follows it. A player whose whole career fits in the window has no boundary
+  // to draw, and a dotted line under the final row would invent one.
+  const windowEndsAfter = useMemo(() => {
+    const last = idx?.window?.[idx.window.length - 1]?.key;
+    if (!last) return null;
+    const rounds = idx.rounds || [];
+    const at = rounds.findIndex(r => r.key === last);
+    return at >= 0 && at < rounds.length - 1 ? last : null;
+  }, [idx]);
+
   return (
     <div style={{ fontFamily: FONT, paddingBottom: BOTTOM_PAD }}>
       <button onClick={onBack} style={{
@@ -406,7 +417,7 @@ function PlayerDetail({ row, onBack, year = null, isDirector = false, onSetOverr
       {/* ── The working ── */}
       {hasRounds && (
         <>
-          <SectionLabel>How it adds up</SectionLabel>
+          <SectionLabel>Included in index</SectionLabel>
           <Card style={{ marginBottom: 12 }}>
             {idx.counting.map(r => (
               <div key={r.key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0" }}>
@@ -435,10 +446,10 @@ function PlayerDetail({ row, onBack, year = null, isDirector = false, onSetOverr
         </>
       )}
 
-      {/* ── Every round ── */}
+      {/* ── All rounds ── */}
       {byYear.length > 0 && (
         <>
-          <SectionLabel>Every round</SectionLabel>
+          <SectionLabel>All rounds</SectionLabel>
           <Card pad={10}>
             <div style={{
               display: "grid", gridTemplateColumns: ROUND_COLS, gap: 6,
@@ -458,12 +469,30 @@ function PlayerDetail({ row, onBack, year = null, isDirector = false, onSetOverr
                   letterSpacing: 1, padding: "0 8px 4px",
                 }}>{y.year}</div>
                 {y.rounds.map(r => (
-                  <RoundRow
-                    key={r.key}
-                    r={r}
-                    inWindow={windowKeys.has(r.key)}
-                    counting={idx.countingKeys.has(r.key)}
-                  />
+                  <Fragment key={r.key}>
+                    <RoundRow
+                      r={r}
+                      inWindow={windowKeys.has(r.key)}
+                      counting={idx.countingKeys.has(r.key)}
+                    />
+                    {/* Where the window ends. Above this line are the rounds
+                        the index could have been built from; below it is
+                        career. It falls mid-year as often as not — Matt V's
+                        twelfth-most-recent round is in the middle of 2014 —
+                        which is exactly why it is drawn against a ROW rather
+                        than between two year headings. */}
+                    {r.key === windowEndsAfter && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 8px 1px" }}>
+                        <span style={{ flex: 1, borderTop: `1px dotted ${K.t3}` }} />
+                        <span style={{
+                          fontSize: FS.micro, fontWeight: 700, color: K.t3,
+                          letterSpacing: 0.5, textTransform: "uppercase", flexShrink: 0,
+                        }}>
+                          older than the last {idx.window.length}
+                        </span>
+                      </div>
+                    )}
+                  </Fragment>
                 ))}
               </div>
             ))}
