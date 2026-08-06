@@ -277,9 +277,13 @@ function PlayerDetail({ row, onBack, isDirector = false, onSetOverride = null })
           The asterisk stays on the number, and the amber dots in the chart
           below say what it means. */}
       <Card style={{ marginBottom: 12, textAlign: "center" }} pad={18}>
-        <div style={{
+        <div className="wbc-name" style={{
           fontSize: FS.lead, fontWeight: 800, color: K.t2,
-          letterSpacing: 1.2, textTransform: "uppercase", marginBottom: 2,
+          // No textTransform here: it was uppercasing this name before the
+          // app-wide rule existed, and an INLINE value beats the .wbc-name
+          // class, which would leave this one card in full caps while every
+          // other name on screen is in small caps.
+          letterSpacing: 1.2, marginBottom: 2,
         }}>{row.name}</div>
         <div style={{ fontSize: FS.display, fontWeight: 900, color: idx?.index == null ? K.t3 : K.acc, lineHeight: 1.1 }}>
           {fmtIndex(idx?.index)}
@@ -650,7 +654,7 @@ function PlayerRow({ row, onOpen }) {
         borderRadius: R.lg, cursor: "pointer", fontFamily: FONT,
       }}
     >
-      <span style={{
+      <span className="wbc-name" style={{
         minWidth: 0, fontSize: FS.body, fontWeight: 700, lineHeight: 1.2,
         color: row.isMe ? K.gold : K.t1,
         overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
