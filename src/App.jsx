@@ -624,12 +624,20 @@ const TEE_PALETTE = ["#60a5fa","#f59e0b","#a78bfa","#34d399","#fb923c","#f472b6"
 // trophy it is supposed to line up with. Widths are sized to the widest string
 // each column can hold at its font size, measured rather than guessed: Total
 // takes the "STROKES" header (38px, the widest thing in that column — wider
-// than any score), Thru takes a "12:10p" tee time at 28px, the round columns
-// take a "+11" at 19px, # takes "T12" plus a movement arrow at 32px.
-const LB_COL = { num: 36, total: 40, thru: 34, prior: 24 };
-// The least gap that still reads as a gap between this round's stats and the
-// round-by-round history beside them.
-const LB_GAP_MIN = 8;
+// than any score), Thru takes a "12:10p" tee time at 28px, # takes "T12" plus
+// a movement arrow at 32px.
+//
+// The round columns are NOT in here: they split whatever is left, four ways,
+// so `prior` is only the floor below which "+11" stops fitting. Fixed widths
+// plus a flexible gap is what made them look uneven — see LB_PAD_R.
+const LB_COL = { num: 36, total: 40, thru: 34, priorMin: 24 };
+// The rows are padded on the LEFT only. A round column's cell is read as the
+// space between the two lines either side of it, and on the outside those
+// lines are the band's edge and the board's edge — so any padding at the right
+// edge is space the eye hands to R4, exactly as the gap column used to hand
+// its width to R1. Ending the last column flush on the board's inner edge is
+// what lets four equal tracks actually look equal.
+const LB_PAD_L = 12;
 
 function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getPlayerTee, finalizedRounds, skinWins, pairingsData, teeTimesData, loaded = true }) {
   const [expanded, setExpanded] = useState(null);
@@ -655,24 +663,25 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
   useLayoutEffect(() => {
     const align = () => {
       if (!containerRef.current) return;
-      // Card has padding 12px each side, grid padding 12px each side
+      // offsetWidth counts the board's own 1px border on each side; inside it
+      // the rows are padded on the left only, and run to the board's inner edge
+      // on the right.
       const containerW = containerRef.current.offsetWidth;
-      // offsetWidth counts the board's own 1px border on each side, and the
-      // grid rows sit inside that with 12px of padding each side. Subtracting
-      // only the padding left the arithmetic 2px richer than the space that
-      // actually exists, and the 1fr gap quietly paid the difference — which
-      // is how a guaranteed minimum gap of 8 came out as 6 on a 360px phone.
-      const gridW = containerW - 2 - 24; // 1px border + 12px padding, each side
-      // Total's centre sits at num + playerW + total/2 from the grid's content
-      // edge, and the grid is inset equally on both sides — so centring Total
-      // in the grid centres it in the viewport, under the trophy behind it.
-      const centred = gridW / 2 - LB_COL.num - LB_COL.total / 2;
+      const innerW = containerW - 2;          // inside the board's border
+      const gridW = innerW - LB_PAD_L;        // the row's content box
+      // Total's centre sits at padL + num + playerW + total/2 from the board's
+      // inner edge, and the board is centred in the viewport — so putting that
+      // at the board's own midpoint puts it under the trophy behind it. The
+      // padding is one-sided now, so it has to be in this sum rather than
+      // cancelling out of it.
+      const centred = innerW / 2 - LB_PAD_L - LB_COL.num - LB_COL.total / 2;
       // On a narrow phone the fixed columns want more than half the width, and
-      // honouring the centring would push the round columns off the right edge.
-      // So centred is a CEILING, not a rule: the player column gives way first,
-      // and Total drifts off the trophy rather than the board losing a column.
-      const fixed = LB_COL.num + LB_COL.total + LB_COL.thru + LB_COL.prior * NUM_ROUNDS;
-      const playerW = Math.max(60, Math.min(centred, gridW - fixed - LB_GAP_MIN));
+      // honouring the centring would squeeze the round columns below the width
+      // a "+11" needs. So centred is a CEILING, not a rule: the player column
+      // gives way first, and Total drifts off the trophy rather than the round
+      // columns becoming unreadable.
+      const fixed = LB_COL.num + LB_COL.total + LB_COL.thru + LB_COL.priorMin * NUM_ROUNDS;
+      const playerW = Math.max(60, Math.min(centred, gridW - fixed));
       setPlayerColW(`${Math.floor(playerW)}px`);
     };
     align();
@@ -950,10 +959,17 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
         </div>
       </div>
       <div ref={containerRef} style={{ background: "transparent", borderRadius: R.lg, border: `1px solid ${K.bdr}`, overflow: "hidden", display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
-        {/* Build dynamic grid: #, Player, Total, Thru, Rd, [8px gap], prior rounds */}
+        {/* Build dynamic grid: #, Player, Total, Thru, then one equal track per round */}
         {(() => {
           const allPriorRounds = Array.from({ length: NUM_ROUNDS }, (_, i) => i + 1);
-          const gridCols = `${LB_COL.num}px ${playerColW} ${LB_COL.total}px ${LB_COL.thru}px 1fr${allPriorRounds.map(() => ` ${LB_COL.prior}px`).join("")}`;
+          // Four EQUAL tracks filling everything left over, instead of four
+          // fixed ones with a flexible gap in front. The gap column made R1's
+          // cell — the space between the band's edge and the first rule — the
+          // width of a round plus the gap, and the row's right padding did the
+          // same for R4 against the board's edge. On a 390 phone that read as
+          // 100 / 55 / 56 / 83 against tracks that were all exactly 24: the
+          // arithmetic was even and the board was not.
+          const gridCols = `${LB_COL.num}px ${playerColW} ${LB_COL.total}px ${LB_COL.thru}px${allPriorRounds.map(() => " 1fr").join("")}`;
           const gridStyle = { display: "grid", gridTemplateColumns: gridCols, alignItems: "center" };
           // Total and Thru are drawn as one band running the whole height of
           // the board rather than as numbers sitting loose in each row. Every
@@ -963,11 +979,15 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
           // round-by-round detail either side. The hairline is on the OUTER
           // edge of each end only: a rule between Total and Thru would split
           // the band back into two columns, which is what it exists to undo.
+          // Inset shadows rather than borders for the same reason the round
+          // columns use them — a border is width, and Total is the column the
+          // whole board is aligned to. Drawn as a border it pushed its own
+          // number half a pixel off the trophy behind it.
           const bandStart = {
             alignSelf: "stretch", display: "flex", alignItems: "center", justifyContent: "center",
-            background: K.t3 + ALPHA.wash, borderLeft: `1px solid ${K.bdr}`,
+            background: K.t3 + ALPHA.wash, boxShadow: `inset 1px 0 0 ${K.bdr}`,
           };
-          const bandEnd = { ...bandStart, borderLeft: undefined, borderRight: `1px solid ${K.bdr}` };
+          const bandEnd = { ...bandStart, boxShadow: `inset -1px 0 0 ${K.bdr}` };
           // Ruling between the round columns, so four numbers in a row read as
           // four rounds rather than one string of digits. Full-strength K.bdr,
           // the same rule the card edge and the header divider are drawn in:
@@ -996,7 +1016,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                   These are eyebrows, not data, and "STROKES" already fills the
                   Total column at micro — a rung up and it spills over the band
                   it is supposed to cap. */}
-              <div ref={headerRef} style={{ ...gridStyle, padding: "7px 12px", fontSize: FS.micro, fontWeight: 600, color: K.t2, textTransform: "uppercase", letterSpacing: "0.06em", borderBottom: `1px solid ${K.bdr}` }}>
+              <div ref={headerRef} style={{ ...gridStyle, padding: `7px 0 7px ${LB_PAD_L}px`, fontSize: FS.micro, fontWeight: 600, color: K.t2, textTransform: "uppercase", letterSpacing: "0.06em", borderBottom: `1px solid ${K.bdr}` }}>
                 <span>#</span>
                 <span>Player</span>
                 {/* Negative margin eats the header's own padding so the band
@@ -1011,7 +1031,6 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                   return <span style={{ ...bandStart, margin: "-7px 0", padding: "7px 0", fontWeight: 700, color: K.t2, letterSpacing: label.length > 5 ? 0 : undefined }}>{label}</span>;
                 })()}
                 <span style={{ ...bandEnd, margin: "-7px 0", padding: "7px 0", fontWeight: 700, color: K.t2 }}>Thru</span>
-                <span />
                 {allPriorRounds.map((r, i) => <span key={r} style={{ ...roundCell(i), margin: "-7px 0", padding: "7px 0" }}>R{r}</span>)}
               </div>
               {/* Only once the round data is actually in. An empty `lb` also means
@@ -1070,7 +1089,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                       })();
                 return (
                   <div key={p.id} style={{ flex: isExpanded ? "0 0 auto" : 1, minHeight: (expanded && !isExpanded) ? rowMinH : 0, display: "flex", flexDirection: "column", justifyContent: "center" }}>
-                    <div onClick={() => { setExpanded(isExpanded ? null : p.id); setScorecardRound(null); }} style={{ ...gridStyle, padding: "0 12px", minHeight: 28, height: "100%", alignItems: "center", borderBottom: `1px solid ${K.bdr}${ALPHA.wash}`, background: "transparent", cursor: "pointer", fontSize: rowStyle.fontSize, lineHeight: 1 }}>
+                    <div onClick={() => { setExpanded(isExpanded ? null : p.id); setScorecardRound(null); }} style={{ ...gridStyle, padding: `0 0 0 ${LB_PAD_L}px`, minHeight: 28, height: "100%", alignItems: "center", borderBottom: `1px solid ${K.bdr}${ALPHA.wash}`, background: "transparent", cursor: "pointer", fontSize: rowStyle.fontSize, lineHeight: 1 }}>
                       {/* # */}
                       <span style={{ fontWeight: 800, fontSize: rowStyle.fontSize, color: top3 ? K.acc : K.t2, display: "flex", alignItems: "center", gap: 1 }}>
                         {isChampion
@@ -1133,8 +1152,6 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                           </span>
                         );
                       })()}
-                      {/* Gap between current round stats and prior rounds */}
-                      <span />
                       {/* Prior rounds — always show all 4 */}
                       {allPriorRounds.map((r, i) => {
                         const prRd = p.rds[r - 1];
