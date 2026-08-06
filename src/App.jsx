@@ -908,11 +908,19 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <h2 style={{ fontFamily: "'Montserrat', sans-serif", fontSize: FS.title, margin: 0, fontWeight: 800 }}>Leaderboard</h2>
           {(() => {
-            const isFinalized = finalizedRounds[round];
-            if (isFinalized) return <span style={{ fontSize: FS.micro, fontWeight: 700, color: K.acc, background: K.acc + ALPHA.wash, border: `1px solid ${K.acc}${ALPHA.hair}`, borderRadius: R.sm, padding: "2px 8px" }}>✓ FINAL</span>;
-            // LIVE: round not finalized AND at least one active player is mid-round (thru 1–17).
-            const live = lb.some(p => !p.isWD && p.rds?.[round - 1]?.thru > 0 && p.rds[round - 1].thru < 18);
-            if (live) return (
+            // No FINAL badge beside the title: the trophy on position 1 says
+            // the tournament is decided, and saying it twice on one screen
+            // only competes with itself.
+            //
+            // The round still has to be UNfinalized for LIVE, which is what
+            // the badge used to establish by returning before this line. A
+            // finalized round can still hold a card that stops short — a
+            // withdrawal, a group that signed at 14 — and a partial card in a
+            // closed round is not play in progress.
+            const live = !finalizedRounds[round]
+              && lb.some(p => !p.isWD && p.rds?.[round - 1]?.thru > 0 && p.rds[round - 1].thru < 18);
+            if (!live) return null;
+            return (
               <>
                 <style>{`@keyframes wbcLivePulse{0%,100%{opacity:1}50%{opacity:.4}}`}</style>
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 7px", borderRadius: R.md, background: K.danger + ALPHA.wash, border: "1px solid #ef444440" }}>
@@ -921,7 +929,6 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                 </span>
               </>
             );
-            return null;
           })()}
         </div>
         {/* Right pill — Par/Total */}
