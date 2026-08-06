@@ -285,6 +285,43 @@ function PlayerDetail({ row, onBack, isDirector = false, onSetOverride = null })
           {fmtIndex(idx?.index)}
           {idx?.index != null && (idx.stale || idx.overridden) && <span style={{ color: K.warn }}>*</span>}
         </div>
+
+        {/* The override, on the number it overrides. It had a card of its own,
+            which spent a full panel and a sentence of explanation on a control
+            a director uses once a season — and put a paragraph between the
+            index and the chart that proves it, for everybody who is not a
+            director and cannot use it at all.
+
+            Closed it is one small button. Open it is the field and its two
+            answers, in the same place. */}
+        {isDirector && onSetOverride && (!editing ? (
+          <Btn variant="secondary" size="sm" style={{ marginTop: 12 }}
+            onClick={() => { setDraft(row.override == null ? "" : String(row.override)); setEditing(true); }}>
+            {idx?.overridden ? "Edit override" : "Override"}
+          </Btn>
+        ) : (
+          <div style={{ marginTop: 12, display: "flex", flexWrap: "wrap", justifyContent: "center", alignItems: "center", gap: 6 }}>
+            <input
+              autoFocus
+              inputMode="decimal"
+              value={draft}
+              placeholder={idx?.computed != null ? fmtIndex(idx.computed) : "index"}
+              onChange={e => setDraft(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") { onSetOverride(draft); setEditing(false); } }}
+              style={{
+                width: 80, padding: "7px 8px", background: K.inp,
+                border: `1px solid ${K.acc}${ALPHA.line}`, borderRadius: R.sm,
+                color: K.t1, fontSize: FS.lead, fontWeight: 800, fontFamily: FONT,
+                textAlign: "center", boxSizing: "border-box",
+              }}
+            />
+            <Btn size="sm" onClick={() => { onSetOverride(draft); setEditing(false); }}>Save</Btn>
+            <Btn variant="ghost" size="sm" onClick={() => setEditing(false)}>Cancel</Btn>
+            {idx?.overridden && (
+              <Btn variant="dangerOutline" size="sm" onClick={() => { onSetOverride(null); setEditing(false); }}>Clear</Btn>
+            )}
+          </div>
+        ))}
       </Card>
 
       {!hasRounds && !idx?.overridden && (
@@ -320,64 +357,12 @@ function PlayerDetail({ row, onBack, isDirector = false, onSetOverride = null })
         </Card>
       )}
 
-      {/* The control, for a director and only where there is a registry entry
-          to write to. It sits under the number it changes rather than in the
-          admin console: this is the screen that publishes the index, and a
-          setting that lives away from the thing it sets is a setting nobody
-          finds. */}
-      {isDirector && onSetOverride && (
-        <Card style={{ marginBottom: 12 }} pad={12}>
-          {!editing ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <span style={{ flex: 1, minWidth: 0, fontSize: FS.label, color: K.t3, lineHeight: 1.4 }}>
-                {idx?.overridden
-                  ? `Hand-set to ${fmtIndex(idx.index)}.`
-                  : "Computed from the rounds below."}
-              </span>
-              <Btn variant="secondary" size="sm" onClick={() => { setDraft(row.override == null ? "" : String(row.override)); setEditing(true); }}>
-                {idx?.overridden ? "Change" : "Set by hand"}
-              </Btn>
-            </div>
-          ) : (
-            <>
-              <div style={{ fontSize: FS.label, color: K.t3, lineHeight: 1.4, marginBottom: 8 }}>
-                A hand-set index replaces the computed one everywhere this tab shows it, and keeps its
-                asterisk. It does not touch the handicap this tournament is played off — that stays in
-                Admin.
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <input
-                  autoFocus
-                  inputMode="decimal"
-                  value={draft}
-                  placeholder={idx?.computed != null ? fmtIndex(idx.computed) : "index"}
-                  onChange={e => setDraft(e.target.value)}
-                  onKeyDown={e => { if (e.key === "Enter") { onSetOverride(draft); setEditing(false); } }}
-                  style={{
-                    width: 88, padding: "8px 10px", background: K.inp,
-                    border: `1px solid ${K.acc}${ALPHA.line}`, borderRadius: R.sm,
-                    color: K.t1, fontSize: FS.lead, fontWeight: 800, fontFamily: FONT,
-                    textAlign: "center", boxSizing: "border-box",
-                  }}
-                />
-                <Btn size="sm" onClick={() => { onSetOverride(draft); setEditing(false); }}>Save</Btn>
-                <Btn variant="ghost" size="sm" onClick={() => setEditing(false)}>Cancel</Btn>
-                {idx?.overridden && (
-                  <Btn variant="dangerOutline" size="sm" style={{ marginLeft: "auto" }}
-                    onClick={() => { onSetOverride(null); setEditing(false); }}>
-                    Clear
-                  </Btn>
-                )}
-              </div>
-            </>
-          )}
-        </Card>
-      )}
-
       {/* ── A short sample ── */}
-      {/* Separate from the asterisk above, because it says a different thing:
-          that one is about WHICH rounds, this is about how many of them count. */}
-      {hasRounds && idx.provisional && (
+      {/* Not the asterisk's explanation — that is the amber dots in the chart.
+          This says a different thing: how many of the rounds there count. It
+          stands down for a hand-set index, where the card above has already
+          named the computed number and the rule behind it. */}
+      {hasRounds && idx.provisional && !idx.overridden && (
         <Card style={{ marginBottom: 12 }}>
           <div style={{ fontSize: FS.small, color: K.t2, lineHeight: 1.5 }}>
             Only {idx.window.length} recorded {idx.window.length === 1 ? "round" : "rounds"}, so this is the best
