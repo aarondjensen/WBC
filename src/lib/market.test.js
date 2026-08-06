@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   MARKET_OPENING_SHARES, MARKET_MID_SHARES, midRoundFor,
   normalizeLots, totalShares, sharesOn, setLotShares,
-  roundStarted, roundComplete, marketWindows,
+  roundStarted, roundComplete, marketWindows, teeOffAt, countdown, countdownTick,
   lotsFor, allLots, marketBoard, marketHoldings, marketPayouts, eligibleBets, rebuyers, marketRoster,
 } from "./market";
 
@@ -110,7 +110,7 @@ describe("marketWindows", () => {
     expect(w.mid.open).toBe(false);
   });
 
-  it("shuts the first window on the first score of Round 1", () => {
+  it("shuts the first window on the first score of Round 1, with no bell set", () => {
     const w = marketWindows({ holeData: { aaron_j_1: { 0: 4 } }, players, numRounds: 4 });
     expect(w.opening.open).toBe(false);
     expect(w.opening.closed).toBe(true);
@@ -142,6 +142,142 @@ describe("marketWindows", () => {
     const w = marketWindows({ holeData: {}, players, numRounds: 2 });
     expect(w.mid.exists).toBe(false);
     expect(w.mid.open).toBe(false);
+  });
+});
+
+describe("teeOffAt", () => {
+  const at = (y, mo, d, h, mi) => new Date(y, mo - 1, d, h, mi).getTime();
+
+  it("is the EARLIEST tee time on the round's date", () => {
+    expect(teeOffAt("2026-08-14", [510, 450, 540])).toBe(at(2026, 8, 14, 7, 30));
+  });
+
+  it("is local time — the phones reading it are standing on the course", () => {
+    const t = new Date(teeOffAt("2026-08-14", [8 * 60 + 5]));
+    expect([t.getHours(), t.getMinutes()]).toEqual([8, 5]);
+  });
+
+  it("is null with no date or no tee sheet — there is no bell to ring", () => {
+    expect(teeOffAt("", [420])).toBeNull();
+    expect(teeOffAt("2026-08-14", [])).toBeNull();
+    expect(teeOffAt("2026-08-14", null)).toBeNull();
+    expect(teeOffAt(null, [420])).toBeNull();
+  });
+
+  it("ignores tee times that would not parse", () => {
+    expect(teeOffAt("2026-08-14", [null, undefined, NaN, 480])).toBe(at(2026, 8, 14, 8, 0));
+  });
+
+  it("rejects a date that is not a date", () => {
+    expect(teeOffAt("August 14", [420])).toBeNull();
+  });
+});
+
+describe("countdown", () => {
+  const s = 1000, m = 60 * s, h = 60 * m, d = 24 * h;
+
+  it("reads days and hours when the tournament is still days away", () => {
+    expect(countdown(2 * d + 5 * h + 40 * m).label).toBe("2d 5h");
+  });
+
+  it("reads hours and minutes through the day before", () => {
+    expect(countdown(5 * h + 12 * m + 30 * s).label).toBe("5h 12m");
+  });
+
+  it("pads the minutes so the label does not change width as it counts", () => {
+    expect(countdown(5 * h + 4 * m).label).toBe("5h 04m");
+  });
+
+  it("switches to a ticking clock inside the last hour", () => {
+    expect(countdown(12 * m + 4 * s).label).toBe("12:04");
+    expect(countdown(59 * m + 59 * s).label).toBe("59:59");
+  });
+
+  it("counts the last minute down second by second", () => {
+    expect(countdown(9 * s).label).toBe("0:09");
+  });
+
+  it("rounds UP, so the last tick reads 0:01 rather than 0:00", () => {
+    // A market that says nothing is left while it is still taking shares is
+    // lying about the more important of the two.
+    expect(countdown(400).label).toBe("0:01");
+    expect(countdown(1).label).toBe("0:01");
+  });
+
+  it("is Closed at zero and stays there past it", () => {
+    expect(countdown(0).label).toBe("Closed");
+    expect(countdown(0).done).toBe(true);
+    expect(countdown(-5 * m).label).toBe("Closed");
+    expect(countdown(-5 * m).total).toBe(0);
+  });
+
+  it("survives a missing argument", () => {
+    expect(countdown().label).toBe("Closed");
+    expect(countdown(null).done).toBe(true);
+  });
+
+  it("flags the last hour urgent, and nothing outside it", () => {
+    expect(countdown(59 * m).urgent).toBe(true);
+    expect(countdown(60 * m).urgent).toBe(true);
+    expect(countdown(60 * m + s).urgent).toBe(false);
+    // Rung is not urgent — there is nothing left to hurry for.
+    expect(countdown(0).urgent).toBe(false);
+  });
+
+  it("breaks the remainder out for a caller that wants its own layout", () => {
+    const c = countdown(2 * d + 5 * h + 12 * m + 4 * s);
+    expect([c.days, c.hours, c.mins, c.secs]).toEqual([2, 5, 12, 4]);
+  });
+});
+
+describe("countdownTick", () => {
+  it("ticks every second once the seconds are moving", () => {
+    expect(countdownTick(59 * 60 * 1000)).toBe(1000);
+    expect(countdownTick(0)).toBe(1000);
+  });
+
+  it("drops to every thirty seconds above an hour, where the label cannot change faster", () => {
+    expect(countdownTick(60 * 60 * 1000 + 1)).toBe(30_000);
+    expect(countdownTick(3 * 24 * 60 * 60 * 1000)).toBe(30_000);
+    expect(countdownTick(Infinity)).toBe(30_000);
+  });
+});
+
+describe("the opening bell", () => {
+  const bell = new Date(2026, 7, 14, 7, 0).getTime();
+  const win = (over) => marketWindows({ holeData: {}, players, numRounds: 4, firstTeeAt: bell, ...over }).opening;
+
+  it("is open right up to the tee time", () => {
+    expect(win({ now: bell - 60_000 })).toMatchObject({ open: true, closed: false });
+  });
+
+  it("shuts ON the tee time, not a minute after", () => {
+    expect(win({ now: bell })).toMatchObject({ open: false, closed: true });
+    expect(win({ now: bell }).note).toMatch(/on the tee/);
+  });
+
+  it("stays shut once the field is out", () => {
+    expect(win({ now: bell + 3 * 3600_000 }).open).toBe(false);
+  });
+
+  // The backstop. A tournament with no date or no tee sheet has no bell, so
+  // the old rule still has to close the window.
+  it("falls back to the first score when there is no bell", () => {
+    const noBell = { holeData: { aaron_j_1: { 0: 4 } }, players, numRounds: 4 };
+    expect(marketWindows(noBell).opening).toMatchObject({ open: false, closed: true });
+    expect(marketWindows({ ...noBell, holeData: {} }).opening.open).toBe(true);
+  });
+
+  // And a round already being played must never leave the market open,
+  // whatever the clock says — a wrong date must not hand the field a market
+  // it can bet into from the 4th fairway.
+  it("a score shuts it even if the bell has not rung", () => {
+    expect(win({ now: bell - 3600_000, holeData: { aaron_j_1: { 0: 4 } } })).toMatchObject({ open: false });
+  });
+
+  it("carries the bell time so the screen can print it", () => {
+    expect(win({ now: bell - 1 }).at).toBe(bell);
+    expect(marketWindows({ holeData: {}, players, numRounds: 4 }).opening.at).toBeNull();
   });
 });
 

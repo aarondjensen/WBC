@@ -111,22 +111,96 @@ export function roundComplete(holeData, players, round) {
   });
 }
 
+// ── When the bell rings ────────────────────────────────────────────
+// The opening window shuts at the FIRST TEE TIME of round one, not at the
+// first score posted in it.
+//
+// Scores were the wrong signal. The first group tees off at 7:00 and does not
+// post a hole for twenty minutes; in that gap the 8:30 group is still in the
+// car park with the board in front of them and the market wide open. Worse,
+// a group that forgets to score keeps it open for everybody. A clock closes
+// on the whole field at once, which is what "before the tournament starts"
+// has always meant.
+//
+// Returns a timestamp in LOCAL time, because a tee time is local to the
+// course and the phones reading it are standing on it. Null when the round
+// has no date or no tee sheet yet — see marketWindows for what happens then.
+//
+// `minutesList` is minutes-since-midnight, already parsed, so this stays pure
+// and the app's one tee-time parser stays in the app.
+export function teeOffAt(dateStr, minutesList) {
+  const mins = (minutesList || []).filter(m => Number.isFinite(m));
+  const d = String(dateStr || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!d || mins.length === 0) return null;
+  const first = Math.min(...mins);
+  return new Date(+d[1], +d[2] - 1, +d[3], Math.floor(first / 60), first % 60).getTime();
+}
+
+// ── The clock on the wall ──────────────────────────────────────────
+// How long is left, broken up and pre-formatted. A deadline printed as a time
+// of day makes a player do arithmetic against their own watch; a countdown
+// answers the only question they actually have, which is whether there is
+// still time to think about it.
+//
+// Rounded UP to the second, so the last tick reads 0:01 and not 0:00 — a
+// market that says nothing is left while it is still taking shares is lying
+// about the more important of the two.
+//
+// The label changes shape with the scale, because "37h 12m 04s" is precision
+// nobody can use and "2224:04" is not a number at all:
+//
+//   days out    2d 5h      — the shape of a plan
+//   hours out   5h 12m     — the shape of a morning
+//   under 1h    12:04      — the shape of a decision, ticking
+export function countdown(msLeft) {
+  const total = Math.max(0, Math.ceil((msLeft ?? 0) / 1000));
+  const days = Math.floor(total / 86400);
+  const hours = Math.floor((total % 86400) / 3600);
+  const mins = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  const label = total <= 0 ? "Closed"
+    : days > 0 ? `${days}d ${hours}h`
+    : hours > 0 ? `${hours}h ${String(mins).padStart(2, "0")}m`
+    : `${mins}:${String(secs).padStart(2, "0")}`;
+  // `urgent` is the last hour — the point at which the screen should stop
+  // being informative and start being a warning, and also the point at which
+  // the seconds are worth ticking.
+  return { total, days, hours, mins, secs, label, urgent: total > 0 && total <= 3600, done: total <= 0 };
+}
+
+// How often the screen has to repaint to keep that label honest. Under an
+// hour the seconds are moving and it needs one a second; above it the label
+// only turns over each minute, so thirty seconds is already twice as often as
+// it can possibly change. Nobody needs a per-second interval running through
+// a Thursday night to keep "2d 5h" up to date.
+export const countdownTick = (msLeft) => ((msLeft ?? 0) <= 3600_000 ? 1000 : 30_000);
+
 // ── The windows, given where play has got to ───────────────────────
 // Each returns { key, label, shares, open, closed, note } — `note` is the
 // one-line explanation the screen shows when a window is shut, because
 // "you cannot place these yet" and "you left these on the table" are very
 // different messages to a player holding unspent shares.
-export function marketWindows({ holeData, players, numRounds }) {
+export function marketWindows({ holeData, players, numRounds, firstTeeAt = null, now = null }) {
   const midRound = midRoundFor(numRounds);
   const started1 = roundStarted(holeData, players, 1);
+  // The bell. A score in round 1 still shuts the window as a backstop — a
+  // tournament with no date or no tee sheet has no bell to ring, and one
+  // that is already being played must not have an open market whatever the
+  // clock says.
+  const belled = firstTeeAt != null && now != null && now >= firstTeeAt;
+  const shut = belled || started1;
 
   const opening = {
     key: "opening",
     label: "Opening bell",
     shares: MARKET_OPENING_SHARES,
-    open: !started1,
-    closed: started1,
-    note: started1 ? "Closed — Round 1 is under way." : "Open until the first score of Round 1.",
+    open: !shut,
+    closed: shut,
+    at: firstTeeAt,
+    note: belled ? "Closed — the field is on the tee."
+      : started1 ? "Closed — Round 1 is under way."
+      : firstTeeAt != null ? "Open until the first tee time."
+      : "Open until the first score of Round 1.",
   };
 
   if (midRound == null) {

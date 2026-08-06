@@ -5,12 +5,13 @@ import { readMembership, isDirectorAccount, resolveMember, joinWithCode, readAcc
 import { K, ON_ACC, ON_DANGER, FS, fsStep, R, ALPHA, MOTION, FONT, SHADOW, SCRIM } from "./theme";
 import { SegmentedToggle, StickyTop, SectionLabel, Card, Toast, Btn } from "./components/ui";
 import { calcCH, buildStrokesMap, computeRoundLine, computeIndividualBoard, rankIndividualBoard, rankIndividualBoardIds, WD_SCORE } from "./lib/individualBoard";
-import { fieldFor, potFor, perUnit, computeSkins, allSkins, skinCounts, lowNetRounds } from "./lib/sideGames";
+import { fieldFor, potFor, perUnit, computeSkins, allSkins, skinCounts, lowNetRounds, lowNetRoundField } from "./lib/sideGames";
 import { teeTimesByPlayer, roundInPlay, thruStatus } from "./lib/thruStatus";
 import {
   MARKET_OPENING_SHARES, MARKET_MID_SHARES, marketWindows, normalizeLots, totalShares,
+  countdown, countdownTick,
   sharesOn, setLotShares, lotsFor, allLots, marketBoard, marketHoldings, marketPayouts, roundComplete,
-  eligibleBets, rebuyers, marketRoster,
+  eligibleBets, rebuyers, marketRoster, teeOffAt,
 } from "./lib/market";
 import { BuyInPrices, BuyInTracker } from "./components/BuyIns";
 import { useConfirm } from "./lib/useConfirm";
@@ -460,6 +461,11 @@ const mergeSideGames = (raw) => {
 // leaderboard, the scorecards and the finalize preview alike.
 const fmtPar = n => n == null ? "—" : n === 0 ? "E" : n > 0 ? `+${n}` : `${n}`;
 
+// Gap the tee sheet fills in with when the director types one group's time and
+// the rest are still blank. A director who spaces two groups differently keeps
+// their own spacing — this is only the starting assumption.
+const TEE_INTERVAL_MIN = 10;
+
 // ── SCORING GATE HELPERS ──
 // Minutes before tee time that scoring input unlocks for non-directors.
 const SCORING_LEAD_MIN = 30;
@@ -665,7 +671,12 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
       if (!containerRef.current) return;
       // Card has padding 12px each side, grid padding 12px each side
       const containerW = containerRef.current.offsetWidth;
-      const gridW = containerW - 24; // 12px padding each side
+      // offsetWidth counts the board's own 1px border on each side, and the
+      // grid rows sit inside that with 12px of padding each side. Subtracting
+      // only the padding left the arithmetic 2px richer than the space that
+      // actually exists, and the 1fr gap quietly paid the difference — which
+      // is how a guaranteed minimum gap of 8 came out as 6 on a 360px phone.
+      const gridW = containerW - 2 - 24; // 1px border + 12px padding, each side
       // Total's centre sits at num + playerW + total/2 from the grid's content
       // edge, and the grid is inset equally on both sides — so centring Total
       // in the grid centres it in the viewport, under the trophy behind it.
@@ -911,11 +922,19 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <h2 style={{ fontFamily: "'Montserrat', sans-serif", fontSize: FS.title, margin: 0, fontWeight: 800 }}>Leaderboard</h2>
           {(() => {
-            const isFinalized = finalizedRounds[round];
-            if (isFinalized) return <span style={{ fontSize: FS.micro, fontWeight: 700, color: K.acc, background: K.acc + ALPHA.wash, border: `1px solid ${K.acc}${ALPHA.hair}`, borderRadius: R.sm, padding: "2px 8px" }}>✓ FINAL</span>;
-            // LIVE: round not finalized AND at least one active player is mid-round (thru 1–17).
-            const live = lb.some(p => !p.isWD && p.rds?.[round - 1]?.thru > 0 && p.rds[round - 1].thru < 18);
-            if (live) return (
+            // No FINAL badge beside the title: the trophy on position 1 says
+            // the tournament is decided, and saying it twice on one screen
+            // only competes with itself.
+            //
+            // The round still has to be UNfinalized for LIVE, which is what
+            // the badge used to establish by returning before this line. A
+            // finalized round can still hold a card that stops short — a
+            // withdrawal, a group that signed at 14 — and a partial card in a
+            // closed round is not play in progress.
+            const live = !finalizedRounds[round]
+              && lb.some(p => !p.isWD && p.rds?.[round - 1]?.thru > 0 && p.rds[round - 1].thru < 18);
+            if (!live) return null;
+            return (
               <>
                 <style>{`@keyframes wbcLivePulse{0%,100%{opacity:1}50%{opacity:.4}}`}</style>
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 7px", borderRadius: R.md, background: K.danger + ALPHA.wash, border: "1px solid #ef444440" }}>
@@ -924,7 +943,6 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                 </span>
               </>
             );
-            return null;
           })()}
         </div>
         {/* Right pill — Par/Total */}
@@ -972,9 +990,19 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
           // on the screen. The band still leads on its background tint rather
           // than on having a heavier edge. None on R1 — its left edge is
           // already the gap.
+          //
+          // Drawn as an inset shadow rather than a border because a border is
+          // LAYOUT. Under border-box it ate a pixel off the left of every cell
+          // that had one, which R1 did not — so R1 centred its number in 24px
+          // while R2-R4 centred theirs in 23px starting a pixel over, and the
+          // four columns came out spaced 24.5, 24, 24. The same pixel pushed
+          // every number half a pixel right of its own track, giving each cell
+          // 12.5 of air on one side of its value and 11.5 on the other. A
+          // shadow paints the identical line and costs no width, so all four
+          // tracks are the same box and the numbers sit dead centre in them.
           const roundCell = (i) => ({
             alignSelf: "stretch", display: "flex", alignItems: "center", justifyContent: "center",
-            borderLeft: i === 0 ? undefined : `1px solid ${K.bdr}`,
+            boxShadow: i === 0 ? undefined : `inset 1px 0 0 ${K.bdr}`,
           });
           return (
             <>
@@ -2971,11 +2999,14 @@ function GroupSetup({ user, players, onStart, presetGroup }) {
 function BettingView({
   players, round, tRounds, courses, holeData, ctpData, onSetCtp, user, numRounds,
   getPlayerTee, sideGames, onUpdateSideGames, marketBets, onSaveMarketBet, leaderboard,
-  finalizedRounds, pairingsData,
+  finalizedRounds, pairingsData, firstTeeAt,
 }) {
   const [tab, setTab] = useState("skins");
   const [expandedPlayer, setExpandedPlayer] = useState(null);
   const [grossMode, setGrossMode] = useState(true);
+  // Which round's full field is open in the Low Net ledger. One at a time —
+  // four open rounds is the same wall of numbers the ledger exists to avoid.
+  const [openNetRound, setOpenNetRound] = useState(null);
   // Each tab keeps its OWN round and its own open drawer. Sharing them would
   // mean opening one tab silently rearranged the other.
   const [skinsRound, setSkinsRound] = useState(null);
@@ -3003,6 +3034,11 @@ function BettingView({
   // the INDEX into the book, not part of it.
   const [showRoster, setShowRoster] = useState(false);
   const { confirm, confirmModal } = useConfirm();
+  // The bell has to ring on a screen nobody is touching. A player sitting on
+  // this tab at 6:59 must watch the market shut at 7:00 rather than find out
+  // by navigating away and back — so the clock ticks, but only while there is
+  // something for it to close, and stops the moment it has.
+  const [now, setNow] = useState(() => Date.now());
 
   // Gross is the default, so this never fires on arrival: reaching Net always
   // means somebody crossed the toggle to get there, which is a deliberate act
@@ -3154,7 +3190,33 @@ function BettingView({
   const settledPins = ctpTags.filter(t => roundSettled(t.round)).length;
 
   // ── The market tab ──
-  const windows = marketWindows({ holeData, players, numRounds });
+  // ── The opening bell ──
+  // `firstTeeAt` — round one's earliest tee time — is when the market shuts.
+  // See lib/market teeOffAt for why a clock rather than the first score. It
+  // arrives as a prop rather than being derived here because the header
+  // counts down to the same instant, and two derivations of one moment is one
+  // more than the number that can be right.
+  const windows = marketWindows({ holeData, players, numRounds, firstTeeAt, now });
+  const bellPending = firstTeeAt != null && windows.opening.open;
+  // The countdown itself. Null once there is nothing left to count — a bell
+  // already rung, or a tournament with no tee sheet to ring one from.
+  const bell = bellPending ? countdown(firstTeeAt - now) : null;
+  // The clock runs for as long as there is a bell left to ring, so `now` can
+  // never go stale enough to leave the market taking shares after the field
+  // has teed off. What the market tab decides is only the RATE: seconds tick
+  // in the last hour while somebody is watching them, and everything else
+  // settles for thirty, which is already twice as often as the label above an
+  // hour can change. A per-second re-render of the whole Betting view behind
+  // a tab nobody is on is battery spent on nothing.
+  //
+  // Depending on `bellFast` rather than on the remaining milliseconds is what
+  // stops the effect tearing down and rebuilding the interval every tick.
+  const bellFast = bell != null && bell.urgent && tab === "market";
+  useEffect(() => {
+    if (!bellPending) return;
+    const t = setInterval(() => setNow(Date.now()), countdownTick(bellFast ? 0 : Infinity));
+    return () => clearInterval(t);
+  }, [bellPending, bellFast]);
   const eventComplete = roundList.length > 0 && roundList.every(r => roundComplete(holeData, players, r));
   // ── The market is SEALED until the tournament is over ──
   // Everything a player could read another player's hand off — the board, the
@@ -3377,6 +3439,31 @@ function BettingView({
   // on a card is always the skin the tab is currently paying for.
   const skinHolesFor = (pid) => new Set(won.filter(s => s.winner.pid === pid).map(s => `${s.round}_${s.hole}`));
 
+  // Add up a nine — or a whole card — over the holes ACTUALLY PLAYED. Par is
+  // accumulated alongside rather than taken from the course total, so a man
+  // walking in after thirteen gets a to-par measured against thirteen holes
+  // instead of being handed five phantom pars.
+  const tallyHoles = (scores, pars, holes) => {
+    let gross = 0, par = 0, played = 0;
+    holes.forEach(i => {
+      const raw = scores[i];
+      if (raw > 0 && raw < WD_SCORE) { gross += raw; par += pars[i] || 0; played += 1; }
+    });
+    return { gross, par, played, toPar: gross - par };
+  };
+  const toParStr = (n) => (n === 0 ? "E" : n > 0 ? `+${n}` : `${n}`);
+
+  // ── One player's week, round by round ──────────────────────────────
+  // What this card is FOR is answering "where did his six skins come from",
+  // and the old one made that nearly impossible: eight anonymous blocks of
+  // nine, no round headings, no course names, no totals, and nothing but
+  // whitespace between one round and the next. A gold circle told you a skin
+  // landed but not which day it landed on.
+  //
+  // So each round is now its own bordered card with a heading — round, course,
+  // skins taken that day, and the score — and the nines carry a ruled grid
+  // with OUT and IN totals, which is the shape every golfer already knows how
+  // to read.
   const renderInlineScorecard = (playerId) => {
     const p = players.find(pl => pl.id === playerId);
     if (!p) return null;
@@ -3387,48 +3474,169 @@ function BettingView({
       if (!course) continue;
       const scores = holeData[`${p.id}_${r}`] || {};
       if (!Object.values(scores).some(v => v > 0)) continue;
-      rows.push({ r, scores, pars: course.hole_pars || [] });
+      // Strokes are only drawn in NET mode, where they are the whole
+      // explanation for a gold circle sitting on an ordinary-looking number:
+      // the card prints gross all week, so a skin won with a stroke is
+      // otherwise a 5 that beat a field of 4s for no visible reason.
+      const strokes = grossMode ? null : (strokesFor(r).maps[p.id] || {});
+      rows.push({ r, scores, pars: course.hole_pars || [], courseName: course.name || "", strokes });
     }
-    // Circles for under par only; gold number + single circle for skin winners; plain number otherwise
-    const ScoreCell = ({ score: raw, par, isSkin }) => {
+    if (rows.length === 0) return null;
+
+    // Two weights. `hair` rules the cells apart inside a nine — it has to be
+    // visible enough to follow a column down three rows on a phone, which is
+    // what the old borderless grid never let anybody do. `edge` frames the
+    // round and fences off the totals.
+    const hair = `1px solid ${K.bdr}${ALPHA.hair}`;
+    const edge = `1px solid ${K.bdr}`;
+
+    // Circles for under par; gold for a skin. A double circle is an eagle or
+    // better, which is the convention the round card and the paper scorecard
+    // both use.
+    const ScoreCell = ({ score: raw, par, isSkin, strokes }) => {
       // Same rule as the field card: a WD hole is a dash, not a 99.
       const score = raw > 0 && raw < WD_SCORE ? raw : 0;
-      if (!score) return <div style={{ width: "100%", aspectRatio: "1", display: "flex", alignItems: "center", justifyContent: "center" }}><span style={{ fontSize: FS.micro, color: K.t3 }}>–</span></div>;
+      if (!score) return <span style={{ fontSize: FS.micro, color: K.t3 }}>–</span>;
       const d = score - par;
       const isUnder = d < 0;
       const isDouble = d <= -2;
       const circleClr = isSkin ? K.gold : K.t2;
       return (
-        <div style={{ width: "100%", aspectRatio: "1", display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ position: "relative", width: "85%", aspectRatio: "1", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            {(isUnder || isSkin) && <div style={{ position: "absolute", inset: 0, borderRadius: "50%", border: `1.5px solid ${circleClr}` }} />}
-            {isDouble && <div style={{ position: "absolute", inset: 3, borderRadius: "50%", border: `1px solid ${circleClr}` }} />}
-            <span style={{ fontSize: FS.micro, fontWeight: 700, color: isSkin ? K.gold : K.t2, position: "relative", zIndex: 1 }}>{score}</span>
-          </div>
-        </div>
+        <span style={{ position: "relative", display: "inline-flex", alignItems: "center", justifyContent: "center", width: 19, height: 19 }}>
+          {(isUnder || isSkin) && <span style={{ position: "absolute", inset: 0, borderRadius: "50%", border: `1.5px solid ${circleClr}` }} />}
+          {isDouble && <span style={{ position: "absolute", inset: 3, borderRadius: "50%", border: `1px solid ${circleClr}` }} />}
+          {/* Strokes received, as the dots they are on a paper card. */}
+          {strokes > 0 && (
+            <span style={{ position: "absolute", top: -2, right: -4, display: "flex", gap: 1 }}>
+              {Array.from({ length: Math.min(strokes, 3) }, (_, k) => (
+                <span key={k} style={{ width: 2.5, height: 2.5, borderRadius: "50%", background: K.t3 }} />
+              ))}
+            </span>
+          )}
+          <span style={{ fontSize: FS.label, fontWeight: 700, color: isSkin ? K.gold : K.t2, position: "relative", zIndex: 1 }}>{score}</span>
+        </span>
       );
     };
+
     return (
-      <div style={{ padding: "8px 10px 6px", borderTop: `1px solid ${K.bdr}${ALPHA.tint}` }}>
-        {rows.map(({ r, scores, pars }) => {
-          const front9 = Array.from({length: 9}, (_, i) => i);
-          const back9  = Array.from({length: 9}, (_, i) => i + 9);
-          const HalfGrid = ({ holes }) => (
-            <div style={{ paddingBottom: 5, borderBottom: holes[0] === 0 ? `1px solid ${K.bdr}${ALPHA.tint}` : "none", marginBottom: holes[0] === 0 ? 5 : 0 }}>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(9, 1fr)", gap: 2 }}>
-                {holes.map(i => <div key={i} style={{ textAlign: "center", fontSize: FS.micro, fontWeight: 600, color: K.t2 }}>{i + 1}</div>)}
-                {holes.map(i => <div key={i} style={{ textAlign: "center", fontSize: FS.micro, color: K.t3, opacity: 0.45 }}>{pars[i] || ""}</div>)}
-                {holes.map(i => <ScoreCell key={i} score={scores[i]} par={pars[i] || 0} isSkin={skinSet.has(`${r}_${i}`)} />)}
-              </div>
-            </div>
-          );
+      <div style={{ padding: "8px 10px 10px", borderTop: hair }}>
+        {rows.map(({ r, scores, pars, courseName, strokes }) => {
+          const all = Array.from({ length: 18 }, (_, i) => i);
+          const round = tallyHoles(scores, pars, all);
+          const roundSkins = won.filter(s => s.winner.pid === p.id && s.round === r).length;
+
+          const Nine = ({ holes, label }) => {
+            const t = tallyHoles(scores, pars, holes);
+            // The totals column is held at a fixed width rather than a share
+            // of the table, so OUT and IN line up under one another whatever
+            // the hole numbers do.
+            const totCell = { textAlign: "center", padding: "3px 2px", borderLeft: edge, background: `${K.bdr}${ALPHA.wash}` };
+            return (
+              <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+                <colgroup>
+                  {holes.map((_, i) => <col key={i} />)}
+                  <col style={{ width: 34 }} />
+                </colgroup>
+                <tbody>
+                  <tr style={{ background: `${K.bdr}${ALPHA.wash}` }}>
+                    {holes.map(i => {
+                      const isSkin = skinSet.has(`${r}_${i}`);
+                      return (
+                        <td key={i} style={{
+                          textAlign: "center", fontSize: FS.micro, fontWeight: isSkin ? 800 : 700,
+                          color: isSkin ? K.gold : K.t2, padding: "3px 1px",
+                          borderLeft: i === holes[0] ? "none" : hair,
+                          borderBottom: hair,
+                          // A gold TICK under the number, not a gold cell and
+                          // not a full-width rule. Filling the cell makes
+                          // three skins on 7-8-9 run together into one block,
+                          // and an edge-to-edge underline does the same thing
+                          // one step later — the column definition this
+                          // rebuild exists for disappears exactly where the
+                          // card matters most. Inset to 55% and it reads as
+                          // three marks on three holes.
+                          ...(isSkin ? {
+                            backgroundImage: `linear-gradient(${K.gold}, ${K.gold})`,
+                            backgroundSize: "55% 2px",
+                            backgroundPosition: "center bottom",
+                            backgroundRepeat: "no-repeat",
+                          } : null),
+                        }}>{i + 1}</td>
+                      );
+                    })}
+                    <td style={{ ...totCell, fontSize: FS.micro, fontWeight: 800, color: K.t3, letterSpacing: 0.5, borderBottom: hair }}>{label}</td>
+                  </tr>
+                  <tr>
+                    {holes.map(i => (
+                      <td key={i} style={{
+                        textAlign: "center", fontSize: FS.micro, color: K.t3, padding: "2px 1px",
+                        borderLeft: i === holes[0] ? "none" : hair, borderBottom: hair,
+                      }}>{pars[i] || ""}</td>
+                    ))}
+                    <td style={{ ...totCell, fontSize: FS.micro, color: K.t3, borderBottom: hair }}>{t.par || ""}</td>
+                  </tr>
+                  <tr>
+                    {holes.map(i => (
+                      <td key={i} style={{ textAlign: "center", padding: "2px 1px", borderLeft: i === holes[0] ? "none" : hair }}>
+                        <ScoreCell score={scores[i]} par={pars[i] || 0} isSkin={skinSet.has(`${r}_${i}`)} strokes={strokes ? strokes[i] || 0 : 0} />
+                      </td>
+                    ))}
+                    <td style={{ ...totCell, fontSize: FS.label, fontWeight: 800, color: K.t1 }}>{t.gross || "–"}</td>
+                  </tr>
+                </tbody>
+              </table>
+            );
+          };
+
           return (
-            <div key={r} style={{ marginBottom: 8 }}>
-              <HalfGrid holes={front9} />
-              <HalfGrid holes={back9} />
+            <div key={r} style={{ border: edge, borderRadius: R.sm, overflow: "hidden", marginBottom: 8 }}>
+              {/* Which round, which course, what it was worth. The heading is
+                  the entire point of the rebuild — without it the grids below
+                  are eight interchangeable blocks of nine numbers. */}
+              <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 7px", background: `${K.bdr}${ALPHA.wash}`, borderBottom: edge }}>
+                <span style={{ fontSize: FS.micro, fontWeight: 800, color: K.acc, letterSpacing: 0.5, flexShrink: 0 }}>RD {r}</span>
+                <span style={{ fontSize: FS.micro, color: K.t3, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{courseName}</span>
+                {roundSkins > 0 && (
+                  <span style={{ fontSize: FS.micro, fontWeight: 800, color: K.gold, flexShrink: 0 }}>
+                    {roundSkins} SKIN{roundSkins !== 1 ? "S" : ""}
+                  </span>
+                )}
+                {/* A card still out on the course says so, rather than showing
+                    a total that looks like a finished round eight shots low. */}
+                {round.played < 18 && (
+                  <span style={{ fontSize: FS.micro, fontWeight: 700, color: K.t3, flexShrink: 0 }}>THRU {round.played}</span>
+                )}
+                <span style={{ fontSize: FS.label, fontWeight: 800, color: K.t1, flexShrink: 0 }}>{round.gross}</span>
+                {/* Under par is RED, the same rule the leaderboard total
+                    follows. A negative number in golf is red — teal here
+                    was the app saying "accent" where the game says "under
+                    par", and the two are not the same thing. */}
+                <span style={{ fontSize: FS.micro, fontWeight: 800, color: round.toPar < 0 ? K.under : K.t3, flexShrink: 0, minWidth: 18, textAlign: "right" }}>
+                  {toParStr(round.toPar)}
+                </span>
+              </div>
+              <Nine holes={Array.from({ length: 9 }, (_, i) => i)} label="OUT" />
+              <div style={{ height: 1, background: `${K.bdr}${ALPHA.line}` }} />
+              <Nine holes={Array.from({ length: 9 }, (_, i) => i + 9)} label="IN" />
             </div>
           );
         })}
+        {/* One line, once, at the foot of the whole card — the two circles are
+            not self-explanatory and a player asked to take them on trust will
+            read a birdie as a skin. */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, fontSize: FS.micro, color: K.t3, paddingTop: 2 }}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+            <span style={{ width: 11, height: 11, borderRadius: "50%", border: `1.5px solid ${K.gold}`, display: "inline-block" }} /> SKIN
+          </span>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+            <span style={{ width: 11, height: 11, borderRadius: "50%", border: `1.5px solid ${K.t2}`, display: "inline-block" }} /> UNDER PAR
+          </span>
+          {!grossMode && (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+              <span style={{ width: 3, height: 3, borderRadius: "50%", background: K.t3, display: "inline-block" }} /> STROKE
+            </span>
+          )}
+        </div>
       </div>
     );
   };
@@ -3538,7 +3746,7 @@ function BettingView({
           away. */}
       <StickyTop>
         <SegmentedToggle
-          options={[["skins", "💰 Skins"], ["ctp", "🎯 CTP"], ["lownet", "🏅 Low Net"], ["market", "📈 Market"]]}
+          options={[["skins", "Skins"], ["ctp", "CTP"], ["lownet", "Low Net"], ["market", "Market"]]}
           value={tab} onChange={setTab}
         />
       </StickyTop>
@@ -3775,68 +3983,174 @@ function BettingView({
           {/* Every round on one screen rather than behind pills: there are
               four of them, each is one line, and the question this tab
               answers — who took which day — is a comparison across them.
-              No leaders card above it: with four rounds the totals are a
-              sum anybody can do off these rows, and a second card repeating
-              the same names was a longer way to say it.
 
-              And no rules under it. The rows say what happened — a name, a
-              net, a share, "ea" when it was split — and the two rules worth
-              knowing are visible in what they produce: a tie prints two
-              names and half the money each, and a round nobody has finished
-              prints that instead of a leader. See lib/sideGames lowNetRounds
-              for why a card walked in early does not count. */}
+              A LEDGER, not a list. Gross, strokes and net each get a column
+              and line up down the page, which is what turns "who won Rd 2"
+              into "Rd 2 was tied off a 78 and an 85" without anybody doing
+              arithmetic. The old row stacked those three numbers into a grey
+              sub-line under the name, where they could not be compared with
+              the round above.
+
+              A tie is simply a second row under the same round number,
+              carrying that man's OWN gross and strokes — two players tie on
+              the net off different cards, so the single "2 tied on 71 net"
+              the old row printed was true of the pair and a lie about each
+              of them. */}
           <div style={{ background: K.card, borderRadius: R.lg, border: `1px solid ${K.bdr}`, overflow: "hidden" }}>
             <div style={{ display: "flex", padding: "8px 14px", borderBottom: `1px solid ${K.bdr}`, fontSize: FS.label, fontWeight: 700, color: K.gold, letterSpacing: 1 }}>
               <span style={{ flex: 1 }}>BY ROUND</span>
-              <span style={{ color: K.t3 }}>NET · PAYS</span>
+              <span style={{ color: K.t3 }}>{lowNetRows.filter(r => r.decided).length} OF {roundList.length}</span>
             </div>
-            {lowNetRows.map(r => {
-              const settled = roundSettled(r.round);
-              const share = r.winners.length > 0 ? lowNetPerRound / r.winners.length : 0;
-              return (
-                <div key={r.round} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 14px", borderBottom: `1px solid ${K.bdr}${ALPHA.hair}` }}>
-                  <span style={{ fontSize: FS.label, fontWeight: 800, color: K.t3, width: 32, flexShrink: 0 }}>Rd {r.round}</span>
-                  {r.decided ? (
-                    <>
-                      <span style={{ flex: 1, minWidth: 0, fontSize: FS.small, fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {r.winners.map(w => w.name).join(", ")}
+            <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+              <colgroup>
+                {/* The four score columns are held at near-equal widths so
+                    the block of numbers reads as a block. WINNER takes the
+                    slack; PAYS is the widest because "$15.63" is the longest
+                    string on the row. */}
+                <col style={{ width: 34 }} />
+                <col />
+                <col style={{ width: 36 }} />
+                <col style={{ width: 32 }} />
+                <col style={{ width: 34 }} />
+                <col style={{ width: 32 }} />
+                <col style={{ width: 54 }} />
+              </colgroup>
+              <thead>
+                <tr style={{ background: `${K.bdr}${ALPHA.wash}` }}>
+                  {[["RD", "left"], ["WINNER", "left"], ["Gross", "right"], ["CH", "right"], ["NET", "right"], ["±", "right"], ["PAYS", "right"]].map(([label, align], i, all) => (
+                    <th key={label} style={{
+                      textAlign: align, fontSize: FS.micro, fontWeight: 700, letterSpacing: 0.5, color: K.t3,
+                      padding: "5px 4px", borderBottom: `1px solid ${K.bdr}${ALPHA.line}`,
+                      paddingLeft: i === 0 ? 10 : 4, paddingRight: i === all.length - 1 ? 12 : 4,
+                    }}>{label}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {lowNetRows.map((r, ri) => {
+                  const settled = roundSettled(r.round);
+                  const share = r.winners.length > 0 ? lowNetPerRound / r.winners.length : 0;
+                  const courseName = roundSetup(r.round).course?.name || "";
+                  const open = openNetRound === r.round;
+                  const toggle = () => setOpenNetRound(open ? null : r.round);
+                  // Banded by ROUND rather than by row, so a tie's two lines
+                  // read as one day rather than as two separate results.
+                  const band = ri % 2 === 1 ? `${K.bdr}${ALPHA.wash}` : "transparent";
+                  const cell = (extra = {}) => ({
+                    padding: "7px 4px", textAlign: "right", fontSize: FS.small, fontWeight: 600,
+                    color: K.t2, borderTop: `1px solid ${K.bdr}${ALPHA.hair}`, ...extra,
+                  });
+                  // The round number and its chevron. Same glyph and rotation
+                  // the skins leaders use, so an expandable row looks the same
+                  // wherever it appears in this tab.
+                  const rdCell = (extra = {}) => (
+                    <td onClick={toggle} style={cell({ textAlign: "left", paddingLeft: 10, cursor: "pointer", ...extra })}>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+                        <span style={{ fontSize: FS.micro, color: open ? K.acc : K.t3, transition: `transform ${MOTION}`, display: "inline-block", transform: `${open ? "rotate(90deg)" : "rotate(0)"} scale(0.8)` }}>▶</span>
+                        <span style={{ fontSize: FS.label, fontWeight: 800, color: open ? K.acc : K.t3 }}>{r.round}</span>
+                      </span>
+                    </td>
+                  );
+                  // The whole field for the day, lowest net first. It answers
+                  // the question the winner's name provokes — by how much —
+                  // and on a round still being played it is the only thing
+                  // this tab can say at all.
+                  const fieldRows = !open ? [] : lowNetRoundField({ players: lowNetField, round: r.round, lineFor }).map(f => {
+                    const won = r.winners.some(w => w.pid === f.pid);
+                    const sub = (extra = {}) => cell({
+                      fontSize: FS.label, borderTop: "none", color: K.t3,
+                      background: `${K.bdr}${ALPHA.wash}`, padding: "5px 4px", ...extra,
+                    });
+                    return (
+                      <tr key={`${r.round}_f_${f.pid}`}>
+                        <td style={sub({ paddingLeft: 10 })} />
+                        {/* The winner is gilded rather than left out. Seeing
+                            the name that took the money sitting one line above
+                            the man who missed it by a shot is the entire
+                            reason to open this. */}
+                        <td className="wbc-name" style={sub({ textAlign: "left", color: won ? K.gold : K.t2, fontWeight: won ? 800 : 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })}>
+                          {f.name}
+                        </td>
+                        <td style={sub()}>{f.gross}</td>
+                        <td style={sub()}>{f.strokes}</td>
+                        {/* A card still out has a gross and no round. Printing
+                            its net would rank a man on the 14th against men
+                            who have signed — the same thing lowNetRounds
+                            refuses to do. */}
+                        <td style={sub({ color: f.complete ? (f.net < 0 ? K.under : K.t2) : K.t3, fontWeight: 700 })}>
+                          {f.complete ? f.netScore : "–"}
+                        </td>
+                        {/* A card still out takes BOTH trailing cells for its
+                            standing. "THRU 16" does not fit the PAYS column
+                            alone and wrapped onto two lines; the ± beside it
+                            is empty on these rows anyway. */}
+                        {f.complete ? (
+                          <>
+                            <td style={sub({ color: f.net < 0 ? K.under : K.t3, fontWeight: 700 })}>{fmtPar(f.net)}</td>
+                            <td style={sub({ paddingRight: 12 })} />
+                          </>
+                        ) : (
+                          <td colSpan={2} style={sub({ paddingRight: 12, fontSize: FS.micro, fontWeight: 700, letterSpacing: 0.3, whiteSpace: "nowrap" })}>
+                            {f.wd ? "WD" : `THRU ${f.thru}`}
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  });
+
+                  if (!r.decided) return [
+                    <tr key={r.round} style={{ background: band }}>
+                      {rdCell()}
+                      <td colSpan={6} onClick={toggle} style={cell({ textAlign: "left", color: K.t3, paddingRight: 12, cursor: "pointer" })}>
+                        {roundSetup(r.round).course ? "Nobody has finished yet" : "No course set"}
+                        {courseName && <span style={{ display: "block", fontSize: FS.micro, color: K.t3, fontWeight: 600 }}>{courseName}</span>}
+                      </td>
+                    </tr>,
+                    ...fieldRows,
+                  ];
+
+                  return [
+                    ...r.winners.map((w, wi) => (
+                      <tr key={`${r.round}_${w.pid}`} style={{ background: band }}>
+                        {/* The round number prints once. A tie's second row
+                            leaves it blank rather than repeating it, which is
+                            what makes the pair read as one day. */}
+                        {wi === 0 ? rdCell() : <td style={cell({ borderTop: "none" })} />}
+                        <td onClick={toggle} style={cell({ textAlign: "left", fontWeight: 700, color: K.t1, borderTop: wi > 0 ? "none" : undefined, cursor: "pointer", minWidth: 0 })}>
+                          <span className="wbc-name" style={{ display: "block", fontSize: FS.small, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{w.name}</span>
+                          {/* The course, under the first winner only. It is
+                              the one thing a round number does not say and
+                              the thing that explains the scores under it —
+                              a 78 at The Loon is not a 78 at the Tribute. */}
+                          {wi === 0 && courseName && (
+                            <span style={{ display: "block", fontSize: FS.micro, color: K.t3, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{courseName}</span>
+                          )}
+                        </td>
+                        <td style={cell({ borderTop: wi > 0 ? "none" : undefined })}>{w.gross}</td>
+                        <td style={cell({ borderTop: wi > 0 ? "none" : undefined })}>{w.strokes}</td>
+                        {/* The net as a SCORE — how a low net gets read out in
+                            a car park — and the to-par beside it. BOTH take the
+                            under-par red: a 67 on a par 72 is a number under
+                            par whether it is written as 67 or as −5, and
+                            colouring only one of them made the pair look like
+                            two different facts. */}
+                        <td style={cell({ fontSize: FS.body, fontWeight: 800, color: w.net < 0 ? K.under : K.t1, borderTop: wi > 0 ? "none" : undefined })}>{w.netScore}</td>
+                        <td style={cell({ fontWeight: 800, color: w.net < 0 ? K.under : K.t1, borderTop: wi > 0 ? "none" : undefined })}>{fmtPar(w.net)}</td>
                         {/* A day still being played can change hands as the
-                            last group comes in, so it says so rather than
-                            reading like a result. */}
-                        {!settled && <span style={{ color: K.warn, fontWeight: 700 }}> · still out</span>}
-                        {/* The gross it came off, so the number can be
-                            checked against the card rather than taken on
-                            trust — this is the line that gets argued about.
-                            Only for a lone winner: two men tie on the NET,
-                            off different grosses and different strokes, so
-                            one gross printed under both names is a sum that
-                            does not work for either of them. */}
-                        <span style={{ display: "block", fontSize: FS.label, color: K.t3, fontWeight: 600 }}>
-                          {r.winners.length === 1
-                            ? `${r.winners[0].gross} gross · ${r.winners[0].strokes} stroke${r.winners[0].strokes !== 1 ? "s" : ""}`
-                            : `${r.winners.length} tied on ${r.winners[0].netScore} net`}
-                        </span>
-                      </span>
-                      {/* The net as a SCORE, which is how a low net is read
-                          out, with the to-par under it — the figure the
-                          leaderboard ranks on and the one that decided the
-                          round. */}
-                      <span style={{ textAlign: "right", flexShrink: 0 }}>
-                        <span style={{ display: "block", fontSize: FS.body, fontWeight: 800, color: K.acc }}>{r.winners[0].netScore}</span>
-                        <span style={{ display: "block", fontSize: FS.label, color: K.t3, fontWeight: 700 }}>{fmtPar(r.net)}</span>
-                      </span>
-                      <span style={{ fontSize: FS.small, color: K.t3, flexShrink: 0, minWidth: 64, textAlign: "right" }}>
-                        {money(share)}{r.winners.length > 1 ? " ea" : ""}
-                      </span>
-                    </>
-                  ) : (
-                    <span style={{ flex: 1, fontSize: FS.small, color: K.t3 }}>
-                      {roundSetup(r.round).course ? "Nobody has finished yet" : "No course set"}
-                    </span>
-                  )}
-                </div>
-              );
-            })}
+                            last group comes in, so the money is held rather
+                            than printed as though it had been paid. */}
+                        <td style={cell({ paddingRight: 12, borderTop: wi > 0 ? "none" : undefined })}>
+                          {settled
+                            ? money(share)
+                            : <span style={{ fontSize: FS.micro, fontWeight: 800, letterSpacing: 0.5, color: K.warn }}>OUT</span>}
+                        </td>
+                      </tr>
+                    )),
+                    ...fieldRows,
+                  ];
+                })}
+              </tbody>
+            </table>
           </div>
 
         </div>
@@ -3932,7 +4246,32 @@ function BettingView({
                   <span style={{ fontSize: FS.label, fontWeight: 700, color: K.t3, letterSpacing: 0.5 }}>SHARES</span>
                 </div>
                 <div style={{ fontSize: FS.small, fontWeight: 700, color: K.t1, marginTop: 2 }}>{w.label}</div>
-                <div style={{ fontSize: FS.label, color: w.open ? K.acc : K.t3, marginTop: 2, lineHeight: 1.4 }}>{w.note}</div>
+                <div style={{ fontSize: FS.label, color: w.open ? K.acc : K.t3, marginTop: 2, lineHeight: 1.4 }}>
+                  {/* A running clock in place of the note while there is one to
+                      run. "Open until the first tee time" is not something a
+                      man deciding whether to think it over can act on; "12:04"
+                      is. Once it has rung, the note takes the line back and
+                      says why the window is shut. */}
+                  {w.key === "opening" && bell ? "Closes in" : w.note}
+                  {w.key === "opening" && bell && (
+                    <span style={{
+                      display: "block", marginTop: 1,
+                      fontSize: FS.body, fontWeight: 800, letterSpacing: 0.5,
+                      fontVariantNumeric: "tabular-nums",
+                      // The last hour turns the clock amber. By then it is not
+                      // information any more, it is a deadline.
+                      color: bell.urgent ? K.warn : K.acc,
+                    }}>{bell.label}</span>
+                  )}
+                  {/* The deadline itself. The countdown says how long; this
+                      says when, which is the one a player checks against the
+                      tee sheet on the noticeboard. */}
+                  {w.key === "opening" && w.at != null && (
+                    <span style={{ display: "block", color: K.t3 }}>
+                      First tee {minutesToTimeStr(new Date(w.at).getHours() * 60 + new Date(w.at).getMinutes())}
+                    </span>
+                  )}
+                </div>
                 {/* The halfway window is a second buy-in, so its chip has to
                     say what it costs. Without that line it reads as ten free
                     shares for the field — and since nothing is prepaid, the
@@ -4454,12 +4793,12 @@ function PairingsEditor({ activePlayers, pairingsData, setPairings, tRounds, cou
     // Auto-propagate to subsequent groups
     const newMins = parseTime(normalized);
     if (newMins != null && gi < numGroups - 1) {
-      let interval = 8;
+      let interval = TEE_INTERVAL_MIN;
       if (gi > 0) {
         const prevMins = parseTime(current[gi - 1]);
         if (prevMins != null) {
           interval = newMins - prevMins;
-          if (interval <= 0) interval = 8;
+          if (interval <= 0) interval = TEE_INTERVAL_MIN;
         }
       }
       for (let i = gi + 1; i < numGroups; i++) {
@@ -7423,27 +7762,7 @@ function AdminView({ activePlayers, rosterPlayers, sideGames, onUpdateSideGames,
           the round selector, the play date and the course all lived over here,
           and the foursomes that use them lived over there. */}
       {tab === "rounds" && (
-        <PairingsEditor key={`${editRound}:${activePlayers.length}`} activePlayers={activePlayers} pairingsData={pairingsData} setPairings={setPairings} tRounds={tRounds} courses={courses} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
-              setTeeTimesData(prev => {
-                const next = typeof updater === "function" ? updater(prev) : updater;
-                // One commit for the whole tee sheet. Writing a row per player
-                // meant a snapshot per player, and each one rebuilt teeTimesData
-                // from a server that was only part way through the change —
-                // which is what made the times flicker while they were typed.
-                const rows = [];
-                Object.keys(next).forEach(rnd => {
-                  (pairingsData[rnd] || []).forEach((grp, gi) => {
-                    const teeTime = (next[rnd] || [])[gi] || null;
-                    grp.forEach(pid => rows.push({
-                      id: docIds.pairing(_e(), rnd, gi + 1, pid), tournament_id: TOURNAMENT_ID,
-                      round_number: parseInt(rnd), group_number: gi + 1, player_id: pid, tee_time: teeTime,
-                    }));
-                  });
-                });
-                db.upsertMany("pairings", rows);
-                return next;
-              });
-            }} roundDates={roundDates} onSetRoundDate={onSetRoundDate} scoringOpen={scoringOpen} onSetScoringOpen={onSetScoringOpen} pairingStrategy={pairingStrategy} onSetPairingStrategy={onSetPairingStrategy} leaderboard={leaderboard} finalizedRounds={finalizedRounds} getPlayerTee={getPlayerTee} editRound={editRound} holeData={holeData} />
+        <PairingsEditor key={`${editRound}:${activePlayers.length}`} activePlayers={activePlayers} pairingsData={pairingsData} setPairings={setPairings} tRounds={tRounds} courses={courses} teeTimesData={teeTimesData} setTeeTimesData={setTeeTimesData} roundDates={roundDates} onSetRoundDate={onSetRoundDate} scoringOpen={scoringOpen} onSetScoringOpen={onSetScoringOpen} pairingStrategy={pairingStrategy} onSetPairingStrategy={onSetPairingStrategy} leaderboard={leaderboard} finalizedRounds={finalizedRounds} getPlayerTee={getPlayerTee} editRound={editRound} holeData={holeData} />
       )}
 
       {/* Discard one player's card for this round. Sits at the bottom of the
@@ -8073,6 +8392,17 @@ export default function WBCApp() {
   const tournamentName = tournamentMeta?.name || TOURNAMENT.name;
   const tournamentLocation = tournamentMeta?.location || "";
 
+  // When the field tees off — round one's earliest tee time. The same instant
+  // the market's opening bell rings, off the same derivation, so the header
+  // and the Betting tab can never be counting to two different moments.
+  // Null until the round has both a date and a tee sheet, which is what keeps
+  // a countdown off a tournament nobody has scheduled yet.
+  //
+  // Up here beside the location because both render branches want it: the
+  // guest leaderboard gets the same header, and a spectator waiting on the
+  // first tee is the person most likely to be watching a countdown to it.
+  const firstTeeAt = teeOffAt(roundDates[1], (teeTimesData[1] || []).map(teeTimeToMinutes));
+
   // Point the module-level NUM_ROUNDS at the saved count, DURING render rather
   // than from an effect. Everything below — and every child this render is
   // about to produce — reads that binding while rendering, so an effect would
@@ -8236,7 +8566,7 @@ export default function WBCApp() {
         if (pairRows?.length) {
           const sorted = pairRows.sort((a, b) => a.round_number - b.round_number || a.group_number - b.group_number || (a.player_id || "").localeCompare(b.player_id || ""));
           setPairingsData(rowsToPairings(sorted));
-          setTeeTimesData(prev => mergeTeeTimes(prev, rowsToTeeTimes(sorted)));
+          setTeeTimesData(prev => mergeTeeTimes(rowsToTeeTimes(sorted), prev));
         }
 
         const teeRows = await db.get("tee_assignments", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
@@ -8255,6 +8585,9 @@ export default function WBCApp() {
           if (s.tees_saved) setTeesSaved(s.tees_saved);
           if (s.tees_modified) setTeesModified(s.tees_modified);
           if (s.round_dates) setRoundDates(s.round_dates);
+          // State wins over whatever the pairing rows carry: it is the copy a
+          // director edited, and it exists for groups that have no players yet.
+          if (s.tee_times) setTeeTimesData(prev => mergeTeeTimes(prev, s.tee_times));
           if (s.scoring_open) setScoringOpen(s.scoring_open);
           if (s.pairing_strategy) setPairingStrategy(s.pairing_strategy);
           if (s.meta) setTournamentMeta(s.meta);
@@ -8285,7 +8618,12 @@ export default function WBCApp() {
     unsubs.push(db.subscribe("pairings", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
       const sorted = docs.sort((a, b) => a.round_number - b.round_number || a.group_number - b.group_number || (a.player_id || "").localeCompare(b.player_id || ""));
       setPairingsData(rowsToPairings(sorted));
-      setTeeTimesData(prev => mergeTeeTimes(prev, rowsToTeeTimes(sorted)));
+      // The SHEET wins, and the rows fill only what it has never known: a
+      // director's tee sheet lives on tournament_state now, and a pairing row
+      // is a copy of it made when the draw was written. Reading them the other
+      // way round let a row written before the sheet — or one belonging to a
+      // group that has since emptied — put a blank back over a real time.
+      setTeeTimesData(prev => mergeTeeTimes(rowsToTeeTimes(sorted), prev));
     }));
 
     unsubs.push(db.subscribe("tee_assignments", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
@@ -8306,6 +8644,7 @@ export default function WBCApp() {
         if (docs[0].tees_saved) setTeesSaved(docs[0].tees_saved);
         if (docs[0].tees_modified) setTeesModified(docs[0].tees_modified);
         if (docs[0].round_dates) setRoundDates(docs[0].round_dates);
+        if (docs[0].tee_times) setTeeTimesData(prev => mergeTeeTimes(prev, docs[0].tee_times));
         if (docs[0].scoring_open) setScoringOpen(docs[0].scoring_open);
         if (docs[0].pairing_strategy) setPairingStrategy(docs[0].pairing_strategy);
         if (docs[0].meta) setTournamentMeta(docs[0].meta);
@@ -8348,12 +8687,13 @@ export default function WBCApp() {
     });
   };
 
-  const saveTournamentState = async (finalized, savedTees, modTees, rDates, sOpen, pStrat) => {
+  const saveTournamentState = async (finalized, savedTees, modTees, rDates, sOpen, pStrat, tTimes) => {
     const tsSaved = savedTees !== undefined ? savedTees : teesSaved;
     const tsMod = modTees !== undefined ? modTees : teesModified;
     const rd = rDates !== undefined ? rDates : roundDates;
     const so = sOpen !== undefined ? sOpen : scoringOpen;
     const ps = pStrat !== undefined ? pStrat : pairingStrategy;
+    const tt = tTimes !== undefined ? tTimes : teeTimesData;
     await db.upsert("tournament_state", {
       id: `ts_${TOURNAMENT_ID}`,
       tournament_id: TOURNAMENT_ID,
@@ -8363,6 +8703,11 @@ export default function WBCApp() {
       round_dates: rd,
       scoring_open: so,
       pairing_strategy: ps,
+      // The tee sheet. It used to live ONLY on the pairing rows, which meant a
+      // group with nobody in it had nowhere to keep its time — see the writer
+      // in AdminView. It is a per-round admin setting like round_dates, and it
+      // belongs beside them, independent of who is drawn into which group.
+      tee_times: tt,
       updated_at: new Date().toISOString(),
     });
   };
@@ -9307,6 +9652,7 @@ export default function WBCApp() {
             same header rather than a second left-aligned copy of one. */}
         <AppHeader
           location={tournamentLocation}
+          countdownAt={firstTeeAt}
           right={<button onClick={handleLogout} style={{ background: "transparent", border: `1px solid ${K.bdr}`, borderRadius: R.sm, color: K.t3, fontSize: FS.small, fontWeight: 600, padding: "5px 12px", cursor: "pointer" }}>Exit</button>}
         />
         <div style={{ padding: "14px 20px 0 20px", flex: 1, overflowY: "hidden", overflowX: "hidden", display: "flex", flexDirection: "column", minHeight: 0, marginBottom: 8 }}>
@@ -9407,6 +9753,7 @@ export default function WBCApp() {
            at, since with one it would be a control that changes nothing.
            Up here it costs the scoring screen nothing at all — not a row,
            not a corner of one. */
+        countdownAt={firstTeeAt}
         right={user.isDirector && view === "scoring" && switchableGroupList.length > 1 && (
           <GroupSwitcher
             groups={switchableGroupList}
@@ -9579,15 +9926,21 @@ export default function WBCApp() {
           <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeTimesData={teeTimesData} roundDates={roundDates} scoringOpen={scoringOpen} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={async (key, signerPid, signerName, present, rnd) => { const nonSigners = (present || []).filter(pid => pid !== signerPid); const autoFinal = nonSigners.length === 0; const optimistic = { signedBy: signerPid, signedByName: signerName, attestedBy: [], present: present || [] }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: optimistic })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), tournament_id: TOURNAMENT_ID, groupKey: key, round: rnd, signedBy: signerPid, signedByName: signerName, present: present || [], attestedBy: [], signedAt: new Date().toISOString() }); if (autoFinal) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onAttestScorecard={async (key, attesterPid, nonSigners) => { const cur = scorecardSigs[key]; if (!cur) return; const attestedBy = [...new Set([...(cur.attestedBy || []), attesterPid])]; const optimistic = { ...cur, attestedBy }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: { ...prev[key], attestedBy } })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), attestedBy }); const allDone = (nonSigners || []).every(pid => attestedBy.includes(pid)); if (allDone) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onUnsignScorecard={async key => { pendingSigsRef.current.delete(key); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); if (finalizedRounds[key]) { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); pendingSigsRef.current.delete(key); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); await saveTournamentState(nf); }} onGoToAdminCourses={(rnd) => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); setAdminSettingsRound(rnd || null); }} markPlayerWD={markPlayerWD} ctpData={ctpData} onSetCtp={onSetCtp} onConfirmCtp={onConfirmCtp} directorPick={directorPick} onGroupChange={setScoringGroup} onSetRound={setRound} />
         </div>
         {view === "players" && <PlayersView players={allPlayers} registry={registry} meId={user?.id} year={getTournamentYear()} isDirector={!!user.isDirector} onSetOverride={setIndexOverride} />}
-        {view === "skins" && <BettingView players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} numRounds={numRounds} getPlayerTee={getPlayerTee} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} marketBets={marketBets} onSaveMarketBet={onSaveMarketBet} leaderboard={getLeaderboard} finalizedRounds={finalizedRounds} pairingsData={pairingsData} />}
+        {view === "skins" && <BettingView players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} numRounds={numRounds} getPlayerTee={getPlayerTee} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} marketBets={marketBets} onSaveMarketBet={onSaveMarketBet} leaderboard={getLeaderboard} finalizedRounds={finalizedRounds} pairingsData={pairingsData} firstTeeAt={firstTeeAt} />}
         {view === "groups" && <GroupsView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} pairingsData={pairingsData} teeTimesData={teeTimesData} getPlayerTee={getPlayerTee} user={user} />}
         {view === "admin" && (user.isDirector ? <AdminView activePlayers={activePlayers} rosterPlayers={allPlayers} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} rebuyIds={rebuyIds} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
               setTeeTimesData(prev => {
                 const next = typeof updater === "function" ? updater(prev) : updater;
-                // One commit for the whole tee sheet. Writing a row per player
-                // meant a snapshot per player, and each one rebuilt teeTimesData
-                // from a server that was only part way through the change —
-                // which is what made the times flicker while they were typed.
+                // THE SHEET IS SAVED FIRST, and on its own document. Tee times
+                // used to be written only onto pairing rows, so a time typed
+                // against a group with nobody in it produced no rows and was
+                // never stored at all — it sat in React state looking saved
+                // until the next thing that rebuilt state from the server took
+                // it away. A tee sheet is normally filled in BEFORE the draw,
+                // which is exactly when there are no rows to carry it.
+                saveTournamentState(finalizedRounds, undefined, undefined, undefined, undefined, undefined, next);
+                // The rows keep their copy, because the scoring gate reads a
+                // group's tee time off the row. One commit for all of them.
                 const rows = [];
                 Object.keys(next).forEach(rnd => {
                   (pairingsData[rnd] || []).forEach((grp, gi) => {
@@ -9598,7 +9951,7 @@ export default function WBCApp() {
                     }));
                   });
                 });
-                db.upsertMany("pairings", rows);
+                if (rows.length) db.upsertMany("pairings", rows);
                 return next;
               });
             }} roundDates={roundDates} onSetRoundDate={async (rnd, dateStr) => { const next = { ...roundDates }; if (dateStr) next[rnd] = dateStr; else delete next[rnd]; setRoundDates(next); await saveTournamentState(finalizedRounds, teesSaved, teesModified, next, scoringOpen); }} scoringOpen={scoringOpen} onSetScoringOpen={async (rnd, open) => { const next = { ...scoringOpen }; if (open) next[rnd] = true; else delete next[rnd]; setScoringOpen(next); await saveTournamentState(finalizedRounds, teesSaved, teesModified, roundDates, next); }} pairingStrategy={pairingStrategy} onSetPairingStrategy={async (rnd, cfg) => { const next = { ...pairingStrategy }; if (cfg) next[rnd] = cfg; else delete next[rnd]; setPairingStrategy(next); await saveTournamentState(finalizedRounds, teesSaved, teesModified, roundDates, scoringOpen, next); }} leaderboard={getLeaderboard} holeData={holeData} finalizedRounds={finalizedRounds} onDiscardRoundScores={onDiscardRoundScores} onFinalizeRound={async rnd => { const nf = { ...finalizedRounds, [rnd]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${rnd}`, tournament_id: TOURNAMENT_ID, round: rnd, finalized: true }); if (rnd < NUM_ROUNDS) setRound(rnd + 1); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf); if (/^\d+$/.test(String(key))) { await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${key}`, tournament_id: TOURNAMENT_ID, round: Number(key), finalized: false }); } else { setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); } }} notify={notify} getPlayerTee={getPlayerTee} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} externalSettingsRound={adminSettingsRound} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); setAdminSettingsRound(null); }} teesSaved={teesSaved} onTeesSave={async r => { const next = { ...teesSaved, [r]: true }; const nextMod = { ...teesModified, [r]: false }; setTeesSaved(next); setTeesModified(nextMod); await saveTournamentState(finalizedRounds, next, nextMod); }} teesModified={teesModified} onTeesModify={async r => { const nextMod = { ...teesModified, [r]: true }; setTeesModified(nextMod); await saveTournamentState(finalizedRounds, teesSaved, nextMod); }} memberships={memberships} onSetDirector={onSetDirector} claims={claims} authUid={fbUser?.uid || null} tournamentMeta={tournamentMeta} onSaveTournamentMeta={saveTournamentMeta} /> : (

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { fieldFor, potFor, perUnit, computeSkins, allSkins, skinCounts, buyInSheet, toggleIn, togglePaid, lowNetRounds } from "./sideGames";
+import { fieldFor, potFor, perUnit, computeSkins, allSkins, skinCounts, buyInSheet, toggleIn, togglePaid, lowNetRounds, lowNetRoundField } from "./sideGames";
 import { WD_SCORE } from "./individualBoard";
 
 const players = [
@@ -430,5 +430,78 @@ describe("the owed → paid → out cycle", () => {
     expect(sheet.grand).toBe(20);
     expect(sheet.outstanding).toBe(0);
     expect(sheet.totals.skins).toMatchObject({ count: 1, paidCount: 1 });
+  });
+});
+
+describe("lowNetRoundField", () => {
+  const line = (net, strokes = 0, over = {}) => ({
+    played: true, wd: false, thru: 18,
+    netToPar: net, grossToPar: net + strokes, gross: 72 + net + strokes, ...over,
+  });
+  const from = (map) => (pid, round) => (map[`${pid}_${round}`] ?? null);
+
+  it("sorts the finished field by net, lowest first", () => {
+    const rows = lowNetRoundField({
+      players, round: 1,
+      lineFor: from({ a_1: line(4), b_1: line(-2), c_1: line(1) }),
+    });
+    expect(rows.map(r => r.pid)).toEqual(["b", "c", "a"]);
+  });
+
+  it("puts everybody still out BELOW the finished cards, whatever their net", () => {
+    // The man on the 14th at -6 is not leading anybody — he has no round yet.
+    const rows = lowNetRoundField({
+      players, round: 1,
+      lineFor: from({ a_1: line(-6, 0, { thru: 14 }), b_1: line(3), c_1: line(5) }),
+    });
+    expect(rows.map(r => r.pid)).toEqual(["b", "c", "a"]);
+    expect(rows[2]).toMatchObject({ complete: false, thru: 14 });
+  });
+
+  it("orders the unfinished by how far round they are", () => {
+    const rows = lowNetRoundField({
+      players, round: 1,
+      lineFor: from({
+        a_1: line(0, 0, { thru: 6 }), b_1: line(0, 0, { thru: 15 }), c_1: line(0, 0, { thru: 11 }),
+      }),
+    });
+    expect(rows.map(r => [r.pid, r.thru])).toEqual([["b", 15], ["c", 11], ["a", 6]]);
+  });
+
+  it("keeps a withdrawal, ranked with the unfinished — its holes are real", () => {
+    const rows = lowNetRoundField({
+      players, round: 1,
+      lineFor: from({ a_1: line(-9, 0, { wd: true }), b_1: line(2) }),
+    });
+    expect(rows.map(r => r.pid)).toEqual(["b", "a"]);
+    expect(rows[1]).toMatchObject({ wd: true, complete: false });
+  });
+
+  it("drops a card nobody has started", () => {
+    const rows = lowNetRoundField({
+      players, round: 1,
+      lineFor: from({ a_1: { played: false }, b_1: line(1) }),
+    });
+    expect(rows.map(r => r.pid)).toEqual(["b"]);
+  });
+
+  it("breaks a tie on net by name, so the order does not wander between renders", () => {
+    const rows = lowNetRoundField({
+      players, round: 1,
+      lineFor: from({ a_1: line(2), b_1: line(2), c_1: line(2) }),
+    });
+    expect(rows.map(r => r.name)).toEqual(["Aaron", "Brad", "Cole"]);
+  });
+
+  it("reports the net as a score alongside to-par, the way the ledger prints it", () => {
+    const rows = lowNetRoundField({
+      players, round: 1,
+      lineFor: from({ a_1: line(-4, 22) }),
+    });
+    expect(rows[0]).toMatchObject({ gross: 90, strokes: 22, net: -4, netScore: 68 });
+  });
+
+  it("survives an empty field", () => {
+    expect(lowNetRoundField({ players: [], round: 1, lineFor: () => null })).toEqual([]);
   });
 });
