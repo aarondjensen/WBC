@@ -27,6 +27,7 @@ import { fitPairings, rungLines, nameWidthCeiling, CARD_GAP } from "./lib/pairin
 import { Popup, ConfirmModal } from "./components/Popup";
 import { EditionSwitcher } from "./components/EditionSwitcher";
 import { docIds } from "./lib/editionId";
+import { isHistoryCourseId } from "./lib/historyImport";
 import { openingHole, nineComplete } from "./lib/holeAdvance";
 import { scoreWindow, nudgeUpTarget, nudgeDownTarget } from "./lib/scoreEntry";
 import { groupTrouble, roundTrouble, describeTrouble, blocksScoring, missingTees, describeMissingTees } from "./lib/roundSetup";
@@ -365,6 +366,23 @@ const rowsToTeeData = (rows) => {
     td[r.round_number][r.player_id] = r.tee_name;
   });
   return td;
+};
+
+// The RECORDED course handicap, when a row carries one → { round: { pid: ch } }.
+//
+// Only imported editions have it (see lib/historyImport.js). The early WBCs set
+// a handicap once and played it on every course, so those years cannot be
+// re-derived from an index — the board reads this instead when it is present,
+// and falls through to calcCH for the running tournament, which is every row
+// this map comes out empty for.
+const rowsToCourseHandicaps = (rows) => {
+  const ch = {};
+  rows.forEach(r => {
+    if (!Number.isFinite(r.course_handicap)) return;
+    if (!ch[r.round_number]) ch[r.round_number] = {};
+    ch[r.round_number][r.player_id] = r.course_handicap;
+  });
+  return ch;
 };
 
 // Convert skins rows (skin_type "ctp") → ctpData { round: { holeNum: { playerId, distanceFt, distance, taggedByName } } }
@@ -7323,13 +7341,18 @@ function AdminView({ activePlayers, rosterPlayers, sideGames, onUpdateSideGames,
             {picking && (() => {
               const q = courseSearch.trim().toLowerCase();
               const searching = q.length >= 2;
+              // The imported years brought ~50 courses in with them, each frozen
+              // at the rating it was played off a decade ago. They belong to
+              // their edition, not to a director setting up next Saturday, and
+              // unfiltered they bury the handful actually in rotation.
+              const pickable = courses.filter(c => !isHistoryCourseId(c.id));
               const lib = searching
-                ? courses.filter(c => (c.name || "").toLowerCase().includes(q) || (c.city || "").toLowerCase().includes(q))
-                : courses;
+                ? pickable.filter(c => (c.name || "").toLowerCase().includes(q) || (c.city || "").toLowerCase().includes(q))
+                : pickable;
               const use = (c) => { setCourseForRound(editRound, c); closePicker(); };
               return (
                 <>
-                  {courses.length === 0 && (
+                  {pickable.length === 0 && (
                     <div style={{ padding: 14, textAlign: "center", color: K.t3, fontSize: FS.label, lineHeight: 1.5 }}>No courses yet — search above to pull one from GolfCourseAPI, or add it by hand.</div>
                   )}
                   {courses.length > 0 && lib.length === 0 && (
@@ -8553,6 +8576,10 @@ export default function WBCApp() {
   });
   const [pairingsData, setPairingsData] = useState({});
   const [teeData, setTeeData] = useState({});
+  // Recorded course handicaps, for imported editions only — empty for the
+  // running tournament. Loaded from the same rows as teeData because it rides
+  // on them; see rowsToCourseHandicaps.
+  const [courseHandicaps, setCourseHandicaps] = useState({});
   const [teesSaved, setTeesSaved] = useState({});
   const [teesModified, setTeesModified] = useState({});
   const [teeTimesData, setTeeTimesData] = useState({});
@@ -8791,7 +8818,7 @@ export default function WBCApp() {
         }
 
         const teeRows = await db.get("tee_assignments", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
-        if (teeRows?.length) setTeeData(rowsToTeeData(teeRows));
+        if (teeRows?.length) { setTeeData(rowsToTeeData(teeRows)); setCourseHandicaps(rowsToCourseHandicaps(teeRows)); }
 
         // CTP tags live in `skins` (skin_type "ctp"). This collection was written but
         // NEVER read — ctpData started empty on every load, so the on-course prompt
@@ -8849,6 +8876,7 @@ export default function WBCApp() {
 
     unsubs.push(db.subscribe("tee_assignments", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
       setTeeData(rowsToTeeData(docs));
+      setCourseHandicaps(rowsToCourseHandicaps(docs));
     }));
 
     // CTP is tournament-wide, so a tag from Group 1's phone has to reach Group 4's phone
@@ -9218,6 +9246,12 @@ export default function WBCApp() {
 
 
   // Get a player's tee box for a round (returns tee object or null)
+  // Null for the running tournament, which is what sends the board to calcCH.
+  const getPlayerCH = (rnd, pid) => {
+    const ch = courseHandicaps[rnd]?.[pid];
+    return Number.isFinite(ch) ? ch : null;
+  };
+
   const getPlayerTee = (rnd, pid, course) => {
     if (!course || !course.tee_boxes || course.tee_boxes.length === 0) return null;
     const assigned = (teeData[rnd] || {})[pid];
@@ -9250,8 +9284,9 @@ export default function WBCApp() {
       tRounds,
       courses: courseList,
       getPlayerTee,
+      getPlayerCH,
     })),
-  [allPlayers, tRounds, courseList, holeData, teeData, numRounds]);
+  [allPlayers, tRounds, courseList, holeData, teeData, courseHandicaps, numRounds]);
 
   const onSaveHole = async (pid, rnd, holeIdx, score) => {
     // Optimistic update
