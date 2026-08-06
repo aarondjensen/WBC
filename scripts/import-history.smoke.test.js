@@ -113,6 +113,31 @@ describe("scripts/import-history.mjs", () => {
     } finally { rmSync(junk, { force: true }); }
   });
 
+  it("refuses a key for a DIFFERENT Firebase project", () => {
+    // The guard that did not exist when a stray key in a sibling folder sent
+    // 472 documents into an unrelated project.
+    const fake = join(tmpdir(), "wbc-other-project-key.json");
+    writeFileSync(fake, JSON.stringify({
+      project_id: "some-other-project", client_email: "x@y.iam.gserviceaccount.com",
+      private_key: "-----BEGIN PRIVATE KEY-----\nx\n-----END PRIVATE KEY-----\n",
+    }));
+    try {
+      const stderr = failWrite({ GOOGLE_APPLICATION_CREDENTIALS: fake });
+      expect(stderr).toContain("DIFFERENT Firebase project");
+      expect(stderr).toContain("some-other-project");
+      expect(stderr).toContain("wannabecup-c5aab");
+      expect(stderr).toContain("Nothing was written");
+      expect(stderr).toContain("--allow-project");
+    } finally { rmSync(fake, { force: true }); }
+  });
+
+  it("--undo dry-runs by default", () => {
+    const out = run(["--year", "2015", "--undo"]);
+    expect(out).toContain("DRY RUN (undo)");
+    expect(out).toContain("would DELETE");
+    expect(out).not.toContain("Deleted ");
+  });
+
   it("refuses a JSON file that is not a service-account key", () => {
     // package.json is valid JSON and carries none of the fields a key has.
     const stderr = failWrite({ GOOGLE_APPLICATION_CREDENTIALS: join(ROOT, "package.json") });

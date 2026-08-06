@@ -76,7 +76,24 @@ const list = (v) => String(v ?? "").split(",").map(Number).filter(Number.isFinit
 
 const args = process.argv.slice(2);
 const WRITE = args.includes("--write");
+const UNDO = args.includes("--undo");
 const yearArg = args.indexOf("--year") >= 0 ? num(args[args.indexOf("--year") + 1]) : null;
+const allowProject = args.indexOf("--allow-project") >= 0 ? args[args.indexOf("--allow-project") + 1] : null;
+
+// ── Which project this repo belongs to ────────────────────────────
+// Read from .firebaserc, the same file `firebase deploy` reads, so there is one
+// answer and it is the one already in the repo.
+//
+// This guard exists because it was missing once. A shell one-liner picked the
+// first *firebase-adminsdk*.json in a folder, that folder held a key for an
+// unrelated project, and 472 documents went into somebody else's database. The
+// run announced the project it was writing to — which is how it was caught —
+// but announcing is not refusing.
+const expectedProject = (() => {
+  try {
+    return JSON.parse(readFileSync(join(ROOT, ".firebaserc"), "utf8"))?.projects?.default || null;
+  } catch { return null; }
+})();
 
 // ── The credential, checked before anything is announced ──────────
 // Up here, not down beside the batches, so a bad key path costs nothing and
@@ -89,7 +106,7 @@ const emulator = process.env.FIRESTORE_EMULATOR_HOST;
 const keyPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
 let serviceAccount = null;
 
-if (WRITE && !emulator) {
+if ((WRITE || UNDO) && !emulator) {
   // No spread on the joined string — `console.error(...str)` prints it one
   // character at a time, spaced.
   const die = (...lines) => { console.error(["", ...lines].join("\n")); process.exit(1); };
@@ -137,6 +154,23 @@ if (WRITE && !emulator) {
           "Firebase Console -> Project Settings -> Service accounts -> Generate new private key.");
     }
   }
+
+  // The guard. A key for another project is refused outright, and saying so
+  // costs one flag if the other project really is the target — which it is
+  // exactly once: cleaning up after this guard did not exist.
+  const target = serviceAccount.project_id;
+  if (expectedProject && target !== expectedProject && target !== allowProject) {
+    die(`That key is for a DIFFERENT Firebase project. Nothing was written.`,
+        "",
+        `  key points at:  ${target}`,
+        `  .firebaserc:    ${expectedProject}`,
+        `  key file:       ${keyPath}`,
+        "",
+        "If that is genuinely where you meant to write — cleaning up a mistake,",
+        "say — name it explicitly:",
+        "",
+        `  npm run import:history -- --allow-project ${target} ...`);
+  }
 }
 
 const tournaments = csv("tournaments.csv");
@@ -177,9 +211,12 @@ const editions = years.map(y => {
 const COLLECTIONS = ["wbc_editions", "tournament_state", "tournament_players",
                      "courses", "tournament_rounds", "tee_assignments", "hole_scores"];
 
-console.log(WRITE
-  ? `WRITING to Firestore${serviceAccount ? ` — project ${serviceAccount.project_id}` : ""}${emulator ? ` (emulator at ${emulator})` : ""}\n`
-  : "DRY RUN — nothing will be written. Pass --write to commit.\n");
+const projectLabel = `${serviceAccount ? ` — project ${serviceAccount.project_id}` : ""}${emulator ? ` (emulator at ${emulator})` : ""}`;
+console.log(
+  UNDO && WRITE ? `DELETING from Firestore${projectLabel}\n`
+  : UNDO        ? "DRY RUN (undo) — nothing will be deleted. Add --write to commit.\n"
+  : WRITE       ? `WRITING to Firestore${projectLabel}\n`
+  :               "DRY RUN — nothing will be written. Pass --write to commit.\n");
 console.log("year   players  rounds  holes   docs");
 let total = 0;
 for (const e of editions) {
@@ -202,6 +239,10 @@ if (scoreless.length) {
 }
 
 if (!WRITE) {
+  if (UNDO) {
+    console.log(`\n--undo would DELETE those ${total} documents. Add --write to commit.`);
+    process.exit(0);
+  }
   const sample = editions.find(e => e.hole_scores.length);
   if (sample) {
     console.log(`\nSample documents from ${sample.year}:`);
@@ -234,6 +275,35 @@ const db = getFirestore();
 // 500 is Firestore's hard limit on a batch; 400 leaves room and keeps a failed
 // batch small enough to reason about.
 const BATCH = 400;
+
+// ── Undo ──────────────────────────────────────────────────────────
+// Deletes exactly the documents this import would CREATE — the ids are derived
+// from (year, round, player, hole), so the set is known without reading the
+// database and nothing else can be caught by it. That precision is the point:
+// it is the tool for putting back a run that went to the wrong project, and it
+// must not touch a single document that run did not write.
+//
+// A document the import never created is simply not in the list. Deleting an id
+// that does not exist is a no-op in Firestore, so an undo of a partial run is
+// safe too.
+if (UNDO) {
+  let removed = 0;
+  for (const e of editions) {
+    for (const c of COLLECTIONS) {
+      const docs = e[c] || [];
+      for (let i = 0; i < docs.length; i += BATCH) {
+        const batch = db.batch();
+        for (const d of docs.slice(i, i + BATCH)) batch.delete(db.collection(c).doc(String(d.id)));
+        await batch.commit();
+        removed += Math.min(BATCH, docs.length - i);
+        process.stdout.write(`\r${removed}/${total} documents…`);
+      }
+    }
+  }
+  console.log(`\rDeleted ${removed} documents across ${editions.length} editions.        `);
+  process.exit(0);
+}
+
 let written = 0;
 for (const e of editions) {
   for (const c of COLLECTIONS) {
