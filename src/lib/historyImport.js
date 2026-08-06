@@ -179,12 +179,12 @@ export const stateDocFor = ({ year, rounds, location = "" }) => ({
 });
 
 // tournament_players — the roster binding, one per golfer per year.
-export const rosterDocFor = ({ year, playerId, handicapIndex = 0 }) => ({
+export const rosterDocFor = ({ year, playerId, handicapIndex = 0, withdrew = false }) => ({
   id: docIds.tournamentPlayer(editionSlug(editionIdForYear(year)), playerId),
   tournament_id: editionIdForYear(year),
   player_id: playerId,
   handicap_index: Number.isFinite(handicapIndex) ? handicapIndex : 0,
-  status: "active",
+  status: withdrew ? "WD" : "active",
 });
 
 // courses — frozen at the rating in force that year. See historyCourseId for
@@ -250,6 +250,35 @@ export const holeDocFor = ({ year, round, playerId, hole, gross, courseName }) =
     score: Number(gross),
   };
 };
+
+// ── withdrewAfter ──────────────────────────────────────────────────
+// The round a player stopped after, or null if he finished.
+//
+// A withdrawal shows up in the source as an ABSENCE — the rounds he played are
+// simply the only rows there are. Aaron J played round 1 of 2016 and Scott R's
+// year went on without him; John C played three rounds of 2025. Those are the
+// only two in fourteen years, and both are what the app calls a WD.
+//
+// Guarded on a CONTIGUOUS PREFIX, so a player missing a middle round is not
+// called a withdrawal. No such row exists in data/ today; the guard is there
+// because "played fewer rounds" and "walked in" are not the same fact, and a
+// future export could carry one that is genuinely a gap.
+export const withdrewAfter = (playedRounds = [], numRounds = 4) => {
+  const played = [...new Set(playedRounds.filter(r => Number.isInteger(r) && r > 0))].sort((a, b) => a - b);
+  if (!played.length || played.length >= numRounds) return null;
+  const contiguousFromOne = played.every((r, i) => r === i + 1);
+  return contiguousFromOne ? played.length : null;
+};
+
+// The sentinel-filled holes for a round a withdrawn player never started.
+// Mirrors markPlayerWD in App.jsx, which fills every unplayed hole with 99 so
+// the scorecard stays structurally complete and the board can report the
+// withdrawal — computeRoundLine excludes those holes from every total, so this
+// changes no score, only what the leaderboard is able to say.
+export const wdHoleDocsFor = ({ year, round, playerId, courseName }) =>
+  Array.from({ length: 18 }, (_, i) => holeDocFor({
+    year, round, playerId, hole: i + 1, gross: WD_SCORE, courseName,
+  }));
 
 // ── buildEdition ───────────────────────────────────────────────────
 // Everything one year needs, from that year's rows. Returns the documents
@@ -317,7 +346,10 @@ export const buildEdition = ({ tournament, rounds = [], courses = [], holes = []
 
   const rosterDocs = [];
   const teeDocs = [];
+  const wdHoleDocs = [];
   for (const [pid, rs] of byPlayer) {
+    const playedRounds = rs.map(r => rn(r.round)).filter(Boolean);
+    const wdAfter = withdrewAfter(playedRounds, numRounds);
     const fit = bestFitIndex(rs.map(r => {
       const c = courseByRound.get(rn(r.round)) || {};
       return {
@@ -325,7 +357,21 @@ export const buildEdition = ({ tournament, rounds = [], courses = [], holes = []
         courseHandicap: Number(r.course_handicap),
       };
     }));
-    rosterDocs.push(rosterDocFor({ year, playerId: pid, handicapIndex: fit?.index ?? 0 }));
+    rosterDocs.push(rosterDocFor({
+      year, playerId: pid, handicapIndex: fit?.index ?? 0, withdrew: wdAfter !== null,
+    }));
+
+    // Only when there were rounds to withdraw FROM: 2010 and 2011 have no
+    // rounds at all, and a roster with no tournament is not a field of
+    // withdrawals.
+    if (wdAfter !== null && sourceRounds.length) {
+      for (let r = wdAfter + 1; r <= numRounds; r++) {
+        wdHoleDocs.push(...wdHoleDocsFor({
+          year, round: r, playerId: pid,
+          courseName: (courseByRound.get(r) || {}).course,
+        }));
+      }
+    }
 
     for (const r of rs) {
       // A POSITIVE INTEGER, not merely a finite one: 2010 and 2011 are
@@ -359,7 +405,9 @@ export const buildEdition = ({ tournament, rounds = [], courses = [], holes = []
     courses: courseDocs,
     tournament_rounds: roundDocs,
     tee_assignments: teeDocs,
-    hole_scores: holeDocs,
+    // The sentinel rounds come last, and never collide: a withdrawn player has
+    // no real scores in those rounds by definition, which is what made him one.
+    hole_scores: [...holeDocs, ...wdHoleDocs],
   };
 };
 

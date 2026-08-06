@@ -144,6 +144,59 @@ describe("imported editions reproduce the tournament that was played", () => {
   });
 });
 
+// ── Withdrawals ───────────────────────────────────────────────────
+// Two in fourteen years, and the source records both as an ABSENCE — the rounds
+// he played are the only rows there are. The app has a first-class WD, so these
+// check the import reaches it: the roster says WD, the rounds he never started
+// carry the sentinel, and the board reports the round he stopped after.
+describe("withdrawals are withdrawals, not missing rounds", () => {
+  const cases = [
+    { year: 2016, player: "Aaron J", after: 1 },
+    { year: 2025, player: "John C", after: 3 },
+  ];
+
+  it.each(cases)("WBC $year: $player withdrew after round $after", ({ year, player, after }) => {
+    const ed = buildYear(year);
+    const pid = playerIdFor(player);
+    const numRounds = ed.tournament_state[0].meta.rounds;
+
+    expect(ed.tournament_players.find(p => p.player_id === pid).status).toBe("WD");
+
+    for (let r = after + 1; r <= numRounds; r++) {
+      const holes = ed.hole_scores.filter(h => h.player_id === pid && h.round_number === r);
+      expect(holes, `${year} r${r}`).toHaveLength(18);
+      expect(holes.every(h => h.score === 99)).toBe(true);
+    }
+
+    const row = boardFor(ed).find(p => p.id === pid);
+    expect(row.withdrew).toBe(true);
+    expect(row.wdRound).toBe(after + 1);
+  });
+
+  it("everybody else in those years finished", () => {
+    for (const { year, player } of cases) {
+      const ed = buildYear(year);
+      const others = ed.tournament_players.filter(p => p.player_id !== playerIdFor(player));
+      expect(others.every(p => p.status === "active"), String(year)).toBe(true);
+      expect(ed.hole_scores.some(h => h.score === 99 && h.player_id !== playerIdFor(player))).toBe(false);
+    }
+  });
+
+  // The sentinel must not touch a score. This is the reason the champion and
+  // total assertions above still hold with the WD rounds present.
+  it("the sentinel rounds change no total", () => {
+    for (const { year, player } of cases) {
+      const ed = buildYear(year);
+      const pid = playerIdFor(player);
+      const withWD = boardFor(ed).find(p => p.id === pid);
+      const withoutWD = boardFor({ ...ed, hole_scores: ed.hole_scores.filter(h => h.score !== 99) })
+        .find(p => p.id === pid);
+      expect(withWD.totalNetToPar, `${year} net`).toBe(withoutWD.totalNetToPar);
+      expect(withWD.totalGross, `${year} gross`).toBe(withoutWD.totalGross);
+    }
+  });
+});
+
 // ── Net skins ─────────────────────────────────────────────────────
 // The stroke INDEX is missing for 2012, 2013 and 2016–2022 (DATA-GUIDE.md), so
 // on those years a stroke can land on the wrong hole and a net skin with it.
