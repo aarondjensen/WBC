@@ -18,19 +18,24 @@
 //  it once does not need the sentence again every time they open it. The
 //  column marked `auto` says so in the heading itself.
 //
+//  ONE TICK IS OWING, TWO IS PAID. Tagging a man in and collecting from him
+//  are days apart — the field is tagged in a car park on Friday and the money
+//  comes in over the weekend — so a cell cycles out → in (✓, amber, he owes)
+//  → paid (✓✓, filled) → out. See toggleCell.
+//
 //  Three ways in, in descending order of how often they get used:
-//    • A COLUMN header toggles that whole buy-in. "Everybody is in for skins"
-//      is one tap, and it is the first thing that happens every year.
+//    • A COLUMN header runs that cycle over the whole buy-in. "Everybody is in
+//      for skins" is one tap on the Friday, "they have all settled up" is one
+//      more on the Sunday.
 //    • A PLAYER NAME drops that player out of everything — the guy who only
 //      came to drink — and puts them into everything if they are already out
 //      of it all. See toggleRow for why it is not symmetrical.
-//    • A CELL toggles one buy-in for one player, which after the two above is
-//      only the half-dozen rebuys.
+//    • A CELL cycles one buy-in for one player.
 //
-//  A game marked `derived` has no toggles at all. Its column is filled in
-//  from what players have already done rather than from anything the director
-//  tags — the market rebuy is incurred by placing halfway shares, not paid up
-//  front — so the cells are a readout and the row still bills for them.
+//  A game marked `derived` cannot be tagged in or out. Its membership is
+//  filled in from what players have already done — the market rebuy is
+//  incurred by placing halfway shares, not tagged — so its cell only ever
+//  answers the payment half, and the row still bills for it.
 //
 //  THE THREE STATES OF `ids`, which is the whole design underneath:
 //
@@ -125,25 +130,49 @@ export function BuyInTracker({ players, games, onChange }) {
   const sheet = buyInSheet({ players, games });
   const rowFor = (pid) => sheet.rows.find(r => r.pid === pid);
 
-  // A cell means one of two things depending on the column.
+  // ── One cell, three states, in the order the money moves ──
   //
-  // On a tagged game it means "is he in", and tapping puts him in or takes
-  // him out. On a DERIVED game the director cannot change that — the market
-  // rebuy is entered by placing halfway shares from a tee box — so the tap
-  // answers the only question left: has he handed the money over. A man who
-  // has not entered has nothing to pay, so his cell does nothing.
+  //   –    out. He is not in this game and owes nothing.
+  //   ✓    IN, and owing. One tick: he has opted in, the pot counts him, the
+  //        cash has not arrived.
+  //   ✓✓   PAID. Two ticks: he settled up.
+  //
+  // Tapping cycles through them and round again, so the third tap is the undo
+  // for a name entered by mistake. Splitting in from paid is the whole point:
+  // a director tags the field on Friday morning and collects over the next
+  // three days, and until now those two facts had one box between them.
+  //
+  // A DERIVED game — the market rebuy — is entered by placing halfway shares
+  // from a tee box, so the director cannot put a man in or take him out. Its
+  // cell only ever answers the second question, and a man who never entered
+  // has nothing to pay.
   const toggleCell = (g, pid) => {
-    if (!g.derived) return onChange({ [g.key]: { in: toggleIn(g.ids, players, pid) } });
-    if (!g.paid || !rowFor(pid)?.games[g.key]) return;
-    onChange({ [g.key]: { paid: togglePaid(g.paid, pid) } });
+    const row = rowFor(pid);
+    const isIn = row?.games[g.key];
+    if (g.derived) {
+      if (!g.paid || !isIn) return;
+      return onChange({ [g.key]: { paid: togglePaid(g.paid, pid) } });
+    }
+    if (!isIn) return onChange({ [g.key]: { in: toggleIn(g.ids, players, pid) } });
+    if (!row.paid[g.key]) return onChange({ [g.key]: { paid: togglePaid(g.paid, pid) } });
+    // Paid → out. Both lists, or he leaves a paid flag behind that would mark
+    // him settled the moment anybody put him back in.
+    onChange({ [g.key]: { in: toggleIn(g.ids, players, pid), paid: (g.paid || []).filter(x => x !== pid) } });
   };
 
+  // The heading runs the same cycle over the whole column: everybody in,
+  // then everybody paid, then nobody. "The field is in for skins" is one tap
+  // on a Friday and "they have all settled up" is one more on the Sunday.
   const toggleColumn = (g) => {
-    if (!g.derived) return onChange({ [g.key]: { in: sheet.totals[g.key].all ? [] : players.map(p => p.id) } });
-    // "Everybody has settled up" in one tap, over the men who are actually in.
-    if (!g.paid) return;
+    const t = sheet.totals[g.key];
     const inPids = sheet.rows.filter(r => r.games[g.key]).map(r => r.pid);
-    onChange({ [g.key]: { paid: sheet.totals[g.key].allPaid ? [] : inPids } });
+    if (g.derived) {
+      if (!g.paid) return;
+      return onChange({ [g.key]: { paid: t.allPaid ? [] : inPids } });
+    }
+    if (!t.all) return onChange({ [g.key]: { in: players.map(p => p.id) } });
+    if (!t.allPaid) return onChange({ [g.key]: { paid: inPids } });
+    onChange({ [g.key]: { in: [], paid: [] } });
   };
 
   // A row toggle DROPS a player who is in anything, and only adds when they
@@ -196,11 +225,10 @@ export function BuyInTracker({ players, games, onChange }) {
             <div key={g.key} onClick={() => toggleColumn(g)}
               style={{ textAlign: "center", cursor: g.derived ? "default" : "pointer", padding: "4px 0", borderRadius: R.xs, background: !g.derived && t.all ? `${K.acc}${ALPHA.wash}` : "transparent" }}>
               <div style={{ fontSize: FS.micro, fontWeight: 800, color: g.derived ? K.t2 : t.all ? K.acc : K.t2, letterSpacing: 0.3 }}>{g.short}</div>
-              {/* A payment column counts what is PAID of what is in — the
-                  number the director is chasing — rather than repeating the
-                  count the cells already show. */}
-              <div style={{ fontSize: FS.micro, color: g.paid ? (t.allPaid ? K.acc : K.warn) : g.derived ? K.acc : K.t3 }}>
-                {g.paid ? `${t.paidCount}/${t.count}` : g.derived ? "auto" : t.count}
+              {/* Paid of in — the number the director is chasing — rather
+                  than repeating the count the cells already show. */}
+              <div style={{ fontSize: FS.micro, color: g.paid ? (t.allPaid && t.count > 0 ? K.acc : K.warn) : K.t3 }}>
+                {g.paid ? `${t.paidCount}/${t.count}` : t.count}
               </div>
             </div>
           );
@@ -234,13 +262,16 @@ export function BuyInTracker({ players, games, onChange }) {
                 : { background: "transparent", border: `1px solid ${K.warn}`, color: K.warn };
             return (
               <div key={g.key} onClick={() => toggleCell(g, row.pid)}
-                title={on && !paid ? "In — not paid yet. Tap when they settle up." : undefined}
+                title={on && !paid ? "In — owes. Tap again when they settle up." : undefined}
                 style={{
                   height: 28, display: "flex", alignItems: "center", justifyContent: "center",
                   cursor: tappable ? "pointer" : "default", borderRadius: R.xs,
-                  fontSize: FS.small, fontWeight: 800, ...style,
+                  // The second tick has to fit the same cell as the first, and
+                  // a 32px column is not wide enough for two at full size.
+                  fontSize: paid ? FS.micro : FS.small, fontWeight: 800,
+                  letterSpacing: paid ? -1 : 0, ...style,
                 }}>
-                {on ? "✓" : "–"}
+                {!on ? "–" : paid ? "✓✓" : "✓"}
               </div>
             );
           })}
