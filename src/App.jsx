@@ -1078,7 +1078,20 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                           isWD: p.isWD,
                         });
                         return (
-                          <span style={{ ...bandEnd, fontSize: fsStep(rowStyle.fontSize, st.kind === "tee" ? -2 : -1), color: K.t2 }}>
+                          <span style={{
+                            ...bandEnd,
+                            fontSize: fsStep(rowStyle.fontSize, st.kind === "tee" ? -2 : -1),
+                            color: K.t2,
+                            // The one cell the app-wide caps have to sit out.
+                            // teeTimeLabel lowercases the meridiem to make a
+                            // time fit this column, and it fits by a third of a
+                            // pixel: "10:24a" measures 33.7 against a 34px
+                            // track, "10:24A" measures 34.9 and crosses the
+                            // band's right-hand rule. Two rungs down is already
+                            // as small as this value goes, so the case is the
+                            // only thing left to give.
+                            textTransform: st.kind === "tee" ? "none" : undefined,
+                          }}>
                             {st.text}
                           </span>
                         );
