@@ -46,7 +46,10 @@ import { getTournamentYear } from "../firebase";
 // style "black" the inset resolves to 0 and this is a plain 5px gap below an
 // opaque status bar. On Android edge-to-edge and in a browser tab the inset is
 // real and the 5px rides on top of it.
-const HEADER_SAFE_PAD = "calc(env(safe-area-inset-top, 0px) + 5px)";
+// Exported because anything that wants to sit ON this band — the scoring
+// screen's "advancing" toast — has to start from the same inset the header
+// does, or it lands somewhere else on a phone with a notch.
+export const HEADER_SAFE_PAD = "calc(env(safe-area-inset-top, 0px) + 5px)";
 
 export function AppHeader({ location, fallbackLocation = "Gaylord, MI", right }) {
   return (

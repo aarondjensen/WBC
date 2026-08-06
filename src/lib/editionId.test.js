@@ -101,6 +101,10 @@ describe("docIds — 2026 back-compatibility", () => {
     expect(docIds.ctp(S, 1, 7)).toBe("ctp_2026_r1_h7");
   });
 
+  it("market bets — one document per bettor", () => {
+    expect(docIds.marketBet(S, "aaron_j")).toBe("mkt_2026_aaron_j");
+  });
+
   // The original edition keeps BARE group keys as document ids. Signatures
   // for the running tournament are already stored under them, and prefixing
   // would orphan every one.
@@ -131,6 +135,7 @@ describe("docIds — edition isolation", () => {
       docIds.tournamentPlayer(slug, "p"),
       docIds.tournamentRound(slug, 1),
       docIds.ctp(slug, 1, 7),
+      docIds.marketBet(slug, "p"),
     ];
     const a = built(A), b = built(B);
     a.forEach((id, i) => expect(id).not.toBe(b[i]));

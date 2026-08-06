@@ -35,6 +35,17 @@ body {
      the next popup is right without anybody having to remember. */
   font-family: 'Montserrat', sans-serif;
   font-variant-numeric: lining-nums tabular-nums;
+  /* ── The app speaks in capitals ────────────────────────────────────
+     WBC already set every eyebrow, column head and section label in caps
+     at ~40 individual call sites; this makes it the voice of the whole
+     app rather than a decoration on the small text. Declared here, on the
+     same element as the font itself and for the same reason: portaled
+     modals hang off <body>, so anywhere else and half the app misses it.
+
+     text-transform only changes what is PAINTED — the underlying string is
+     untouched — so nothing downstream of a name, a course or a score sees
+     a different value than it did before. */
+  text-transform: uppercase;
 }
 
 /* font-family alone, not the `font` shorthand — the shorthand would also reset
@@ -42,6 +53,43 @@ body {
 input, button, textarea, select, optgroup {
   font-family: inherit;
   font-variant-numeric: inherit;
+  text-transform: inherit;
+}
+
+/* ── Except the fields you type into ───────────────────────────────
+   A control that renders text back at you in a case you did not type is
+   how a password gets mistyped three times: the event password is a
+   free-text field, matched as typed, so showing "WBC2026" while sending
+   "wbc2026" invites exactly that. Same story, less dangerous, for the
+   course search box and every name field — the caps would say the value
+   was stored that way, and it isn't.
+
+   Buttons stay in caps: `input` here is the text-entry kind only, so the
+   button-flavoured inputs keep inheriting from <body> above. */
+input:not([type="button"]):not([type="submit"]):not([type="reset"]),
+textarea {
+  text-transform: none;
+}
+
+/* ── Number fields carry no spinner ────────────────────────────────
+   Every numeric input in this app is a narrow, centred cell — a buy-in
+   price, a CTP distance, a share count — sized to the digits and nothing
+   else. The browser's spin buttons appear on focus, eat ~14px of that
+   width and shove the number off centre, which reads as the field breaking
+   the moment you tap it. They are also useless here: these are values you
+   type or nudge with the app's own +/- controls, on a phone that has no
+   pointer to hover them with.
+
+   Both engines, because they disagree about the mechanism: WebKit/Blink
+   render a pseudo-element, Firefox styles the input itself. */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
 }
 
 /* Horizontal strips that scroll on touch — the admin round pills once the

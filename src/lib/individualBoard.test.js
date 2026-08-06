@@ -174,6 +174,17 @@ describe("computeIndividualBoard", () => {
     expect(alice.rds[1]).toEqual({ netToPar: null, thru: 0, wd: false });
   });
 
+  // The leaderboard's Thru column renders totalThru directly, so it has to keep
+  // counting across the round break rather than resetting: 18 with round 1 in
+  // the books, 23 on the 5th hole of round 2, 36 once that one is done.
+  it("counts holes played across the whole tournament, not per round", () => {
+    const done = rows => rows.find(r => r.id === "a").totalThru;
+    expect(done(board({ a_1: partialRound(5, 4) }))).toBe(5);
+    expect(done(board({ a_1: fullRound(4) }))).toBe(18);
+    expect(done(board({ a_1: fullRound(4), a_2: partialRound(5, 4) }))).toBe(23);
+    expect(done(board({ a_1: fullRound(4), a_2: fullRound(4) }))).toBe(36);
+  });
+
   it("carries the player's own fields through untouched", () => {
     const rows = board({});
     expect(rows.find(r => r.id === "a").name).toBe("Alice");
