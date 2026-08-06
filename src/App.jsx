@@ -27,6 +27,7 @@ import { fitPairings, rungLines, nameWidthCeiling, CARD_GAP } from "./lib/pairin
 import { Popup, ConfirmModal } from "./components/Popup";
 import { EditionSwitcher } from "./components/EditionSwitcher";
 import { docIds } from "./lib/editionId";
+import { isHistoryCourseId } from "./lib/historyImport";
 import { openingHole, nineComplete } from "./lib/holeAdvance";
 import { scoreWindow, nudgeUpTarget, nudgeDownTarget } from "./lib/scoreEntry";
 import { groupTrouble, roundTrouble, describeTrouble, blocksScoring, missingTees, describeMissingTees } from "./lib/roundSetup";
@@ -365,6 +366,23 @@ const rowsToTeeData = (rows) => {
     td[r.round_number][r.player_id] = r.tee_name;
   });
   return td;
+};
+
+// The RECORDED course handicap, when a row carries one → { round: { pid: ch } }.
+//
+// Only imported editions have it (see lib/historyImport.js). The early WBCs set
+// a handicap once and played it on every course, so those years cannot be
+// re-derived from an index — the board reads this instead when it is present,
+// and falls through to calcCH for the running tournament, which is every row
+// this map comes out empty for.
+const rowsToCourseHandicaps = (rows) => {
+  const ch = {};
+  rows.forEach(r => {
+    if (!Number.isFinite(r.course_handicap)) return;
+    if (!ch[r.round_number]) ch[r.round_number] = {};
+    ch[r.round_number][r.player_id] = r.course_handicap;
+  });
+  return ch;
 };
 
 // Convert skins rows (skin_type "ctp") → ctpData { round: { holeNum: { playerId, distanceFt, distance, taggedByName } } }
@@ -3058,7 +3076,8 @@ function GroupSetup({ user, players, onStart, presetGroup }) {
 // lowNetRounds drops a withdrawn card outright.
 function BettingView({
   players, round, tRounds, courses, holeData, ctpData, onSetCtp, user, numRounds,
-  getPlayerTee, sideGames, onUpdateSideGames, marketBets, onSaveMarketBet, leaderboard,
+  getPlayerTee, getPlayerCH = () => null,
+  sideGames, onUpdateSideGames, marketBets, onSaveMarketBet, leaderboard,
   finalizedRounds, pairingsData, firstTeeAt,
 }) {
   const [tab, setTab] = useState("skins");
@@ -3166,10 +3185,18 @@ function BettingView({
     const { course } = roundSetup(r);
     const maps = {}; const chs = {};
     skinsField.forEach(p => {
+      // Same precedence as the leaderboard: a RECORDED handicap wins over a
+      // derived one. This is the second place the app turns an index into
+      // strokes, and it has to agree with the first — on a flat imported year
+      // calcCH gives out the wrong NUMBER of strokes, not merely the wrong
+      // holes, so net skins would disagree with the leaderboard beside it.
+      const recorded = getPlayerCH(r, p.id);
       const tee = course ? getPlayerTee(r, p.id, course) : null;
-      const ch = course
-        ? calcCH(p.handicap_index, tee?.slope || course.slope, tee?.rating || course.rating, tee?.par || course.par)
-        : 0;
+      const ch = Number.isFinite(recorded)
+        ? recorded
+        : course
+          ? calcCH(p.handicap_index, tee?.slope || course.slope, tee?.rating || course.rating, tee?.par || course.par)
+          : 0;
       chs[p.id] = ch;
       maps[p.id] = buildStrokesMap(ch, course?.hole_handicaps || []);
     });
@@ -7323,13 +7350,18 @@ function AdminView({ activePlayers, rosterPlayers, sideGames, onUpdateSideGames,
             {picking && (() => {
               const q = courseSearch.trim().toLowerCase();
               const searching = q.length >= 2;
+              // The imported years brought ~50 courses in with them, each frozen
+              // at the rating it was played off a decade ago. They belong to
+              // their edition, not to a director setting up next Saturday, and
+              // unfiltered they bury the handful actually in rotation.
+              const pickable = courses.filter(c => !isHistoryCourseId(c.id));
               const lib = searching
-                ? courses.filter(c => (c.name || "").toLowerCase().includes(q) || (c.city || "").toLowerCase().includes(q))
-                : courses;
+                ? pickable.filter(c => (c.name || "").toLowerCase().includes(q) || (c.city || "").toLowerCase().includes(q))
+                : pickable;
               const use = (c) => { setCourseForRound(editRound, c); closePicker(); };
               return (
                 <>
-                  {courses.length === 0 && (
+                  {pickable.length === 0 && (
                     <div style={{ padding: 14, textAlign: "center", color: K.t3, fontSize: FS.label, lineHeight: 1.5 }}>No courses yet — search above to pull one from GolfCourseAPI, or add it by hand.</div>
                   )}
                   {courses.length > 0 && lib.length === 0 && (
@@ -8553,6 +8585,10 @@ export default function WBCApp() {
   });
   const [pairingsData, setPairingsData] = useState({});
   const [teeData, setTeeData] = useState({});
+  // Recorded course handicaps, for imported editions only — empty for the
+  // running tournament. Loaded from the same rows as teeData because it rides
+  // on them; see rowsToCourseHandicaps.
+  const [courseHandicaps, setCourseHandicaps] = useState({});
   const [teesSaved, setTeesSaved] = useState({});
   const [teesModified, setTeesModified] = useState({});
   const [teeTimesData, setTeeTimesData] = useState({});
@@ -8791,7 +8827,7 @@ export default function WBCApp() {
         }
 
         const teeRows = await db.get("tee_assignments", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
-        if (teeRows?.length) setTeeData(rowsToTeeData(teeRows));
+        if (teeRows?.length) { setTeeData(rowsToTeeData(teeRows)); setCourseHandicaps(rowsToCourseHandicaps(teeRows)); }
 
         // CTP tags live in `skins` (skin_type "ctp"). This collection was written but
         // NEVER read — ctpData started empty on every load, so the on-course prompt
@@ -8849,6 +8885,7 @@ export default function WBCApp() {
 
     unsubs.push(db.subscribe("tee_assignments", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
       setTeeData(rowsToTeeData(docs));
+      setCourseHandicaps(rowsToCourseHandicaps(docs));
     }));
 
     // CTP is tournament-wide, so a tag from Group 1's phone has to reach Group 4's phone
@@ -9218,6 +9255,12 @@ export default function WBCApp() {
 
 
   // Get a player's tee box for a round (returns tee object or null)
+  // Null for the running tournament, which is what sends the board to calcCH.
+  const getPlayerCH = (rnd, pid) => {
+    const ch = courseHandicaps[rnd]?.[pid];
+    return Number.isFinite(ch) ? ch : null;
+  };
+
   const getPlayerTee = (rnd, pid, course) => {
     if (!course || !course.tee_boxes || course.tee_boxes.length === 0) return null;
     const assigned = (teeData[rnd] || {})[pid];
@@ -9250,8 +9293,9 @@ export default function WBCApp() {
       tRounds,
       courses: courseList,
       getPlayerTee,
+      getPlayerCH,
     })),
-  [allPlayers, tRounds, courseList, holeData, teeData, numRounds]);
+  [allPlayers, tRounds, courseList, holeData, teeData, courseHandicaps, numRounds]);
 
   const onSaveHole = async (pid, rnd, holeIdx, score) => {
     // Optimistic update
@@ -10174,7 +10218,7 @@ export default function WBCApp() {
           <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeTimesData={teeTimesData} roundDates={roundDates} scoringOpen={scoringOpen} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={async (key, signerPid, signerName, present, rnd) => { const nonSigners = (present || []).filter(pid => pid !== signerPid); const autoFinal = nonSigners.length === 0; const optimistic = { signedBy: signerPid, signedByName: signerName, attestedBy: [], present: present || [] }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: optimistic })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), tournament_id: TOURNAMENT_ID, groupKey: key, round: rnd, signedBy: signerPid, signedByName: signerName, present: present || [], attestedBy: [], signedAt: new Date().toISOString() }); if (autoFinal) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onAttestScorecard={async (key, attesterPid, nonSigners) => { const cur = scorecardSigs[key]; if (!cur) return; const attestedBy = [...new Set([...(cur.attestedBy || []), attesterPid])]; const optimistic = { ...cur, attestedBy }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: { ...prev[key], attestedBy } })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), attestedBy }); const allDone = (nonSigners || []).every(pid => attestedBy.includes(pid)); if (allDone) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onUnsignScorecard={async key => { pendingSigsRef.current.delete(key); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); if (finalizedRounds[key]) { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); pendingSigsRef.current.delete(key); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); await saveTournamentState(nf); }} onGoToAdminCourses={(rnd) => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); setAdminSettingsRound(rnd || null); }} markPlayerWD={markPlayerWD} ctpData={ctpData} onSetCtp={onSetCtp} onConfirmCtp={onConfirmCtp} directorPick={directorPick} onGroupChange={setScoringGroup} onSetRound={setRound} />
         </div>
         {view === "players" && <PlayersView players={allPlayers} registry={registry} meId={user?.id} year={getTournamentYear()} isDirector={!!user.isDirector} onSetOverride={setIndexOverride} />}
-        {view === "skins" && <BettingView players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} numRounds={numRounds} getPlayerTee={getPlayerTee} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} marketBets={marketBets} onSaveMarketBet={onSaveMarketBet} leaderboard={getLeaderboard} finalizedRounds={finalizedRounds} pairingsData={pairingsData} firstTeeAt={firstTeeAt} />}
+        {view === "skins" && <BettingView players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} numRounds={numRounds} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} marketBets={marketBets} onSaveMarketBet={onSaveMarketBet} leaderboard={getLeaderboard} finalizedRounds={finalizedRounds} pairingsData={pairingsData} firstTeeAt={firstTeeAt} />}
         {view === "groups" && <GroupsView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} pairingsData={pairingsData} teeTimesData={teeTimesData} getPlayerTee={getPlayerTee} user={user} />}
         {view === "admin" && (user.isDirector ? <AdminView activePlayers={activePlayers} rosterPlayers={allPlayers} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} rebuyIds={rebuyIds} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
               setTeeTimesData(prev => {

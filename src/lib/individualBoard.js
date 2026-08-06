@@ -146,6 +146,17 @@ export function computeRoundLine({ scores = {}, holePars = [], holeHcps = [], ch
 //               Falls back to the course's own ratings when a tee isn't
 //               assigned, which is what makes a board renderable before the
 //               director has finished tee assignments.
+//   getPlayerCH — (round, playerId) → number | null. The course handicap this
+//               player was RECORDED as playing off, when one is on file.
+//               Returns null for the running tournament, where the index is the
+//               source of truth and calcCH below is the answer.
+//
+//               It exists for the imported years. The early WBCs set a handicap
+//               once and carried it unchanged across all four rounds — the
+//               course handicap came later — so for 2012–2017, 2019 and 2024
+//               there is no index that reproduces the record: 24 of 109
+//               player-years land 2+ strokes out on some round, which is enough
+//               to reorder a finished leaderboard. See lib/historyImport.js.
 //
 // Returns one row per player, in INPUT ORDER:
 //   { ...player, totalNetToPar, totalGrossToPar, totalGross,
@@ -159,6 +170,7 @@ export function computeIndividualBoard({
   tRounds = [],
   courses = [],
   getPlayerTee = () => null,
+  getPlayerCH = () => null,
 }) {
   return players.map(p => {
     let totalNetToPar = 0;
@@ -177,8 +189,16 @@ export function computeIndividualBoard({
       // a slot in `rds` so the leaderboard's round columns stay aligned.
       if (!course) { rds.push({ netToPar: null, thru: 0, wd: false }); continue; }
 
+      // A RECORDED handicap wins over a derived one. Only an imported year has
+      // one; the running tournament falls straight through to calcCH, so this
+      // changes nothing about how a live round is scored.
+      //
+      // Guarded on Number.isFinite rather than truthiness: a scratch player's
+      // recorded 0 is a real answer, and `|| calcCH(...)` would throw it away
+      // and quietly re-derive — the one case where the two disagree most.
+      const recordedCH = getPlayerCH(r, p.id);
       const tee = getPlayerTee(r, p.id, course);
-      const ch = calcCH(
+      const ch = Number.isFinite(recordedCH) ? recordedCH : calcCH(
         p.handicap_index,
         tee?.slope || course.slope,
         tee?.rating || course.rating,
