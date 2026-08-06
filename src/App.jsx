@@ -3749,7 +3749,7 @@ function BettingView({
           away. */}
       <StickyTop>
         <SegmentedToggle
-          options={[["skins", "💰 Skins"], ["ctp", "🎯 CTP"], ["lownet", "🏅 Low Net"], ["market", "📈 Market"]]}
+          options={[["skins", "Skins"], ["ctp", "CTP"], ["lownet", "Low Net"], ["market", "Market"]]}
           value={tab} onChange={setTab}
         />
       </StickyTop>
