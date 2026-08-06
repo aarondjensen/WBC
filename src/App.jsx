@@ -1077,7 +1077,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                             it was landing in a different place on every row.
                             minWidth:0 keeps the ellipsis working inside a flex
                             item that is now allowed to grow. */}
-                        <span className="wbc-name" style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
+                        <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
                         {/* FS.micro flat, not a step off the row size: this is
                             an affordance, not data, and stepping it meant it
                             grew whenever the board had room to grow — which is
@@ -1821,7 +1821,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
                   }}>
                     <div>
                       <div style={{ fontSize: FS.label, fontWeight: 700, color: K.acc, marginBottom: 4 }}>Group {gi + 1}</div>
-                      <div className="wbc-name" style={{ fontSize: FS.small, fontWeight: 600, color: K.t1 }}>{grpPlayers.map(p => p.name.split(" ")[0]).join(", ")}</div>
+                      <div style={{ fontSize: FS.small, fontWeight: 600, color: K.t1 }}>{grpPlayers.map(p => p.name.split(" ")[0]).join(", ")}</div>
                     </div>
                     <div style={{ textAlign: "right" }}>
                       {isFinalized
@@ -2193,7 +2193,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
               }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <span className="wbc-name" style={{ fontSize: FS.body, fontWeight: 700 }}>{p.name}</span>
+                    <span style={{ fontSize: FS.body, fontWeight: 700 }}>{p.name}</span>
                     <span style={{ fontSize: FS.label, color: K.acc, fontWeight: 700 }}>{ch}</span>
                     {strokes > 0 && <span style={{ color: K.acc, fontSize: FS.label, letterSpacing: "-1px" }}>{"●".repeat(strokes)}</span>}
                   </div>
@@ -2257,7 +2257,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
               {/* Player header row */}
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <span className="wbc-name" style={{ fontSize: FS.body, fontWeight: 700 }}>{p.name}</span>
+                  <span style={{ fontSize: FS.body, fontWeight: 700 }}>{p.name}</span>
                   <span style={{ fontSize: FS.label, color: K.acc, fontWeight: 700 }}>{ch}</span>
                   {strokes > 0 && <span style={{ color: K.acc, fontSize: FS.label, letterSpacing: "-1px" }}>{"●".repeat(strokes)}</span>}
                 </div>
@@ -2324,7 +2324,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
                   const pl = players.find(pp => pp.id === pid);
                   const done = attestedPids.includes(pid);
                   return (
-                    <button className="wbc-name" key={pid} disabled={done} onClick={() => handleAttest(pid)} style={{
+                    <button key={pid} disabled={done} onClick={() => handleAttest(pid)} style={{
                       fontSize: FS.small, fontWeight: 700, padding: "8px 12px", borderRadius: R.sm,
                       background: done ? K.acc + ALPHA.wash : K.inp,
                       border: `1.5px solid ${done ? K.acc + ALPHA.line : K.bdr}`,
@@ -2396,7 +2396,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
                       const sum18 = Array.from({ length: 18 }, (_, h) => h).reduce((a, h) => { const v = scMap[h]; return a + ((v > 0 && v < 90) ? v : 0); }, 0);
                       const cells = [
                         <div key={p.id + "-n"} style={{ ...cb, justifyContent: "flex-start", overflow: "hidden" }}>
-                          <span className="wbc-name" style={{ fontSize: FS.label, fontWeight: 700, color: K.t1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name.split(" ")[0]}</span>
+                          <span style={{ fontSize: FS.label, fontWeight: 700, color: K.t1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name.split(" ")[0]}</span>
                         </div>,
                         ...holes.map(h => {
                           const v = scMap[h];
@@ -2472,7 +2472,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
                   const out = holes.reduce((a, h) => { const v = scMap[h]; return a + ((v > 0 && v < 90) ? v : 0); }, 0);
                   return [
                     <div key={p.id + "-n"} style={{ ...cb, justifyContent: "flex-start", overflow: "hidden" }}>
-                      <span className="wbc-name" style={{ fontSize: FS.label, fontWeight: 700, color: K.t1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name.split(" ")[0]}</span>
+                      <span style={{ fontSize: FS.label, fontWeight: 700, color: K.t1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name.split(" ")[0]}</span>
                     </div>,
                     ...holes.map(h => {
                       const v = scMap[h];
@@ -2556,7 +2556,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
                   <span style={{ fontSize: FS.body }}>⛳</span>
                   <span style={{ flex: 1, minWidth: 0 }}>
                     <span style={{ display: "block", fontSize: FS.micro, fontWeight: 800, color: K.warn, letterSpacing: 1.2, textTransform: "uppercase" }}>Current CTP</span>
-                    <span className="wbc-name" style={{ fontSize: FS.small, fontWeight: 700, color: K.t1 }}>{leaderPl.name}</span>
+                    <span style={{ fontSize: FS.small, fontWeight: 700, color: K.t1 }}>{leaderPl.name}</span>
                   </span>
                   {leaderDist && <span style={{ fontSize: FS.small, fontWeight: 800, color: K.warn }}>{leaderDist}</span>}
                 </div>
@@ -2578,7 +2578,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
                     if (!pl) return null;
                     const sel = ctpPickPlayer === pid;
                     return (
-                      <button className="wbc-name" key={pid}
+                      <button key={pid}
                         onClick={() => {
                           tapNudge();
                           // Changing who it was un-answers the distance: the
@@ -2786,7 +2786,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
                 return (
                   <div key={p.id} style={{ background: K.inp, borderRadius: R.sm, marginBottom: 8, overflow: "hidden", border: `1px solid ${K.bdr}` }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "5px 8px", borderBottom: cellBorder }}>
-                      <span className="wbc-name" style={{ fontSize: FS.small, fontWeight: 700, color: K.t1 }}>{p.name}</span>
+                      <span style={{ fontSize: FS.small, fontWeight: 700, color: K.t1 }}>{p.name}</span>
                       <div style={{ display: "flex", gap: 8, fontSize: FS.small }}>
                         <span style={{ color: K.t3 }}>Gross <strong style={{ color: K.t2 }}>{gross || "—"}</strong></span>
                         <span style={{ color: K.t3 }}>Net <strong style={{ color: net && (net - parTotal) < 0 ? K.under : K.t1 }}>{net || "—"}</strong></span>
@@ -2925,10 +2925,7 @@ function GroupSetup({ user, players, onStart, presetGroup }) {
                   display: "flex", alignItems: "center", justifyContent: "center",
                   color: isSelected ? K.bg : K.t3, fontSize: FS.small, fontWeight: 800,
                 }}>{isSelected ? "✓" : ""}</div>
-                {/* The class goes on the name alone — "(you)" is an annotation,
-                    not part of what the man is called, and inside the small
-                    caps it would shrink along with the name. */}
-                <span style={{ fontWeight: 600, fontSize: FS.small }}><span className="wbc-name">{p.name}</span>{isSelf ? " (you)" : ""}</span>
+                <span style={{ fontWeight: 600, fontSize: FS.small }}>{p.name}{isSelf ? " (you)" : ""}</span>
               </div>
               <span style={{ fontSize: FS.label, color: K.t3 }}>HI: {p.handicap_index}</span>
             </button>
@@ -3367,7 +3364,7 @@ function BettingView({
       <div style={{ padding: "8px 14px", borderBottom: `1px solid ${K.bdr}`, fontSize: FS.label, fontWeight: 700, color: K.gold, letterSpacing: 1 }}>{title}</div>
       {rows.map(r => (
         <div key={r.key} style={{ display: "flex", alignItems: "center", padding: "8px 14px", borderBottom: `1px solid ${K.bdr}${ALPHA.hair}`, gap: 8 }}>
-          <span className="wbc-name" style={{ flex: 1, minWidth: 0, fontSize: FS.body, fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</span>
+          <span style={{ flex: 1, minWidth: 0, fontSize: FS.body, fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</span>
           <span style={{ fontSize: FS.body, fontWeight: 700, color: K.acc, flexShrink: 0 }}>{r.mid}</span>
           <span style={{ fontSize: FS.small, color: K.t3, flexShrink: 0, minWidth: 54, textAlign: "right" }}>{r.right}</span>
         </div>
@@ -3479,7 +3476,7 @@ function BettingView({
               const scores = holeData[`${p.id}_${shownRound}`] || {};
               return (
                 <tr key={p.id} style={{ borderTop: cellBdr, background: pi % 2 === 1 ? `${K.bdr}${ALPHA.wash}` : "transparent" }}>
-                  <td className="wbc-name" style={{ fontSize: FS.label, fontWeight: 600, color: K.t1, padding: "3px 4px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  <td style={{ fontSize: FS.label, fontWeight: 600, color: K.t1, padding: "3px 4px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                     {p.name.split(" ")[0]}
                   </td>
                   {holes.map(i => {
@@ -3579,7 +3576,7 @@ function BettingView({
                     <div onClick={() => setExpandedPlayer(isExpanded ? null : pid)}
                       style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", cursor: "pointer" }}>
                       <span style={{ fontSize: FS.micro, color: isExpanded ? K.acc : K.t3, transition: `transform ${MOTION}`, display: "inline-block", transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)", flexShrink: 0 }}>▶</span>
-                      <span className="wbc-name" style={{ flex: 1, minWidth: 0, fontSize: FS.body, fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <span style={{ flex: 1, minWidth: 0, fontSize: FS.body, fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {players.find(p => p.id === pid)?.name || pid}
                       </span>
                       <span style={{ fontSize: FS.body, fontWeight: 700, color: K.acc, flexShrink: 0 }}>{count} skin{count !== 1 ? "s" : ""}</span>
@@ -3666,7 +3663,7 @@ function BettingView({
                               </div>
                               {winner ? (
                                 <span style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
-                                  <span className="wbc-name" style={{ fontSize: FS.body, fontWeight: 700, color: K.acc, whiteSpace: "nowrap" }}>🎯 {winner.name}</span>
+                                  <span style={{ fontSize: FS.body, fontWeight: 700, color: K.acc, whiteSpace: "nowrap" }}>🎯 {winner.name}</span>
                                   {dist && <span style={{ fontSize: FS.small, fontWeight: 800, color: K.warn }}>{dist}</span>}
                                 </span>
                               ) : <span style={{ fontSize: FS.small, color: K.t3 }}>No winner yet</span>}
@@ -3908,7 +3905,7 @@ function BettingView({
                           borderBottom: `1px solid ${K.bdr}${ALPHA.hair}`,
                           background: r.placed === 0 ? K.warn + ALPHA.wash : "transparent",
                         }}>
-                        <span className="wbc-name" style={{ minWidth: 0, fontSize: FS.small, fontWeight: 600, color: r.placed > 0 ? K.t1 : K.t2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        <span style={{ minWidth: 0, fontSize: FS.small, fontWeight: 600, color: r.placed > 0 ? K.t1 : K.t2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           {r.name}
                         </span>
                         {cell(r.opening, openFull, r.opening > 0)}
@@ -4038,8 +4035,7 @@ function BettingView({
                   return (
                     <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: `1px solid ${K.bdr}${ALPHA.hair}` }}>
                       <span style={{ flex: 1, minWidth: 0, fontSize: FS.small, fontWeight: 600, color: n > 0 ? K.t1 : K.t3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {/* Name only — the share count beside it is not a name. */}
-                        <span className="wbc-name">{p.name}</span>
+                        {p.name}
                         {held > 0 && <span style={{ color: K.t3, fontWeight: 600 }}> · {held} held</span>}
                       </span>
                       <Btn variant="secondary" size="sm" disabled={!canPlace || n <= 0}
@@ -4118,7 +4114,7 @@ function BettingView({
                   const isLeader = r.pid === winnerId;
                   return (
                     <div key={r.pid} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", borderBottom: `1px solid ${K.bdr}${ALPHA.hair}`, background: isLeader ? K.accGlow : "transparent" }}>
-                      <span className="wbc-name" style={{ flex: 1, minWidth: 0, fontSize: FS.body, fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <span style={{ flex: 1, minWidth: 0, fontSize: FS.body, fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {isLeader && <span style={{ color: K.gold }}>🏆 </span>}{r.name}
                       </span>
                       {/* The share of the market, as a bar rather than a second
@@ -4175,7 +4171,7 @@ function BettingView({
                       style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 4px", cursor: "pointer" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
                         <span style={{ fontSize: FS.micro, color: isOpen ? K.acc : K.t3, transition: `transform ${MOTION}`, display: "inline-block", transform: isOpen ? "rotate(90deg)" : "rotate(0deg)" }}>▶</span>
-                        <span className="wbc-name" style={{ fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.name}</span>
+                        <span style={{ fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.name}</span>
                       </div>
                       <span style={{ color: K.acc, fontWeight: 800, flexShrink: 0 }}>{h.shares} sh</span>
                     </div>
@@ -4254,7 +4250,7 @@ function GroupsView({ players, round, tRounds, courses, pairingsData, teeTimesDa
                 const isMe = pid === user.id;
                 return (
                   <div key={pid} style={{ padding: "5px 12px", display: "grid", gridTemplateColumns: "5fr 1.6fr 2.4fr 2fr", alignItems: "center", borderBottom: pi < grp.length - 1 ? `1px solid ${K.bdr}${ALPHA.wash}` : "none", background: isMe ? K.t2 + ALPHA.wash : "transparent" }}>
-                    <span className="wbc-name" style={{ fontWeight: 600, fontSize: FS.small, color: isMe ? K.gold : K.t1 }}>{p.name}</span>
+                    <span style={{ fontWeight: 600, fontSize: FS.small, color: isMe ? K.gold : K.t1 }}>{p.name}</span>
                     <span style={{ fontSize: FS.label, fontWeight: 600, color: K.t2, textAlign: "center" }}>{p.handicap_index}</span>
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: FS.label, fontWeight: 600, color: isDarkTee(teeClr) ? "#9ca3af" : isLightTee(teeClr) ? K.t3 : teeClr }}>
                       {teeName && <>
@@ -5101,7 +5097,7 @@ function PlayerRow({ player, isLast, onOpen, isDirector, account }) {
       padding: "10px 14px", display: "flex", alignItems: "center", gap: 8,
     }}>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div className="wbc-name" style={{ fontSize: FS.body, fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <div style={{ fontSize: FS.body, fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {/* 🔗 = this name is claimed by a signed-in account. It replaces the
               "Signed in" list that used to sit in the Event tab restating the
               roster: the question it answered — who can actually post a score —
@@ -5302,7 +5298,7 @@ function PlayerEditor({ editing, set, onClose, tPlayers, players, memberships, c
           }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: FS.small, fontWeight: 700, color: K.acc, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                Returning · <span className="wbc-name">{editing.linked.name}</span>
+                Returning · {editing.linked.name}
               </div>
               <div style={{ fontSize: FS.micro, color: K.t3, marginTop: 1 }}>
                 Keeps their career, their index and their sign-in.
@@ -5323,7 +5319,7 @@ function PlayerEditor({ editing, set, onClose, tPlayers, players, memberships, c
                   padding: "8px 10px", display: "flex", alignItems: "center", gap: 8, fontFamily: FONT,
                 }}>
                   <span style={{ flex: 1, minWidth: 0 }}>
-                    <span className="wbc-name" style={{ display: "block", fontSize: FS.small, fontWeight: 700, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    <span style={{ display: "block", fontSize: FS.small, fontWeight: 700, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {r.name}
                     </span>
                     <span style={{ display: "block", fontSize: FS.micro, color: K.t3, marginTop: 1 }}>
@@ -6267,7 +6263,7 @@ function AdminView({ activePlayers, rosterPlayers, sideGames, onUpdateSideGames,
                 return (
                   <div key={p.id} style={{ display: "grid", gridTemplateColumns: "32px 1fr 56px 56px", alignItems: "center", padding: "7px 12px", margin: "3px 8px", borderRadius: R.sm, border: `1px solid ${K.bdr}`, background: K.card }}>
                     <span style={{ fontSize: FS.label, fontWeight: 700, color: pos === 1 && !tiedAbove ? K.acc : K.t3 }}>{posLabel}</span>
-                    <span className="wbc-name" style={{ fontSize: FS.small, fontWeight: 600, color: K.t1 }}>{p.name}</span>
+                    <span style={{ fontSize: FS.small, fontWeight: 600, color: K.t1 }}>{p.name}</span>
                     <span style={{ fontSize: FS.small, fontWeight: 800, textAlign: "center", color: p.netToPar < 0 ? K.under : p.netToPar > 0 ? K.t2 : K.t1 }}>
                       {p.netToPar === 0 ? "E" : p.netToPar > 0 ? `+${p.netToPar}` : p.netToPar}
                     </span>
@@ -7466,7 +7462,7 @@ function AdminView({ activePlayers, rosterPlayers, sideGames, onUpdateSideGames,
               {posted.map(({ p, holes }, i) => (
                 <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", borderBottom: i < posted.length - 1 ? `1px solid ${K.bdr}${ALPHA.hair}` : "none" }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="wbc-name" style={{ fontSize: FS.small, fontWeight: 700, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
+                    <div style={{ fontSize: FS.small, fontWeight: 700, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
                     <div style={{ fontSize: FS.label, color: K.t3 }}>{holes} hole{holes === 1 ? "" : "s"} posted</div>
                   </div>
                   <Btn onClick={async () => {
@@ -9497,7 +9493,7 @@ export default function WBCApp() {
                     {(user.name || "?").trim().charAt(0).toUpperCase()}
                   </div>
                   <div style={{ minWidth: 0 }}>
-                    <div className="wbc-name" style={{ fontSize: FS.body, fontWeight: 700, color: K.t1 }}>{user.name}</div>
+                    <div style={{ fontSize: FS.body, fontWeight: 700, color: K.t1 }}>{user.name}</div>
                     <div style={{ fontSize: FS.label, color: K.t3 }}>{user.isDirector ? "Tournament director" : "Player"}</div>
                   </div>
                 </div>

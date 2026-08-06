@@ -92,29 +92,6 @@ input[type="number"] {
   appearance: textfield;
 }
 
-/* ── Player names, set in small caps ───────────────────────────────
-   A name reads the way a scorecard or a club honours board prints one:
-   the initial at full height, the rest as capitals cut down to about
-   x-height. It is still all caps — this is a size change, not a case one.
-
-   `text-transform: none` is LOAD-BEARING, not tidying. font-variant-caps
-   only shrinks letters that are lowercase in the SOURCE string, and the
-   app-wide uppercase on <body> runs first — so with the transform left on
-   there are no lowercase letters left to shrink and the property does
-   exactly nothing. Measured: "Aaron J" is 76.5px either way with the
-   transform on, 61.8px with it off.
-
-   That also means this rides on names being STORED in their natural case
-   ("Aaron J", "McDonald"), which is how the roster and every historical
-   sheet in data/ hold them. A name typed in as "AARON J" has no lowercase
-   to cut down and simply renders as it does today — no worse, just not
-   small caps. Montserrat ships no smcp table, so these are synthesised by
-   the browser; that is the same thing the honours board does by hand. */
-.wbc-name {
-  text-transform: none;
-  font-variant-caps: small-caps;
-}
-
 /* Horizontal strips that scroll on touch — the admin round pills once the
    round count outgrows the width. No scrollbar sitting under them, and iOS
    momentum scrolling, which `overflow-x: auto` alone does not give in a
