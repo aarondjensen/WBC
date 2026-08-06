@@ -4068,7 +4068,7 @@ function BettingView({
                             the name that took the money sitting one line above
                             the man who missed it by a shot is the entire
                             reason to open this. */}
-                        <td className="wbc-name" style={sub({ textAlign: "left", color: won ? K.gold : K.t2, fontWeight: won ? 800 : 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })}>
+                        <td style={sub({ textAlign: "left", color: won ? K.gold : K.t2, fontWeight: won ? 800 : 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })}>
                           {f.name}
                         </td>
                         <td style={sub()}>{f.gross}</td>
@@ -4117,7 +4117,7 @@ function BettingView({
                             what makes the pair read as one day. */}
                         {wi === 0 ? rdCell() : <td style={cell({ borderTop: "none" })} />}
                         <td onClick={toggle} style={cell({ textAlign: "left", fontWeight: 700, color: K.t1, borderTop: wi > 0 ? "none" : undefined, cursor: "pointer", minWidth: 0 })}>
-                          <span className="wbc-name" style={{ display: "block", fontSize: FS.small, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{w.name}</span>
+                          <span style={{ display: "block", fontSize: FS.small, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{w.name}</span>
                           {/* The course, under the first winner only. It is
                               the one thing a round number does not say and
                               the thing that explains the scores under it —
