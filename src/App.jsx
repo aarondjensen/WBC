@@ -14,6 +14,8 @@ import {
 } from "./lib/market";
 import { BuyInPrices, BuyInTracker } from "./components/BuyIns";
 import { useConfirm } from "./lib/useConfirm";
+// Tee times survive a re-group because of these two — see lib/teeSheet.js.
+import { rowsToTeeTimes, mergeTeeTimes } from "./lib/teeSheet";
 import { useDirtyForm } from "./lib/useDirtyForm";
 import { usePullToRefresh, hasNewBundle } from "./lib/usePullToRefresh";
 import { NotificationSettings } from "./components/NotificationSettings";
@@ -149,6 +151,32 @@ const db = {
       }
       return true;
     } catch(e) { console.error("db.upsertMany error:", col, e); return null; }
+  },
+  // Write a set of rows and delete another set in the SAME commit. Doing it as
+  // a delete followed by writes means the collection is briefly missing
+  // everything the delete took, and every listener sees that gap and rebuilds
+  // its state from it.
+  replaceMany: async (col, rows, deleteIds = []) => {
+    const valid = (rows || []).filter(r => r && r.id);
+    const gone = (deleteIds || []).filter(Boolean);
+    if (!valid.length && !gone.length) return true;
+    try {
+      // 500 writes per batch is Firestore's cap; 490 leaves room. Deletes ride
+      // in the first batch so the replacement lands with them.
+      const ops = [
+        ...gone.map(id => ({ kind: "del", id })),
+        ...valid.map(r => ({ kind: "set", row: r })),
+      ];
+      for (let i = 0; i < ops.length; i += 490) {
+        const batch = writeBatch(_db);
+        ops.slice(i, i + 490).forEach(op => {
+          if (op.kind === "del") batch.delete(doc(_db, col, String(op.id)));
+          else batch.set(doc(_db, col, String(op.row.id)), op.row, { merge: true });
+        });
+        await batch.commit();
+      }
+      return true;
+    } catch(e) { console.error("db.replaceMany error:", col, e); return null; }
   },
   delete: async (col, filters = []) => {
     try {
@@ -422,17 +450,6 @@ const mergeSideGames = (raw) => {
 };
 
 // Convert tee times rows → teeTimesData { round: [time, time, ...] }
-const rowsToTeeTimes = (rows) => {
-  const tt = {};
-  rows.forEach(r => {
-    if (!tt[r.round_number]) tt[r.round_number] = [];
-    const gi = r.group_number - 1;
-    while (tt[r.round_number].length <= gi) tt[r.round_number].push("");
-    tt[r.round_number][gi] = r.tee_time || "";
-  });
-  return tt;
-};
-
 // calcCH now lives in lib/individualBoard.js, alongside the net-to-par math it
 // feeds, and is imported at the top of this file — one implementation for the
 // leaderboard, the scorecards and the finalize preview alike.
@@ -5463,7 +5480,15 @@ const isoAddDays = (iso, n) => {
   const dt = new Date(y, m - 1, d + n);
   return isoOf(dt.getFullYear(), dt.getMonth(), dt.getDate());
 };
-function DateRangeCalendar({ start, end, onChange }) {
+// `mode="day"` picks a single date instead of a range — same grid, same month
+// paging, one tap. It exists because the round's play date used to fall back to
+// an <input type="date"> when the event had no dates set, and a native date
+// field inside a modal is the worst place for one: iOS lays the control out to
+// its own idea of a width, and tapping it raises the OS picker over a modal
+// that dismisses on the touch behind it. The picker flashed and vanished, and
+// the field ran off the side of the screen. Our own grid does neither.
+function DateRangeCalendar({ start, end, onChange, mode = "range" }) {
+  const day = mode === "day";
   // Which end of the range the next tap sets. Starting a NEW range whenever
   // both are set is what makes a mis-tap cheap: tap any day and you are picking
   // a fresh range, rather than having to clear something first.
@@ -5481,8 +5506,10 @@ function DateRangeCalendar({ start, end, onChange }) {
     return { y: d.getFullYear(), m: d.getMonth() };
   })();
 
-  const maxEnd = start ? isoAddDays(start, MAX_EVENT_DAYS - 1) : null;
+  const maxEnd = day ? null : (start ? isoAddDays(start, MAX_EVENT_DAYS - 1) : null);
   const tap = (iso) => {
+    // One tap, one date, done — tapping the day already chosen clears it.
+    if (day) { setMonthOffset(0); onChange(iso === start ? "" : iso, ""); return; }
     // Paging is relative to the start date, so once a tap moves the start the
     // offset has to go back to zero or the view jumps by however far they had
     // paged to reach the day they just tapped.
@@ -5530,8 +5557,8 @@ function DateRangeCalendar({ start, end, onChange }) {
           if (!d) return <div key={i} />;
           const iso = isoOf(view.y, view.m, d);
           const isStart = iso === start;
-          const isEnd = iso === end;
-          const between = start && end && iso > start && iso < end;
+          const isEnd = !day && iso === end;
+          const between = !day && start && end && iso > start && iso < end;
           const beyond = picking === "end" && start && maxEnd && iso > maxEnd;
           const edge = isStart || isEnd;
           return (
@@ -5549,7 +5576,9 @@ function DateRangeCalendar({ start, end, onChange }) {
         })}
       </div>
       <div style={{ marginTop: 6, fontSize: FS.label, color: K.t3, textAlign: "center" }}>
-        {!start
+        {day
+          ? (start ? fmtRoundDate(start) : "Tap the day this round is played")
+          : !start
           ? "Tap the first day of the tournament"
           : picking === "end"
             ? "Now tap the last day"
@@ -6385,8 +6414,7 @@ function AdminView({ activePlayers, rosterPlayers, sideGames, onUpdateSideGames,
               </div>
               {chips.length === 0 ? (
                 <>
-                  <input type="date" value={mine} onChange={e => pick(e.target.value)}
-                    style={{ width: "100%", background: K.inp, border: `1px solid ${ac}${ALPHA.hair}`, borderRadius: R.sm, color: K.t1, fontSize: FS.lead, fontWeight: 600, padding: "10px 12px", colorScheme: "dark", boxSizing: "border-box" }} />
+                  <DateRangeCalendar mode="day" start={mine} end="" onChange={(d) => pick(d)} />
                   <div style={{ fontSize: FS.label, color: K.t3, marginTop: 8, lineHeight: 1.5 }}>
                     Set the tournament dates in Event and this becomes a list of the days it runs.
                   </div>
@@ -7363,17 +7391,21 @@ function AdminView({ activePlayers, rosterPlayers, sideGames, onUpdateSideGames,
         <PairingsEditor key={`${editRound}:${activePlayers.length}`} activePlayers={activePlayers} pairingsData={pairingsData} setPairings={setPairings} tRounds={tRounds} courses={courses} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
               setTeeTimesData(prev => {
                 const next = typeof updater === "function" ? updater(prev) : updater;
-                // Fire-and-forget: update tee times on pairings rows in Firestore
-                Object.keys(next).forEach(async rnd => {
-                  const groups = pairingsData[rnd] || [];
-                  groups.forEach(async (grp, gi) => {
+                // One commit for the whole tee sheet. Writing a row per player
+                // meant a snapshot per player, and each one rebuilt teeTimesData
+                // from a server that was only part way through the change —
+                // which is what made the times flicker while they were typed.
+                const rows = [];
+                Object.keys(next).forEach(rnd => {
+                  (pairingsData[rnd] || []).forEach((grp, gi) => {
                     const teeTime = (next[rnd] || [])[gi] || null;
-                    grp.forEach(async pid => {
-                      const row = { id: docIds.pairing(_e(), rnd, gi + 1, pid), tournament_id: TOURNAMENT_ID, round_number: parseInt(rnd), group_number: gi+1, player_id: pid, tee_time: teeTime };
-                      await db.upsert("pairings", row);
-                    });
+                    grp.forEach(pid => rows.push({
+                      id: docIds.pairing(_e(), rnd, gi + 1, pid), tournament_id: TOURNAMENT_ID,
+                      round_number: parseInt(rnd), group_number: gi + 1, player_id: pid, tee_time: teeTime,
+                    }));
                   });
                 });
+                db.upsertMany("pairings", rows);
                 return next;
               });
             }} roundDates={roundDates} onSetRoundDate={onSetRoundDate} scoringOpen={scoringOpen} onSetScoringOpen={onSetScoringOpen} pairingStrategy={pairingStrategy} onSetPairingStrategy={onSetPairingStrategy} leaderboard={leaderboard} finalizedRounds={finalizedRounds} getPlayerTee={getPlayerTee} editRound={editRound} holeData={holeData} />
@@ -8169,7 +8201,7 @@ export default function WBCApp() {
         if (pairRows?.length) {
           const sorted = pairRows.sort((a, b) => a.round_number - b.round_number || a.group_number - b.group_number || (a.player_id || "").localeCompare(b.player_id || ""));
           setPairingsData(rowsToPairings(sorted));
-          setTeeTimesData(rowsToTeeTimes(sorted));
+          setTeeTimesData(prev => mergeTeeTimes(prev, rowsToTeeTimes(sorted)));
         }
 
         const teeRows = await db.get("tee_assignments", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
@@ -8218,7 +8250,7 @@ export default function WBCApp() {
     unsubs.push(db.subscribe("pairings", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
       const sorted = docs.sort((a, b) => a.round_number - b.round_number || a.group_number - b.group_number || (a.player_id || "").localeCompare(b.player_id || ""));
       setPairingsData(rowsToPairings(sorted));
-      setTeeTimesData(rowsToTeeTimes(sorted));
+      setTeeTimesData(prev => mergeTeeTimes(prev, rowsToTeeTimes(sorted)));
     }));
 
     unsubs.push(db.subscribe("tee_assignments", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
@@ -9035,30 +9067,41 @@ export default function WBCApp() {
     const incoming = JSON.stringify(groups);
     if (existing === incoming) return;
     setPairingsData(prev => ({ ...prev, [rnd]: groups }));
-    // A round's TEE TIMES live on its pairing rows, and this deletes every one
-    // of them before writing the new draw — so the times only survive because
-    // they are copied back out of `teeTimesData` below. That makes client state
-    // the only copy for the length of this function, and if it is empty when a
-    // save lands (a cold load that has not filled it yet, a save raised from a
-    // screen that never subscribed) the round comes back with every tee time
-    // gone — which reads as "admin cleared the tee times", and locks every
-    // non-director out of scoring behind a gate that has nothing to open on.
-    // So: when client state has nothing, ask Firestore what is actually stored
-    // before deleting it.
+    // Two things this has to get right, found the hard way from two directions.
+    //
+    // A round's TEE TIMES live on its pairing rows, so rewriting the draw
+    // rewrites them: they survive only because they are copied back out of
+    // `teeTimesData` below. If that client state is empty when a save lands —
+    // a cold load that has not filled it yet, a save raised from a screen that
+    // never subscribed — the round comes back with every tee time gone, which
+    // reads as "admin cleared the tee times" and locks every non-director out
+    // of scoring behind a gate with nothing to open on. So when client state
+    // has nothing, ask Firestore what is actually stored.
+    //
+    // And the write is ONE commit. The old shape deleted every pairing row for
+    // the round and then wrote the new ones one at a time; the delete commits
+    // by itself, so every listener saw a round with no pairings and no tee
+    // times and published that, then watched them come back a group at a time.
+    // That was the flash. Deletes and writes ride in the same batch now, so
+    // there is no moment in between to observe. Times carry across by GROUP
+    // INDEX — group 1 keeps its time when its players change, which is the
+    // whole point of a tee sheet.
+    //
+    // One read serves both: the stored times when the client has none, and the
+    // ids to delete. Reading rather than trusting the local mirror also means a
+    // row another director left behind cannot survive as a player in two groups.
+    const onServer = await db.get("pairings", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }, { field: "round_number", op: "==", value: rnd }]) || [];
     let times = (teeTimesData[rnd] || []);
-    if (!times.some(t => t)) {
-      const existing = await db.get("pairings", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }, { field: "round_number", op: "==", value: rnd }]);
-      times = rowsToTeeTimes(existing || [])[rnd] || times;
-    }
-    // Delete old pairings for this round and reinsert
-    await db.delete("pairings", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }, { field: "round_number", op: "==", value: rnd }]);
+    if (!times.some(t => t)) times = rowsToTeeTimes(onServer)[rnd] || times;
     const rows = [];
     groups.forEach((grp, gi) => {
       grp.forEach(pid => {
         rows.push({ id: docIds.pairing(_e(), rnd, gi + 1, pid), tournament_id: TOURNAMENT_ID, round_number: rnd, group_number: gi + 1, player_id: pid, tee_time: times[gi] || null });
       });
     });
-    for (const row of rows) await db.upsert("pairings", row);
+    const keep = new Set(rows.map(r => r.id));
+    const stale = onServer.map(r => r.id).filter(id => id && !keep.has(id));
+    await db.replaceMany("pairings", rows, stale);
     notify(`Round ${rnd} pairings saved`);
   };
 
@@ -9506,17 +9549,21 @@ export default function WBCApp() {
         {view === "admin" && (user.isDirector ? <AdminView activePlayers={activePlayers} rosterPlayers={allPlayers} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} rebuyIds={rebuyIds} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
               setTeeTimesData(prev => {
                 const next = typeof updater === "function" ? updater(prev) : updater;
-                // Fire-and-forget: update tee times on pairings rows in Firestore
-                Object.keys(next).forEach(async rnd => {
-                  const groups = pairingsData[rnd] || [];
-                  groups.forEach(async (grp, gi) => {
+                // One commit for the whole tee sheet. Writing a row per player
+                // meant a snapshot per player, and each one rebuilt teeTimesData
+                // from a server that was only part way through the change —
+                // which is what made the times flicker while they were typed.
+                const rows = [];
+                Object.keys(next).forEach(rnd => {
+                  (pairingsData[rnd] || []).forEach((grp, gi) => {
                     const teeTime = (next[rnd] || [])[gi] || null;
-                    grp.forEach(async pid => {
-                      const row = { id: docIds.pairing(_e(), rnd, gi + 1, pid), tournament_id: TOURNAMENT_ID, round_number: parseInt(rnd), group_number: gi+1, player_id: pid, tee_time: teeTime };
-                      await db.upsert("pairings", row);
-                    });
+                    grp.forEach(pid => rows.push({
+                      id: docIds.pairing(_e(), rnd, gi + 1, pid), tournament_id: TOURNAMENT_ID,
+                      round_number: parseInt(rnd), group_number: gi + 1, player_id: pid, tee_time: teeTime,
+                    }));
                   });
                 });
+                db.upsertMany("pairings", rows);
                 return next;
               });
             }} roundDates={roundDates} onSetRoundDate={async (rnd, dateStr) => { const next = { ...roundDates }; if (dateStr) next[rnd] = dateStr; else delete next[rnd]; setRoundDates(next); await saveTournamentState(finalizedRounds, teesSaved, teesModified, next, scoringOpen); }} scoringOpen={scoringOpen} onSetScoringOpen={async (rnd, open) => { const next = { ...scoringOpen }; if (open) next[rnd] = true; else delete next[rnd]; setScoringOpen(next); await saveTournamentState(finalizedRounds, teesSaved, teesModified, roundDates, next); }} pairingStrategy={pairingStrategy} onSetPairingStrategy={async (rnd, cfg) => { const next = { ...pairingStrategy }; if (cfg) next[rnd] = cfg; else delete next[rnd]; setPairingStrategy(next); await saveTournamentState(finalizedRounds, teesSaved, teesModified, roundDates, scoringOpen, next); }} leaderboard={getLeaderboard} holeData={holeData} finalizedRounds={finalizedRounds} onDiscardRoundScores={onDiscardRoundScores} onFinalizeRound={async rnd => { const nf = { ...finalizedRounds, [rnd]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${rnd}`, tournament_id: TOURNAMENT_ID, round: rnd, finalized: true }); if (rnd < NUM_ROUNDS) setRound(rnd + 1); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf); if (/^\d+$/.test(String(key))) { await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${key}`, tournament_id: TOURNAMENT_ID, round: Number(key), finalized: false }); } else { setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); } }} notify={notify} getPlayerTee={getPlayerTee} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} externalSettingsRound={adminSettingsRound} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); setAdminSettingsRound(null); }} teesSaved={teesSaved} onTeesSave={async r => { const next = { ...teesSaved, [r]: true }; const nextMod = { ...teesModified, [r]: false }; setTeesSaved(next); setTeesModified(nextMod); await saveTournamentState(finalizedRounds, next, nextMod); }} teesModified={teesModified} onTeesModify={async r => { const nextMod = { ...teesModified, [r]: true }; setTeesModified(nextMod); await saveTournamentState(finalizedRounds, teesSaved, nextMod); }} memberships={memberships} onSetDirector={onSetDirector} claims={claims} authUid={fbUser?.uid || null} tournamentMeta={tournamentMeta} onSaveTournamentMeta={saveTournamentMeta} /> : (
