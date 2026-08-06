@@ -91,6 +91,11 @@ export const countingFor = (n) =>
 // with the arithmetic behind it.
 export const COUNTING = COUNTING_BY_SIZE[WINDOW];
 
+// The score a withdrawn player's unplayed holes are filled with. Duplicated
+// from individualBoard rather than imported so this module keeps its promise of
+// no app dependencies; the two are asserted equal in the tests.
+const WD_SENTINEL = 99;
+
 // The slope of a course of average difficulty — the constant every differential
 // is rescaled onto.
 const STANDARD_SLOPE = 113;
@@ -224,11 +229,136 @@ export function wbcIndex(rounds = [], { recentSlots = recentRoundSlots() } = {})
   };
 }
 
+// ── editionRounds ──────────────────────────────────────────────────
+// A finished edition's rounds, in the shape the index math wants.
+//
+// The bundled history stops at the last export of data/rounds.csv, so the
+// tournament that JUST finished is not in it — it is in Firestore, as hole
+// scores. This turns those into differentials so a new year can be seeded off
+// a record that includes the year before it, rather than off numbers a year
+// out of date. Everything is passed in; this function has never heard of
+// Firestore.
+//
+//   holeScores     [{ player_id, round_number, hole_number, score }]
+//   tRounds        [{ round_number, course_id }]
+//   courses        [{ id, rating, slope, tee_boxes:[{ name, rating, slope }] }]
+//   teeAssignments [{ round_number, player_id, tee_name }]
+//
+// Only COMPLETE rounds count. A card thru 11, or one filled with the WD
+// sentinel, is not a round anybody can be handicapped on — and a partial gross
+// compared against a full course rating would read as a spectacular round.
+//
+// The rating used is the TEE the player was assigned, falling back to the
+// course's own — which is the same resolution calcCH uses to score the round.
+// Handicapping a round against a different rating than it was played off would
+// be a second, quieter kind of wrong.
+//
+// Returns { [playerId]: [round, …] }, newest first.
+export function editionRounds({ year, holeScores = [], tRounds = [], courses = [], teeAssignments = [] } = {}) {
+  const yr = Number(year);
+  if (!Number.isFinite(yr)) return {};
+
+  const courseFor = (round) => {
+    const tr = (tRounds || []).find(t => Number(t.round_number) === round);
+    return tr ? (courses || []).find(c => c.id === tr.course_id) || null : null;
+  };
+  const teeFor = (round, pid, course) => {
+    const name = (teeAssignments || []).find(t => Number(t.round_number) === round && t.player_id === pid)?.tee_name;
+    const box = name ? (course?.tee_boxes || []).find(t => t.name === name) : null;
+    return box || course || null;
+  };
+
+  // Gather strokes per player+round first: the rows arrive one hole at a time
+  // and in no particular order.
+  const cards = {};
+  for (const r of holeScores || []) {
+    const round = Number(r.round_number);
+    const pid = r.player_id;
+    if (!pid || !Number.isFinite(round) || round <= 0) continue;
+    const hole = Number(r.hole_number);
+    if (!Number.isFinite(hole) || hole < 1 || hole > 18) continue;
+    const key = `${pid}|${round}`;
+    (cards[key] ||= { pid, round, holes: {} }).holes[hole] = Number(r.score);
+  }
+
+  const out = {};
+  for (const card of Object.values(cards)) {
+    const scores = Object.values(card.holes);
+    if (scores.length !== 18) continue;                     // incomplete card
+    if (scores.some(s => !(s > 0) || s === WD_SENTINEL)) continue;  // withdrew
+    const course = courseFor(card.round);
+    if (!course) continue;
+    const tee = teeFor(card.round, card.pid, course);
+    const gross = scores.reduce((a, s) => a + s, 0);
+    const rating = Number(tee?.rating), slope = Number(tee?.slope);
+    (out[card.pid] ||= []).push({
+      year: yr,
+      round: card.round,
+      key: `${yr}-${card.round}`,
+      player: card.pid,
+      gross,
+      ch: null,
+      net: null,
+      course: { name: course.name || "", rating, slope, par: Number(course.par) || null },
+      differential: differential({ gross, rating, slope }),
+    });
+  }
+  for (const list of Object.values(out)) list.sort(newestFirst);
+  return out;
+}
+
 // ── indexFor ───────────────────────────────────────────────────────
 // The one call the view makes for a player: their history and their index.
-export function indexFor(name) {
-  const rounds = historyFor(name);
-  return { name, rounds, ...wbcIndex(rounds) };
+//
+// `override` is a number a director has set by hand, and it REPLACES the
+// computed index without erasing it — `computed` keeps the arithmetic, the
+// window and the counting rounds stay exactly as they were, and the detail page
+// shows both. That is the whole design of the override: a hand-set index that
+// hides its own working is a number nobody can argue with or check, and the
+// reason to set one is usually that the history is thin or wrong, which is
+// worth being able to see side by side.
+//
+// The cases it exists for: a first-timer with no rounds at all, somebody whose
+// real index is known from a home club, and the year a career's data is plainly
+// not describing the golfer any more.
+export function indexFor(name, { override = null, extraRounds = [] } = {}) {
+  const rounds = mergeRounds(historyFor(name), extraRounds);
+  const board = wbcIndex(rounds);
+  // An empty string is a cleared field, not a scratch player. `Number("")` is
+  // 0 and 0 is a legal index, so the blank has to be rejected before the number
+  // check rather than by it — and 0 has to survive, which a falsy test would
+  // not have let it do.
+  const overridden = override != null
+    && String(override).trim() !== ""
+    && Number.isFinite(Number(override));
+  return {
+    name,
+    rounds,
+    ...board,
+    computed: board.index,
+    index: overridden ? tenth(Number(override)) : board.index,
+    overridden,
+  };
+}
+
+// ── mergeRounds ────────────────────────────────────────────────────
+// The bundled history plus whatever a caller has that is newer, newest first
+// and one entry per round.
+//
+// De-duped by `year-round` with the EXTRA winning, because the two only ever
+// collide after data/rounds.csv has been re-exported to include a year that is
+// also still being read live — and in that overlap the live record is the one
+// that cannot be stale. Both should say the same thing; if they ever disagree,
+// silently counting the round twice would be the worse failure.
+export function mergeRounds(base = [], extra = []) {
+  const seen = new Set();
+  const out = [];
+  for (const r of [...(extra || []), ...(base || [])]) {
+    if (!r || seen.has(r.key)) continue;
+    seen.add(r.key);
+    out.push(r);
+  }
+  return out.sort(newestFirst);
 }
 
 // ── matchHistoryName ───────────────────────────────────────────────

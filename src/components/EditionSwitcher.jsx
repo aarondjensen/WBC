@@ -51,7 +51,10 @@ const fieldStyle = (w) => ({
 // What a clone can copy. Scores, pairings, tee assignments, skins and
 // signatures are NEVER cloned — see the note in lib/editions.js.
 const CLONE_ITEMS = [
-  { key: "players", label: "Roster & handicap indexes" },
+  // "updated" rather than "copied": a player who posted cards in the year being
+  // cloned from starts the new one on a WBC Index that includes them, not on
+  // the number he began last year with. See rosterHandicap in editionClone.
+  { key: "players", label: "Roster, handicaps updated for last year" },
   { key: "rounds", label: "Round setup (course per round)" },
   { key: "tournamentName", label: "Tournament name & location" },
   // The price of a seat in skins, CTP, low net and the market. Who bought in

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   plannedYear, plannedSource, summaryLine, editionHasContent, newestBuiltEdition,
   reyearName, cloneMeta, cloneSideGames,
-  cloneRosterRow, cloneRoundRow, editionDoc, overwriteWarning,
+  cloneRosterRow, cloneRoundRow, editionDoc, overwriteWarning, rosterHandicap,
 } from "./editionClone";
 
 // The real shape this screen got wrong once, and must never get wrong again:
@@ -205,8 +205,13 @@ describe("cloneRosterRow", () => {
     expect(row.tournament_id).toBe("wbc_2026");
   });
 
-  it("carries the handicap index forward as this year's starting point", () => {
+  it("carries the handicap index forward when the source year was not played", () => {
     expect(cloneRosterRow(tp, { slug: "2026", tournamentId: "wbc_2026" }).handicap_index).toBe(12.4);
+  });
+
+  it("starts them on a recomputed index when they played the source year", () => {
+    const row = cloneRosterRow(tp, { slug: "2026", tournamentId: "wbc_2026", index: 9.8, playedRounds: 4 });
+    expect(row.handicap_index).toBe(9.8);
   });
 
   it("drops last year's withdrawal", () => {
@@ -271,5 +276,45 @@ describe("overwriteWarning", () => {
 
   it("is empty when the clone copies nothing", () => {
     expect(overwriteWarning({})).toEqual([]);
+  });
+});
+
+
+// ── rosterHandicap ──
+// What a cloned roster row starts on. The source year has just been played, so
+// a man who played it starts the new one on an index that includes those
+// rounds; everyone else keeps what they had.
+describe("rosterHandicap", () => {
+  const tp = { player_id: "aaron_j", handicap_index: 12.4 };
+
+  it("takes the recomputed index for a player who posted cards", () => {
+    expect(rosterHandicap(tp, { index: 9.8, playedRounds: 4 })).toBe(9.8);
+  });
+
+  it("keeps the carried index when the source year was never played", () => {
+    expect(rosterHandicap(tp, { index: 9.8, playedRounds: 0 })).toBe(12.4);
+  });
+
+  it("keeps it for a rostered player who posted nothing", () => {
+    expect(rosterHandicap(tp, { index: null, playedRounds: 0 })).toBe(12.4);
+  });
+
+  // A first-timer with no history: the director's typed number is the only one
+  // there is, and scratch-by-accident is the failure to avoid.
+  it("keeps a typed number when there is no index to compute", () => {
+    expect(rosterHandicap({ handicap_index: 4.7 }, { index: null, playedRounds: 4 })).toBe(4.7);
+  });
+
+  it("accepts a scratch recomputed index", () => {
+    expect(rosterHandicap(tp, { index: 0, playedRounds: 4 })).toBe(0);
+  });
+
+  it("falls back to zero when there is nothing at all", () => {
+    expect(rosterHandicap({}, {})).toBe(0);
+    expect(rosterHandicap(null, {})).toBe(0);
+  });
+
+  it("ignores a carried value that is not a number", () => {
+    expect(rosterHandicap({ handicap_index: "" }, {})).toBe(0);
   });
 });

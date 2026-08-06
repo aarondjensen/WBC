@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
   differential, wbcIndex, historyFor, indexFor, indexTable, matchHistoryName,
-  recentRoundSlots, countingFor, WINDOW, COUNTING,
+  recentRoundSlots, countingFor, editionRounds, mergeRounds, WINDOW, COUNTING,
 } from "./handicap";
+import { WD_SCORE } from "./individualBoard";
 
 // A round, as wbcIndex wants one. Differentials are handed in directly so the
 // window/selection rules can be tested without doing the arithmetic twice.
@@ -358,5 +359,214 @@ describe("the taper, applied", () => {
     for (const name of ["Aaron J", "Bob B", "Matt V"]) {
       expect(indexFor(name).counting, name).toHaveLength(COUNTING);
     }
+  });
+});
+
+// ── A hand-set index ──
+// An override replaces the number without erasing the arithmetic behind it, so
+// the detail page can show a director's figure and what the rounds actually say
+// at the same time.
+describe("indexFor with an override", () => {
+  it("reports the computed index when there is no override", () => {
+    const p = indexFor("Aaron J");
+    expect(p.overridden).toBe(false);
+    expect(p.index).toBe(6.6);
+    expect(p.computed).toBe(6.6);
+  });
+
+  it("replaces the index and says so", () => {
+    const p = indexFor("Aaron J", { override: 8 });
+    expect(p.overridden).toBe(true);
+    expect(p.index).toBe(8);
+  });
+
+  it("keeps the computed index alongside it", () => {
+    const p = indexFor("Aaron J", { override: 8 });
+    expect(p.computed).toBe(6.6);
+  });
+
+  it("leaves the working untouched, so the page can still show it", () => {
+    const plain = indexFor("Aaron J");
+    const over = indexFor("Aaron J", { override: 8 });
+    expect(over.window.map(r => r.key)).toEqual(plain.window.map(r => r.key));
+    expect(over.counting.map(r => r.key)).toEqual(plain.counting.map(r => r.key));
+    expect(over.stale).toBe(plain.stale);
+  });
+
+  it("quotes a hand-set index to the same tenth as a computed one", () => {
+    expect(indexFor("Aaron J", { override: 8.25 }).index).toBe(8.3);
+    expect(indexFor("Aaron J", { override: "12" }).index).toBe(12);
+  });
+
+  it("gives a player with no rounds at all a real index", () => {
+    const p = indexFor("Nobody X", { override: 14.2 });
+    expect(p.computed).toBe(null);
+    expect(p.index).toBe(14.2);
+    expect(p.overridden).toBe(true);
+    expect(p.rounds).toEqual([]);
+  });
+
+  it("treats a cleared override as no override", () => {
+    for (const v of [null, undefined, "", NaN]) {
+      const p = indexFor("Aaron J", { override: v });
+      expect(p.overridden, String(v)).toBe(false);
+      expect(p.index, String(v)).toBe(6.6);
+    }
+  });
+
+  // Zero is a legal handicap index — a scratch player — and must not be read as
+  // "no override" the way a falsy check would.
+  it("accepts a scratch override of zero", () => {
+    const p = indexFor("Aaron J", { override: 0 });
+    expect(p.overridden).toBe(true);
+    expect(p.index).toBe(0);
+  });
+
+  it("accepts a plus handicap", () => {
+    expect(indexFor("Aaron J", { override: -1.4 }).index).toBe(-1.4);
+  });
+});
+
+// ── Rounds from a finished edition ──
+// The tournament that just ended is in Firestore, not in the bundled history,
+// so a new year has to be able to seed off it. These are the shapes the clone
+// reads, turned into differentials.
+describe("editionRounds", () => {
+  const card = (pid, round, scores) =>
+    scores.map((s, i) => ({ player_id: pid, round_number: round, hole_number: i + 1, score: s }));
+  const eighteen = (n) => Array.from({ length: 18 }, () => n);
+
+  const courses = [{
+    id: "gc_loon", name: "The Loon", par: 72, rating: 72.8, slope: 139,
+    tee_boxes: [
+      { name: "BLACK", rating: 72.8, slope: 139 },
+      { name: "BLUE", rating: 70.5, slope: 134 },
+    ],
+  }];
+  const tRounds = [{ round_number: 1, course_id: "gc_loon" }];
+  const base = { year: 2026, tRounds, courses };
+
+  it("turns a complete card into a differential", () => {
+    const out = editionRounds({
+      ...base,
+      holeScores: card("aaron_j", 1, eighteen(5)),          // 90 gross
+      teeAssignments: [{ round_number: 1, player_id: "aaron_j", tee_name: "BLUE" }],
+    });
+    // (90 − 70.5) × 113/134 = 16.44…
+    expect(out.aaron_j).toHaveLength(1);
+    expect(out.aaron_j[0]).toMatchObject({ year: 2026, round: 1, key: "2026-1", gross: 90, differential: 16.4 });
+  });
+
+  // The rating has to be the tee the round was PLAYED off, or the differential
+  // measures a course nobody teed up on.
+  it("measures against the assigned tee, not the course's own rating", () => {
+    const blue = editionRounds({ ...base, holeScores: card("a", 1, eighteen(5)), teeAssignments: [{ round_number: 1, player_id: "a", tee_name: "BLUE" }] });
+    const black = editionRounds({ ...base, holeScores: card("a", 1, eighteen(5)), teeAssignments: [{ round_number: 1, player_id: "a", tee_name: "BLACK" }] });
+    expect(blue.a[0].differential).not.toBe(black.a[0].differential);
+    expect(black.a[0].differential).toBe(14);   // (90 − 72.8) × 113/139 = 13.98
+  });
+
+  it("falls back to the course's rating when no tee was assigned", () => {
+    const out = editionRounds({ ...base, holeScores: card("a", 1, eighteen(5)), teeAssignments: [] });
+    expect(out.a[0].differential).toBe(14);
+  });
+
+  // A card thru 11 against a full course rating would read as a spectacular
+  // round, which is the most expensive way to get a handicap wrong.
+  it("ignores an incomplete card", () => {
+    const partial = card("a", 1, eighteen(5)).slice(0, 11);
+    expect(editionRounds({ ...base, holeScores: partial, teeAssignments: [] })).toEqual({});
+  });
+
+  it("ignores a withdrawal", () => {
+    const wd = card("a", 1, [...Array(11).fill(5), ...Array(7).fill(99)]);
+    expect(editionRounds({ ...base, holeScores: wd, teeAssignments: [] })).toEqual({});
+  });
+
+  it("ignores a round whose course is not in the edition", () => {
+    const out = editionRounds({ ...base, tRounds: [], holeScores: card("a", 1, eighteen(5)), teeAssignments: [] });
+    expect(out).toEqual({});
+  });
+
+  it("keeps each player's rounds newest first", () => {
+    const out = editionRounds({
+      ...base,
+      tRounds: [{ round_number: 1, course_id: "gc_loon" }, { round_number: 2, course_id: "gc_loon" }],
+      holeScores: [...card("a", 1, eighteen(5)), ...card("a", 2, eighteen(4))],
+      teeAssignments: [],
+    });
+    expect(out.a.map(r => r.round)).toEqual([2, 1]);
+  });
+
+  it("has nothing to say about an edition with no year", () => {
+    expect(editionRounds({ holeScores: card("a", 1, eighteen(5)) })).toEqual({});
+    expect(editionRounds()).toEqual({});
+  });
+
+  // The sentinel this filters on has to stay in step with the one the scoring
+  // screen writes.
+  it("uses the same withdrawal sentinel the board does", () => {
+    expect(WD_SCORE).toBe(99);
+  });
+});
+
+describe("mergeRounds", () => {
+  const r = (year, round) => ({ year, round, key: `${year}-${round}`, differential: 10 });
+
+  it("puts everything in one list, newest first", () => {
+    expect(mergeRounds([r(2024, 1), r(2023, 1)], [r(2026, 1)]).map(x => x.key))
+      .toEqual(["2026-1", "2024-1", "2023-1"]);
+  });
+
+  it("counts a round once when both sides hold it", () => {
+    const merged = mergeRounds([r(2025, 1), r(2024, 1)], [r(2025, 1)]);
+    expect(merged.map(x => x.key)).toEqual(["2025-1", "2024-1"]);
+  });
+
+  it("lets the live copy win that collision", () => {
+    const live = { ...r(2025, 1), differential: 3 };
+    expect(mergeRounds([r(2025, 1)], [live])[0].differential).toBe(3);
+  });
+
+  it("copes with either side being empty", () => {
+    expect(mergeRounds([], [r(2026, 1)]).map(x => x.key)).toEqual(["2026-1"]);
+    expect(mergeRounds([r(2026, 1)], []).map(x => x.key)).toEqual(["2026-1"]);
+    expect(mergeRounds()).toEqual([]);
+  });
+});
+
+describe("indexFor with a just-finished edition", () => {
+  // Four rounds far better than anything in Aaron J's record, so the effect is
+  // unmistakable rather than a rounding step.
+  const fresh = [1, 2, 3, 4].map(n => ({
+    year: 2026, round: n, key: `2026-${n}`, differential: 1 + n / 10,
+  }));
+
+  it("moves the index when the new rounds are better", () => {
+    const before = indexFor("Aaron J").index;
+    const after = indexFor("Aaron J", { extraRounds: fresh }).index;
+    expect(after).toBeLessThan(before);
+  });
+
+  it("puts the new rounds at the front of the window", () => {
+    const p = indexFor("Aaron J", { extraRounds: fresh });
+    expect(p.window.slice(0, 4).map(r => r.key)).toEqual(["2026-4", "2026-3", "2026-2", "2026-1"]);
+    expect(p.window).toHaveLength(WINDOW);
+  });
+
+  it("counts them, being the best rounds on the card", () => {
+    const p = indexFor("Aaron J", { extraRounds: fresh });
+    expect(p.counting.filter(r => r.year === 2026)).toHaveLength(4);
+  });
+
+  it("gives a player with no history at all an index off them alone", () => {
+    const p = indexFor(null, { extraRounds: fresh });
+    expect(p.window).toHaveLength(4);
+    expect(p.counting).toHaveLength(1);      // the taper: best 1 of 4
+    expect(p.index).toBe(1.1);
+  });
+
+  it("still lets a hand-set index win", () => {
+    expect(indexFor("Aaron J", { extraRounds: fresh, override: 20 }).index).toBe(20);
   });
 });
