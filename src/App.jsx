@@ -10,7 +10,7 @@ import { teeTimesByPlayer, roundInPlay, thruStatus } from "./lib/thruStatus";
 import {
   MARKET_OPENING_SHARES, MARKET_MID_SHARES, marketWindows, normalizeLots, totalShares,
   countdown, countdownTick, openingSharesLeft,
-  sharesOn, setLotShares, lotsFor, allLots, marketBoard, marketHoldings, marketPayouts, roundComplete,
+  sharesOn, setLotShares, lotsFor, marketBoard, marketHoldings, marketPayouts, roundComplete,
   eligibleBets, rebuyers, marketRoster, teeOffAt,
 } from "./lib/market";
 import { BuyInPrices, BuyInTracker } from "./components/BuyIns";
@@ -4552,12 +4552,14 @@ function BettingView({
               <div style={{ display: "flex", flexDirection: "column" }}>
                 {players.map(p => {
                   const n = sharesOn(draftLots, p.id);
-                  const held = sharesOn(allLots(bookBet), p.id);
                   return (
                     <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: `1px solid ${K.bdr}${ALPHA.hair}` }}>
+                      {/* The name alone. It used to carry a "· 4 held" tail
+                          repeating what the accent number beside it already
+                          says, and the name brightening from t3 to t1 is the
+                          same fact a third time. */}
                       <span style={{ flex: 1, minWidth: 0, fontSize: FS.small, fontWeight: 600, color: n > 0 ? K.t1 : K.t3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {p.name}
-                        {held > 0 && <span style={{ color: K.t3, fontWeight: 600 }}> · {held} held</span>}
                       </span>
                       <Btn variant="secondary" size="sm" disabled={!canPlace || n <= 0}
                         style={{ padding: "3px 10px", minWidth: 32 }}
