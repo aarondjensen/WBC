@@ -4,10 +4,17 @@
    comment there. The letterbox either side of the app column on wide screens
    is painted by the app's own outer wrapper, so it stays #030810 without this
    needing to differ. */
+/* The two `bg` tokens from src/theme.js. Declared here as well as in K because
+   this paints before React mounts and behind the app column on wide screens;
+   the data-theme attribute is set by the pre-paint script in index.html and
+   again by setTheme. theme.test.js asserts these stay in step with the JS. */
 html, body, #root {
   height: 100%;
   width: 100%;
   background: #080f1a;
+}
+html[data-theme="light"], html[data-theme="light"] body, html[data-theme="light"] #root {
+  background: #f2f5f9;
 }
 
 body {
