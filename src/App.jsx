@@ -8414,7 +8414,6 @@ export default function WBCApp() {
   // account to delete. deleteStage: null | "confirm" | "working".
   const [accountOpen, setAccountOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [notifOpen, setNotifOpen] = useState(false);
   // Every year the tournament has been run in this app. A sheet rather than a
   // view because opening one RELOADS the app onto that edition (see
   // lib/editions.js), so there is nothing to route back from.
@@ -10086,7 +10085,6 @@ export default function WBCApp() {
           if (key === "admin") { setView("admin"); return; }
           if (key === "players") { setView("players"); return; }
           if (key === "editions") { setEditionsOpen(true); return; }
-          if (key === "notifications") { setNotifOpen(true); return; }
           if (key === "account") { setDeleteErr(""); setDeleteStage(null); setAccountOpen(true); }
         }}
       />
@@ -10106,26 +10104,6 @@ export default function WBCApp() {
           Account. They are a menu entry now, so they need somewhere to land —
           and they are no longer rendered in the Account sheet, so a preference
           still has exactly one home. */}
-      {notifOpen && (
-        <div
-          onClick={() => setNotifOpen(false)}
-          data-popup="1"
-          style={{ position: "fixed", inset: 0, zIndex: 400, background: "rgba(3,8,16,0.72)", backdropFilter: "blur(2px)", display: "flex", alignItems: "flex-end", justifyContent: "center" }}
-        >
-          <div
-            onClick={e => e.stopPropagation()}
-            style={{ width: "100%", maxWidth: 480, background: K.card, borderTop: `1px solid ${K.bdr}`, borderTopLeftRadius: 18, borderTopRightRadius: 18, padding: "14px 20px calc(20px + env(safe-area-inset-bottom, 0px))", maxHeight: "88vh", overflowY: "auto" }}
-          >
-            <div style={{ width: 38, height: 4, borderRadius: R.xs, background: K.bdr, margin: "0 auto 6px" }} />
-            <NotificationSettings
-              user={user}
-              notify={notify}
-              onPermissionChange={setNotifPerm}
-            />
-          </div>
-        </div>
-      )}
-
       {accountOpen && (
         <div
           onClick={() => { if (deleteStage !== "working") { setAccountOpen(false); setDeleteStage(null); } }}
@@ -10133,7 +10111,12 @@ export default function WBCApp() {
         >
           <div
             onClick={e => e.stopPropagation()}
-            style={{ width: "100%", maxWidth: 480, background: K.card, borderTop: `1px solid ${K.bdr}`, borderTopLeftRadius: 18, borderTopRightRadius: 18, padding: "20px 20px calc(20px + env(safe-area-inset-bottom, 0px))", boxShadow: "0 -12px 40px rgba(0,0,0,0.6)" }}
+            style={{ width: "100%", maxWidth: 480, background: K.card, borderTop: `1px solid ${K.bdr}`, borderTopLeftRadius: 18, borderTopRightRadius: 18, padding: "20px 20px calc(20px + env(safe-area-inset-bottom, 0px))", boxShadow: "0 -12px 40px rgba(0,0,0,0.6)",
+              // Folding Notifications in here roughly tripled this sheet's
+              // height, and a bottom sheet grows UPWARDS — so on a small phone
+              // Delete account, the last thing in it, went off the top with no
+              // way to reach it. Capped and scrollable.
+              maxHeight: "calc(var(--app-height, 100dvh) - 40px)", overflowY: "auto" }}
           >
             <div style={{ width: 38, height: 4, borderRadius: R.xs, background: K.bdr, margin: "0 auto 18px" }} />
 
@@ -10148,6 +10131,18 @@ export default function WBCApp() {
                     <div style={{ fontSize: FS.label, color: K.t3 }}>{user.isDirector ? "Tournament director" : "Player"}</div>
                   </div>
                 </div>
+
+                {/* Notifications, in the sheet that is already about you.
+                    It was a menu row of its own, which put "which of my devices
+                    buzzes" a level up alongside the tournament itself — and
+                    made My Account a screen with two buttons on it. */}
+                <NotificationSettings
+                  user={user}
+                  notify={notify}
+                  onPermissionChange={setNotifPerm}
+                />
+
+                <div style={{ height: 1, background: K.bdr, margin: "18px 0 14px" }} />
 
                 <Btn variant="secondary" block onClick={() => { setAccountOpen(false); handleLogout(); }}>
                   Log out
