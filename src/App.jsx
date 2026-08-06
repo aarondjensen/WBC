@@ -9043,12 +9043,13 @@ export default function WBCApp() {
   //              tapping Remove actually asked for — and if the byte delete
   //              then fails, the result is a hidden orphan rather than a photo
   //              that is still on screen after being deleted.
-  const onUploadPhoto = async (file) => {
+  const onUploadPhoto = async (file, onProgress) => {
     const uid = fbUser?.uid;
     if (!uid) throw new Error("You need to be signed in to add photos.");
     const { uploadPhoto } = await import("./lib/mediaUpload");
     const row = await uploadPhoto({
       file,
+      onProgress,
       slug: _e(),
       uid,
       uploaderName: user?.name || "",

@@ -197,12 +197,18 @@ const takenAtOf = (file) => {
 // second write path into the same collection is how two of them drift.
 //
 // Throws with a message meant to be shown to whoever is holding the phone.
-export const uploadPhoto = async ({ file, slug, uid, uploaderName, round = null, caption = "", now = Date.now(), rand = Math.random() }) => {
+export const uploadPhoto = async ({ file, slug, uid, uploaderName, round = null, caption = "", now = Date.now(), rand = Math.random(), onProgress }) => {
   const check = validateSource(file);
   if (!check.ok) throw new Error(check.reason);
   if (!slug) throw new Error("No tournament is selected.");
   if (!uid) throw new Error("You need to be signed in to add photos.");
 
+  // Two phases, reported separately, because they fail and feel different.
+  // Decoding and re-encoding a 12-megapixel photo takes real time on a phone
+  // and has no measurable progress — the screen shows a shimmer for it. The
+  // upload does have measurable progress, and on course wifi it is the part
+  // somebody is actually waiting on, so that one gets a real bar.
+  onProgress?.(0, "preparing");
   const bitmap = await decode(file);
   let display, thumb;
   try {
@@ -220,13 +226,38 @@ export const uploadPhoto = async ({ file, slug, uid, uploaderName, round = null,
   // encoded, not from what was asked for. A JPEG parked at a .webp path would
   // be served with the wrong content type for as long as the photo exists.
   const paths = storagePaths(slug, id, display.ext);
-  const { getStorage, ref, uploadBytes, getDownloadURL } = await storageApi();
+  const { getStorage, ref, uploadBytesResumable, getDownloadURL } = await storageApi();
   const storage = getStorage(_app);
+
+  // Progress is measured across BOTH files as one number. Reporting them
+  // separately would show the bar reach 100% and start again, which reads as
+  // the upload having failed and restarted — on a slow connection that is
+  // exactly the moment somebody gives up and taps again.
+  const total = display.blob.size + thumb.blob.size;
+  let sent = 0;
+  onProgress?.(0, "uploading");
+  const send = (target, blob, type) => new Promise((resolve, reject) => {
+    const task = uploadBytesResumable(target, blob, { contentType: type, cacheControl: IMMUTABLE_YEAR });
+    let counted = 0;
+    task.on(
+      "state_changed",
+      snap => {
+        // Deltas, not absolutes — two tasks share one running total, and
+        // Firebase re-reports bytesTransferred from zero if it retries a chunk.
+        sent += snap.bytesTransferred - counted;
+        counted = snap.bytesTransferred;
+        onProgress?.(Math.min(1, total ? sent / total : 0), "uploading");
+      },
+      reject,
+      () => resolve(task.snapshot.ref),
+    );
+  });
 
   const fullRef = ref(storage, paths.full);
   const thumbRef = ref(storage, paths.thumb);
-  await uploadBytes(fullRef, display.blob, { contentType: display.type, cacheControl: IMMUTABLE_YEAR });
-  await uploadBytes(thumbRef, thumb.blob, { contentType: thumb.type, cacheControl: IMMUTABLE_YEAR });
+  await send(fullRef, display.blob, display.type);
+  await send(thumbRef, thumb.blob, thumb.type);
+  onProgress?.(1, "uploading");
   const [url, thumbUrl] = await Promise.all([getDownloadURL(fullRef), getDownloadURL(thumbRef)]);
 
   return {
