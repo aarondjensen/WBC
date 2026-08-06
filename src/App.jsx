@@ -12,8 +12,10 @@ import {
   sharesOn, setLotShares, lotsFor, allLots, marketBoard, marketHoldings, marketPayouts, roundComplete,
   eligibleBets, rebuyers, marketRoster,
 } from "./lib/market";
-import { BuyInTracker } from "./components/BuyIns";
+import { BuyInPrices, BuyInTracker } from "./components/BuyIns";
 import { useConfirm } from "./lib/useConfirm";
+// Tee times survive a re-group because of these two — see lib/teeSheet.js.
+import { rowsToTeeTimes, mergeTeeTimes } from "./lib/teeSheet";
 import { useDirtyForm } from "./lib/useDirtyForm";
 import { usePullToRefresh, hasNewBundle } from "./lib/usePullToRefresh";
 import { NotificationSettings } from "./components/NotificationSettings";
@@ -149,6 +151,32 @@ const db = {
       }
       return true;
     } catch(e) { console.error("db.upsertMany error:", col, e); return null; }
+  },
+  // Write a set of rows and delete another set in the SAME commit. Doing it as
+  // a delete followed by writes means the collection is briefly missing
+  // everything the delete took, and every listener sees that gap and rebuilds
+  // its state from it.
+  replaceMany: async (col, rows, deleteIds = []) => {
+    const valid = (rows || []).filter(r => r && r.id);
+    const gone = (deleteIds || []).filter(Boolean);
+    if (!valid.length && !gone.length) return true;
+    try {
+      // 500 writes per batch is Firestore's cap; 490 leaves room. Deletes ride
+      // in the first batch so the replacement lands with them.
+      const ops = [
+        ...gone.map(id => ({ kind: "del", id })),
+        ...valid.map(r => ({ kind: "set", row: r })),
+      ];
+      for (let i = 0; i < ops.length; i += 490) {
+        const batch = writeBatch(_db);
+        ops.slice(i, i + 490).forEach(op => {
+          if (op.kind === "del") batch.delete(doc(_db, col, String(op.id)));
+          else batch.set(doc(_db, col, String(op.row.id)), op.row, { merge: true });
+        });
+        await batch.commit();
+      }
+      return true;
+    } catch(e) { console.error("db.replaceMany error:", col, e); return null; }
   },
   delete: async (col, filters = []) => {
     try {
@@ -413,6 +441,11 @@ const mergeSideGames = (raw) => {
     out[k] = {
       amount: Number(g.amount) || 0,
       in: Array.isArray(g.in) ? g.in : null,
+      // Who has actually handed the money over. Separate from `in` because
+      // tagging the field and collecting from it are days apart, and unlike
+      // `in` a missing list means NOBODY — paying is an affirmative act, so
+      // there is no everybody-by-default here.
+      paid: Array.isArray(g.paid) ? g.paid : [],
       // Skins is the only one with a hand-typed pot to preserve: it is the
       // game WBC was already playing before any of this existed.
       ...(k === "skins" ? { pot: Number(g.pot) || 0 } : {}),
@@ -422,17 +455,6 @@ const mergeSideGames = (raw) => {
 };
 
 // Convert tee times rows → teeTimesData { round: [time, time, ...] }
-const rowsToTeeTimes = (rows) => {
-  const tt = {};
-  rows.forEach(r => {
-    if (!tt[r.round_number]) tt[r.round_number] = [];
-    const gi = r.group_number - 1;
-    while (tt[r.round_number].length <= gi) tt[r.round_number].push("");
-    tt[r.round_number][gi] = r.tee_time || "";
-  });
-  return tt;
-};
-
 // calcCH now lives in lib/individualBoard.js, alongside the net-to-par math it
 // feeds, and is imported at the top of this file — one implementation for the
 // leaderboard, the scorecards and the finalize preview alike.
@@ -1056,7 +1078,21 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                             minWidth:0 keeps the ellipsis working inside a flex
                             item that is now allowed to grow. */}
                         <span className="wbc-name" style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
-                        <span style={{ fontSize: fsStep(rowStyle.fontSize, -2), flexShrink: 0, color: isExpanded ? K.acc : K.t2, transition: `transform ${MOTION}`, display: "inline-block", transform: isExpanded ? "rotate(180deg)" : "rotate(0)" }}>▼</span>
+                        {/* FS.micro flat, not a step off the row size: this is
+                            an affordance, not data, and stepping it meant it
+                            grew whenever the board had room to grow — which is
+                            backwards for the quietest mark in the row.
+                            Micro is the bottom of the type scale and this still
+                            wants to be smaller, so the last bit comes off the
+                            MARK rather than the type: the rung stays on the
+                            ladder and scale() takes the glyph to about 6px.
+                            Sizing it as type instead would have put a number
+                            below the scale's floor into the file, which is the
+                            drift the scale exists to stop — and a transform
+                            costs no layout, so the gutter to the band stays put
+                            whatever the glyph does. Below ~0.6 the triangle
+                            stops reading as one and turns into a dot. */}
+                        <span style={{ fontSize: FS.micro, flexShrink: 0, color: isExpanded ? K.acc : K.t2, transition: `transform ${MOTION}`, display: "inline-block", transform: `${isExpanded ? "rotate(180deg)" : "rotate(0)"} scale(0.75)` }}>▼</span>
                       </div>
                       {/* Total */}
                       {/* Full-strength ink, not the t2 the row's other numbers
@@ -3310,6 +3346,10 @@ function BettingView({
             amount: sideGames?.[k]?.amount || 0,
             // The rebuy column is a readout of who has placed halfway shares,
             // not a list anybody keeps. Everything else is the director's.
+            paid: sideGames?.[k]?.paid ?? [],
+            // The rebuy column is a readout of who has placed halfway shares,
+            // not a list anybody keeps, so its membership cannot be tagged —
+            // only its payment.
             ...(k === "rebuy"
               ? { ids: rebuyField.map(p => p.id), derived: true }
               : { ids: sideGames?.[k]?.in ?? null }),
@@ -3740,7 +3780,14 @@ function BettingView({
               answers — who took which day — is a comparison across them.
               No leaders card above it: with four rounds the totals are a
               sum anybody can do off these rows, and a second card repeating
-              the same names was a longer way to say it. */}
+              the same names was a longer way to say it.
+
+              And no rules under it. The rows say what happened — a name, a
+              net, a share, "ea" when it was split — and the two rules worth
+              knowing are visible in what they produce: a tie prints two
+              names and half the money each, and a round nobody has finished
+              prints that instead of a leader. See lib/sideGames lowNetRounds
+              for why a card walked in early does not count. */}
           <div style={{ background: K.card, borderRadius: R.lg, border: `1px solid ${K.bdr}`, overflow: "hidden" }}>
             <div style={{ display: "flex", padding: "8px 14px", borderBottom: `1px solid ${K.bdr}`, fontSize: FS.label, fontWeight: 700, color: K.gold, letterSpacing: 1 }}>
               <span style={{ flex: 1 }}>BY ROUND</span>
@@ -3795,10 +3842,6 @@ function BettingView({
             })}
           </div>
 
-          <div style={{ fontSize: FS.label, color: K.t3, lineHeight: 1.5, padding: "10px 2px 0" }}>
-            The lowest net of each round takes that round&apos;s share. A tie splits it.
-            Only a full 18 counts — a card walked in early is not a low net.
-          </div>
         </div>
       )}
 
@@ -4211,7 +4254,7 @@ function GroupsView({ players, round, tRounds, courses, pairingsData, teeTimesDa
                 const isMe = pid === user.id;
                 return (
                   <div key={pid} style={{ padding: "5px 12px", display: "grid", gridTemplateColumns: "5fr 1.6fr 2.4fr 2fr", alignItems: "center", borderBottom: pi < grp.length - 1 ? `1px solid ${K.bdr}${ALPHA.wash}` : "none", background: isMe ? K.t2 + ALPHA.wash : "transparent" }}>
-                    <span style={{ fontWeight: 600, fontSize: FS.small, color: isMe ? K.gold : K.t1 }}>{p.name}</span>
+                    <span className="wbc-name" style={{ fontWeight: 600, fontSize: FS.small, color: isMe ? K.gold : K.t1 }}>{p.name}</span>
                     <span style={{ fontSize: FS.label, fontWeight: 600, color: K.t2, textAlign: "center" }}>{p.handicap_index}</span>
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: FS.label, fontWeight: 600, color: isDarkTee(teeClr) ? "#9ca3af" : isLightTee(teeClr) ? K.t3 : teeClr }}>
                       {teeName && <>
@@ -5058,7 +5101,7 @@ function PlayerRow({ player, isLast, onOpen, isDirector, account }) {
       padding: "10px 14px", display: "flex", alignItems: "center", gap: 8,
     }}>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: FS.body, fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <div className="wbc-name" style={{ fontSize: FS.body, fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {/* 🔗 = this name is claimed by a signed-in account. It replaces the
               "Signed in" list that used to sit in the Event tab restating the
               roster: the question it answered — who can actually post a score —
@@ -5259,7 +5302,7 @@ function PlayerEditor({ editing, set, onClose, tPlayers, players, memberships, c
           }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: FS.small, fontWeight: 700, color: K.acc, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                Returning · {editing.linked.name}
+                Returning · <span className="wbc-name">{editing.linked.name}</span>
               </div>
               <div style={{ fontSize: FS.micro, color: K.t3, marginTop: 1 }}>
                 Keeps their career, their index and their sign-in.
@@ -5280,7 +5323,7 @@ function PlayerEditor({ editing, set, onClose, tPlayers, players, memberships, c
                   padding: "8px 10px", display: "flex", alignItems: "center", gap: 8, fontFamily: FONT,
                 }}>
                   <span style={{ flex: 1, minWidth: 0 }}>
-                    <span style={{ display: "block", fontSize: FS.small, fontWeight: 700, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    <span className="wbc-name" style={{ display: "block", fontSize: FS.small, fontWeight: 700, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {r.name}
                     </span>
                     <span style={{ display: "block", fontSize: FS.micro, color: K.t3, marginTop: 1 }}>
@@ -5467,7 +5510,15 @@ const isoAddDays = (iso, n) => {
   const dt = new Date(y, m - 1, d + n);
   return isoOf(dt.getFullYear(), dt.getMonth(), dt.getDate());
 };
-function DateRangeCalendar({ start, end, onChange }) {
+// `mode="day"` picks a single date instead of a range — same grid, same month
+// paging, one tap. It exists because the round's play date used to fall back to
+// an <input type="date"> when the event had no dates set, and a native date
+// field inside a modal is the worst place for one: iOS lays the control out to
+// its own idea of a width, and tapping it raises the OS picker over a modal
+// that dismisses on the touch behind it. The picker flashed and vanished, and
+// the field ran off the side of the screen. Our own grid does neither.
+function DateRangeCalendar({ start, end, onChange, mode = "range" }) {
+  const day = mode === "day";
   // Which end of the range the next tap sets. Starting a NEW range whenever
   // both are set is what makes a mis-tap cheap: tap any day and you are picking
   // a fresh range, rather than having to clear something first.
@@ -5485,8 +5536,10 @@ function DateRangeCalendar({ start, end, onChange }) {
     return { y: d.getFullYear(), m: d.getMonth() };
   })();
 
-  const maxEnd = start ? isoAddDays(start, MAX_EVENT_DAYS - 1) : null;
+  const maxEnd = day ? null : (start ? isoAddDays(start, MAX_EVENT_DAYS - 1) : null);
   const tap = (iso) => {
+    // One tap, one date, done — tapping the day already chosen clears it.
+    if (day) { setMonthOffset(0); onChange(iso === start ? "" : iso, ""); return; }
     // Paging is relative to the start date, so once a tap moves the start the
     // offset has to go back to zero or the view jumps by however far they had
     // paged to reach the day they just tapped.
@@ -5534,8 +5587,8 @@ function DateRangeCalendar({ start, end, onChange }) {
           if (!d) return <div key={i} />;
           const iso = isoOf(view.y, view.m, d);
           const isStart = iso === start;
-          const isEnd = iso === end;
-          const between = start && end && iso > start && iso < end;
+          const isEnd = !day && iso === end;
+          const between = !day && start && end && iso > start && iso < end;
           const beyond = picking === "end" && start && maxEnd && iso > maxEnd;
           const edge = isStart || isEnd;
           return (
@@ -5553,7 +5606,9 @@ function DateRangeCalendar({ start, end, onChange }) {
         })}
       </div>
       <div style={{ marginTop: 6, fontSize: FS.label, color: K.t3, textAlign: "center" }}>
-        {!start
+        {day
+          ? (start ? fmtRoundDate(start) : "Tap the day this round is played")
+          : !start
           ? "Tap the first day of the tournament"
           : picking === "end"
             ? "Now tap the last day"
@@ -5875,7 +5930,7 @@ function AccessPanel({ notify, confirm }) {
   );
 }
 
-function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, roundDates, onSetRoundDate, scoringOpen, onSetScoringOpen, pairingStrategy, onSetPairingStrategy, leaderboard, holeData, finalizedRounds, onFinalizeRound, onUnfinalizeRound, onDiscardRoundScores, notify, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, externalSettingsRound, onExternalSettingsHandled, teesSaved, onTeesSave, teesModified, onTeesModify, memberships, onSetDirector, claims, authUid, tournamentMeta, onSaveTournamentMeta }) {
+function AdminView({ activePlayers, rosterPlayers, sideGames, onUpdateSideGames, rebuyIds, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, roundDates, onSetRoundDate, scoringOpen, onSetScoringOpen, pairingStrategy, onSetPairingStrategy, leaderboard, holeData, finalizedRounds, onFinalizeRound, onUnfinalizeRound, onDiscardRoundScores, notify, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, externalSettingsRound, onExternalSettingsHandled, teesSaved, onTeesSave, teesModified, onTeesModify, memberships, onSetDirector, claims, authUid, tournamentMeta, onSaveTournamentMeta }) {
   const [tab, setTab] = useState("rounds");
   // Themed confirmations (see lib/useConfirm). The host <ConfirmModal/> is
   // rendered once at the bottom of this view; `confirm(...)` returns a
@@ -6212,7 +6267,7 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
                 return (
                   <div key={p.id} style={{ display: "grid", gridTemplateColumns: "32px 1fr 56px 56px", alignItems: "center", padding: "7px 12px", margin: "3px 8px", borderRadius: R.sm, border: `1px solid ${K.bdr}`, background: K.card }}>
                     <span style={{ fontSize: FS.label, fontWeight: 700, color: pos === 1 && !tiedAbove ? K.acc : K.t3 }}>{posLabel}</span>
-                    <span style={{ fontSize: FS.small, fontWeight: 600, color: K.t1 }}>{p.name}</span>
+                    <span className="wbc-name" style={{ fontSize: FS.small, fontWeight: 600, color: K.t1 }}>{p.name}</span>
                     <span style={{ fontSize: FS.small, fontWeight: 800, textAlign: "center", color: p.netToPar < 0 ? K.under : p.netToPar > 0 ? K.t2 : K.t1 }}>
                       {p.netToPar === 0 ? "E" : p.netToPar > 0 ? `+${p.netToPar}` : p.netToPar}
                     </span>
@@ -6254,7 +6309,7 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
           tab regardless of that tab's content height — see ui.jsx. */}
       <StickyTop padBottom={10}>
         <SegmentedToggle
-          options={[["players","Players"],["rounds","Rounds"],["event","Event"]]}
+          options={[["players","Players"],["rounds","Rounds"],["betting","Betting"],["event","Event"]]}
           value={tab}
           onChange={setTab}
         />
@@ -6389,8 +6444,7 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
               </div>
               {chips.length === 0 ? (
                 <>
-                  <input type="date" value={mine} onChange={e => pick(e.target.value)}
-                    style={{ width: "100%", background: K.inp, border: `1px solid ${ac}${ALPHA.hair}`, borderRadius: R.sm, color: K.t1, fontSize: FS.lead, fontWeight: 600, padding: "10px 12px", colorScheme: "dark", boxSizing: "border-box" }} />
+                  <DateRangeCalendar mode="day" start={mine} end="" onChange={(d) => pick(d)} />
                   <div style={{ fontSize: FS.label, color: K.t3, marginTop: 8, lineHeight: 1.5 }}>
                     Set the tournament dates in Event and this becomes a list of the days it runs.
                   </div>
@@ -6485,6 +6539,37 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
                 </div>
               )}
 
+
+      {/* ── Betting ── */}
+      {/* Just the prices. What a seat costs is event SETUP — settled once
+          before anybody tees off — so it belongs beside the roster and the
+          rounds rather than on the screen the field is reading during play.
+          Who is IN each game stays on the Betting tab, next to the pot the
+          answer changes. */}
+      {tab === "betting" && (
+        <div style={{ marginTop: 4 }}>
+          <SectionLabel>What a seat costs</SectionLabel>
+          <Card>
+            <BuyInPrices
+              players={rosterPlayers}
+              games={SIDE_GAME_KEYS.map(k => ({
+                key: k, ...SIDE_GAME_LABELS[k],
+                amount: sideGames?.[k]?.amount || 0,
+                // The rebuy is incurred by placing halfway shares, not tagged,
+                // so its count comes off the bets — the same list the pot is
+                // counted from. Everything else is the director's own list.
+                ids: k === "rebuy" ? rebuyIds : (sideGames?.[k]?.in ?? null),
+                paid: sideGames?.[k]?.paid ?? [],
+              }))}
+              onChange={onUpdateSideGames}
+            />
+          </Card>
+          <div style={{ fontSize: FS.label, color: K.t3, lineHeight: 1.5, marginTop: 12 }}>
+            A price of zero turns that game&apos;s pot off — nothing is counted and
+            nobody is billed for it.
+          </div>
+        </div>
+      )}
 
       {tab === "event" && (
         <div style={{ marginTop: 16 }}>
@@ -6732,25 +6817,7 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
                       <div style={{ fontSize: FS.micro, fontWeight: 700, color: K.t3, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>Search results</div>
                   {searchLoading && <div style={{ textAlign: "center", padding: 12, color: K.t3, fontSize: FS.label }}>Searching GolfCourseAPI...</div>}
                   {!searchLoading && courseSearch.trim().length >= 2 && searchResults.length === 0 && !manualCourse && (
-                    <div style={{ textAlign: "center", padding: "10px 0" }}>
-                      <div style={{ color: K.t3, fontSize: FS.label, marginBottom: 8 }}>No courses found</div>
-                      <button onClick={() => setManualCourse({
-                        id: `manual_${Date.now()}`,
-                        name: courseSearch.trim(),
-                        city: "", state: courseStateFilter || "",
-                        par: 72, slope: 113, rating: 72.0,
-                        hole_pars: Array(18).fill(4),
-                        hole_handicaps: Array(18).fill(0).map((_,i)=>i+1),
-                        tee_boxes: [
-                          { name: "Black", color: "#222222", rating: 74.0, slope: 130, par: 72, yardage: 6800 },
-                          { name: "Blue",  color: "#1a56db", rating: 72.0, slope: 120, par: 72, yardage: 6400 },
-                          { name: "White", color: "#e5e7eb", rating: 70.0, slope: 113, par: 72, yardage: 6000 },
-                          { name: "Red",   color: "#e02424", rating: 68.0, slope: 108, par: 72, yardage: 5400 },
-                        ],
-                      })} style={{ padding: "7px 16px", borderRadius: R.sm, background: "transparent", border: `1px solid ${ac}`, color: ac, fontSize: FS.label, fontWeight: 700, cursor: "pointer" }}>
-                        + Add Course Manually
-                      </button>
-                    </div>
+                    <div style={{ textAlign: "center", padding: "10px 0", color: K.t3, fontSize: FS.label }}>No courses found</div>
                   )}
                   {!searchLoading && manualCourse && (() => {
                     const mc = manualCourse;
@@ -6909,6 +6976,32 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
                       </div>
                     </button>
                   ))}
+                  {/* Adding by hand is offered whenever a search is on, not only
+                      when it came back empty. The API returning SOMETHING is not
+                      the same as it returning the course you are playing, and the
+                      old shape — button only when there were no results at all —
+                      left a director who could see three wrong courses with no
+                      way through except typing a nonsense query to clear them. */}
+                  {!searchLoading && courseSearch.trim().length >= 2 && !manualCourse && (
+                    <div style={{ textAlign: "center", padding: "4px 0 2px" }}>
+                      <button onClick={() => setManualCourse({
+                        id: `manual_${Date.now()}`,
+                        name: courseSearch.trim(),
+                        city: "", state: courseStateFilter || "",
+                        par: 72, slope: 113, rating: 72.0,
+                        hole_pars: Array(18).fill(4),
+                        hole_handicaps: Array(18).fill(0).map((_,i)=>i+1),
+                        tee_boxes: [
+                          { name: "Black", color: "#222222", rating: 74.0, slope: 130, par: 72, yardage: 6800 },
+                          { name: "Blue",  color: "#1a56db", rating: 72.0, slope: 120, par: 72, yardage: 6400 },
+                          { name: "White", color: "#e5e7eb", rating: 70.0, slope: 113, par: 72, yardage: 6000 },
+                          { name: "Red",   color: "#e02424", rating: 68.0, slope: 108, par: 72, yardage: 5400 },
+                        ],
+                      })} style={{ padding: "7px 16px", borderRadius: R.sm, background: "transparent", border: `1px solid ${ac}`, color: ac, fontSize: FS.label, fontWeight: 700, cursor: "pointer" }}>
+                        + Add “{courseSearch.trim()}” by hand
+                      </button>
+                    </div>
+                  )}
                   {/* Local DB prompt modal */}
                   {localDbPrompt && (() => {
                     const { sbCourse } = localDbPrompt;
@@ -7337,17 +7430,21 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
         <PairingsEditor key={`${editRound}:${activePlayers.length}`} activePlayers={activePlayers} pairingsData={pairingsData} setPairings={setPairings} tRounds={tRounds} courses={courses} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
               setTeeTimesData(prev => {
                 const next = typeof updater === "function" ? updater(prev) : updater;
-                // Fire-and-forget: update tee times on pairings rows in Firestore
-                Object.keys(next).forEach(async rnd => {
-                  const groups = pairingsData[rnd] || [];
-                  groups.forEach(async (grp, gi) => {
+                // One commit for the whole tee sheet. Writing a row per player
+                // meant a snapshot per player, and each one rebuilt teeTimesData
+                // from a server that was only part way through the change —
+                // which is what made the times flicker while they were typed.
+                const rows = [];
+                Object.keys(next).forEach(rnd => {
+                  (pairingsData[rnd] || []).forEach((grp, gi) => {
                     const teeTime = (next[rnd] || [])[gi] || null;
-                    grp.forEach(async pid => {
-                      const row = { id: docIds.pairing(_e(), rnd, gi + 1, pid), tournament_id: TOURNAMENT_ID, round_number: parseInt(rnd), group_number: gi+1, player_id: pid, tee_time: teeTime };
-                      await db.upsert("pairings", row);
-                    });
+                    grp.forEach(pid => rows.push({
+                      id: docIds.pairing(_e(), rnd, gi + 1, pid), tournament_id: TOURNAMENT_ID,
+                      round_number: parseInt(rnd), group_number: gi + 1, player_id: pid, tee_time: teeTime,
+                    }));
                   });
                 });
+                db.upsertMany("pairings", rows);
                 return next;
               });
             }} roundDates={roundDates} onSetRoundDate={onSetRoundDate} scoringOpen={scoringOpen} onSetScoringOpen={onSetScoringOpen} pairingStrategy={pairingStrategy} onSetPairingStrategy={onSetPairingStrategy} leaderboard={leaderboard} finalizedRounds={finalizedRounds} getPlayerTee={getPlayerTee} editRound={editRound} holeData={holeData} />
@@ -7369,7 +7466,7 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
               {posted.map(({ p, holes }, i) => (
                 <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", borderBottom: i < posted.length - 1 ? `1px solid ${K.bdr}${ALPHA.hair}` : "none" }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: FS.small, fontWeight: 700, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
+                    <div className="wbc-name" style={{ fontSize: FS.small, fontWeight: 700, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
                     <div style={{ fontSize: FS.label, color: K.t3 }}>{holes} hole{holes === 1 ? "" : "s"} posted</div>
                   </div>
                   <Btn onClick={async () => {
@@ -7912,11 +8009,11 @@ export default function WBCApp() {
   // this existed was. An empty array is a different answer (nobody), so the
   // two must not be collapsed. See components/BuyIns.
   const [sideGames, setSideGames] = useState({
-    skins: { amount: 0, in: null, pot: 0 },
-    ctp: { amount: 0, in: null },
-    lownet: { amount: 0, in: null },
-    market: { amount: 0, in: null },
-    rebuy: { amount: 0, in: null },
+    skins: { amount: 0, in: null, pot: 0, paid: [] },
+    ctp: { amount: 0, in: null, paid: [] },
+    lownet: { amount: 0, in: null, paid: [] },
+    market: { amount: 0, in: null, paid: [] },
+    rebuy: { amount: 0, in: null, paid: [] },
   });
   const [pairingsData, setPairingsData] = useState({});
   const [teeData, setTeeData] = useState({});
@@ -8143,7 +8240,7 @@ export default function WBCApp() {
         if (pairRows?.length) {
           const sorted = pairRows.sort((a, b) => a.round_number - b.round_number || a.group_number - b.group_number || (a.player_id || "").localeCompare(b.player_id || ""));
           setPairingsData(rowsToPairings(sorted));
-          setTeeTimesData(rowsToTeeTimes(sorted));
+          setTeeTimesData(prev => mergeTeeTimes(prev, rowsToTeeTimes(sorted)));
         }
 
         const teeRows = await db.get("tee_assignments", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
@@ -8192,7 +8289,7 @@ export default function WBCApp() {
     unsubs.push(db.subscribe("pairings", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
       const sorted = docs.sort((a, b) => a.round_number - b.round_number || a.group_number - b.group_number || (a.player_id || "").localeCompare(b.player_id || ""));
       setPairingsData(rowsToPairings(sorted));
-      setTeeTimesData(rowsToTeeTimes(sorted));
+      setTeeTimesData(prev => mergeTeeTimes(prev, rowsToTeeTimes(sorted)));
     }));
 
     unsubs.push(db.subscribe("tee_assignments", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
@@ -8573,6 +8670,16 @@ export default function WBCApp() {
   // so the standings players read and the order the `leaderboard` pairing mode
   // draws from are provably the same number — see that module's header for why
   // this is not computed here any more.
+  // Who has taken the market's halfway rebuy. Derived from the bets, never
+  // tagged — see lib/market rebuyers. It is computed HERE rather than only
+  // inside the Betting tab because the Admin price sheet bills for it too,
+  // and a count taken from the stored (unused) `in` list would have told the
+  // director a different number to the one the pot is counted from.
+  const rebuyIds = useMemo(() => {
+    const inMarket = new Set(fieldFor(sideGames?.market?.in, allPlayers).map(p => p.id));
+    return rebuyers(eligibleBets({ bets: marketBets, inMarket: pid => inMarket.has(pid) }));
+  }, [sideGames, allPlayers, marketBets]);
+
   const getLeaderboard = useMemo(() =>
     rankIndividualBoard(computeIndividualBoard({
       players: allPlayers,
@@ -8999,30 +9106,41 @@ export default function WBCApp() {
     const incoming = JSON.stringify(groups);
     if (existing === incoming) return;
     setPairingsData(prev => ({ ...prev, [rnd]: groups }));
-    // A round's TEE TIMES live on its pairing rows, and this deletes every one
-    // of them before writing the new draw — so the times only survive because
-    // they are copied back out of `teeTimesData` below. That makes client state
-    // the only copy for the length of this function, and if it is empty when a
-    // save lands (a cold load that has not filled it yet, a save raised from a
-    // screen that never subscribed) the round comes back with every tee time
-    // gone — which reads as "admin cleared the tee times", and locks every
-    // non-director out of scoring behind a gate that has nothing to open on.
-    // So: when client state has nothing, ask Firestore what is actually stored
-    // before deleting it.
+    // Two things this has to get right, found the hard way from two directions.
+    //
+    // A round's TEE TIMES live on its pairing rows, so rewriting the draw
+    // rewrites them: they survive only because they are copied back out of
+    // `teeTimesData` below. If that client state is empty when a save lands —
+    // a cold load that has not filled it yet, a save raised from a screen that
+    // never subscribed — the round comes back with every tee time gone, which
+    // reads as "admin cleared the tee times" and locks every non-director out
+    // of scoring behind a gate with nothing to open on. So when client state
+    // has nothing, ask Firestore what is actually stored.
+    //
+    // And the write is ONE commit. The old shape deleted every pairing row for
+    // the round and then wrote the new ones one at a time; the delete commits
+    // by itself, so every listener saw a round with no pairings and no tee
+    // times and published that, then watched them come back a group at a time.
+    // That was the flash. Deletes and writes ride in the same batch now, so
+    // there is no moment in between to observe. Times carry across by GROUP
+    // INDEX — group 1 keeps its time when its players change, which is the
+    // whole point of a tee sheet.
+    //
+    // One read serves both: the stored times when the client has none, and the
+    // ids to delete. Reading rather than trusting the local mirror also means a
+    // row another director left behind cannot survive as a player in two groups.
+    const onServer = await db.get("pairings", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }, { field: "round_number", op: "==", value: rnd }]) || [];
     let times = (teeTimesData[rnd] || []);
-    if (!times.some(t => t)) {
-      const existing = await db.get("pairings", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }, { field: "round_number", op: "==", value: rnd }]);
-      times = rowsToTeeTimes(existing || [])[rnd] || times;
-    }
-    // Delete old pairings for this round and reinsert
-    await db.delete("pairings", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }, { field: "round_number", op: "==", value: rnd }]);
+    if (!times.some(t => t)) times = rowsToTeeTimes(onServer)[rnd] || times;
     const rows = [];
     groups.forEach((grp, gi) => {
       grp.forEach(pid => {
         rows.push({ id: docIds.pairing(_e(), rnd, gi + 1, pid), tournament_id: TOURNAMENT_ID, round_number: rnd, group_number: gi + 1, player_id: pid, tee_time: times[gi] || null });
       });
     });
-    for (const row of rows) await db.upsert("pairings", row);
+    const keep = new Set(rows.map(r => r.id));
+    const stale = onServer.map(r => r.id).filter(id => id && !keep.has(id));
+    await db.replaceMany("pairings", rows, stale);
     notify(`Round ${rnd} pairings saved`);
   };
 
@@ -9379,7 +9497,7 @@ export default function WBCApp() {
                     {(user.name || "?").trim().charAt(0).toUpperCase()}
                   </div>
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: FS.body, fontWeight: 700, color: K.t1 }}>{user.name}</div>
+                    <div className="wbc-name" style={{ fontSize: FS.body, fontWeight: 700, color: K.t1 }}>{user.name}</div>
                     <div style={{ fontSize: FS.label, color: K.t3 }}>{user.isDirector ? "Tournament director" : "Player"}</div>
                   </div>
                 </div>
@@ -9467,20 +9585,24 @@ export default function WBCApp() {
         {view === "players" && <PlayersView players={allPlayers} registry={registry} meId={user?.id} year={getTournamentYear()} isDirector={!!user.isDirector} onSetOverride={setIndexOverride} />}
         {view === "skins" && <BettingView players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} numRounds={numRounds} getPlayerTee={getPlayerTee} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} marketBets={marketBets} onSaveMarketBet={onSaveMarketBet} leaderboard={getLeaderboard} finalizedRounds={finalizedRounds} pairingsData={pairingsData} />}
         {view === "groups" && <GroupsView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} pairingsData={pairingsData} teeTimesData={teeTimesData} getPlayerTee={getPlayerTee} user={user} />}
-        {view === "admin" && (user.isDirector ? <AdminView activePlayers={activePlayers} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
+        {view === "admin" && (user.isDirector ? <AdminView activePlayers={activePlayers} rosterPlayers={allPlayers} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} rebuyIds={rebuyIds} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
               setTeeTimesData(prev => {
                 const next = typeof updater === "function" ? updater(prev) : updater;
-                // Fire-and-forget: update tee times on pairings rows in Firestore
-                Object.keys(next).forEach(async rnd => {
-                  const groups = pairingsData[rnd] || [];
-                  groups.forEach(async (grp, gi) => {
+                // One commit for the whole tee sheet. Writing a row per player
+                // meant a snapshot per player, and each one rebuilt teeTimesData
+                // from a server that was only part way through the change —
+                // which is what made the times flicker while they were typed.
+                const rows = [];
+                Object.keys(next).forEach(rnd => {
+                  (pairingsData[rnd] || []).forEach((grp, gi) => {
                     const teeTime = (next[rnd] || [])[gi] || null;
-                    grp.forEach(async pid => {
-                      const row = { id: docIds.pairing(_e(), rnd, gi + 1, pid), tournament_id: TOURNAMENT_ID, round_number: parseInt(rnd), group_number: gi+1, player_id: pid, tee_time: teeTime };
-                      await db.upsert("pairings", row);
-                    });
+                    grp.forEach(pid => rows.push({
+                      id: docIds.pairing(_e(), rnd, gi + 1, pid), tournament_id: TOURNAMENT_ID,
+                      round_number: parseInt(rnd), group_number: gi + 1, player_id: pid, tee_time: teeTime,
+                    }));
                   });
                 });
+                db.upsertMany("pairings", rows);
                 return next;
               });
             }} roundDates={roundDates} onSetRoundDate={async (rnd, dateStr) => { const next = { ...roundDates }; if (dateStr) next[rnd] = dateStr; else delete next[rnd]; setRoundDates(next); await saveTournamentState(finalizedRounds, teesSaved, teesModified, next, scoringOpen); }} scoringOpen={scoringOpen} onSetScoringOpen={async (rnd, open) => { const next = { ...scoringOpen }; if (open) next[rnd] = true; else delete next[rnd]; setScoringOpen(next); await saveTournamentState(finalizedRounds, teesSaved, teesModified, roundDates, next); }} pairingStrategy={pairingStrategy} onSetPairingStrategy={async (rnd, cfg) => { const next = { ...pairingStrategy }; if (cfg) next[rnd] = cfg; else delete next[rnd]; setPairingStrategy(next); await saveTournamentState(finalizedRounds, teesSaved, teesModified, roundDates, scoringOpen, next); }} leaderboard={getLeaderboard} holeData={holeData} finalizedRounds={finalizedRounds} onDiscardRoundScores={onDiscardRoundScores} onFinalizeRound={async rnd => { const nf = { ...finalizedRounds, [rnd]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${rnd}`, tournament_id: TOURNAMENT_ID, round: rnd, finalized: true }); if (rnd < NUM_ROUNDS) setRound(rnd + 1); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf); if (/^\d+$/.test(String(key))) { await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${key}`, tournament_id: TOURNAMENT_ID, round: Number(key), finalized: false }); } else { setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); } }} notify={notify} getPlayerTee={getPlayerTee} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} externalSettingsRound={adminSettingsRound} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); setAdminSettingsRound(null); }} teesSaved={teesSaved} onTeesSave={async r => { const next = { ...teesSaved, [r]: true }; const nextMod = { ...teesModified, [r]: false }; setTeesSaved(next); setTeesModified(nextMod); await saveTournamentState(finalizedRounds, next, nextMod); }} teesModified={teesModified} onTeesModify={async r => { const nextMod = { ...teesModified, [r]: true }; setTeesModified(nextMod); await saveTournamentState(finalizedRounds, teesSaved, nextMod); }} memberships={memberships} onSetDirector={onSetDirector} claims={claims} authUid={fbUser?.uid || null} tournamentMeta={tournamentMeta} onSaveTournamentMeta={saveTournamentMeta} /> : (
