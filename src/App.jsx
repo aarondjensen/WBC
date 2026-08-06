@@ -3089,7 +3089,7 @@ function BettingView({
   players, round, tRounds, courses, holeData, ctpData, onSetCtp, user, numRounds,
   getPlayerTee, getPlayerCH = () => null,
   sideGames, onUpdateSideGames, marketBets, onSaveMarketBet, leaderboard,
-  finalizedRounds, pairingsData, firstTeeAt, marketNudge,
+  finalizedRounds, pairingsData, firstTeeAt, marketNudge, teeTimesData,
 }) {
   const [tab, setTab] = useState("skins");
   const [expandedPlayer, setExpandedPlayer] = useState(null);
@@ -3287,6 +3287,17 @@ function BettingView({
   // tees off, so winning Thursday is worth the same whatever happens Friday.
   const lowNetPerRound = perUnit(lowNetPot, roundList.length);
   const lowNetRows = lowNetRounds({ players: lowNetField, rounds: roundList, lineFor });
+
+  // The round's tee sheet as one line — first off to last off. A round
+  // nobody has finished has no result to print, and "nobody has finished
+  // yet" only says what the empty row already says; when it goes off is the
+  // thing somebody looking at an unplayed round actually wants.
+  const teeWindowFor = (r) => {
+    const mins = ((teeTimesData || {})[r] || []).map(teeTimeToMinutes).filter(m => Number.isFinite(m));
+    if (mins.length === 0) return null;
+    const lo = Math.min(...mins), hi = Math.max(...mins);
+    return lo === hi ? minutesToTimeStr(lo) : `${minutesToTimeStr(lo)} – ${minutesToTimeStr(hi)}`;
+  };
 
   // ── The market tab ──
   // ── The opening bell ──
@@ -4293,7 +4304,18 @@ function BettingView({
                     <tr key={r.round} style={{ background: band }}>
                       <td style={cell({ paddingLeft: 10 })} />
                       <td colSpan={6} onClick={toggle} style={cell({ textAlign: "left", color: K.t3, paddingRight: 12, cursor: "pointer" })}>
-                        {roundSetup(r.round).course ? "Nobody has finished yet" : "No scores yet"}
+                        {(() => {
+                          const tee = teeWindowFor(r.round);
+                          if (tee) return (
+                            <>
+                              <span style={{ fontSize: FS.micro, fontWeight: 800, letterSpacing: 0.5, color: K.t3 }}>TEE </span>
+                              <span style={{ color: K.t2, fontWeight: 700 }}>{tee}</span>
+                            </>
+                          );
+                          // No sheet drawn yet, so there is nothing to say
+                          // except that the day is still empty.
+                          return roundSetup(r.round).course ? "Nobody has finished yet" : "No scores yet";
+                        })()}
                       </td>
                     </tr>,
                     ...fieldRows,
@@ -10316,7 +10338,7 @@ export default function WBCApp() {
             the caller's uid, so a guest — who has no uid at all — can browse
             the library but cannot add to it. */}
         {view === "photos" && <PhotosView items={media} year={getTournamentYear()} uid={fbUser?.uid || null} isDirector={!!user.isDirector} isGuest={!!user.isGuest} canPost={!user.isGuest && !!fbUser?.uid} onUpload={onUploadPhoto} onDelete={onDeletePhoto} notify={notify} />}
-        {view === "skins" && <BettingView players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} numRounds={numRounds} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} marketBets={marketBets} onSaveMarketBet={onSaveMarketBet} leaderboard={getLeaderboard} finalizedRounds={finalizedRounds} pairingsData={pairingsData} firstTeeAt={firstTeeAt} marketNudge={marketNudge} />}
+        {view === "skins" && <BettingView players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} numRounds={numRounds} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} marketBets={marketBets} onSaveMarketBet={onSaveMarketBet} leaderboard={getLeaderboard} finalizedRounds={finalizedRounds} pairingsData={pairingsData} firstTeeAt={firstTeeAt} marketNudge={marketNudge} teeTimesData={teeTimesData} />}
         {view === "groups" && <GroupsView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} pairingsData={pairingsData} teeTimesData={teeTimesData} getPlayerTee={getPlayerTee} user={user} />}
         {view === "admin" && (user.isDirector ? <AdminView activePlayers={activePlayers} rosterPlayers={allPlayers} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} rebuyIds={rebuyIds} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
               setTeeTimesData(prev => {
