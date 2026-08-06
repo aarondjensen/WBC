@@ -4173,8 +4173,13 @@ function BettingView({
                   // the question the winner's name provokes — by how much —
                   // and on a round still being played it is the only thing
                   // this tab can say at all.
-                  const fieldRows = !open ? [] : lowNetRoundField({ players: lowNetField, round: r.round, lineFor }).map(f => {
-                    const won = r.winners.some(w => w.pid === f.pid);
+                  // The rest of the field, starting at second. The winners
+                  // are already printed above in full, so repeating them at
+                  // the head of the list was the same two lines twice — the
+                  // question this opens is who ELSE was out there.
+                  const fieldRows = !open ? [] : lowNetRoundField({ players: lowNetField, round: r.round, lineFor })
+                    .filter(f => !r.winners.some(w => w.pid === f.pid))
+                    .map(f => {
                     const sub = (extra = {}) => cell({
                       fontSize: FS.label, borderTop: "none", color: K.t3,
                       background: `${K.bdr}${ALPHA.wash}`, padding: "5px 4px", ...extra,
@@ -4182,11 +4187,7 @@ function BettingView({
                     return (
                       <tr key={`${r.round}_f_${f.pid}`}>
                         <td style={sub({ paddingLeft: 10 })} />
-                        {/* The winner is gilded rather than left out. Seeing
-                            the name that took the money sitting one line above
-                            the man who missed it by a shot is the entire
-                            reason to open this. */}
-                        <td style={sub({ textAlign: "left", color: won ? K.gold : K.t2, fontWeight: won ? 800 : 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })}>
+                        <td style={sub({ textAlign: "left", color: K.t2, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })}>
                           {f.name}
                         </td>
                         <td style={sub()}>{f.gross}</td>
@@ -4215,6 +4216,17 @@ function BettingView({
                       </tr>
                     );
                   });
+                  // A day the whole field tied, or one only the winner
+                  // finished, opens onto nothing — which looks broken rather
+                  // than empty unless it says so.
+                  if (open && fieldRows.length === 0) fieldRows.push(
+                    <tr key={`${r.round}_f_none`}>
+                      <td style={cell({ paddingLeft: 10, borderTop: "none", background: `${K.bdr}${ALPHA.wash}`, padding: "5px 4px 5px 10px" })} />
+                      <td colSpan={6} style={cell({ textAlign: "left", borderTop: "none", background: `${K.bdr}${ALPHA.wash}`, padding: "5px 12px 5px 4px", fontSize: FS.label, color: K.t3 })}>
+                        Nobody else has posted
+                      </td>
+                    </tr>,
+                  );
 
                   if (!r.decided) return [
                     headerRow,
