@@ -3439,6 +3439,31 @@ function BettingView({
   // on a card is always the skin the tab is currently paying for.
   const skinHolesFor = (pid) => new Set(won.filter(s => s.winner.pid === pid).map(s => `${s.round}_${s.hole}`));
 
+  // Add up a nine — or a whole card — over the holes ACTUALLY PLAYED. Par is
+  // accumulated alongside rather than taken from the course total, so a man
+  // walking in after thirteen gets a to-par measured against thirteen holes
+  // instead of being handed five phantom pars.
+  const tallyHoles = (scores, pars, holes) => {
+    let gross = 0, par = 0, played = 0;
+    holes.forEach(i => {
+      const raw = scores[i];
+      if (raw > 0 && raw < WD_SCORE) { gross += raw; par += pars[i] || 0; played += 1; }
+    });
+    return { gross, par, played, toPar: gross - par };
+  };
+  const toParStr = (n) => (n === 0 ? "E" : n > 0 ? `+${n}` : `${n}`);
+
+  // ── One player's week, round by round ──────────────────────────────
+  // What this card is FOR is answering "where did his six skins come from",
+  // and the old one made that nearly impossible: eight anonymous blocks of
+  // nine, no round headings, no course names, no totals, and nothing but
+  // whitespace between one round and the next. A gold circle told you a skin
+  // landed but not which day it landed on.
+  //
+  // So each round is now its own bordered card with a heading — round, course,
+  // skins taken that day, and the score — and the nines carry a ruled grid
+  // with OUT and IN totals, which is the shape every golfer already knows how
+  // to read.
   const renderInlineScorecard = (playerId) => {
     const p = players.find(pl => pl.id === playerId);
     if (!p) return null;
@@ -3449,48 +3474,165 @@ function BettingView({
       if (!course) continue;
       const scores = holeData[`${p.id}_${r}`] || {};
       if (!Object.values(scores).some(v => v > 0)) continue;
-      rows.push({ r, scores, pars: course.hole_pars || [] });
+      // Strokes are only drawn in NET mode, where they are the whole
+      // explanation for a gold circle sitting on an ordinary-looking number:
+      // the card prints gross all week, so a skin won with a stroke is
+      // otherwise a 5 that beat a field of 4s for no visible reason.
+      const strokes = grossMode ? null : (strokesFor(r).maps[p.id] || {});
+      rows.push({ r, scores, pars: course.hole_pars || [], courseName: course.name || "", strokes });
     }
-    // Circles for under par only; gold number + single circle for skin winners; plain number otherwise
-    const ScoreCell = ({ score: raw, par, isSkin }) => {
+    if (rows.length === 0) return null;
+
+    // Two weights. `hair` rules the cells apart inside a nine — it has to be
+    // visible enough to follow a column down three rows on a phone, which is
+    // what the old borderless grid never let anybody do. `edge` frames the
+    // round and fences off the totals.
+    const hair = `1px solid ${K.bdr}${ALPHA.hair}`;
+    const edge = `1px solid ${K.bdr}`;
+
+    // Circles for under par; gold for a skin. A double circle is an eagle or
+    // better, which is the convention the round card and the paper scorecard
+    // both use.
+    const ScoreCell = ({ score: raw, par, isSkin, strokes }) => {
       // Same rule as the field card: a WD hole is a dash, not a 99.
       const score = raw > 0 && raw < WD_SCORE ? raw : 0;
-      if (!score) return <div style={{ width: "100%", aspectRatio: "1", display: "flex", alignItems: "center", justifyContent: "center" }}><span style={{ fontSize: FS.micro, color: K.t3 }}>–</span></div>;
+      if (!score) return <span style={{ fontSize: FS.micro, color: K.t3 }}>–</span>;
       const d = score - par;
       const isUnder = d < 0;
       const isDouble = d <= -2;
       const circleClr = isSkin ? K.gold : K.t2;
       return (
-        <div style={{ width: "100%", aspectRatio: "1", display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ position: "relative", width: "85%", aspectRatio: "1", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            {(isUnder || isSkin) && <div style={{ position: "absolute", inset: 0, borderRadius: "50%", border: `1.5px solid ${circleClr}` }} />}
-            {isDouble && <div style={{ position: "absolute", inset: 3, borderRadius: "50%", border: `1px solid ${circleClr}` }} />}
-            <span style={{ fontSize: FS.micro, fontWeight: 700, color: isSkin ? K.gold : K.t2, position: "relative", zIndex: 1 }}>{score}</span>
-          </div>
-        </div>
+        <span style={{ position: "relative", display: "inline-flex", alignItems: "center", justifyContent: "center", width: 19, height: 19 }}>
+          {(isUnder || isSkin) && <span style={{ position: "absolute", inset: 0, borderRadius: "50%", border: `1.5px solid ${circleClr}` }} />}
+          {isDouble && <span style={{ position: "absolute", inset: 3, borderRadius: "50%", border: `1px solid ${circleClr}` }} />}
+          {/* Strokes received, as the dots they are on a paper card. */}
+          {strokes > 0 && (
+            <span style={{ position: "absolute", top: -2, right: -4, display: "flex", gap: 1 }}>
+              {Array.from({ length: Math.min(strokes, 3) }, (_, k) => (
+                <span key={k} style={{ width: 2.5, height: 2.5, borderRadius: "50%", background: K.t3 }} />
+              ))}
+            </span>
+          )}
+          <span style={{ fontSize: FS.label, fontWeight: 700, color: isSkin ? K.gold : K.t2, position: "relative", zIndex: 1 }}>{score}</span>
+        </span>
       );
     };
+
     return (
-      <div style={{ padding: "8px 10px 6px", borderTop: `1px solid ${K.bdr}${ALPHA.tint}` }}>
-        {rows.map(({ r, scores, pars }) => {
-          const front9 = Array.from({length: 9}, (_, i) => i);
-          const back9  = Array.from({length: 9}, (_, i) => i + 9);
-          const HalfGrid = ({ holes }) => (
-            <div style={{ paddingBottom: 5, borderBottom: holes[0] === 0 ? `1px solid ${K.bdr}${ALPHA.tint}` : "none", marginBottom: holes[0] === 0 ? 5 : 0 }}>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(9, 1fr)", gap: 2 }}>
-                {holes.map(i => <div key={i} style={{ textAlign: "center", fontSize: FS.micro, fontWeight: 600, color: K.t2 }}>{i + 1}</div>)}
-                {holes.map(i => <div key={i} style={{ textAlign: "center", fontSize: FS.micro, color: K.t3, opacity: 0.45 }}>{pars[i] || ""}</div>)}
-                {holes.map(i => <ScoreCell key={i} score={scores[i]} par={pars[i] || 0} isSkin={skinSet.has(`${r}_${i}`)} />)}
-              </div>
-            </div>
-          );
+      <div style={{ padding: "8px 10px 10px", borderTop: hair }}>
+        {rows.map(({ r, scores, pars, courseName, strokes }) => {
+          const all = Array.from({ length: 18 }, (_, i) => i);
+          const round = tallyHoles(scores, pars, all);
+          const roundSkins = won.filter(s => s.winner.pid === p.id && s.round === r).length;
+
+          const Nine = ({ holes, label }) => {
+            const t = tallyHoles(scores, pars, holes);
+            // The totals column is held at a fixed width rather than a share
+            // of the table, so OUT and IN line up under one another whatever
+            // the hole numbers do.
+            const totCell = { textAlign: "center", padding: "3px 2px", borderLeft: edge, background: `${K.bdr}${ALPHA.wash}` };
+            return (
+              <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+                <colgroup>
+                  {holes.map((_, i) => <col key={i} />)}
+                  <col style={{ width: 34 }} />
+                </colgroup>
+                <tbody>
+                  <tr style={{ background: `${K.bdr}${ALPHA.wash}` }}>
+                    {holes.map(i => {
+                      const isSkin = skinSet.has(`${r}_${i}`);
+                      return (
+                        <td key={i} style={{
+                          textAlign: "center", fontSize: FS.micro, fontWeight: isSkin ? 800 : 700,
+                          color: isSkin ? K.gold : K.t2, padding: "3px 1px",
+                          borderLeft: i === holes[0] ? "none" : hair,
+                          borderBottom: hair,
+                          // A gold TICK under the number, not a gold cell and
+                          // not a full-width rule. Filling the cell makes
+                          // three skins on 7-8-9 run together into one block,
+                          // and an edge-to-edge underline does the same thing
+                          // one step later — the column definition this
+                          // rebuild exists for disappears exactly where the
+                          // card matters most. Inset to 55% and it reads as
+                          // three marks on three holes.
+                          ...(isSkin ? {
+                            backgroundImage: `linear-gradient(${K.gold}, ${K.gold})`,
+                            backgroundSize: "55% 2px",
+                            backgroundPosition: "center bottom",
+                            backgroundRepeat: "no-repeat",
+                          } : null),
+                        }}>{i + 1}</td>
+                      );
+                    })}
+                    <td style={{ ...totCell, fontSize: FS.micro, fontWeight: 800, color: K.t3, letterSpacing: 0.5, borderBottom: hair }}>{label}</td>
+                  </tr>
+                  <tr>
+                    {holes.map(i => (
+                      <td key={i} style={{
+                        textAlign: "center", fontSize: FS.micro, color: K.t3, padding: "2px 1px",
+                        borderLeft: i === holes[0] ? "none" : hair, borderBottom: hair,
+                      }}>{pars[i] || ""}</td>
+                    ))}
+                    <td style={{ ...totCell, fontSize: FS.micro, color: K.t3, borderBottom: hair }}>{t.par || ""}</td>
+                  </tr>
+                  <tr>
+                    {holes.map(i => (
+                      <td key={i} style={{ textAlign: "center", padding: "2px 1px", borderLeft: i === holes[0] ? "none" : hair }}>
+                        <ScoreCell score={scores[i]} par={pars[i] || 0} isSkin={skinSet.has(`${r}_${i}`)} strokes={strokes ? strokes[i] || 0 : 0} />
+                      </td>
+                    ))}
+                    <td style={{ ...totCell, fontSize: FS.label, fontWeight: 800, color: K.t1 }}>{t.gross || "–"}</td>
+                  </tr>
+                </tbody>
+              </table>
+            );
+          };
+
           return (
-            <div key={r} style={{ marginBottom: 8 }}>
-              <HalfGrid holes={front9} />
-              <HalfGrid holes={back9} />
+            <div key={r} style={{ border: edge, borderRadius: R.sm, overflow: "hidden", marginBottom: 8 }}>
+              {/* Which round, which course, what it was worth. The heading is
+                  the entire point of the rebuild — without it the grids below
+                  are eight interchangeable blocks of nine numbers. */}
+              <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 7px", background: `${K.bdr}${ALPHA.wash}`, borderBottom: edge }}>
+                <span style={{ fontSize: FS.micro, fontWeight: 800, color: K.acc, letterSpacing: 0.5, flexShrink: 0 }}>RD {r}</span>
+                <span style={{ fontSize: FS.micro, color: K.t3, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{courseName}</span>
+                {roundSkins > 0 && (
+                  <span style={{ fontSize: FS.micro, fontWeight: 800, color: K.gold, flexShrink: 0 }}>
+                    {roundSkins} SKIN{roundSkins !== 1 ? "S" : ""}
+                  </span>
+                )}
+                {/* A card still out on the course says so, rather than showing
+                    a total that looks like a finished round eight shots low. */}
+                {round.played < 18 && (
+                  <span style={{ fontSize: FS.micro, fontWeight: 700, color: K.t3, flexShrink: 0 }}>THRU {round.played}</span>
+                )}
+                <span style={{ fontSize: FS.label, fontWeight: 800, color: K.t1, flexShrink: 0 }}>{round.gross}</span>
+                <span style={{ fontSize: FS.micro, fontWeight: 700, color: round.toPar < 0 ? K.acc : K.t3, flexShrink: 0, minWidth: 18, textAlign: "right" }}>
+                  {toParStr(round.toPar)}
+                </span>
+              </div>
+              <Nine holes={Array.from({ length: 9 }, (_, i) => i)} label="OUT" />
+              <div style={{ height: 1, background: `${K.bdr}${ALPHA.line}` }} />
+              <Nine holes={Array.from({ length: 9 }, (_, i) => i + 9)} label="IN" />
             </div>
           );
         })}
+        {/* One line, once, at the foot of the whole card — the two circles are
+            not self-explanatory and a player asked to take them on trust will
+            read a birdie as a skin. */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, fontSize: FS.micro, color: K.t3, paddingTop: 2 }}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+            <span style={{ width: 11, height: 11, borderRadius: "50%", border: `1.5px solid ${K.gold}`, display: "inline-block" }} /> SKIN
+          </span>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+            <span style={{ width: 11, height: 11, borderRadius: "50%", border: `1.5px solid ${K.t2}`, display: "inline-block" }} /> UNDER PAR
+          </span>
+          {!grossMode && (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+              <span style={{ width: 3, height: 3, borderRadius: "50%", background: K.t3, display: "inline-block" }} /> STROKE
+            </span>
+          )}
+        </div>
       </div>
     );
   };
