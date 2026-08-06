@@ -23,6 +23,7 @@ import { NotificationSettings } from "./components/NotificationSettings";
 import { registerForPush, getCachedSubscriptionStatus } from "./lib/notifications";
 import { pairingScoreImpact, orphanedScores, describeScored, totalHoles } from "./lib/scoreGuard";
 import { groupsForRound, assignToGroup, removeFromGroup as removeFromGroupPure, clearGroup, swapIntoGroup, rowsToPairings } from "./lib/pairings";
+import { fitPairings, rungLines, nameWidthCeiling, CARD_GAP } from "./lib/pairingsFit";
 import { Popup, ConfirmModal } from "./components/Popup";
 import { EditionSwitcher } from "./components/EditionSwitcher";
 import { docIds } from "./lib/editionId";
@@ -4601,8 +4602,76 @@ function BettingView({
 function GroupsView({ players, round, tRounds, courses, pairingsData, teeTimesData, getPlayerTee, user }) {
   const tr = tRounds.find(t => t.round_number === round);
   const course = tr ? courses.find(c => c.id === tr.course_id) : null;
-  const groups = (pairingsData || {})[round] || [];
+  const groups = useMemo(() => (pairingsData || {})[round] || [], [pairingsData, round]);
   const roundTeeTimes = (teeTimesData || {})[round] || [];
+
+  // The draw is a handful of cards and it used to sit at FS.small with a third
+  // of the tab empty below it. So the size comes from the space: measure what
+  // the stack has been given and take the biggest rung that fits it — the same
+  // bargain the leaderboard strikes, and the one the type scale is written for.
+  //
+  // Only the players actually on a card count towards the shape, because that
+  // is what gets drawn: a pairing pointing at a player who has left the roster
+  // renders nothing, and counting it would buy height for a row that is not
+  // there and step the whole tab down a rung to pay for it.
+  const stackRef = useRef(null);
+  const [box, setBox] = useState({ h: 0, w: 0 });
+  const drawn = useMemo(
+    () => groups.map(grp => grp.map(pid => players.find(p => p.id === pid)).filter(Boolean)),
+    [groups, players],
+  );
+  const sizes = useMemo(() => drawn.map(grp => grp.length), [drawn]);
+  // Re-measure when the shape of the draw changes, not when its identity does:
+  // a Firestore snapshot that rewrites the same four foursomes is not a reason
+  // to read the layout again. The names ride along because the longest one is
+  // the other half of the fit, and a substitution can change it.
+  const drawShape = `${sizes.join(",")}|${drawn.flat().map(p => p.name).join("|")}`;
+  // useLayoutEffect, not useEffect: this measures and then restyles from the
+  // measurement, so running it after paint shows one frame at the wrong size.
+  // The stack is flex: 1 against a floor, so its height is the space on offer
+  // and does NOT move when the rung it feeds changes — no measure/grow loop.
+  useLayoutEffect(() => {
+    const measure = () => {
+      const el = stackRef.current;
+      if (!el) return;
+      setBox(prev => (prev.h === el.clientHeight && prev.w === el.clientWidth
+        ? prev
+        : { h: el.clientHeight, w: el.clientWidth }));
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [drawShape]);
+
+  // The longest name on the stack, in pixels per pixel of font size — the other
+  // half of the fit. Canvas rather than the DOM because a name only overflows
+  // once it has been drawn too big, and the point is not to draw it too big.
+  //
+  // Measured at 100px and divided down, so one measurement covers every rung.
+  // toUpperCase() because the app paints names in capitals and text-transform
+  // is a CSS thing the canvas knows nothing about — measure the string the
+  // browser will draw, not the one Firestore stores. And measured a second
+  // time on fonts.ready, because Montserrat arrives over the network and the
+  // fallback it is measured against until then is the narrower of the two,
+  // which is the direction that truncates.
+  const [nameWidthPerPx, setNameWidthPerPx] = useState(0);
+  useLayoutEffect(() => {
+    const names = drawn.flat().map(p => p.name);
+    if (names.length === 0) return undefined;
+    let live = true;
+    const measureNames = () => {
+      const ctx = document.createElement("canvas").getContext("2d");
+      if (!ctx || !live) return;
+      ctx.font = `600 100px ${FONT}`;
+      setNameWidthPerPx(nameWidthCeiling(names.map(n => ctx.measureText(n.toUpperCase()).width / 100)));
+    };
+    measureNames();
+    if (document.fonts) document.fonts.ready.then(measureNames);
+    return () => { live = false; };
+  }, [drawn]);
+
+  const fit = fitPairings(box.h, sizes, box.w, nameWidthPerPx);
+  const { rowLine, headLine } = rungLines(fit);
 
   const getTeeColor = (p) => {
     if (!course) return "#e8e8e8";
@@ -4616,39 +4685,44 @@ function GroupsView({ players, round, tRounds, courses, pairingsData, teeTimesDa
   };
 
   return (
-    <div>
+    <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
       <div style={{ marginBottom: 14 }}>
         <h2 style={{ fontFamily: "'Montserrat', sans-serif", fontSize: FS.title, margin: 0, fontWeight: 800, display: "inline" }}>Round {round}</h2>
         {course && <span style={{ fontSize: FS.small, color: K.t3, marginLeft: 10 }}>{course.name} · Par {course.par}</span>}
       </div>
       {groups.length > 0 ? (
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {groups.map((grp, gi) => {
+        // The stack takes the rest of the tab whatever it holds — that height
+        // IS the input to the fit above. overflowY stays auto as a backstop:
+        // a draw too deep for even the smallest rung scrolls rather than
+        // losing its last group off the bottom.
+        <div ref={stackRef} style={{ display: "flex", flexDirection: "column", gap: CARD_GAP, flex: 1, minHeight: 0, overflowY: "auto" }}>
+          {drawn.map((rows, gi) => {
             const teeTime = roundTeeTimes[gi];
             return (
-            <div key={gi} style={{ background: K.card, borderRadius: R.md, border: `1px solid ${K.bdr}`, overflow: "hidden" }}>
-              <div style={{ padding: "6px 12px", fontSize: FS.label, fontWeight: 700, color: K.acc, borderBottom: `1px solid ${K.bdr}`, background: K.accGlow, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div key={gi} style={{ background: K.card, borderRadius: R.md, border: `1px solid ${K.bdr}`, overflow: "hidden", flexShrink: 0 }}>
+              <div style={{ padding: `${fit.headPad}px 12px`, fontSize: fit.head, lineHeight: `${headLine}px`, fontWeight: 700, color: K.acc, borderBottom: `1px solid ${K.bdr}`, background: K.accGlow, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <span>{teeTime || `Group ${gi + 1}`}</span>
-                {teeTime && <span style={{ fontSize: FS.micro, fontWeight: 500, color: K.t3 }}>Group {gi + 1}</span>}
+                {teeTime && <span style={{ fontSize: fit.headSub, fontWeight: 500, color: K.t3 }}>Group {gi + 1}</span>}
               </div>
-              {grp.map((pid, pi) => {
-                const p = players.find(pl => pl.id === pid);
-                if (!p) return null;
-                const ch = course ? (() => { const tee = getPlayerTee(round, pid, course); return calcCH(p.handicap_index, tee?.slope || course.slope, tee?.rating || course.rating, tee?.par || course.par); })() : 0;
+              {rows.map((p, pi) => {
+                const ch = course ? (() => { const tee = getPlayerTee(round, p.id, course); return calcCH(p.handicap_index, tee?.slope || course.slope, tee?.rating || course.rating, tee?.par || course.par); })() : 0;
                 const teeName = getTeeName(p);
                 const teeClr = getTeeColor(p);
-                const isMe = pid === user.id;
+                const isMe = p.id === user.id;
                 return (
-                  <div key={pid} style={{ padding: "5px 12px", display: "grid", gridTemplateColumns: "5fr 1.6fr 2.4fr 2fr", alignItems: "center", borderBottom: pi < grp.length - 1 ? `1px solid ${K.bdr}${ALPHA.wash}` : "none", background: isMe ? K.t2 + ALPHA.wash : "transparent" }}>
-                    <span style={{ fontWeight: 600, fontSize: FS.small, color: isMe ? K.gold : K.t1 }}>{p.name}</span>
-                    <span style={{ fontSize: FS.label, fontWeight: 600, color: K.t2, textAlign: "center" }}>{p.handicap_index}</span>
-                    <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: FS.label, fontWeight: 600, color: isDarkTee(teeClr) ? "#9ca3af" : isLightTee(teeClr) ? K.t3 : teeClr }}>
+                  <div key={p.id} style={{ padding: `${fit.rowPad}px 12px`, lineHeight: `${rowLine}px`, display: "grid", gridTemplateColumns: "5fr 1.6fr 2.4fr 2fr", alignItems: "center", borderBottom: pi < rows.length - 1 ? `1px solid ${K.bdr}${ALPHA.wash}` : "none", background: isMe ? K.t2 + ALPHA.wash : "transparent" }}>
+                    {/* The name is the one cell that can outgrow its column as
+                        the rung climbs, so it ellipses rather than wrapping —
+                        a wrapped row is a row taller than the fit paid for. */}
+                    <span style={{ fontWeight: 600, fontSize: fit.name, color: isMe ? K.gold : K.t1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
+                    <span style={{ fontSize: fit.cell, fontWeight: 600, color: K.t2, textAlign: "center" }}>{p.handicap_index}</span>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: fit.cell, fontWeight: 600, minWidth: 0, overflow: "hidden", whiteSpace: "nowrap", color: isDarkTee(teeClr) ? "#9ca3af" : isLightTee(teeClr) ? K.t3 : teeClr }}>
                       {teeName && <>
-                        <TeeColorSwatch color={teeClr} name={teeName} size={7} />
+                        <TeeColorSwatch color={teeClr} name={teeName} size={fit.swatch} />
                         {teeName}
                       </>}
                     </span>
-                    <span style={{ color: K.t2, fontSize: FS.label, fontWeight: 500, textAlign: "right" }}>{course ? `CH ${ch}` : "–"}</span>
+                    <span style={{ color: K.t2, fontSize: fit.cell, fontWeight: 500, textAlign: "right", whiteSpace: "nowrap" }}>{course ? `CH ${ch}` : "–"}</span>
                   </div>
                 );
               })}
@@ -9971,7 +10045,10 @@ export default function WBCApp() {
       </div>
       )}
 
-      <div className="wbc-app-body" style={{ padding: (view === "leaderboard" || view === "admin") ? "14px 20px 0 20px" : "14px 20px", flex: 1, overflowY: "auto", overflowX: "hidden", display: (view === "leaderboard" || view === "admin") ? "flex" : "block", flexDirection: "column", minHeight: 0, paddingBottom: (view === "leaderboard" || view === "admin") ? "28px" : 0 }}>
+      {/* Pairings joins the two views that lay out to the height they have
+          rather than to the height of what is in them — the tab sizes its own
+          type from that measurement, so it needs a floor to measure against. */}
+      <div className="wbc-app-body" style={{ padding: (view === "leaderboard" || view === "admin") ? "14px 20px 0 20px" : "14px 20px", flex: 1, overflowY: "auto", overflowX: "hidden", display: (view === "leaderboard" || view === "admin" || view === "groups") ? "flex" : "block", flexDirection: "column", minHeight: 0, paddingBottom: (view === "leaderboard" || view === "admin") ? "28px" : 0 }}>
         {view === "leaderboard" && <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} pairingsData={pairingsData} teeTimesData={teeTimesData} loaded={storageLoaded} />}
         <div style={{ display: view === "scoring" ? "block" : "none", paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
           <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeTimesData={teeTimesData} roundDates={roundDates} scoringOpen={scoringOpen} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={async (key, signerPid, signerName, present, rnd) => { const nonSigners = (present || []).filter(pid => pid !== signerPid); const autoFinal = nonSigners.length === 0; const optimistic = { signedBy: signerPid, signedByName: signerName, attestedBy: [], present: present || [] }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: optimistic })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), tournament_id: TOURNAMENT_ID, groupKey: key, round: rnd, signedBy: signerPid, signedByName: signerName, present: present || [], attestedBy: [], signedAt: new Date().toISOString() }); if (autoFinal) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onAttestScorecard={async (key, attesterPid, nonSigners) => { const cur = scorecardSigs[key]; if (!cur) return; const attestedBy = [...new Set([...(cur.attestedBy || []), attesterPid])]; const optimistic = { ...cur, attestedBy }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: { ...prev[key], attestedBy } })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), attestedBy }); const allDone = (nonSigners || []).every(pid => attestedBy.includes(pid)); if (allDone) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onUnsignScorecard={async key => { pendingSigsRef.current.delete(key); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); if (finalizedRounds[key]) { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); pendingSigsRef.current.delete(key); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); await saveTournamentState(nf); }} onGoToAdminCourses={(rnd) => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); setAdminSettingsRound(rnd || null); }} markPlayerWD={markPlayerWD} ctpData={ctpData} onSetCtp={onSetCtp} onConfirmCtp={onConfirmCtp} directorPick={directorPick} onGroupChange={setScoringGroup} onSetRound={setRound} />
