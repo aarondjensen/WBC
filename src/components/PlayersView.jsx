@@ -376,7 +376,7 @@ function PlayerDetail({ row, onBack, isDirector = false, onSetOverride = null })
       {/* ── The last 12 ── */}
       {hasRounds && (
         <>
-          <SectionLabel>The last {idx.window.length}</SectionLabel>
+          <SectionLabel style={{ textAlign: "center" }}>The last {idx.window.length}</SectionLabel>
           <Card style={{ marginBottom: 12 }}>
             <WindowChart idx={idx} />
           </Card>
@@ -386,7 +386,7 @@ function PlayerDetail({ row, onBack, isDirector = false, onSetOverride = null })
       {/* ── The working ── */}
       {hasRounds && (
         <>
-          <SectionLabel>Included in index</SectionLabel>
+          <SectionLabel style={{ textAlign: "center" }}>Included in index</SectionLabel>
           <Card style={{ marginBottom: 12 }}>
             {idx.counting.map(r => (
               <div key={r.key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0" }}>
@@ -418,7 +418,7 @@ function PlayerDetail({ row, onBack, isDirector = false, onSetOverride = null })
       {/* ── All rounds ── */}
       {byYear.length > 0 && (
         <>
-          <SectionLabel>All rounds</SectionLabel>
+          <SectionLabel style={{ textAlign: "center" }}>All rounds</SectionLabel>
           <Card pad={10}>
             <div style={{
               display: "grid", gridTemplateColumns: ROUND_COLS, gap: 6,
@@ -449,7 +449,12 @@ function PlayerDetail({ row, onBack, isDirector = false, onSetOverride = null })
                         career. It falls mid-year as often as not — Matt V's
                         twelfth-most-recent round is in the middle of 2014 —
                         which is exactly why it is drawn against a ROW rather
-                        than between two year headings. */}
+                        than between two year headings.
+
+                        The label sits in the middle of its own rule, naming
+                        what is ABOVE it. Hung off one end it read as a heading
+                        for the rounds below, which is the opposite of what the
+                        line means. */}
                     {r.key === windowEndsAfter && (
                       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 8px 1px" }}>
                         <span style={{ flex: 1, borderTop: `1px dotted ${K.t3}` }} />
@@ -457,8 +462,9 @@ function PlayerDetail({ row, onBack, isDirector = false, onSetOverride = null })
                           fontSize: FS.micro, fontWeight: 700, color: K.t3,
                           letterSpacing: 0.5, textTransform: "uppercase", flexShrink: 0,
                         }}>
-                          older than the last {idx.window.length}
+                          last {idx.window.length}
                         </span>
+                        <span style={{ flex: 1, borderTop: `1px dotted ${K.t3}` }} />
                       </div>
                     )}
                   </Fragment>
