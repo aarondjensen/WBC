@@ -17,7 +17,10 @@
 
 import { initializeApp } from "firebase/app";
 import { FirebaseAuthentication } from "@capacitor-firebase/authentication";
-import { getFirestore, doc, deleteDoc, collection, query, where, getDocs, writeBatch } from "firebase/firestore";
+import {
+  getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
+  doc, deleteDoc, collection, query, where, getDocs, writeBatch,
+} from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import {
   getAuth,
@@ -87,7 +90,52 @@ const FIREBASE_CONFIG = {
 };
 
 export const _app = initializeApp(FIREBASE_CONFIG);
-export const _db = getFirestore(_app);
+
+// ─── Firestore, with the cache on disk ─────────────────────────────────────
+// This was `getFirestore(_app)`, which gives an in-MEMORY cache: it lives as
+// long as the page does and is thrown away on every reload.
+//
+// That is the wrong default for this app specifically. App.jsx subscribes to
+// eight collections scoped to the whole tournament, and hole_scores alone is
+// twelve players × four rounds × eighteen holes — 864 documents. With a memory
+// cache, every cold start re-reads all ~1,000 of them from the server, and a
+// phone on a golf course cold-starts constantly: the screen locks, iOS evicts
+// the tab, somebody switches to the camera and back. Twelve phones doing that
+// thirty or forty times over a day of golf is a few hundred thousand billed
+// reads against a 50,000/day no-cost quota.
+//
+// A persistent cache changes what a relaunch costs. The listener resumes from
+// the token it stored, so the server sends only what CHANGED since the phone
+// last had it — a handful of holes somebody posted — instead of the whole
+// tournament again. The documents already on disk are neither re-sent nor
+// re-billed. Same screens, same code, one to two orders of magnitude fewer
+// reads.
+//
+// It is also strictly better on a course with no signal: a relaunch out of
+// range now paints the leaderboard from disk instead of showing nothing.
+//
+// ── Why the multi-tab manager ──
+// Without it, persistence is claimed by ONE tab and every other tab fails to
+// initialize its cache. Somebody with the leaderboard open on a laptop and the
+// scoring screen open in a second tab is a completely ordinary thing here, and
+// the failure would look like the app being broken in whichever tab lost.
+//
+// ── Why the fallback ──
+// IndexedDB is not always available — Safari private browsing, a locked-down
+// WebView, a browser with storage disabled. initializeFirestore throws in
+// those cases, and an app that fails to load a leaderboard because it could
+// not open a CACHE would be a bad trade for the saving. Falling back to the
+// old memory-cached behaviour costs reads and loses nothing else.
+export const _db = (() => {
+  try {
+    return initializeFirestore(_app, {
+      localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+    });
+  } catch (e) {
+    console.warn("Firestore persistent cache unavailable; falling back to memory.", e?.message || e);
+    return getFirestore(_app);
+  }
+})();
 const _functions = getFunctions(_app);
 
 // Firestore collections owned by this module. wbc_users maps a Firebase
