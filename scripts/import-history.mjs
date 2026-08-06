@@ -78,6 +78,67 @@ const args = process.argv.slice(2);
 const WRITE = args.includes("--write");
 const yearArg = args.indexOf("--year") >= 0 ? num(args[args.indexOf("--year") + 1]) : null;
 
+// ── The credential, checked before anything is announced ──────────
+// Up here, not down beside the batches, so a bad key path costs nothing and
+// says nothing misleading. This used to be a bare readFileSync at the write
+// site: a missing file printed "WRITING to Firestore", the document counts, and
+// then a raw ENOENT stack — which reads exactly like an import that got part of
+// the way in. It never had; the file is read before the first batch. Now it
+// says so before printing a single count.
+const emulator = process.env.FIRESTORE_EMULATOR_HOST;
+const keyPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+let serviceAccount = null;
+
+if (WRITE && !emulator) {
+  // No spread on the joined string — `console.error(...str)` prints it one
+  // character at a time, spaced.
+  const die = (...lines) => { console.error(["", ...lines].join("\n")); process.exit(1); };
+
+  if (!keyPath) {
+    die("GOOGLE_APPLICATION_CREDENTIALS is not set. Nothing was written.",
+        "",
+        "  PowerShell:  $env:GOOGLE_APPLICATION_CREDENTIALS = \"C:\\path\\to\\key.json\"",
+        "  bash:        export GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json",
+        "",
+        "The key comes from Firebase Console -> Project Settings -> Service accounts",
+        "-> Generate new private key. To rehearse with no key at all, set",
+        "FIRESTORE_EMULATOR_HOST and point it at the emulator.");
+  }
+
+  let raw;
+  try {
+    raw = readFileSync(keyPath, "utf8");
+  } catch (e) {
+    die(`Can't read the service-account key. Nothing was written.`,
+        `  ${keyPath}`,
+        "",
+        e.code === "ENOENT"
+          ? "There is no file at that path. Check the name — the console downloads it"
+          : `  ${e.message}`,
+        e.code === "ENOENT"
+          ? "as <project>-firebase-adminsdk-<hash>.json, which is rarely what you guessed."
+          : "");
+  }
+
+  try {
+    serviceAccount = JSON.parse(raw);
+  } catch {
+    die("The service-account key is not valid JSON. Nothing was written.",
+        `  ${keyPath}`);
+  }
+
+  // A downloaded key has these. Catching it here beats a confusing auth failure
+  // several hundred documents later.
+  for (const field of ["project_id", "client_email", "private_key"]) {
+    if (!serviceAccount[field]) {
+      die(`That file is not a service-account key — no \`${field}\`. Nothing was written.`,
+          `  ${keyPath}`,
+          "",
+          "Firebase Console -> Project Settings -> Service accounts -> Generate new private key.");
+    }
+  }
+}
+
 const tournaments = csv("tournaments.csv");
 const allRounds = csv("rounds.csv");
 const allCourses = csv("courses.csv");
@@ -116,7 +177,9 @@ const editions = years.map(y => {
 const COLLECTIONS = ["wbc_editions", "tournament_state", "tournament_players",
                      "courses", "tournament_rounds", "tee_assignments", "hole_scores"];
 
-console.log(WRITE ? "WRITING to Firestore\n" : "DRY RUN — nothing will be written. Pass --write to commit.\n");
+console.log(WRITE
+  ? `WRITING to Firestore${serviceAccount ? ` — project ${serviceAccount.project_id}` : ""}${emulator ? ` (emulator at ${emulator})` : ""}\n`
+  : "DRY RUN — nothing will be written. Pass --write to commit.\n");
 console.log("year   players  rounds  holes   docs");
 let total = 0;
 for (const e of editions) {
@@ -152,26 +215,19 @@ if (!WRITE) {
 // ── The write half ────────────────────────────────────────────────
 // Imported lazily so a dry run needs no credentials and no firebase-admin
 // install — which is what makes the preview above runnable by anybody.
-const { initializeApp, cert, applicationDefault } = await import("firebase-admin/app");
+const { initializeApp, cert } = await import("firebase-admin/app");
 const { getFirestore } = await import("firebase-admin/firestore");
 
-// The emulator needs no credential, and rehearsing the write there is the way
-// to see what 8,000 documents look like before any of them are real:
+// The credential was read and checked at the top; nothing here can fail on a
+// bad path. The emulator needs none at all, and rehearsing the write there is
+// how to see what 8,000 documents look like before any of them are real:
 //
 //   firebase emulators:exec --only firestore \
 //     "FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 npm run import:history -- --write"
-const emulator = process.env.FIRESTORE_EMULATOR_HOST;
-const keyPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
-if (!emulator && !keyPath) {
-  console.error("\nGOOGLE_APPLICATION_CREDENTIALS is not set — see the header of this file.");
-  console.error("To rehearse against the emulator instead, set FIRESTORE_EMULATOR_HOST.");
-  process.exit(1);
-}
-if (emulator) console.log(`Emulator at ${emulator} — this is a rehearsal, not the live database.\n`);
 initializeApp({
-  projectId: process.env.GCLOUD_PROJECT || process.env.FIREBASE_PROJECT || "wbc-import",
-  ...(keyPath ? { credential: cert(JSON.parse(readFileSync(keyPath, "utf8"))) }
-              : emulator ? {} : { credential: applicationDefault() }),
+  projectId: serviceAccount?.project_id
+    || process.env.GCLOUD_PROJECT || process.env.FIREBASE_PROJECT || "wbc-import",
+  ...(serviceAccount ? { credential: cert(serviceAccount) } : {}),
 });
 const db = getFirestore();
 
