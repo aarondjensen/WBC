@@ -106,7 +106,11 @@ const emulator = process.env.FIRESTORE_EMULATOR_HOST;
 const keyPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
 let serviceAccount = null;
 
-if ((WRITE || UNDO) && !emulator) {
+// Gated on --write alone, not on WRITE || UNDO. `--undo` without `--write` is a
+// dry run that deletes nothing and touches no database, so demanding a
+// credential for it blocks the one command somebody reaches for FIRST when they
+// want to know what an undo would remove.
+if (WRITE && !emulator) {
   // No spread on the joined string — `console.error(...str)` prints it one
   // character at a time, spaced.
   const die = (...lines) => { console.error(["", ...lines].join("\n")); process.exit(1); };
