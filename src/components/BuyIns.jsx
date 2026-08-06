@@ -238,7 +238,7 @@ export function BuyInTracker({ players, games, onChange }) {
 
       {sheet.rows.map(row => (
         <div key={row.pid} style={{ display: "grid", gridTemplateColumns: cols, alignItems: "center", gap: 2, padding: "3px 10px", borderBottom: `1px solid ${K.bdr}${ALPHA.hair}` }}>
-          <span className="wbc-name" onClick={() => toggleRow(row.pid)}
+          <span onClick={() => toggleRow(row.pid)}
             style={{ minWidth: 0, fontSize: FS.small, fontWeight: 600, cursor: "pointer", color: row.owes > 0 ? K.t1 : K.t3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {row.name}
             {/* Withdrawals stay ON the sheet — they paid — and are marked so
