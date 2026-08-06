@@ -53,9 +53,28 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black" />
     <meta name="apple-mobile-web-app-title" content="WBC 2026" />
     <title>WBC 2026</title>
+    <script>
+      // ── Theme, before first paint ──────────────────────────────────
+      // The palette lives in src/theme.js, but this runs before any of it is
+      // parsed — and a light-mode user reloading onto a near-black page that
+      // flips white a beat later is the whole reason to do it here. Same
+      // storage key theme.js reads; the two backgrounds are the two `bg`
+      // tokens, and theme.test.js asserts they still match.
+      (function () {
+        var t = 'dark';
+        try { var v = localStorage.getItem('wbc_theme'); if (v === 'light' || v === 'dark') t = v; } catch (e) {}
+        document.documentElement.setAttribute('data-theme', t);
+        var bg = t === 'light' ? '#f2f5f9' : '#080f1a';
+        document.documentElement.style.background = bg;
+        var m = document.querySelector('meta[name="theme-color"]');
+        if (m) m.setAttribute('content', bg);
+      })();
+    </script>
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
-      html, body, #root { height: 100%; overflow: hidden; background: #080f1e; }
+      /* No background here — the script above paints it from the stored theme
+         before this stylesheet can matter, and a hardcoded one would flash. */
+      html, body, #root { height: 100%; overflow: hidden; }
       body { font-family: 'Montserrat', sans-serif; }
       input, button, textarea, select { font-family: inherit; }
     </style>

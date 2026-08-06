@@ -13,7 +13,40 @@
 // COLORS stay WBC's: BC is amber-on-brown, WBC is teal, and matching the two
 // apps' structure was never meant to mean repainting one of them.
 
-export const K = {
+// ══════════════════════════════════════════════════════════════════
+//  Two palettes, one live object.
+// ══════════════════════════════════════════════════════════════════
+//
+// `K` is read ~1,400 times as `style={{ color: K.t1 }}`, and 76 of those append
+// two hex digits for opacity — `K.acc + ALPHA.wash`. That second habit rules out
+// the obvious approach of making each token a CSS variable, because
+// `var(--k-acc)14` is not a colour.
+//
+// So K stays a plain object of hex and is MUTATED in place by setTheme — the
+// same live-binding trick App.jsx uses for NUM_ROUNDS. Every call site reads it
+// during render, so pointing it at another palette and re-rendering repaints the
+// app with no call site touched and every alpha-append still valid.
+//
+// ── Deriving the light palette ────────────────────────────────────
+// Not picked by eye. Each light token was tuned until its contrast against the
+// light background matched what its dark counterpart achieves against the dark
+// one, so the hierarchy reads the same in both:
+//
+//   token   dark on bg   light on bg
+//   t1        16.3          16.1     body text
+//   t2         9.2           7.2     secondary
+//   t3         5.8           5.6     the SMALL text — the note below
+//   bdr        1.35          1.31    a hairline, not a boundary
+//   card       1.08          1.09    a surface lifted off the page
+//
+// The accent is the one that cannot match. A teal bright enough to sit at 10:1
+// on near-black is 1.9:1 on near-white — invisible. The light accent is a DARKER
+// teal of the same hue at 4.9:1, which is AA for small text, and it has to be:
+// `acc` is the leader's number and the finalized tick as often as it is a fill.
+//
+// That flip is why ON_ACC moves with the theme — dark ink on the bright teal,
+// white on the dark one — and theme.test.js holds every one of these ratios.
+const DARK = {
   bg: "#080f1a", card: "#0e1829", inp: "#0a1425", hover: "#142036",
   acc: "#22d3a7", accDim: "#0d9b73", accGlow: "rgba(34,211,167,0.12)",
   tourn: "#38bdf8", tournGlow: "rgba(56,189,248,0.12)",
@@ -59,16 +92,70 @@ export const K = {
   thumb: "#1c2c47",
 };
 
+// The same tokens in daylight. Same hues, inverted lightness, every one checked
+// against the light background rather than mechanically converted — the bright
+// score colours in particular: #22c55e is 1.8:1 on white, so a birdie printed in
+// it would be a rumour.
+const LIGHT = {
+  // The brand navy is the INK here — the same #080f1a the dark theme uses as its
+  // page — and the greys above it are that navy lightened and desaturated rather
+  // than a neutral slate borrowed from nowhere. It is why the two themes read as
+  // one app rather than two: the light one is the dark one turned inside out.
+  bg: "#f2f5f9", card: "#ffffff", inp: "#e8edf4", hover: "#dde4ef",
+  acc: "#0b7a5c", accDim: "#065f47", accGlow: "rgba(11,122,92,0.12)",
+  tourn: "#0369a1", tournGlow: "rgba(3,105,161,0.12)",
+  warn: "#a35a00", danger: "#c02626",
+  t1: "#080f1a", t2: "#364763", t3: "#546683",
+  bdr: "#ccd6e4",
+  // `par` tracks t2 in daylight too — a par is the score with no colour of its
+  // own, printed in the muted ink.
+  eagle: "#1d4ed8", birdie: "#15803d", par: "#364763", bogey: "#a16207", dbl: "#c02626",
+  ok: "#15803d",
+  under: "#c02626",
+  gold: "#8a6a10",
+  // White rather than `card`, and near-opaque for the same reason the dark one
+  // is: this bar sits over scrolling content and has to stop it.
+  nav: "rgba(255,255,255,0.97)",
+  // Inverted relative to dark: there, a selected thumb is LIGHTER than the track
+  // it sits in; here it has to be lighter still than a light track, so it is the
+  // one pure white surface in the palette.
+  thumb: "#ffffff",
+};
+
+export const THEMES = ["dark", "light"];
+const PALETTES = { dark: DARK, light: LIGHT };
+export const THEME_KEY = "wbc_theme";
+
+// The live palette. Seeded from storage so the first paint is already right —
+// see the pre-paint script in index.html, which reads the same key to set the
+// page background before React exists.
+const readStoredTheme = () => {
+  try {
+    const v = typeof localStorage !== "undefined" && localStorage.getItem(THEME_KEY);
+    return THEMES.includes(v) ? v : "dark";
+  } catch { return "dark"; }
+};
+
+let activeTheme = readStoredTheme();
+export const getTheme = () => activeTheme;
+
+export const K = { ...PALETTES[activeTheme] };
+
 // Ink for a filled accent button. Which ink an accent button takes is decided
 // by the FILL, not by the theme — K.bg happens to be near-black here, but
 // spelling it out separately keeps that a deliberate contrast choice rather
 // than a coincidence that breaks if the background ever lightens.
-export const ON_ACC = "#04121b";
+//
+// It has to MOVE with the theme, which is why this is a `let`: ESM live bindings
+// mean every `import { ON_ACC }` sees the reassignment, so setTheme can flip it
+// without a single call site changing. Dark's teal is bright and takes near-black
+// ink; light's teal is dark and takes white.
+export let ON_ACC = activeTheme === "light" ? "#ffffff" : "#04121b";
 
 // The same decision for the red fill, which lands on the other side of it: the
 // danger red is dark enough to carry white, the teal is not. Written out for
 // the same reason ON_ACC is — so a filled button never has to guess its ink.
-export const ON_DANGER = "#ffffff";
+export let ON_DANGER = "#ffffff";
 
 export const FONT = "'Montserrat', sans-serif";
 
@@ -183,8 +270,41 @@ export const ALPHA = {
 
 // Black, for the two things black is for. Neither is a theme color — a shadow
 // is the absence of light regardless of palette.
-export const SHADOW = `#000000${ALPHA.line}`;  // 33%
-export const SCRIM  = `#000000${ALPHA.held}`;  // 60%
+// Both are black in the dark theme, where a shadow is a deeper hole in an
+// already dark page. On a white one the same 33% reads as soot, so light gets a
+// softer shadow — and a scrim that still has to darken the page enough to push a
+// modal forward, which is the one place light does NOT go lighter.
+export let SHADOW = activeTheme === "light" ? `#0b1b3a${ALPHA.hair}` : `#000000${ALPHA.line}`;
+export let SCRIM  = activeTheme === "light" ? `#0b1b3a${ALPHA.held}`  : `#000000${ALPHA.held}`;
+
+// ── setTheme ───────────────────────────────────────────────────────
+// Mutates K in place rather than replacing it, so the ~1,400 call sites holding
+// the same object reference all repaint. The caller re-renders; nothing here
+// knows about React.
+//
+// The <html> data-theme attribute is for CSS that cannot read K — index.css
+// paints the page background before React mounts, and the browser chrome colour
+// rides the theme-color meta.
+export const setTheme = (name) => {
+  const next = THEMES.includes(name) ? name : "dark";
+  activeTheme = next;
+  Object.assign(K, PALETTES[next]);
+  ON_ACC = next === "light" ? "#ffffff" : "#04121b";
+  ON_DANGER = "#ffffff";
+  SHADOW = next === "light" ? `#0b1b3a${ALPHA.hair}` : `#000000${ALPHA.line}`;
+  SCRIM = next === "light" ? `#0b1b3a${ALPHA.held}` : `#000000${ALPHA.held}`;
+  try {
+    if (typeof localStorage !== "undefined") localStorage.setItem(THEME_KEY, next);
+  } catch { /* blocked storage */ }
+  if (typeof document !== "undefined") {
+    document.documentElement.setAttribute("data-theme", next);
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute("content", K.bg);
+  }
+  return next;
+};
+
+export const toggleTheme = () => setTheme(activeTheme === "dark" ? "light" : "dark");
 
 // ── The segmented control ──
 // One definition of what "this one is selected" looks like, because WBC draws

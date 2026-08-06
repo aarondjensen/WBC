@@ -2,7 +2,7 @@ import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } fr
 import { createPortal } from "react-dom";
 import { _app, _db, _auth, onAuthStateChanged, doGoogleSignIn, doAppleSignIn, doSignOut, consumeRedirectResult, deleteAccount, USERS_COLLECTION, NATIVE_APPLE_ENABLED, APPLE_PROVIDER_ENABLED, isNativePlatform, isAndroidNative, AUTH_PROVIDERS_ENABLED, TOURNAMENT_ID, getEditionSlug, getTournamentYear, isDefaultEdition } from "./firebase";
 import { readMembership, isDirectorAccount, resolveMember, joinWithCode, readAccessCode, setAccessCode, setDirector, subscribeMemberships, accountsUnreadable, membershipForPlayer, playerIsDirector } from "./lib/accounts";
-import { K, ON_ACC, ON_DANGER, FS, fsStep, R, ALPHA, MOTION, FONT, SHADOW, SCRIM } from "./theme";
+import { K, ON_ACC, ON_DANGER, FS, fsStep, R, ALPHA, MOTION, FONT, SHADOW, SCRIM, getTheme, setTheme, THEMES, segTrack, segThumb} from "./theme";
 import { SegmentedToggle, StickyTop, SectionLabel, Card, Toast, Btn } from "./components/ui";
 import { calcCH, buildStrokesMap, computeRoundLine, computeIndividualBoard, rankIndividualBoard, rankIndividualBoardIds, WD_SCORE } from "./lib/individualBoard";
 import { fieldFor, potFor, perUnit, computeSkins, allSkins, skinCounts, lowNetRounds, lowNetRoundField } from "./lib/sideGames";
@@ -8413,6 +8413,11 @@ export default function WBCApp() {
   // the app stores require to be deletable. PIN-only players have no such
   // account to delete. deleteStage: null | "confirm" | "working".
   const [accountOpen, setAccountOpen] = useState(false);
+  // Light or dark. The VALUE lives in theme.js (K is mutated in place, so every
+  // call site repaints); this state exists only to make React re-render when it
+  // changes — the palette is not React's to own.
+  const [theme, setThemeState] = useState(getTheme);
+  const pickTheme = (name) => { setThemeState(setTheme(name)); };
   const [menuOpen, setMenuOpen] = useState(false);
   // Every year the tournament has been run in this app. A sheet rather than a
   // view because opening one RELOADS the app onto that edition (see
@@ -10129,6 +10134,20 @@ export default function WBCApp() {
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: FS.body, fontWeight: 700, color: K.t1 }}>{user.name}</div>
                     <div style={{ fontSize: FS.label, color: K.t3 }}>{user.isDirector ? "Tournament director" : "Player"}</div>
+                  </div>
+                </div>
+
+                {/* ── Appearance ── */}
+                <div style={{ marginBottom: 18 }}>
+                  <div style={{ fontSize: FS.label, fontWeight: 800, letterSpacing: 1, color: K.t3, textTransform: "uppercase", marginBottom: 8 }}>Appearance</div>
+                  <div style={segTrack()}>
+                    {THEMES.map(t => (
+                      <button key={t} onClick={() => pickTheme(t)} style={{
+                        ...segThumb(theme === t),
+                        flex: 1, padding: "9px 0", cursor: "pointer",
+                        fontSize: FS.small, fontWeight: 800, textTransform: "capitalize",
+                      }}>{t}</button>
+                    ))}
                   </div>
                 </div>
 
