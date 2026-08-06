@@ -134,11 +134,15 @@ export function SegmentedToggle({ options, value, onChange, variant = "segmented
             }}
           >
             <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+            {/* A dot beside the label. A BOOLEAN reads as done/not-done in
+                the accent; a COLOUR STRING is a filled dot in that colour,
+                which is how a tab says something needs attention rather than
+                merely reporting a state. */}
             {badge != null && (
               <span style={{
                 width: 6, height: 6, borderRadius: "50%", flexShrink: 0,
-                background: badge ? K.acc : "transparent",
-                border: `1.5px solid ${badge ? K.acc : K.t3 + ALPHA.line}`,
+                background: typeof badge === "string" ? badge : badge ? K.acc : "transparent",
+                border: `1.5px solid ${typeof badge === "string" ? badge : badge ? K.acc : K.t3 + ALPHA.line}`,
               }} />
             )}
             {on && <SegRule compact={compact} />}
