@@ -52,19 +52,64 @@ import { buyInSheet, toggleIn } from "../lib/sideGames";
 
 const money = (n) => `$${(n || 0).toFixed(2)}`;
 
-export function BuyInTracker({ players, games, onChange }) {
-  // Prices are local while typing and committed on blur, so a half-typed "2"
-  // on the way to "20" never briefly halves the pot on everybody's phone.
+// ── BuyInPrices ──
+// What a seat in each game costs. It lives in the ADMIN console, not on the
+// Betting tab, because a price is event SETUP — decided once in a car park
+// before anybody tees off — and the Betting tab's job during the week is the
+// opposite: who has paid, and what the pot is worth. Mixing the two put a
+// text field a mis-tap away from a roster somebody was scrolling.
+//
+// Each row carries its own count and subtotal so the arithmetic is visible at
+// the point the number is typed.
+export function BuyInPrices({ players, games, onChange }) {
+  // Local while typing and committed on blur, so a half-typed "2" on the way
+  // to "20" never briefly halves the pot on everybody's phone.
   const [prices, setPrices] = useState(() =>
     Object.fromEntries(games.map(g => [g.key, g.amount ? String(g.amount) : ""])));
 
   const sheet = buyInSheet({ players, games });
-  const rowFor = (pid) => sheet.rows.find(r => r.pid === pid);
 
   const commitPrice = (g) => {
     const v = parseFloat(prices[g.key]);
     onChange({ [g.key]: { amount: Number.isFinite(v) && v > 0 ? v : 0 } });
   };
+
+  return (
+    <div style={{ fontFamily: FONT }}>
+      {games.map(g => (
+        <div key={g.key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 0", borderBottom: `1px solid ${K.bdr}${ALPHA.hair}` }}>
+          <span style={{ flex: 1, minWidth: 0, fontSize: FS.body, fontWeight: 700, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.label}</span>
+          <span style={{ fontSize: FS.body, fontWeight: 800, color: K.gold }}>$</span>
+          <input
+            type="number" inputMode="decimal" value={prices[g.key] ?? ""} placeholder="0"
+            onChange={e => setPrices(p => ({ ...p, [g.key]: e.target.value }))}
+            onBlur={() => commitPrice(g)}
+            onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); }}
+            style={{
+              width: 62, fontSize: FS.lead, fontWeight: 800, color: K.gold, textAlign: "right",
+              background: "transparent", border: "none", borderBottom: `1px solid ${K.acc}`,
+              outline: "none", fontFamily: FONT, padding: 0,
+            }}
+          />
+          <span style={{ width: 104, textAlign: "right", fontSize: FS.small, color: K.t3, flexShrink: 0 }}>
+            {sheet.totals[g.key].count} in · {money(sheet.totals[g.key].amount)}
+          </span>
+        </div>
+      ))}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 12 }}>
+        <span style={{ flex: 1, fontSize: FS.label, fontWeight: 800, color: K.t3, letterSpacing: 0.8 }}>TOTAL COLLECTED</span>
+        <span style={{ fontSize: FS.lead, fontWeight: 800, color: K.gold }}>{money(sheet.grand)}</span>
+      </div>
+      <div style={{ fontSize: FS.label, color: K.t3, lineHeight: 1.5, marginTop: 10 }}>
+        Who is in each game is tagged on the Betting tab, under any pot.
+      </div>
+    </div>
+  );
+}
+
+export function BuyInTracker({ players, games, onChange }) {
+  const sheet = buyInSheet({ players, games });
+  const rowFor = (pid) => sheet.rows.find(r => r.pid === pid);
 
   const toggleCell = (g, pid) => {
     if (g.derived) return;
@@ -112,41 +157,18 @@ export function BuyInTracker({ players, games, onChange }) {
   return (
     <div style={{ background: K.card, border: `1px solid ${K.acc}${ALPHA.line}`, borderRadius: R.sm, marginBottom: 8, overflow: "hidden", fontFamily: FONT }}>
 
-      {/* ── What each seat costs ── */}
-      {/* Set once a year, and set here rather than on the sheet itself: a
-          price is a property of the GAME, and putting a text field in a column
-          header on a phone is how you end up editing a number you meant to
-          tap. Each row carries its own subtotal so the arithmetic is visible
-          at the point the number is typed. */}
-      <div style={{ padding: "10px 12px", borderBottom: `1px solid ${K.bdr}` }}>
-        <div style={{ fontSize: FS.label, fontWeight: 800, color: K.t3, letterSpacing: 0.8, marginBottom: 8 }}>WHAT A SEAT COSTS</div>
-        {games.map(g => (
-          <div key={g.key} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-            <span style={{ flex: 1, minWidth: 0, fontSize: FS.small, fontWeight: 700, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.label}</span>
-            <span style={{ fontSize: FS.small, fontWeight: 800, color: K.gold }}>$</span>
-            <input
-              type="number" inputMode="decimal" value={prices[g.key] ?? ""} placeholder="0"
-              onChange={e => setPrices(p => ({ ...p, [g.key]: e.target.value }))}
-              onBlur={() => commitPrice(g)}
-              onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); }}
-              style={{
-                width: 56, fontSize: FS.body, fontWeight: 800, color: K.gold, textAlign: "right",
-                background: "transparent", border: "none", borderBottom: `1px solid ${K.acc}`,
-                outline: "none", fontFamily: FONT, padding: 0,
-              }}
-            />
-            <span style={{ width: 96, textAlign: "right", fontSize: FS.small, color: K.t3, flexShrink: 0 }}>
-              {sheet.totals[g.key].count} in · {money(sheet.totals[g.key].amount)}
-            </span>
-          </div>
-        ))}
-      </div>
-
       {/* ── The sheet ── */}
       <div style={{ padding: "8px 12px 0", fontSize: FS.label, fontWeight: 800, color: K.t3, letterSpacing: 0.8 }}>
         WHO IS IN
       </div>
-      <div style={{ fontSize: FS.label, color: K.t3, padding: "2px 12px 8px", lineHeight: 1.4 }}>
+      {/* The prices, read-only, so the sheet still explains its own OWES
+          column — and says where they are changed rather than leaving the
+          director hunting for a field that used to be here. */}
+      <div style={{ fontSize: FS.label, color: K.t3, padding: "2px 12px 6px", lineHeight: 1.5 }}>
+        {games.map(g => `${g.short} $${g.amount || 0}`).join(" · ")}
+        <span style={{ color: K.t3 }}> — set in Admin → Betting.</span>
+      </div>
+      <div style={{ fontSize: FS.label, color: K.t3, padding: "0 12px 8px", lineHeight: 1.4 }}>
         Tap a heading for the whole column, a name to drop a player entirely.
         {games.some(g => g.derived) && (
           <> Columns marked <span style={{ color: K.acc, fontWeight: 700 }}>auto</span> fill themselves.</>

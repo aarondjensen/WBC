@@ -12,7 +12,7 @@ import {
   sharesOn, setLotShares, lotsFor, allLots, marketBoard, marketHoldings, marketPayouts, roundComplete,
   eligibleBets, rebuyers, marketRoster,
 } from "./lib/market";
-import { BuyInTracker } from "./components/BuyIns";
+import { BuyInPrices, BuyInTracker } from "./components/BuyIns";
 import { useConfirm } from "./lib/useConfirm";
 import { useDirtyForm } from "./lib/useDirtyForm";
 import { usePullToRefresh, hasNewBundle } from "./lib/usePullToRefresh";
@@ -5871,7 +5871,7 @@ function AccessPanel({ notify, confirm }) {
   );
 }
 
-function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, roundDates, onSetRoundDate, scoringOpen, onSetScoringOpen, pairingStrategy, onSetPairingStrategy, leaderboard, holeData, finalizedRounds, onFinalizeRound, onUnfinalizeRound, onDiscardRoundScores, notify, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, externalSettingsRound, onExternalSettingsHandled, teesSaved, onTeesSave, teesModified, onTeesModify, memberships, onSetDirector, claims, authUid, tournamentMeta, onSaveTournamentMeta }) {
+function AdminView({ activePlayers, rosterPlayers, sideGames, onUpdateSideGames, rebuyIds, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, roundDates, onSetRoundDate, scoringOpen, onSetScoringOpen, pairingStrategy, onSetPairingStrategy, leaderboard, holeData, finalizedRounds, onFinalizeRound, onUnfinalizeRound, onDiscardRoundScores, notify, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, externalSettingsRound, onExternalSettingsHandled, teesSaved, onTeesSave, teesModified, onTeesModify, memberships, onSetDirector, claims, authUid, tournamentMeta, onSaveTournamentMeta }) {
   const [tab, setTab] = useState("rounds");
   // Themed confirmations (see lib/useConfirm). The host <ConfirmModal/> is
   // rendered once at the bottom of this view; `confirm(...)` returns a
@@ -6250,7 +6250,7 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
           tab regardless of that tab's content height — see ui.jsx. */}
       <StickyTop padBottom={10}>
         <SegmentedToggle
-          options={[["players","Players"],["rounds","Rounds"],["event","Event"]]}
+          options={[["players","Players"],["rounds","Rounds"],["betting","Betting"],["event","Event"]]}
           value={tab}
           onChange={setTab}
         />
@@ -6481,6 +6481,36 @@ function AdminView({ activePlayers, tournament, tPlayers, tRounds, courses, setC
                 </div>
               )}
 
+
+      {/* ── Betting ── */}
+      {/* Just the prices. What a seat costs is event SETUP — settled once
+          before anybody tees off — so it belongs beside the roster and the
+          rounds rather than on the screen the field is reading during play.
+          Who is IN each game stays on the Betting tab, next to the pot the
+          answer changes. */}
+      {tab === "betting" && (
+        <div style={{ marginTop: 4 }}>
+          <SectionLabel>What a seat costs</SectionLabel>
+          <Card>
+            <BuyInPrices
+              players={rosterPlayers}
+              games={SIDE_GAME_KEYS.map(k => ({
+                key: k, ...SIDE_GAME_LABELS[k],
+                amount: sideGames?.[k]?.amount || 0,
+                // The rebuy is incurred by placing halfway shares, not tagged,
+                // so its count comes off the bets — the same list the pot is
+                // counted from. Everything else is the director's own list.
+                ids: k === "rebuy" ? rebuyIds : (sideGames?.[k]?.in ?? null),
+              }))}
+              onChange={onUpdateSideGames}
+            />
+          </Card>
+          <div style={{ fontSize: FS.label, color: K.t3, lineHeight: 1.5, marginTop: 12 }}>
+            A price of zero turns that game&apos;s pot off — nothing is counted and
+            nobody is billed for it.
+          </div>
+        </div>
+      )}
 
       {tab === "event" && (
         <div style={{ marginTop: 16 }}>
@@ -8569,6 +8599,16 @@ export default function WBCApp() {
   // so the standings players read and the order the `leaderboard` pairing mode
   // draws from are provably the same number — see that module's header for why
   // this is not computed here any more.
+  // Who has taken the market's halfway rebuy. Derived from the bets, never
+  // tagged — see lib/market rebuyers. It is computed HERE rather than only
+  // inside the Betting tab because the Admin price sheet bills for it too,
+  // and a count taken from the stored (unused) `in` list would have told the
+  // director a different number to the one the pot is counted from.
+  const rebuyIds = useMemo(() => {
+    const inMarket = new Set(fieldFor(sideGames?.market?.in, allPlayers).map(p => p.id));
+    return rebuyers(eligibleBets({ bets: marketBets, inMarket: pid => inMarket.has(pid) }));
+  }, [sideGames, allPlayers, marketBets]);
+
   const getLeaderboard = useMemo(() =>
     rankIndividualBoard(computeIndividualBoard({
       players: allPlayers,
@@ -9463,7 +9503,7 @@ export default function WBCApp() {
         {view === "players" && <PlayersView players={allPlayers} registry={registry} meId={user?.id} year={getTournamentYear()} isDirector={!!user.isDirector} onSetOverride={setIndexOverride} />}
         {view === "skins" && <BettingView players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} numRounds={numRounds} getPlayerTee={getPlayerTee} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} marketBets={marketBets} onSaveMarketBet={onSaveMarketBet} leaderboard={getLeaderboard} finalizedRounds={finalizedRounds} pairingsData={pairingsData} />}
         {view === "groups" && <GroupsView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} pairingsData={pairingsData} teeTimesData={teeTimesData} getPlayerTee={getPlayerTee} user={user} />}
-        {view === "admin" && (user.isDirector ? <AdminView activePlayers={activePlayers} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
+        {view === "admin" && (user.isDirector ? <AdminView activePlayers={activePlayers} rosterPlayers={allPlayers} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} rebuyIds={rebuyIds} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
               setTeeTimesData(prev => {
                 const next = typeof updater === "function" ? updater(prev) : updater;
                 // Fire-and-forget: update tee times on pairings rows in Firestore
