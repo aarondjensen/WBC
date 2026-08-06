@@ -14,7 +14,6 @@ import {
   eligibleBets, rebuyers, marketRoster, teeOffAt,
 } from "./lib/market";
 import { BuyInPrices, BuyInTracker } from "./components/BuyIns";
-import { BellCountdown } from "./components/BellCountdown";
 import { useConfirm } from "./lib/useConfirm";
 // Tee times survive a re-group because of these two — see lib/teeSheet.js.
 import { rowsToTeeTimes, mergeTeeTimes } from "./lib/teeSheet";
@@ -8135,6 +8134,17 @@ export default function WBCApp() {
   const tournamentName = tournamentMeta?.name || TOURNAMENT.name;
   const tournamentLocation = tournamentMeta?.location || "";
 
+  // When the field tees off — round one's earliest tee time. The same instant
+  // the market's opening bell rings, off the same derivation, so the header
+  // and the Betting tab can never be counting to two different moments.
+  // Null until the round has both a date and a tee sheet, which is what keeps
+  // a countdown off a tournament nobody has scheduled yet.
+  //
+  // Up here beside the location because both render branches want it: the
+  // guest leaderboard gets the same header, and a spectator waiting on the
+  // first tee is the person most likely to be watching a countdown to it.
+  const firstTeeAt = teeOffAt(roundDates[1], (teeTimesData[1] || []).map(teeTimeToMinutes));
+
   // Point the module-level NUM_ROUNDS at the saved count, DURING render rather
   // than from an effect. Everything below — and every child this render is
   // about to produce — reads that binding while rendering, so an effect would
@@ -9384,6 +9394,7 @@ export default function WBCApp() {
             same header rather than a second left-aligned copy of one. */}
         <AppHeader
           location={tournamentLocation}
+          countdownAt={firstTeeAt}
           right={<button onClick={handleLogout} style={{ background: "transparent", border: `1px solid ${K.bdr}`, borderRadius: R.sm, color: K.t3, fontSize: FS.small, fontWeight: 600, padding: "5px 12px", cursor: "pointer" }}>Exit</button>}
         />
         <div style={{ padding: "14px 20px 0 20px", flex: 1, overflowY: "hidden", overflowX: "hidden", display: "flex", flexDirection: "column", minHeight: 0, marginBottom: 8 }}>
@@ -9407,13 +9418,6 @@ export default function WBCApp() {
   // the inset for the ones that have it, since the same slip is merely less
   // likely there rather than impossible.
   const NAV_BOTTOM_PAD = "max(16px, calc(env(safe-area-inset-bottom, 0px) + 6px))";
-
-  // When the field tees off — round one's earliest tee time. The same instant
-  // the market's opening bell rings, off the same derivation, so the header
-  // and the Betting tab can never be counting to two different moments.
-  // Null until the round has both a date and a tee sheet, which is what keeps
-  // a countdown off a tournament nobody has scheduled yet.
-  const firstTeeAt = teeOffAt(roundDates[1], (teeTimesData[1] || []).map(teeTimeToMinutes));
 
   const navItems = [
     { key: "groups", label: "Pairings", icon: "pairings" },
@@ -9491,12 +9495,8 @@ export default function WBCApp() {
            at, since with one it would be a control that changes nothing.
            Up here it costs the scoring screen nothing at all — not a row,
            not a corner of one. */
-        /* The corner holds one thing. The switcher wins it when both could
-           claim it — it is a control, the countdown is decoration — but in
-           practice they never overlap: the switcher only appears on the
-           Scoring tab of a round being played, by which time the tee time is
-           behind us and the countdown has already taken itself down. */
-        right={user.isDirector && view === "scoring" && switchableGroupList.length > 1 ? (
+        countdownAt={firstTeeAt}
+        right={user.isDirector && view === "scoring" && switchableGroupList.length > 1 && (
           <GroupSwitcher
             groups={switchableGroupList}
             currentKey={scoringGroup ? groupKeyOf(scoringGroup.round, scoringGroup.ids) : null}
@@ -9509,7 +9509,7 @@ export default function WBCApp() {
               setRound(g.round);
             }}
           />
-        ) : <BellCountdown at={firstTeeAt} />}
+        )}
       />
 
       <MoreMenu

@@ -40,6 +40,7 @@
 import { K, FONT, FS } from "../theme";
 import { WBC_LOGO } from "../constants";
 import { getTournamentYear } from "../firebase";
+import { BellCountdown } from "./BellCountdown";
 
 // The single knob for how far the header sits from the top of the screen.
 // 5px above the platform's inset: on an installed iOS app with status-bar
@@ -51,7 +52,19 @@ import { getTournamentYear } from "../firebase";
 // does, or it lands somewhere else on a phone with a notch.
 export const HEADER_SAFE_PAD = "calc(env(safe-area-inset-top, 0px) + 5px)";
 
-export function AppHeader({ location, fallbackLocation = "Gaylord, MI", right }) {
+// `countdownAt` is the moment the field tees off, or null when the round has
+// no date and no tee sheet yet. Given one, the mark gets the countdown wrapped
+// around it — see BellCountdown for why the digits flank the logo rather than
+// taking a corner. Given null, or once it has run out, the header is exactly
+// the header it has always been.
+export function AppHeader({ location, fallbackLocation = "Gaylord, MI", right, countdownAt = null }) {
+  const mark = (
+    <div style={{
+      width: 30, height: 30, background: K.acc, flexShrink: 0,
+      WebkitMask: `url("${WBC_LOGO}") center/contain no-repeat`,
+      mask: `url("${WBC_LOGO}") center/contain no-repeat`,
+    }} />
+  );
   return (
     <div style={{
       position: "relative", zIndex: 50, flexShrink: 0,
@@ -66,11 +79,7 @@ export function AppHeader({ location, fallbackLocation = "Gaylord, MI", right })
       borderBottom: `1px solid ${K.bdr}`,
       fontFamily: FONT,
     }}>
-      <div style={{
-        width: 30, height: 30, background: K.acc, flexShrink: 0,
-        WebkitMask: `url("${WBC_LOGO}") center/contain no-repeat`,
-        mask: `url("${WBC_LOGO}") center/contain no-repeat`,
-      }} />
+      {countdownAt != null ? <BellCountdown at={countdownAt}>{mark}</BellCountdown> : mark}
 
       {/* WBC's own display treatment, not the one this layout was ported
           with. Both apps set Montserrat, so the FAMILY was never the
