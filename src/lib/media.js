@@ -239,6 +239,34 @@ export const groupByRound = (items) => {
   return groups;
 };
 
+// ── The budget circuit breaker ─────────────────────────────────────
+// Google Cloud budgets alert; they do not cap. The only native hard stop
+// detaches the project from its billing account, which would take Firestore,
+// the Cloud Functions and push down with it — the whole tournament app dark,
+// plausibly mid-round, to save a sum smaller than one green fee.
+//
+// So the stop is scoped to the thing that can actually run away: photo
+// uploads. functions/index.js listens to the budget's Pub/Sub topic and
+// writes wbc_config/photos; this reads it. Scoring, leaderboards, pairings and
+// notifications are untouched by design — a blown photo budget must never be
+// able to stop somebody posting a score.
+//
+// Reading the gallery stays open when the breaker is tripped. Serving photos
+// that already exist is bounded and cached; it is UPLOADING that adds bytes
+// which then have to be served forever.
+export const CONFIG_DOC = "wbc_config";
+export const PHOTOS_CONFIG_ID = "photos";
+
+// Missing config means allowed. The document does not exist until the breaker
+// trips for the first time, and a photo library that refuses uploads because
+// nobody has ever blown the budget would be a strange way to fail.
+export const photoUploadsAllowed = (config) => !config?.uploadsDisabled;
+
+// What to tell somebody holding a phone. Deliberately not "contact an
+// administrator": on this tournament the director is standing next to them.
+export const uploadsDisabledReason = (config) =>
+  config?.reason || "Photo uploads are paused — this month's storage budget was reached.";
+
 // ── Deletion ───────────────────────────────────────────────────────
 // Who may remove a photo, decided here so the gallery and firestore.rules
 // agree by construction rather than by both being edited carefully.

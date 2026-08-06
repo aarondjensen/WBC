@@ -5,6 +5,7 @@ import {
   archiveProject, archiveBase, mediaDocId, storagePaths, archivePaths, photoId,
   resizePlan, squareCropPlan, validateSource,
   takenTime, sortByTaken, groupByRound, UNROUNDED_LABEL, canDelete,
+  photoUploadsAllowed, uploadsDisabledReason,
 } from "./media";
 
 describe("archive naming", () => {
@@ -302,6 +303,31 @@ describe("canDelete", () => {
 
   it("refuses a missing item rather than throwing", () => {
     expect(canDelete(null, { uid: "me", isDirector: true })).toBe(false);
+  });
+});
+
+describe("photoUploadsAllowed", () => {
+  it("allows uploads when the breaker has never tripped", () => {
+    expect(photoUploadsAllowed(null)).toBe(true);
+    expect(photoUploadsAllowed(undefined)).toBe(true);
+    expect(photoUploadsAllowed({})).toBe(true);
+  });
+
+  it("allows uploads when the breaker is explicitly closed", () => {
+    expect(photoUploadsAllowed({ uploadsDisabled: false })).toBe(true);
+  });
+
+  it("stops uploads when the breaker is tripped", () => {
+    expect(photoUploadsAllowed({ uploadsDisabled: true })).toBe(false);
+  });
+
+  it("carries the reason the function wrote, when there is one", () => {
+    expect(uploadsDisabledReason({ reason: "Budget hit $1.02." })).toBe("Budget hit $1.02.");
+  });
+
+  it("still says something useful with no reason recorded", () => {
+    expect(uploadsDisabledReason({ uploadsDisabled: true })).toMatch(/paused/i);
+    expect(uploadsDisabledReason(null)).toMatch(/paused/i);
   });
 });
 

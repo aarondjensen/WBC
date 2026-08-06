@@ -399,4 +399,97 @@ exports.deleteMembership = onCall(async (request) => {
   return { deleted: true };
 });
 
+// ─────────────────────────────────────────────────────────────────────────
+//  onBudgetAlert — the photo library's circuit breaker
+// ─────────────────────────────────────────────────────────────────────────
+// Google Cloud budgets alert; they do not cap. The documented way to get a
+// real stop is a function like this one that detaches the project from its
+// billing account — which for WBC would take Firestore, these functions and
+// push down together, potentially with sixteen people mid-round trying to
+// post scores. That trade is wrong at this size: the thing being protected
+// costs less than a green fee, and the thing being broken is the tournament.
+//
+// So this breaker is scoped to the only surface that can actually run away —
+// photo uploads. It writes a flag; the app reads it and hides the upload
+// button (src/lib/media.js photoUploadsAllowed). Scoring, leaderboards,
+// pairings and notifications are deliberately untouched, and READING the
+// gallery stays open: serving photos that already exist is bounded and
+// cached, it is adding new ones that grows the bill forever.
+//
+// ── Wiring it up (once, in the console) ──────────────────────────────────
+//   1. Create a Pub/Sub topic:            wbc-budget-alerts
+//   2. Billing → Budgets & alerts → edit the Cloud Storage budget →
+//      Manage notifications → "Connect a Pub/Sub topic to this budget" →
+//      pick wbc-budget-alerts.
+//   3. firebase deploy --only functions:onBudgetAlert
+//
+// The budget must stay SCOPED to Cloud Storage on this project. A billing-
+// account-wide budget would trip this breaker on Firestore or Functions
+// spend, disabling photos over a cost photos did not cause.
+//
+// ── Hysteresis, and why it re-arms itself ────────────────────────────────
+// Budget alerts republish every ~20-30 minutes with the month's running
+// total, and that total resets when the month rolls over. So the breaker
+// closes again on its own in the new month, with no console visit — which is
+// the behaviour you want for a monthly budget.
+//
+// Re-enabling at 50% rather than at the same 100% it tripped on is what stops
+// it flapping open and shut while spend hovers on the line. A director can
+// also clear it by hand: wbc_config/photos is director-writable.
+const { onMessagePublished } = require("firebase-functions/v2/pubsub");
+
+const BUDGET_TOPIC = "wbc-budget-alerts";
+const TRIP_AT = 1.0;   // spent >= 100% of budget → stop uploads
+const REARM_AT = 0.5;  // spent back under 50%    → allow them again
+
+exports.onBudgetAlert = onMessagePublished(BUDGET_TOPIC, async (event) => {
+  const msg = event?.data?.message?.json;
+  if (!msg) {
+    logger.warn("Budget alert with no JSON payload; ignoring.");
+    return;
+  }
+
+  const cost = Number(msg.costAmount);
+  const budget = Number(msg.budgetAmount);
+  // A budget of zero would make every ratio infinite and trip the breaker on
+  // the first cent. Refuse rather than guess.
+  if (!Number.isFinite(cost) || !Number.isFinite(budget) || budget <= 0) {
+    logger.warn("Budget alert with unusable amounts; ignoring.", { cost, budget });
+    return;
+  }
+
+  const ratio = cost / budget;
+  const ref = db.collection("wbc_config").doc("photos");
+  const current = (await ref.get()).data() || {};
+  const disabled = !!current.uploadsDisabled;
+
+  // Only WRITE on a transition. These messages arrive every twenty minutes
+  // for the life of the budget; rewriting an unchanged flag each time would
+  // fire the app's onSnapshot on every phone, all month, for nothing.
+  if (!disabled && ratio >= TRIP_AT) {
+    const currency = msg.currencyCode || "USD";
+    await ref.set({
+      uploadsDisabled: true,
+      reason: `Photo uploads are paused — storage spend reached ${currency} ${cost.toFixed(2)} of a ${currency} ${budget.toFixed(2)} budget.`,
+      costAmount: cost,
+      budgetAmount: budget,
+      budgetName: msg.budgetDisplayName || "",
+      changedAt: new Date().toISOString(),
+    }, { merge: true });
+    logger.warn("Photo uploads DISABLED by budget breaker", { cost, budget, ratio });
+    return;
+  }
+
+  if (disabled && ratio < REARM_AT) {
+    await ref.set({
+      uploadsDisabled: false,
+      reason: "",
+      costAmount: cost,
+      budgetAmount: budget,
+      changedAt: new Date().toISOString(),
+    }, { merge: true });
+    logger.info("Photo uploads RE-ENABLED by budget breaker", { cost, budget, ratio });
+  }
+});
+
 exports.__sendToPlayer = sendToPlayer;

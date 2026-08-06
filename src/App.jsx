@@ -40,6 +40,7 @@ import { OffRoundBanner } from "./components/OffRoundBanner";
 import { MoreMenu } from "./components/MoreMenu";
 import { PlayersView } from "./components/PlayersView";
 import { PhotosView } from "./components/PhotosView";
+import { photoUploadsAllowed, uploadsDisabledReason } from "./lib/media";
 import { returningPlayers, returningLine } from "./lib/returningPlayers";
 import { TROPHY_SVG_URL, WBC_LOGO, WBC_FAVICON, DEFAULT_NUM_ROUNDS, ROUND_CHOICES, clampRounds } from "./constants";
 import { collection, doc, setDoc, getDocs, query, where, writeBatch, onSnapshot, deleteDoc } from "firebase/firestore";
@@ -8608,6 +8609,8 @@ export default function WBCApp() {
   // The photo library's index for the active edition. See src/lib/media.js —
   // these documents point at the photos, they do not contain them.
   const [media, setMedia] = useState([]);
+  // wbc_config/photos — the budget circuit breaker's flag. Null until read.
+  const [photoConfig, setPhotoConfig] = useState(null);
   // ── The career registry, as state ──
   // DEMO_PLAYERS holds the same rows, but it is a module-level variable that
   // nothing re-renders on — which is fine for names read during a render and
@@ -8974,17 +8977,41 @@ export default function WBCApp() {
       setTPlayers(docs.map(r => ({ id: r.id, tournament_id: r.tournament_id, player_id: r.player_id, handicap_index: parseFloat(r.handicap_index) || 0, status: r.status || "active" })));
     }));
 
-    // The photo library's index — one document per photo, never the photo.
-    // Live so a group that posts from the 7th tee shows up on everybody else's
-    // phone the way a score does. The documents are small (two URLs and a
-    // caption) and an edition's worth is a few hundred of them, which is the
-    // whole reason the index can be subscribed to while the bytes cannot.
-    unsubs.push(db.subscribe("wbc_media", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
-      setMedia(docs);
+    // Whether photo uploads are switched on. One tiny document, subscribed
+    // with the rest because every phone needs it and it never changes — see
+    // onBudgetAlert in functions/index.js, which only writes it on a
+    // transition precisely so this listener stays quiet.
+    unsubs.push(db.subscribe("wbc_config", [], (docs) => {
+      setPhotoConfig(docs.find(d => d.id === "photos") || null);
     }));
 
     return () => unsubs.forEach(u => u && u());
   }, []);
+
+  // ── The photo index, subscribed only once somebody opens Photos ──
+  // Deliberately NOT in the block above. Every other subscription there is
+  // bounded by the shape of a tournament — twelve players, four rounds,
+  // eighteen holes — but this one grows with however many photos get posted,
+  // and Firestore bills a read per document each time a listener attaches.
+  //
+  // The app has no persistent cache, so every cold start re-reads everything
+  // it subscribes to. Attaching this on load would mean a phone that never
+  // opens the gallery still paying for the whole index on each launch, times
+  // twelve phones, times however often a phone reloads over a tournament
+  // weekend. Mounting it on first open instead makes the cost proportional to
+  // people actually looking at photos.
+  //
+  // `photosOpened` latches: once opened, the subscription stays for the rest
+  // of the session, so coming back to the gallery is instant and posting a
+  // photo still shows up live on every phone that has it open.
+  const [photosOpened, setPhotosOpened] = useState(false);
+  useEffect(() => { if (view === "photos") setPhotosOpened(true); }, [view]);
+  useEffect(() => {
+    if (!photosOpened) return;
+    return db.subscribe("wbc_media", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
+      setMedia(docs);
+    });
+  }, [photosOpened]);
 
   // Save tournament state to Firestore
   // Written on its own rather than through saveTournamentState: that helper
@@ -10337,7 +10364,7 @@ export default function WBCApp() {
         {/* Posting requires a real account: firestore.rules pins uploadedBy to
             the caller's uid, so a guest — who has no uid at all — can browse
             the library but cannot add to it. */}
-        {view === "photos" && <PhotosView items={media} year={getTournamentYear()} uid={fbUser?.uid || null} isDirector={!!user.isDirector} isGuest={!!user.isGuest} canPost={!user.isGuest && !!fbUser?.uid} onUpload={onUploadPhoto} onDelete={onDeletePhoto} notify={notify} />}
+        {view === "photos" && <PhotosView items={media} year={getTournamentYear()} uid={fbUser?.uid || null} isDirector={!!user.isDirector} isGuest={!!user.isGuest} canPost={!user.isGuest && !!fbUser?.uid && photoUploadsAllowed(photoConfig)} uploadsBlockedReason={photoUploadsAllowed(photoConfig) ? "" : uploadsDisabledReason(photoConfig)} onUpload={onUploadPhoto} onDelete={onDeletePhoto} notify={notify} />}
         {view === "skins" && <BettingView players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} numRounds={numRounds} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} marketBets={marketBets} onSaveMarketBet={onSaveMarketBet} leaderboard={getLeaderboard} finalizedRounds={finalizedRounds} pairingsData={pairingsData} firstTeeAt={firstTeeAt} marketNudge={marketNudge} teeTimesData={teeTimesData} />}
         {view === "groups" && <GroupsView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} pairingsData={pairingsData} teeTimesData={teeTimesData} getPlayerTee={getPlayerTee} user={user} />}
         {view === "admin" && (user.isDirector ? <AdminView activePlayers={activePlayers} rosterPlayers={allPlayers} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} rebuyIds={rebuyIds} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
