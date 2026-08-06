@@ -13,7 +13,7 @@
 // eight tournaments — including two whose champion changes.
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { computeIndividualBoard, rankIndividualBoard } from "./individualBoard";
+import { computeIndividualBoard, rankIndividualBoard, buildStrokesMap } from "./individualBoard";
 import { buildEdition, playerIdFor } from "./historyImport";
 
 // The same minimal RFC-4180 reader scripts/build-history.mjs uses — hole_pars
@@ -141,6 +141,40 @@ describe("imported editions reproduce the tournament that was played", () => {
       for (const h of ed.hole_scores) counts[`${h.player_id}_${h.round_number}`] = (counts[`${h.player_id}_${h.round_number}`] || 0) + 1;
       for (const [k, n] of Object.entries(counts)) expect(n, `${year} ${k}`).toBe(18);
     });
+  });
+});
+
+// ── Net skins ─────────────────────────────────────────────────────
+// The stroke INDEX is missing for 2012, 2013 and 2016–2022 (DATA-GUIDE.md), so
+// on those years a stroke can land on the wrong hole and a net skin with it.
+// That is accepted and unfixable — the data does not exist.
+//
+// What is NOT accepted is the count being wrong. Skins allocate strokes through
+// a second code path (strokesFor in App.jsx), and on a flat year calcCH gives
+// out a different NUMBER of strokes than the tournament played off — so net
+// skins would disagree with the leaderboard beside it. These pin the number.
+describe("net skins allocate the strokes the round was actually played off", () => {
+  const yearsWithRealStrokeIndex = [2014, 2015, 2023, 2024, 2025];
+
+  it.each(scoredYears)("WBC %i gives out exactly the recorded handicap in strokes", (year) => {
+    const ed = buildYear(year);
+    const ch = {};
+    for (const t of ed.tee_assignments) (ch[t.round_number] ||= {})[t.player_id] = t.course_handicap;
+
+    for (const c of ed.tournament_rounds) {
+      const course = ed.courses.find(x => x.id === c.course_id);
+      for (const [pid, recorded] of Object.entries(ch[c.round_number] || {})) {
+        const map = buildStrokesMap(recorded, course.hole_handicaps);
+        const given = Object.values(map).reduce((a, b) => a + b, 0);
+        expect(given, `${year} r${c.round_number} ${pid}`).toBe(Math.abs(recorded));
+      }
+    }
+  });
+
+  it("names the years whose stroke index is real, so net skins is exact there", () => {
+    // Not a behaviour assertion — a record of which years' per-hole net can be
+    // trusted, kept next to the code that depends on it.
+    expect(yearsWithRealStrokeIndex.every(y => scoredYears.includes(y))).toBe(true);
   });
 });
 
