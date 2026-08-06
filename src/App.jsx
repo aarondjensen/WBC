@@ -3007,6 +3007,8 @@ function BettingView({
   // Which round's full field is open in the Low Net ledger. One at a time —
   // four open rounds is the same wall of numbers the ledger exists to avoid.
   const [openNetRound, setOpenNetRound] = useState(null);
+  // Whose pins are itemized in the CTP leaders card.
+  const [openCtpPlayer, setOpenCtpPlayer] = useState(null);
   // Each tab keeps its OWN round and its own open drawer. Sharing them would
   // mean opening one tab silently rearranged the other.
   const [skinsRound, setSkinsRound] = useState(null);
@@ -3187,7 +3189,6 @@ function BettingView({
   // tees off, so winning Thursday is worth the same whatever happens Friday.
   const lowNetPerRound = perUnit(lowNetPot, roundList.length);
   const lowNetRows = lowNetRounds({ players: lowNetField, rounds: roundList, lineFor });
-  const settledPins = ctpTags.filter(t => roundSettled(t.round)).length;
 
   // ── The market tab ──
   // ── The opening bell ──
@@ -3417,21 +3418,6 @@ function BettingView({
         />
       )}
     </>
-  );
-
-  // A leaders card — the same row in all three games, only the trailing
-  // numbers differ.
-  const leadersCard = (title, rows) => rows.length === 0 ? null : (
-    <div style={{ background: K.card, borderRadius: R.lg, border: `1px solid ${K.bdr}`, marginBottom: 10, overflow: "hidden" }}>
-      <div style={{ padding: "8px 14px", borderBottom: `1px solid ${K.bdr}`, fontSize: FS.label, fontWeight: 700, color: K.gold, letterSpacing: 1 }}>{title}</div>
-      {rows.map(r => (
-        <div key={r.key} style={{ display: "flex", alignItems: "center", padding: "8px 14px", borderBottom: `1px solid ${K.bdr}${ALPHA.hair}`, gap: 8 }}>
-          <span style={{ flex: 1, minWidth: 0, fontSize: FS.body, fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</span>
-          <span style={{ fontSize: FS.body, fontWeight: 700, color: K.acc, flexShrink: 0 }}>{r.mid}</span>
-          <span style={{ fontSize: FS.small, color: K.t3, flexShrink: 0, minWidth: 54, textAlign: "right" }}>{r.right}</span>
-        </div>
-      ))}
-    </div>
   );
 
   // ── Scorecards ──
@@ -3776,18 +3762,34 @@ function BettingView({
               names underneath was just a longer way to ask it. */}
           {Object.keys(skinTotals).length > 0 && (
             <div style={{ background: K.card, borderRadius: R.lg, border: `1px solid ${K.bdr}`, marginBottom: 10, overflow: "hidden" }}>
-              <div style={{ padding: "8px 14px", borderBottom: `1px solid ${K.bdr}`, fontSize: FS.label, fontWeight: 700, color: K.gold, letterSpacing: 1 }}>SKINS LEADERS</div>
+              {/* The two trailing numbers get COLUMN HEADINGS rather than
+                  each row re-labelling itself. "4 skins / 3 skins / 1 skin"
+                  down a column is the same word printed six times to say
+                  something the heading says once — and the word was doing the
+                  work of telling you which number was which, so the heading
+                  frees the row to be a number. Widths match the cells below
+                  so the three line up. */}
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", borderBottom: `1px solid ${K.bdr}`, fontSize: FS.label, fontWeight: 700, color: K.gold, letterSpacing: 1 }}>
+                <span style={{ flex: 1, minWidth: 0 }}>SKINS LEADERS</span>
+                <span style={{ fontSize: FS.micro, color: K.t3, letterSpacing: 0.5, flexShrink: 0, minWidth: 34, textAlign: "right" }}>COUNT</span>
+                <span style={{ fontSize: FS.micro, color: K.t3, letterSpacing: 0.5, flexShrink: 0, minWidth: 56, textAlign: "right" }}>$</span>
+              </div>
               {Object.entries(skinTotals).sort((a, b) => b[1] - a[1]).map(([pid, count]) => {
                 const isExpanded = expandedPlayer === pid;
                 return (
                   <div key={pid} style={{ borderBottom: `1px solid ${K.bdr}${ALPHA.hair}` }}>
                     <div onClick={() => setExpandedPlayer(isExpanded ? null : pid)}
                       style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", cursor: "pointer" }}>
-                      <span style={{ fontSize: FS.micro, color: isExpanded ? K.acc : K.t3, transition: `transform ${MOTION}`, display: "inline-block", transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)", flexShrink: 0 }}>▶</span>
                       <span style={{ flex: 1, minWidth: 0, fontSize: FS.body, fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {players.find(p => p.id === pid)?.name || pid}
                       </span>
-                      <span style={{ fontSize: FS.body, fontWeight: 700, color: K.acc, flexShrink: 0 }}>{count} skin{count !== 1 ? "s" : ""}</span>
+                      {/* The leaderboard's chevron, exactly: a ▼ that turns
+                          over rather than a ▶ that swings, scaled below the
+                          type scale's floor because this is an affordance and
+                          not data, and sitting AFTER the name where the board
+                          puts it — between the name and the row's numbers. */}
+                      <span style={{ fontSize: FS.micro, flexShrink: 0, color: isExpanded ? K.acc : K.t2, transition: `transform ${MOTION}`, display: "inline-block", transform: `${isExpanded ? "rotate(180deg)" : "rotate(0)"} scale(0.75)` }}>▼</span>
+                      <span style={{ fontSize: FS.body, fontWeight: 700, color: K.acc, flexShrink: 0, minWidth: 34, textAlign: "right" }}>{count}</span>
                       <span style={{ fontSize: FS.small, color: K.t3, flexShrink: 0, minWidth: 56, textAlign: "right" }}>{money(count * perSkin)}</span>
                     </div>
                     {isExpanded && renderInlineScorecard(pid)}
@@ -3816,21 +3818,70 @@ function BettingView({
                 {(ctpPot > 0 || user?.isDirector) && potCard({
                   label: "CTP POT", pot: ctpPot,
                   summary: `${ctpField.length} IN${(sideGames?.ctp?.amount || 0) > 0 ? ` · $${sideGames.ctp.amount} EACH` : ""}`,
-                  rightTop: `${ctpTags.length} of ${par3Count} taken · ${settledPins} final`,
+                  // Just the count of pins the tournament HAS, which is what
+                  // the pot divides by. How many are taken and how many are
+                  // final are both said better further down — on the pin
+                  // itself, where a taken hole carries a name and a FINAL
+                  // marker — and a running "2 of 7 taken" up here was a
+                  // progress bar for something nobody is waiting on.
+                  rightTop: `${par3Count} total`,
                   rightBottom: `${money(perPin)} / pin`,
                 })}
 
-                {/* Where skins print money, this prints the closest the player
-                    has been all week — the only other number a CTP has. */}
-                {leadersCard("CTP LEADERS", ctpLeaders.map(({ pid, count, best }) => ({
-                  key: pid,
-                  name: players.find(p => p.id === pid)?.name || pid,
-                  // The closest shot all week rides with the count rather than
-                  // in its own column: it is the tiebreak between two men on
-                  // the same number of pins, so it belongs beside that number.
-                  mid: `${count} CTP${count !== 1 ? "s" : ""}${best != null ? ` · ${best} ft` : ""}`,
-                  right: money(count * perPin),
-                })))}
+                {/* CTP LEADERS, with each row opening that player's own pins.
+                    NO DISTANCE ON THE ROW. It used to carry the closest shot
+                    of the week beside the count, which is one number standing
+                    for several — a man with four pins has four distances and
+                    the row printed his best as though it described all of
+                    them. The count and the money are what the row is for;
+                    every distance lives one tap down, on the pin it belongs
+                    to. */}
+                {ctpLeaders.length > 0 && (
+                  <div style={{ background: K.card, borderRadius: R.lg, border: `1px solid ${K.bdr}`, marginBottom: 10, overflow: "hidden" }}>
+                    <div style={{ padding: "8px 14px", borderBottom: `1px solid ${K.bdr}`, fontSize: FS.label, fontWeight: 700, color: K.gold, letterSpacing: 1 }}>CTP LEADERS</div>
+                    {ctpLeaders.map(({ pid, count }) => {
+                      const isOpen = openCtpPlayer === pid;
+                      const mine = ctpTags
+                        .filter(t => t.playerId === pid)
+                        .sort((a, b) => a.round - b.round || a.hole - b.hole);
+                      return (
+                        <div key={pid} style={{ borderBottom: `1px solid ${K.bdr}${ALPHA.hair}` }}>
+                          <div onClick={() => setOpenCtpPlayer(isOpen ? null : pid)}
+                            style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", cursor: "pointer" }}>
+                            <span style={{ flex: 1, minWidth: 0, fontSize: FS.body, fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {players.find(p => p.id === pid)?.name || pid}
+                            </span>
+                            <span style={{ fontSize: FS.micro, flexShrink: 0, color: isOpen ? K.acc : K.t2, transition: `transform ${MOTION}`, display: "inline-block", transform: `${isOpen ? "rotate(180deg)" : "rotate(0)"} scale(0.75)` }}>▼</span>
+                            <span style={{ fontSize: FS.body, fontWeight: 700, color: K.acc, flexShrink: 0 }}>{count} CTP{count !== 1 ? "s" : ""}</span>
+                            <span style={{ fontSize: FS.small, color: K.t3, flexShrink: 0, minWidth: 54, textAlign: "right" }}>{money(count * perPin)}</span>
+                          </div>
+                          {isOpen && (
+                            <div style={{ padding: "2px 14px 8px", borderTop: `1px solid ${K.bdr}${ALPHA.tint}` }}>
+                              {mine.map(t => (
+                                <div key={`${t.round}_${t.hole}`} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0" }}>
+                                  <span style={{ fontSize: FS.label, fontWeight: 700, color: K.t3, flexShrink: 0, minWidth: 34 }}>Rd {t.round}</span>
+                                  <span style={{ fontSize: FS.label, color: K.t2, flex: 1, minWidth: 0 }}>Hole {t.hole}</span>
+                                  {/* The distance, here and nowhere else. A pin
+                                      tagged without one prints a dash rather
+                                      than a zero — nobody paced it, which is
+                                      not the same as it being on the lip. */}
+                                  <span style={{ fontSize: FS.small, fontWeight: 800, color: t.distanceFt != null ? K.warn : K.t3, flexShrink: 0, minWidth: 44, textAlign: "right" }}>
+                                    {t.distanceFt != null ? `${t.distanceFt} ft` : "–"}
+                                  </span>
+                                  {/* A pin in a round still being played can
+                                      still be taken off him. */}
+                                  <span style={{ fontSize: FS.micro, fontWeight: 800, letterSpacing: 0.4, flexShrink: 0, minWidth: 46, textAlign: "right", color: roundSettled(t.round) ? K.acc : K.t3 }}>
+                                    {roundSettled(t.round) ? "FINAL" : "PENDING"}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
 
                 {roundPills(ctpShownRound, setCtpRound)}
 
@@ -4046,8 +4097,8 @@ function BettingView({
                   const rdCell = (extra = {}) => (
                     <td onClick={toggle} style={cell({ textAlign: "left", paddingLeft: 10, cursor: "pointer", ...extra })}>
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
-                        <span style={{ fontSize: FS.micro, color: open ? K.acc : K.t3, transition: `transform ${MOTION}`, display: "inline-block", transform: `${open ? "rotate(90deg)" : "rotate(0)"} scale(0.8)` }}>▶</span>
                         <span style={{ fontSize: FS.label, fontWeight: 800, color: open ? K.acc : K.t3 }}>{r.round}</span>
+                        <span style={{ fontSize: FS.micro, flexShrink: 0, color: open ? K.acc : K.t2, transition: `transform ${MOTION}`, display: "inline-block", transform: `${open ? "rotate(180deg)" : "rotate(0)"} scale(0.75)` }}>▼</span>
                       </span>
                     </td>
                   );
@@ -4509,8 +4560,8 @@ function BettingView({
                     <div onClick={() => setOpenHolder(isOpen ? null : h.pid)}
                       style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 4px", cursor: "pointer" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-                        <span style={{ fontSize: FS.micro, color: isOpen ? K.acc : K.t3, transition: `transform ${MOTION}`, display: "inline-block", transform: isOpen ? "rotate(90deg)" : "rotate(0deg)" }}>▶</span>
                         <span style={{ fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.name}</span>
+                        <span style={{ fontSize: FS.micro, flexShrink: 0, color: isOpen ? K.acc : K.t2, transition: `transform ${MOTION}`, display: "inline-block", transform: `${isOpen ? "rotate(180deg)" : "rotate(0)"} scale(0.75)` }}>▼</span>
                       </div>
                       <span style={{ color: K.acc, fontWeight: 800, flexShrink: 0 }}>{h.shares} sh</span>
                     </div>
