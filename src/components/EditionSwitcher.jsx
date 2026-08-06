@@ -202,7 +202,6 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
   const stateOf = (e) => editionState(summaries?.[e.id]);
   const stateColor = (s) => s === "complete" ? K.acc : s === "live" ? K.warn : K.t3;
   const cloneSource = editions.find(e => e.id === cloneFrom) || null;
-  const hasContent = (e) => editionHasContent(summaries?.[e.id]);
   // The label on a source option: the year, and what is in it. "2025 · 16
   // players · 1,368 scores" is what makes it obvious which year is worth
   // copying — which is the whole question this dropdown asks.
@@ -224,59 +223,94 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
         {loading ? (
           <div style={{ fontSize: FS.small, color: K.t3, padding: "10px 0 16px" }}>Loading…</div>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
+          /* ── One line per year, and the list scrolls inside itself ────
+             Sixteen tournaments landed here the day history was imported, and
+             the three-line card each one used to get — name, then what is in
+             it, then a status pill — turned this into about 1,400px of
+             scrolling to reach a form sitting underneath it.
+
+             A row is now ~40px and says the same three things: the year, what
+             is in it, and its state as the DOT rather than a pill (the label
+             rides the title attribute, and the legend below spells the colours
+             out once instead of seventeen times).
+
+             The height cap is the other half. Without it the popup grows with
+             the number of years and pushes "Build a year" off the bottom
+             forever; with it the list scrolls in place and everything else
+             stays where it was. 44vh so a phone still shows ~6 rows. */
+          <div style={{
+            display: "flex", flexDirection: "column", gap: 4, marginBottom: 10,
+            maxHeight: "min(44vh, 300px)", overflowY: "auto",
+            // Room for the scrollbar so it never sits on top of the bin.
+            paddingRight: 2,
+          }}>
             {editions.map((e) => {
               const isActive = e.id === activeId;
               const state = stateOf(e);
               const verdict = deleteVerdict(state, { isActive });
+              const summary = summaries ? (summaryLine(summaries[e.id]) || "Couldn't read") : "Counting…";
+              // "WBC 2015" beside a bold 2015 is the same word seventeen times.
+              // A name that ISN'T the default is worth the space; the default
+              // is not.
+              const customName = e.name && e.name !== `WBC ${e.year}` ? e.name : null;
               return (
                 <div key={e.id} style={{
-                  display: "flex", alignItems: "center", gap: 10, padding: "11px 12px", borderRadius: R.md,
-                  background: K.inp, border: `1px solid ${isActive ? K.acc : K.bdr}`,
+                  display: "flex", alignItems: "center", gap: 8, borderRadius: R.sm,
+                  background: isActive ? K.acc + ALPHA.wash : K.inp,
+                  border: `1px solid ${isActive ? K.acc : K.bdr}`,
                 }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: FS.small, fontWeight: 800, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.name}</div>
-                    {/* WHAT IS IN THE YEAR, first and in plain words. This is
-                        the line that answers "which of these is my
-                        tournament" — the status label underneath answers it
-                        wrongly often enough that it can't be the only thing
-                        on the row: an empty year seeded by a phone reads
-                        PUBLISHED, and a finished tournament reads DRAFT. */}
-                    <div style={{ fontSize: FS.label, fontWeight: 600, color: hasContent(e) ? K.t2 : K.t3, marginTop: 3 }}>
-                      {summaries ? (summaryLine(summaries[e.id]) || "Couldn't read") : "Counting…"}
-                    </div>
-                    {/* DERIVED — Complete / In progress / Not started / Empty —
-                        not the stored `status`. There is nothing to tap here
-                        because there is nothing to set: a year is finished
-                        when its last round is signed off, and it says so the
-                        moment that happens. */}
-                    <div style={{
-                      display: "inline-block", marginTop: 5, padding: "2px 7px", borderRadius: R.xs,
-                      border: `1px solid ${stateColor(state)}${ALPHA.line}`,
-                      fontSize: FS.micro, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase",
-                      color: stateColor(state),
-                    }}>{summaries ? STATE_LABEL[state] : "…"}</div>
-                  </div>
+                  {/* The whole row opens the year — a 40px-tall target instead
+                      of a 28px button at the end of it. The active row is inert
+                      because there is nowhere to go. */}
+                  <button
+                    onClick={isActive ? undefined : () => setPending(e)}
+                    disabled={isActive}
+                    title={summaries ? STATE_LABEL[state] : "Counting…"}
+                    style={{
+                      flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 8,
+                      padding: "9px 10px", background: "transparent", border: "none",
+                      textAlign: "left", cursor: isActive ? "default" : "pointer", color: K.t1,
+                    }}>
+                    <span aria-hidden style={{
+                      width: 7, height: 7, borderRadius: "50%", flexShrink: 0,
+                      background: stateColor(state),
+                    }} />
+                    <span style={{ fontSize: FS.body, fontWeight: 800, flexShrink: 0 }}>{e.year}</span>
+                    <span style={{
+                      flex: 1, minWidth: 0, fontSize: FS.label, fontWeight: 600, color: K.t3,
+                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                    }}>{customName ? `${customName} · ${summary}` : summary}</span>
+                  </button>
                   {isActive ? (
-                    <span style={{ fontSize: FS.label, fontWeight: 800, letterSpacing: 0.5, color: ON_ACC, background: K.acc, padding: "5px 10px", borderRadius: R.sm }}>ACTIVE</span>
-                  ) : (
-                    <>
-                      <Btn variant="secondary" size="sm" onClick={() => setPending(e)}
-                        style={{ letterSpacing: 0.5, color: K.t2, background: K.card }}>Open</Btn>
-                      {/* No bin at all on a year that may not be deleted —
-                          a finished tournament, or one we couldn't read. A
-                          greyed-out control invites a tap and then explains
-                          itself; an absent one says the answer is settled.
-                          lib/editions.js refuses these regardless. */}
-                      {canManage && verdict.allowed && (
-                        <Btn variant="ghost" size="sm" onClick={() => setPendingDelete(e)} title="Delete this year"
-                          style={{ color: K.t3, padding: "5px 6px", flexShrink: 0, lineHeight: 1 }}>🗑</Btn>
-                      )}
-                    </>
-                  )}
+                    <span style={{
+                      flexShrink: 0, marginRight: 8, fontSize: FS.micro, fontWeight: 800,
+                      letterSpacing: 0.5, color: ON_ACC, background: K.acc,
+                      padding: "3px 7px", borderRadius: R.xs,
+                    }}>ACTIVE</span>
+                  ) : canManage && verdict.allowed ? (
+                    /* No bin at all on a year that may not be deleted — a
+                       finished tournament, or one we couldn't read. A greyed-out
+                       control invites a tap and then explains itself; an absent
+                       one says the answer is settled. lib/editions.js refuses
+                       these regardless. */
+                    <Btn variant="ghost" size="sm" onClick={() => setPendingDelete(e)} title="Delete this year"
+                      style={{ color: K.t3, padding: "4px 8px", flexShrink: 0, lineHeight: 1 }}>🗑</Btn>
+                  ) : null}
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {/* The dot, once, instead of a pill on every row. */}
+        {!loading && editions.length > 0 && (
+          <div style={{ display: "flex", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
+            {[["complete", "Complete"], ["live", "In progress"], ["setup", "Not started"]].map(([st, label]) => (
+              <span key={st} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: FS.micro, color: K.t3, fontWeight: 700 }}>
+                <span aria-hidden style={{ width: 6, height: 6, borderRadius: "50%", background: stateColor(st) }} />
+                {label}
+              </span>
+            ))}
           </div>
         )}
 
