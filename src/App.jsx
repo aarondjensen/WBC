@@ -1081,9 +1081,18 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                         {/* FS.micro flat, not a step off the row size: this is
                             an affordance, not data, and stepping it meant it
                             grew whenever the board had room to grow — which is
-                            backwards for the quietest mark in the row. Micro is
-                            the rung the scale keeps for exactly this. */}
-                        <span style={{ fontSize: FS.micro, flexShrink: 0, color: isExpanded ? K.acc : K.t2, transition: `transform ${MOTION}`, display: "inline-block", transform: isExpanded ? "rotate(180deg)" : "rotate(0)" }}>▼</span>
+                            backwards for the quietest mark in the row.
+                            Micro is the bottom of the type scale and this still
+                            wants to be smaller, so the last bit comes off the
+                            MARK rather than the type: the rung stays on the
+                            ladder and scale() takes the glyph to about 6px.
+                            Sizing it as type instead would have put a number
+                            below the scale's floor into the file, which is the
+                            drift the scale exists to stop — and a transform
+                            costs no layout, so the gutter to the band stays put
+                            whatever the glyph does. Below ~0.6 the triangle
+                            stops reading as one and turns into a dot. */}
+                        <span style={{ fontSize: FS.micro, flexShrink: 0, color: isExpanded ? K.acc : K.t2, transition: `transform ${MOTION}`, display: "inline-block", transform: `${isExpanded ? "rotate(180deg)" : "rotate(0)"} scale(0.75)` }}>▼</span>
                       </div>
                       {/* Total */}
                       {/* Full-strength ink, not the t2 the row's other numbers
