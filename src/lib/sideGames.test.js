@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { fieldFor, potFor, perUnit, computeSkins, allSkins, skinCounts, buyInSheet, toggleIn, lowNetRounds } from "./sideGames";
+import { fieldFor, potFor, perUnit, computeSkins, allSkins, skinCounts, buyInSheet, toggleIn, togglePaid, lowNetRounds } from "./sideGames";
 import { WD_SCORE } from "./individualBoard";
 
 const players = [
@@ -323,5 +323,66 @@ describe("lowNetRounds", () => {
 
   it("survives an event with no rounds", () => {
     expect(lowNetRounds({ players, rounds: [], lineFor: () => null })).toEqual([]);
+  });
+});
+
+describe("buyInSheet payment tracking", () => {
+  // The market rebuy is the one buy-in where entering and paying are separate
+  // acts: a man enters it by placing halfway shares from a tee box, hours
+  // before he can hand anybody $25.
+  const games = (paid) => [
+    { key: "skins", amount: 20, ids: null },
+    { key: "rebuy", amount: 25, ids: ["a", "b"], paid },
+  ];
+
+  it("bills a man the moment he enters, paid or not", () => {
+    // Nobody has paid the rebuy, and both men in it still owe it.
+    const sheet = buyInSheet({ players, games: games([]) });
+    expect(sheet.rows.map(r => r.owes)).toEqual([45, 45, 20]);
+    expect(sheet.grand).toBe(110);
+    // Paying changes what is outstanding, never what is owed.
+    expect(buyInSheet({ players, games: games(["a", "b"]) }).grand).toBe(110);
+  });
+
+  it("counts what is still to come in", () => {
+    expect(buyInSheet({ players, games: games([]) }).outstanding).toBe(50);
+    expect(buyInSheet({ players, games: games(["a"]) }).outstanding).toBe(25);
+    expect(buyInSheet({ players, games: games(["a", "b"]) }).outstanding).toBe(0);
+  });
+
+  it("marks each row paid or not, per game", () => {
+    const { rows } = buyInSheet({ players, games: games(["a"]) });
+    expect(rows.find(r => r.pid === "a").paid).toEqual({ skins: true, rebuy: true });
+    expect(rows.find(r => r.pid === "b").paid).toEqual({ skins: true, rebuy: false });
+    // Cole is not in the rebuy at all — not in is not the same as unpaid.
+    expect(rows.find(r => r.pid === "c")).toMatchObject({ unpaid: 0, paid: { rebuy: false } });
+  });
+
+  it("reports the column's payment state for its heading", () => {
+    expect(buyInSheet({ players, games: games([]) }).totals.rebuy)
+      .toMatchObject({ count: 2, paidCount: 0, paidAmount: 0, allPaid: false });
+    expect(buyInSheet({ players, games: games(["a", "b"]) }).totals.rebuy)
+      .toMatchObject({ paidCount: 2, paidAmount: 50, allPaid: true });
+  });
+
+  // A game with no `paid` array is not tracking payment — ticking its box IS
+  // the cash changing hands — so it must never show up as outstanding.
+  it("treats an untracked game as settled", () => {
+    const untracked = [{ key: "skins", amount: 20, ids: null }];
+    const sheet = buyInSheet({ players, games: untracked });
+    expect(sheet.outstanding).toBe(0);
+    expect(sheet.totals.skins).toMatchObject({ allPaid: true, paidCount: 3 });
+  });
+});
+
+describe("togglePaid", () => {
+  it("marks a player paid", () => expect(togglePaid([], "a")).toEqual(["a"]));
+  it("un-marks one, for the tap that was a mistake", () => {
+    expect(togglePaid(["a", "b"], "a")).toEqual(["b"]);
+  });
+  // No null-means-everybody rule here: nobody has paid until somebody says so.
+  it("treats a missing list as nobody paid", () => {
+    expect(togglePaid(null, "a")).toEqual(["a"]);
+    expect(togglePaid(undefined, "a")).toEqual(["a"]);
   });
 });

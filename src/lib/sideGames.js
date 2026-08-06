@@ -70,30 +70,67 @@ export const perUnit = (pot, units) => ((units || 0) > 0 ? (pot || 0) / units : 
 export function buyInSheet({ players, games }) {
   const list = players || [];
   const gs = games || [];
+  // A game with no `paid` array is not TRACKING payment, and everybody in it
+  // counts as settled — that is every buy-in the director tags by hand, where
+  // ticking the box IS the cash changing hands. Only the market rebuy needs
+  // the two apart: a man enters it by placing halfway shares from a tee box,
+  // hours before he can hand anybody $25.
+  const isPaid = (g, pid) => !g.paid || g.paid.includes(pid);
+
   const rows = list.map(p => {
     const inGames = {};
+    const paidGames = {};
     let owes = 0;
+    let unpaid = 0;
     gs.forEach(g => {
       const isIn = g.ids == null ? true : g.ids.includes(p.id);
       inGames[g.key] = isIn;
-      if (isIn) owes += g.amount || 0;
+      paidGames[g.key] = isIn && isPaid(g, p.id);
+      if (isIn) {
+        owes += g.amount || 0;
+        if (!paidGames[g.key]) unpaid += g.amount || 0;
+      }
     });
     // `wd` rides along so the sheet can say why somebody who is not playing
     // is still being billed. It changes no arithmetic: a withdrawal does not
     // refund a buy-in.
-    return { pid: p.id, name: p.name, wd: !!p.isWD, games: inGames, owes };
+    return { pid: p.id, name: p.name, wd: !!p.isWD, games: inGames, paid: paidGames, owes, unpaid };
   });
+
   const totals = {};
   gs.forEach(g => {
-    const count = rows.filter(r => r.games[g.key]).length;
+    const inRows = rows.filter(r => r.games[g.key]);
+    const paidCount = inRows.filter(r => r.paid[g.key]).length;
     totals[g.key] = {
-      count,
-      amount: count * (g.amount || 0),
-      all: rows.length > 0 && count === rows.length,
-      none: count === 0,
+      count: inRows.length,
+      amount: inRows.length * (g.amount || 0),
+      all: rows.length > 0 && inRows.length === rows.length,
+      none: inRows.length === 0,
+      // Payment, where it is tracked. `allPaid` is what a column heading
+      // reads to decide whether tapping it means everybody-paid or nobody.
+      paidCount,
+      paidAmount: paidCount * (g.amount || 0),
+      allPaid: inRows.length > 0 && paidCount === inRows.length,
     };
   });
-  return { rows, totals, grand: rows.reduce((sum, r) => sum + r.owes, 0) };
+
+  return {
+    rows,
+    totals,
+    grand: rows.reduce((sum, r) => sum + r.owes, 0),
+    // What is still to come in. Zero on a tournament that tracks no payment,
+    // which is every one of them until somebody enters the halfway market.
+    outstanding: rows.reduce((sum, r) => sum + r.unpaid, 0),
+  };
+}
+
+// Mark one player paid, or un-mark them. Separate from toggleIn because it
+// answers a different question — that one is "is he in", this is "has he
+// handed the money over" — and because `paid` has no null-means-everybody
+// rule: nobody has paid until somebody says so.
+export function togglePaid(paid, pid) {
+  const list = paid || [];
+  return list.includes(pid) ? list.filter(x => x !== pid) : [...list, pid];
 }
 
 // Add or remove one player from one game's list, materialising `null` into
