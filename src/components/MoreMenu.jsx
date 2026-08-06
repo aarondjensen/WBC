@@ -56,6 +56,12 @@ export function MoreMenu({ open, onClose, onSelect, isDirector, adminFlag, notif
     // this is one year across the golfers. The active year rides on the row
     // so the menu says which tournament is on screen without opening it.
     { key: "editions", label: "Tournaments", value: activeYear ? String(activeYear) : null },
+    // The photo library, under the year it belongs to. It follows the active
+    // edition the same way the leaderboard does, so it sits directly below the
+    // control that changes which year is on screen rather than above it — the
+    // row that answers "which tournament" reads first, then the two rows that
+    // show one.
+    { key: "photos", label: "Photos" },
     // Notifications used to be a row of its own here. It is a setting ABOUT
     // YOU — which device buzzes, and for what — so it lives inside My Account
     // beside the other two, rather than as a sibling of the tournament. The

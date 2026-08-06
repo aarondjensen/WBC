@@ -76,6 +76,8 @@ await check("anon CANNOT write a scorecard signature", () =>
   assertFails(setDoc(doc(anon, "wbc_scorecard_sigs/sig_1"), { signedBy: "x" })));
 await check("anon CANNOT create an edition", () =>
   assertFails(setDoc(doc(anon, "wbc_editions/wbc_2027"), { year: 2027 })));
+await check("anon CANNOT post a photo", () =>
+  assertFails(setDoc(doc(anon, "wbc_media/med_2026_anon"), { uploadedBy: "uid_mike", host: "storage" })));
 
 // Signed in is NOT enough — this is the whole reason the door exists.
 await check("signed-in non-member CANNOT write a hole score", () =>
@@ -113,6 +115,37 @@ await check("member can claim a name (wbc_users, own uid)", () =>
   assertSucceeds(setDoc(doc(mike, "wbc_users/uid_mike"), { uid: "uid_mike", player_id: "mike_r" })));
 await check("member CANNOT claim a name as somebody else", () =>
   assertFails(setDoc(doc(mike, "wbc_users/uid_aaron"), { uid: "uid_aaron", player_id: "aaron_j" })));
+
+// ── The photo library ──
+// Posting is a member write, like scoring. The three things worth pinning are
+// that a member cannot post under another name, cannot quietly become the
+// author of a photo by editing its caption, and cannot delete out of the
+// ARCHIVE — whose bytes are a Cloudflare Pages deploy, not something a client
+// delete can reach. src/lib/media.js canDelete() mirrors that last rule and
+// media.test.js pins the mirror.
+await env.withSecurityRulesDisabled(async (ctx) => {
+  const f = ctx.firestore();
+  await setDoc(doc(f, "wbc_media/med_2026_theirs"), { uploadedBy: "uid_aaron", host: "storage", edition: "2026" });
+  await setDoc(doc(f, "wbc_media/med_2019_archived"), { uploadedBy: "uid_mike", host: "pages", edition: "2019" });
+});
+await check("member can post a photo", () =>
+  assertSucceeds(setDoc(doc(mike, "wbc_media/med_2026_mine"), { uploadedBy: "uid_mike", host: "storage", edition: "2026" })));
+await check("member CANNOT post a photo under somebody else's name", () =>
+  assertFails(setDoc(doc(mike, "wbc_media/med_2026_forged"), { uploadedBy: "uid_aaron", host: "storage", edition: "2026" })));
+await check("member can fix the caption on their own photo", () =>
+  assertSucceeds(setDoc(doc(mike, "wbc_media/med_2026_mine"), { caption: "18th green" }, { merge: true })));
+await check("member CANNOT become the author of their own photo's replacement", () =>
+  assertFails(setDoc(doc(mike, "wbc_media/med_2026_mine"), { uploadedBy: "uid_aaron" }, { merge: true })));
+await check("member CANNOT edit somebody else's photo", () =>
+  assertFails(setDoc(doc(mike, "wbc_media/med_2026_theirs"), { caption: "mine now" }, { merge: true })));
+await check("member CANNOT delete somebody else's photo", () =>
+  assertFails(deleteDoc(doc(mike, "wbc_media/med_2026_theirs"))));
+await check("member CANNOT delete out of the archive, even their own", () =>
+  assertFails(deleteDoc(doc(mike, "wbc_media/med_2019_archived"))));
+await check("member can delete their own live photo", () =>
+  assertSucceeds(deleteDoc(doc(mike, "wbc_media/med_2026_mine"))));
+await check("anon can read the gallery", () =>
+  assertSucceeds(getDoc(doc(anon, "wbc_media/med_2026_theirs"))));
 
 // The director-owned half: no player screen reaches these, and a member
 // without the crown must not either.
@@ -177,6 +210,18 @@ await check("director can create an edition", () =>
 // A director is a member first — the scoring half stays open to them.
 await check("director can still write a hole score", () =>
   assertSucceeds(setDoc(doc(aaron, "hole_scores/hs_4"), { score: 3 })));
+
+// The photo library's director half: the archive, and anything a member
+// posted. A director is the one who can also re-run the Pages deploy that
+// actually removes an archived photo's bytes, which is why the archive is
+// theirs alone.
+await env.withSecurityRulesDisabled(async (ctx) => {
+  await setDoc(doc(ctx.firestore(), "wbc_media/med_2026_carls"), { uploadedBy: "uid_carl", host: "storage", edition: "2026" });
+});
+await check("director can delete out of the archive", () =>
+  assertSucceeds(deleteDoc(doc(aaron, "wbc_media/med_2019_archived"))));
+await check("director can remove a photo somebody else posted", () =>
+  assertSucceeds(deleteDoc(doc(aaron, "wbc_media/med_2026_carls"))));
 
 await env.cleanup();
 for (const [s, n, e] of results) console.log(s.padEnd(5), n, e ? `— ${e}` : "");
