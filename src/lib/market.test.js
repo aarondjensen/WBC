@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   MARKET_OPENING_SHARES, MARKET_MID_SHARES, midRoundFor,
   normalizeLots, totalShares, sharesOn, setLotShares,
-  roundStarted, roundComplete, marketWindows, teeOffAt,
+  roundStarted, roundComplete, marketWindows, teeOffAt, countdown, countdownTick,
   lotsFor, allLots, marketBoard, marketHoldings, marketPayouts, eligibleBets, rebuyers, marketRoster,
 } from "./market";
 
@@ -170,6 +170,76 @@ describe("teeOffAt", () => {
 
   it("rejects a date that is not a date", () => {
     expect(teeOffAt("August 14", [420])).toBeNull();
+  });
+});
+
+describe("countdown", () => {
+  const s = 1000, m = 60 * s, h = 60 * m, d = 24 * h;
+
+  it("reads days and hours when the tournament is still days away", () => {
+    expect(countdown(2 * d + 5 * h + 40 * m).label).toBe("2d 5h");
+  });
+
+  it("reads hours and minutes through the day before", () => {
+    expect(countdown(5 * h + 12 * m + 30 * s).label).toBe("5h 12m");
+  });
+
+  it("pads the minutes so the label does not change width as it counts", () => {
+    expect(countdown(5 * h + 4 * m).label).toBe("5h 04m");
+  });
+
+  it("switches to a ticking clock inside the last hour", () => {
+    expect(countdown(12 * m + 4 * s).label).toBe("12:04");
+    expect(countdown(59 * m + 59 * s).label).toBe("59:59");
+  });
+
+  it("counts the last minute down second by second", () => {
+    expect(countdown(9 * s).label).toBe("0:09");
+  });
+
+  it("rounds UP, so the last tick reads 0:01 rather than 0:00", () => {
+    // A market that says nothing is left while it is still taking shares is
+    // lying about the more important of the two.
+    expect(countdown(400).label).toBe("0:01");
+    expect(countdown(1).label).toBe("0:01");
+  });
+
+  it("is Closed at zero and stays there past it", () => {
+    expect(countdown(0).label).toBe("Closed");
+    expect(countdown(0).done).toBe(true);
+    expect(countdown(-5 * m).label).toBe("Closed");
+    expect(countdown(-5 * m).total).toBe(0);
+  });
+
+  it("survives a missing argument", () => {
+    expect(countdown().label).toBe("Closed");
+    expect(countdown(null).done).toBe(true);
+  });
+
+  it("flags the last hour urgent, and nothing outside it", () => {
+    expect(countdown(59 * m).urgent).toBe(true);
+    expect(countdown(60 * m).urgent).toBe(true);
+    expect(countdown(60 * m + s).urgent).toBe(false);
+    // Rung is not urgent — there is nothing left to hurry for.
+    expect(countdown(0).urgent).toBe(false);
+  });
+
+  it("breaks the remainder out for a caller that wants its own layout", () => {
+    const c = countdown(2 * d + 5 * h + 12 * m + 4 * s);
+    expect([c.days, c.hours, c.mins, c.secs]).toEqual([2, 5, 12, 4]);
+  });
+});
+
+describe("countdownTick", () => {
+  it("ticks every second once the seconds are moving", () => {
+    expect(countdownTick(59 * 60 * 1000)).toBe(1000);
+    expect(countdownTick(0)).toBe(1000);
+  });
+
+  it("drops to every thirty seconds above an hour, where the label cannot change faster", () => {
+    expect(countdownTick(60 * 60 * 1000 + 1)).toBe(30_000);
+    expect(countdownTick(3 * 24 * 60 * 60 * 1000)).toBe(30_000);
+    expect(countdownTick(Infinity)).toBe(30_000);
   });
 });
 
