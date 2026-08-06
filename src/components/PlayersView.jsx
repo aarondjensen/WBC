@@ -57,6 +57,11 @@ const RECENT_SET = new Set(recentRoundSlots());
 // never drift out of line with the numbers under it.
 const LIST_COLS = "minmax(0, 1fr) 46px 54px 10px";
 
+// The size of both chart marks — the filled bar swatch and the amber dot. One
+// constant so the legend's dot is the same object as the one under the bars,
+// rather than a second size that drifts from what it is describing.
+const MARK = 9;
+
 // Clearance under the last row. The nav bar's trophy sits in a dome that rises
 // 24px above the bar, so a list that stops at the bar's edge has its final row
 // half-covered by a trophy.
@@ -148,9 +153,9 @@ function WindowChart({ idx }) {
       {outsiders > 0 && (
         <div style={{ ...grid, marginTop: 4 }}>
           {cols.map(c => (
-            <div key={c.key} style={{ display: "flex", justifyContent: "center", height: 6 }}>
+            <div key={c.key} style={{ display: "flex", justifyContent: "center", height: MARK }}>
               {!RECENT_SET.has(c.key) && (
-                <span style={{ width: 6, height: 6, borderRadius: "50%", background: K.warn }} />
+                <span style={{ width: MARK, height: MARK, borderRadius: "50%", background: K.warn }} />
               )}
             </div>
           ))}
@@ -170,18 +175,19 @@ function WindowChart({ idx }) {
         ))}
       </div>
 
+      {/* Only the two marks that mean something on their own. A third entry
+          used to name the hollow bars — "in the window, didn't count" — which
+          is what a bar IS when it is not filled: the absence of the first
+          entry, spelled out, taking a line to say nothing the picture had not
+          already said. */}
       <div style={{ display: "flex", flexWrap: "wrap", columnGap: 14, rowGap: 5, marginTop: 12, fontSize: FS.micro, color: K.t3 }}>
         <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-          <span style={{ width: 9, height: 9, borderRadius: R.xs, background: K.acc, flexShrink: 0 }} />
-          counts toward the index
-        </span>
-        <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-          <span style={{ width: 9, height: 9, borderRadius: R.xs, background: `${K.acc}${ALPHA.wash}`, border: `1px solid ${K.acc}${ALPHA.line}`, flexShrink: 0 }} />
-          in the window, didn&apos;t count
+          <span style={{ width: MARK, height: MARK, borderRadius: R.xs, background: K.acc, flexShrink: 0 }} />
+          included in index
         </span>
         {outsiders > 0 && (
           <span style={{ display: "flex", alignItems: "center", gap: 5, color: K.warn }}>
-            <span style={{ width: 6, height: 6, borderRadius: "50%", background: K.warn, flexShrink: 0 }} />
+            <span style={{ width: MARK, height: MARK, borderRadius: "50%", background: K.warn, flexShrink: 0 }} />
             outside the WBC&apos;s last {WINDOW}
           </span>
         )}
