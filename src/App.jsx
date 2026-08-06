@@ -3780,15 +3780,17 @@ function BettingView({
                   <div key={pid} style={{ borderBottom: `1px solid ${K.bdr}${ALPHA.hair}` }}>
                     <div onClick={() => setExpandedPlayer(isExpanded ? null : pid)}
                       style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", cursor: "pointer" }}>
+                      {/* The leaderboard's chevron — a ▼ that turns over
+                          rather than a ▶ that swings, scaled below the type
+                          scale's floor because this is an affordance and not
+                          data — but LEADING the row rather than trailing the
+                          name. On the board it sits after the name because
+                          the name is the row; here the row is a name and two
+                          numbers, and the mark belongs where the eye starts. */}
+                      <span style={{ fontSize: FS.micro, flexShrink: 0, color: isExpanded ? K.acc : K.t2, transition: `transform ${MOTION}`, display: "inline-block", transform: `${isExpanded ? "rotate(180deg)" : "rotate(0)"} scale(0.75)` }}>▼</span>
                       <span style={{ flex: 1, minWidth: 0, fontSize: FS.small, fontWeight: 700, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {players.find(p => p.id === pid)?.name || pid}
                       </span>
-                      {/* The leaderboard's chevron, exactly: a ▼ that turns
-                          over rather than a ▶ that swings, scaled below the
-                          type scale's floor because this is an affordance and
-                          not data, and sitting AFTER the name where the board
-                          puts it — between the name and the row's numbers. */}
-                      <span style={{ fontSize: FS.micro, flexShrink: 0, color: isExpanded ? K.acc : K.t2, transition: `transform ${MOTION}`, display: "inline-block", transform: `${isExpanded ? "rotate(180deg)" : "rotate(0)"} scale(0.75)` }}>▼</span>
                       <span style={{ fontSize: FS.body, fontWeight: 700, color: K.acc, flexShrink: 0, width: 48, textAlign: "center" }}>{count}</span>
                       <span style={{ fontSize: FS.small, color: K.t3, flexShrink: 0, width: 66, textAlign: "center" }}>{money(count * perSkin)}</span>
                     </div>
@@ -3838,7 +3840,14 @@ function BettingView({
                     to. */}
                 {ctpLeaders.length > 0 && (
                   <div style={{ background: K.card, borderRadius: R.lg, border: `1px solid ${K.bdr}`, marginBottom: 10, overflow: "hidden" }}>
-                    <div style={{ padding: "8px 14px", borderBottom: `1px solid ${K.bdr}`, fontSize: FS.label, fontWeight: 700, color: K.gold, letterSpacing: 1 }}>CTP LEADERS</div>
+                    {/* The same two headings the skins card carries, at the
+                        same widths, so the two leader boards in this tab read
+                        as one idea rather than two layouts. */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", borderBottom: `1px solid ${K.bdr}`, fontSize: FS.label, fontWeight: 700, color: K.gold, letterSpacing: 1 }}>
+                      <span style={{ flex: 1, minWidth: 0 }}>CTP LEADERS</span>
+                      <span style={{ fontSize: FS.micro, color: K.t3, letterSpacing: 0.5, flexShrink: 0, width: 48, textAlign: "center" }}>COUNT</span>
+                      <span style={{ fontSize: FS.micro, color: K.t3, letterSpacing: 0.5, flexShrink: 0, width: 66, textAlign: "center" }}>$</span>
+                    </div>
                     {ctpLeaders.map(({ pid, count }) => {
                       const isOpen = openCtpPlayer === pid;
                       const mine = ctpTags
@@ -3848,12 +3857,18 @@ function BettingView({
                         <div key={pid} style={{ borderBottom: `1px solid ${K.bdr}${ALPHA.hair}` }}>
                           <div onClick={() => setOpenCtpPlayer(isOpen ? null : pid)}
                             style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", cursor: "pointer" }}>
-                            <span style={{ flex: 1, minWidth: 0, fontSize: FS.body, fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {/* Chevron first, then the name — the affordance
+                                sits where the eye starts the row rather than
+                                at the far end of a name it has to read past. */}
+                            <span style={{ fontSize: FS.micro, flexShrink: 0, color: isOpen ? K.acc : K.t2, transition: `transform ${MOTION}`, display: "inline-block", transform: `${isOpen ? "rotate(180deg)" : "rotate(0)"} scale(0.75)` }}>▼</span>
+                            <span style={{ flex: 1, minWidth: 0, fontSize: FS.small, fontWeight: 700, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                               {players.find(p => p.id === pid)?.name || pid}
                             </span>
-                            <span style={{ fontSize: FS.micro, flexShrink: 0, color: isOpen ? K.acc : K.t2, transition: `transform ${MOTION}`, display: "inline-block", transform: `${isOpen ? "rotate(180deg)" : "rotate(0)"} scale(0.75)` }}>▼</span>
-                            <span style={{ fontSize: FS.body, fontWeight: 700, color: K.acc, flexShrink: 0 }}>{count} CTP{count !== 1 ? "s" : ""}</span>
-                            <span style={{ fontSize: FS.small, color: K.t3, flexShrink: 0, minWidth: 54, textAlign: "right" }}>{money(count * perPin)}</span>
+                            {/* The count alone. The heading says what it is,
+                                so the row does not have to say "CTPs" once
+                                per line down the column. */}
+                            <span style={{ fontSize: FS.body, fontWeight: 700, color: K.acc, flexShrink: 0, width: 48, textAlign: "center" }}>{count}</span>
+                            <span style={{ fontSize: FS.small, color: K.t3, flexShrink: 0, width: 66, textAlign: "center" }}>{money(count * perPin)}</span>
                           </div>
                           {isOpen && (
                             <div style={{ padding: "2px 14px 8px", borderTop: `1px solid ${K.bdr}${ALPHA.tint}` }}>
