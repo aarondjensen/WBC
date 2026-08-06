@@ -5022,8 +5022,8 @@ const splitName = (p) => {
 };
 
 // How many holes a player has actually posted in a round — used by both the
-// delete confirmation and the discard-scores action, so the number the
-// director is warned about is the number that would be affected.
+// move-to-inactive confirmation and the discard-scores action, so the number
+// the director is warned about is the number that would be affected.
 const holesEntered = (holeData, pid, round) =>
   Object.values(holeData?.[`${pid}_${round}`] || {}).filter(s => s > 0 && s !== WD_SCORE).length;
 
@@ -5174,15 +5174,33 @@ function PlayerEditor({ editing, set, onClose, tPlayers, players, memberships, c
     onClose();
   };
 
-  const doDelete = async () => {
+  // ── Move to inactive ──
+  // The same write this has always done — the edition's roster row goes, the
+  // player record stays — said as what it is. It was a 🗑 in danger red, which
+  // is a promise of destruction the action never kept: a man taken off this
+  // year's field keeps his career, his index and his sign-in, and the Players
+  // tab already files him under "Inactive" rather than forgetting him. The red
+  // trash can made a routine bit of new-year setup — two men not coming this
+  // time — look like the button that erases fourteen years of golf.
+  //
+  // Destructive styling is kept for exactly one case: a player with holes
+  // already posted. Taking him off the roster mid-tournament really does stop
+  // those counting, and that is worth a red confirm and a nudge toward WD,
+  // which is the action that keeps his card.
+  const doDeactivate = async () => {
     const scored = Array.from({ length: numRounds }, (_, i) => i + 1)
       .map(r => ({ r, holes: holesEntered(holeData, editing.pid, r) }))
       .filter(x => x.holes > 0);
     const total = scored.reduce((n, s) => n + s.holes, 0);
-    const msg = ["This removes them from the tournament roster."];
-    if (total) msg.push("", `${total} scored hole${total === 1 ? "" : "s"} stay in the database (${scored.map(s => `Rd ${s.r}: ${s.holes}`).join(", ")}) but stop counting.`);
-    msg.push("", "Their player record and career id are kept, so they can be added back.");
-    if (await confirm({ title: `Remove ${fullName(p) || p.name}?`, message: msg.join("\n"), confirmLabel: "Remove", destructive: true })) {
+    const msg = ["They come off this year's roster and move to Inactive on the Players tab."];
+    if (total) msg.push("", `${total} scored hole${total === 1 ? "" : "s"} stay in the database (${scored.map(s => `Rd ${s.r}: ${s.holes}`).join(", ")}) but stop counting. If they started and quit, WD on the scoring screen is the better move — it keeps their card.`);
+    msg.push("", "Their record, their index and their sign-in are untouched. Add them back any year from + Add player.");
+    if (await confirm({
+      title: `Move ${fullName(p) || p.name} to inactive?`,
+      message: msg.join("\n"),
+      confirmLabel: "Move to inactive",
+      destructive: total > 0,
+    })) {
       onRemove(editing.pid);
       onClose();
     }
@@ -5292,12 +5310,37 @@ function PlayerEditor({ editing, set, onClose, tPlayers, players, memberships, c
             The tournament has started — changing an index re-scores every round, including finalized ones.
           </div>
         )}
+
+        {/* ── Status ──
+            In the form rather than in the footer beside Cancel and Save,
+            because it is not a form action: it does not wait for Save and it
+            does not edit a field. It states where this man stands this year
+            and offers the one move away from it. */}
+        {!isNew && (
+          <div style={{
+            display: "flex", alignItems: "center", gap: 8,
+            paddingTop: 11, borderTop: `1px solid ${K.bdr}${ALPHA.hair}`,
+          }}>
+            {/* "Active" alone, with no explaining clause after it: on a 360px
+                phone the row is the button plus about 150px, and a sentence
+                that ellipsises mid-word reads worse than the one word that
+                fits. What it means is in the confirmation. */}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <span style={lbl}>Status</span>
+              <div style={{ fontSize: FS.small, fontWeight: 700, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                Active
+              </div>
+            </div>
+            <Btn variant="secondary" size="sm" onClick={doDeactivate}
+              title="Take them off this year's roster"
+              style={{ flexShrink: 0, color: K.t2, whiteSpace: "nowrap" }}>
+              Move to inactive
+            </Btn>
+          </div>
+        )}
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderTop: `1px solid ${K.bdr}` }}>
-        {!isNew && (
-          <Btn variant="dangerOutline" onClick={doDelete} title="Remove player" style={{ flexShrink: 0, lineHeight: 1 }}>🗑</Btn>
-        )}
         <span style={{ flex: 1 }} />
         <Btn variant="secondary" onClick={onClose} style={{ color: K.t2 }}>Cancel</Btn>
         <Btn onClick={doSave} style={{ paddingLeft: 20, paddingRight: 20 }}>{isNew ? "Add" : "Save"}</Btn>
@@ -8690,6 +8733,13 @@ export default function WBCApp() {
     await db.upsert("players", patch, "id").catch(() => {});
   };
 
+  // ── Move a player to inactive ──
+  // "Remove" is what it does to the EDITION — the tournament_players row and
+  // this year's pairings — and the name has stayed that way because that is
+  // still the write. What it has never done is remove a player: the `players`
+  // record, the career id behind it and every historical round are untouched,
+  // which is why the button that calls this says "Move to inactive" and why
+  // the Players tab lists him under that heading afterwards.
   const removePlayer = async (pid) => {
     const tp = tPlayers.find(t => t.player_id === pid);
     setTPlayers(prev => prev.filter(tp => tp.player_id !== pid));
@@ -8703,7 +8753,7 @@ export default function WBCApp() {
       return updated;
     });
     await db.delete("pairings", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }, { field: "player_id", op: "==", value: pid }]);
-    notify("Player removed");
+    notify("Moved to inactive");
   };
 
   // Compute gross skin wins for scorecard highlighting: { "round_holeIdx": playerId }
