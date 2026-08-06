@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   playerIdFor, historyCourseId, isHistoryCourseId, bestFitIndex,
   editionDocFor, stateDocFor, rosterDocFor, courseDocFor, roundDocFor,
-  teeDocFor, holeDocFor, buildEdition, countDocs,
+  teeDocFor, holeDocFor, buildEdition, countDocs, withdrewAfter, WD_SCORE,
 } from "./historyImport";
 
 describe("playerIdFor", () => {
@@ -93,6 +93,29 @@ describe("bestFitIndex", () => {
     const fit = bestFitIndex([{ slope: 130, rating: 71, par: 72, courseHandicap: 9 }]);
     expect(Number.isInteger(Math.round(fit.index * 10))).toBe(true);
     expect(fit.index).toBe(Math.round(fit.index * 10) / 10);
+  });
+});
+
+describe("withdrewAfter", () => {
+  it("reports the round a short player stopped after", () => {
+    expect(withdrewAfter([1], 4)).toBe(1);          // 2016 Aaron J
+    expect(withdrewAfter([1, 2, 3], 4)).toBe(3);    // 2025 John C
+  });
+  it("is null for a player who finished", () => {
+    expect(withdrewAfter([1, 2, 3, 4], 4)).toBeNull();
+    expect(withdrewAfter([1, 2, 3], 3)).toBeNull();
+  });
+  // "Played fewer rounds" and "walked in" are not the same fact.
+  it("refuses to call a mid-tournament GAP a withdrawal", () => {
+    expect(withdrewAfter([1, 2, 4], 4)).toBeNull();
+    expect(withdrewAfter([2, 3, 4], 4)).toBeNull();
+  });
+  it("is null when nothing was played at all", () => {
+    expect(withdrewAfter([], 4)).toBeNull();
+    expect(withdrewAfter([null, undefined, 0], 4)).toBeNull();
+  });
+  it("tolerates duplicate and unsorted input", () => {
+    expect(withdrewAfter([3, 1, 2, 2], 4)).toBe(3);
   });
 });
 
@@ -213,6 +236,42 @@ describe("buildEdition", () => {
     expect(e.tournament_players).toHaveLength(1);
     expect(e.hole_scores).toHaveLength(0);
     expect(e.tee_assignments).toHaveLength(0);   // no round to hang one on
+  });
+
+  it("marks a withdrawal and fills the rounds he never started", () => {
+    const e = buildEdition({
+      tournament: { year: 2016, num_rounds: 2 },
+      courses,
+      rounds: [
+        { round: 1, player: "Aaron J", course_handicap: 11 },
+        { round: 1, player: "Brian K", course_handicap: 14 },
+        { round: 2, player: "Brian K", course_handicap: 14 },
+      ],
+      holes: [{ round: 1, player: "Aaron J", hole: 1, gross: 5 },
+              { round: 1, player: "Brian K", hole: 1, gross: 4 },
+              { round: 2, player: "Brian K", hole: 1, gross: 4 }],
+    });
+    const aaron = e.tournament_players.find(p => p.player_id === "aaron_j");
+    const brian = e.tournament_players.find(p => p.player_id === "brian_k");
+    expect(aaron.status).toBe("WD");
+    expect(brian.status).toBe("active");
+
+    // 18 sentinel holes for the round he never started, and none for the man
+    // who finished.
+    const aaronR2 = e.hole_scores.filter(h => h.player_id === "aaron_j" && h.round_number === 2);
+    expect(aaronR2).toHaveLength(18);
+    expect(aaronR2.every(h => h.score === WD_SCORE)).toBe(true);
+    expect(e.hole_scores.filter(h => h.player_id === "brian_k" && h.score === WD_SCORE)).toHaveLength(0);
+  });
+
+  it("does not fill a scoreless year with withdrawals", () => {
+    const e = buildEdition({
+      tournament: { year: 2010, num_rounds: 4 },
+      rounds: [{ round: null, player: "Scott R", course_handicap: null }],
+      courses: [], holes: [],
+    });
+    expect(e.tournament_players[0].status).toBe("active");
+    expect(e.hole_scores).toHaveLength(0);
   });
 
   it("ids are unique across every collection it emits", () => {
