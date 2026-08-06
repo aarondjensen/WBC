@@ -226,7 +226,7 @@ function RoundRow({ r, inWindow, counting }) {
 }
 
 // ── PlayerDetail ───────────────────────────────────────────────────
-function PlayerDetail({ row, onBack, year = null, isDirector = false, onSetOverride = null }) {
+function PlayerDetail({ row, onBack, isDirector = false, onSetOverride = null }) {
   const idx = row.idx;
   const hasRounds = !!idx && idx.window.length > 0;
   const [editing, setEditing] = useState(false);
@@ -267,40 +267,24 @@ function PlayerDetail({ row, onBack, year = null, isDirector = false, onSetOverr
       </button>
 
       {/* ── The number ── */}
+      {/* The name and the index, and nothing else. This card carried three more
+          lines — a WBC INDEX caption under the number, "best 5 of 12 · 2014–
+          2024", and what the player is playing off this year — and every one of
+          them was answered better a little further down the page: by the
+          section headings, by the chart, and by the year column on the list you
+          arrived from. A hero that restates the page is a hero you scroll past.
+
+          The asterisk stays on the number, and the amber dots in the chart
+          below say what it means. */}
       <Card style={{ marginBottom: 12, textAlign: "center" }} pad={18}>
-        <SectionLabel style={{ marginBottom: 4 }}>{row.name}</SectionLabel>
+        <div style={{
+          fontSize: FS.lead, fontWeight: 800, color: K.t2,
+          letterSpacing: 1.2, textTransform: "uppercase", marginBottom: 2,
+        }}>{row.name}</div>
         <div style={{ fontSize: FS.display, fontWeight: 900, color: idx?.index == null ? K.t3 : K.acc, lineHeight: 1.1 }}>
           {fmtIndex(idx?.index)}
           {idx?.index != null && (idx.stale || idx.overridden) && <span style={{ color: K.warn }}>*</span>}
         </div>
-        <div style={{ fontSize: FS.label, fontWeight: 700, color: K.t3, letterSpacing: 1.5, marginTop: 4 }}>
-          WBC INDEX
-        </div>
-        {/* What the number on top of this card actually is. A hand-set index
-            says so here rather than only in a card below it — the headline is
-            the thing people quote, and quoting it without knowing it was set
-            by hand is the one misreading this screen can cause. */}
-        {idx?.overridden ? (
-          <div style={{ fontSize: FS.small, color: K.warn, fontWeight: 700, marginTop: 10 }}>set by hand</div>
-        ) : hasRounds && (
-          <div style={{ fontSize: FS.small, color: K.t2, marginTop: 10 }}>
-            best {idx.counting.length} of {idx.window.length} · {idx.spanFrom === idx.spanTo ? idx.spanFrom : `${idx.spanFrom}–${idx.spanTo}`}
-          </div>
-        )}
-        {/* What they are actually playing off, said here because this card is
-            where somebody looks the number up. When the two differ a director
-            has overridden it in Admin, and the sentence says which is which
-            rather than leaving two figures to be reconciled. */}
-        {row.year != null && (
-          <div style={{
-            fontSize: FS.label, color: K.t3, marginTop: 8, paddingTop: 8,
-            borderTop: `1px solid ${K.bdr}`,
-          }}>
-            Playing off <strong style={{ color: K.t1 }}>{row.year.toFixed(1)}</strong>
-            {year ? ` in ${year}` : " this year"}
-            {idx?.index != null && Math.abs(row.year - idx.index) > 0.05 && " — set in Admin"}
-          </div>
-        )}
       </Card>
 
       {!hasRounds && !idx?.overridden && (
@@ -588,7 +572,6 @@ export function PlayersView({ players = [], registry = [], meId = null, year = n
       <PlayerDetail
         row={detail}
         onBack={() => setOpen(null)}
-        year={year}
         isDirector={isDirector}
         onSetOverride={detail.pid && onSetOverride ? (v) => onSetOverride(detail.pid, v) : null}
       />
