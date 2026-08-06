@@ -4003,21 +4003,25 @@ function BettingView({
             </div>
             <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
               <colgroup>
-                <col style={{ width: 26 }} />
+                {/* The four score columns are held at near-equal widths so
+                    the block of numbers reads as a block. WINNER takes the
+                    slack; PAYS is the widest because "$15.63" is the longest
+                    string on the row. */}
+                <col style={{ width: 24 }} />
                 <col />
-                <col style={{ width: 30 }} />
-                <col style={{ width: 28 }} />
+                <col style={{ width: 36 }} />
                 <col style={{ width: 32 }} />
-                <col style={{ width: 30 }} />
-                <col style={{ width: 56 }} />
+                <col style={{ width: 34 }} />
+                <col style={{ width: 32 }} />
+                <col style={{ width: 58 }} />
               </colgroup>
               <thead>
                 <tr style={{ background: `${K.bdr}${ALPHA.wash}` }}>
-                  {[["RD", "left"], ["WINNER", "left"], ["GRS", "right"], ["STK", "right"], ["NET", "right"], ["±", "right"], ["PAYS", "right"]].map(([label, align], i, all) => (
+                  {[["RD", "left"], ["WINNER", "left"], ["Gross", "right"], ["CH", "right"], ["NET", "right"], ["±", "right"], ["PAYS", "right"]].map(([label, align], i, all) => (
                     <th key={label} style={{
                       textAlign: align, fontSize: FS.micro, fontWeight: 700, letterSpacing: 0.5, color: K.t3,
-                      padding: "5px 3px", borderBottom: `1px solid ${K.bdr}${ALPHA.line}`,
-                      paddingLeft: i === 0 ? 12 : 3, paddingRight: i === all.length - 1 ? 12 : 3,
+                      padding: "5px 4px", borderBottom: `1px solid ${K.bdr}${ALPHA.line}`,
+                      paddingLeft: i === 0 ? 12 : 4, paddingRight: i === all.length - 1 ? 12 : 4,
                     }}>{label}</th>
                   ))}
                 </tr>
@@ -4030,7 +4034,7 @@ function BettingView({
                   // read as one day rather than as two separate results.
                   const band = ri % 2 === 1 ? `${K.bdr}${ALPHA.wash}` : "transparent";
                   const cell = (extra = {}) => ({
-                    padding: "7px 3px", textAlign: "right", fontSize: FS.small, fontWeight: 600,
+                    padding: "7px 4px", textAlign: "right", fontSize: FS.small, fontWeight: 600,
                     color: K.t2, borderTop: `1px solid ${K.bdr}${ALPHA.hair}`, ...extra,
                   });
                   if (!r.decided) return (
@@ -4055,12 +4059,12 @@ function BettingView({
                       <td style={cell({ borderTop: wi > 0 ? "none" : undefined })}>{w.gross}</td>
                       <td style={cell({ borderTop: wi > 0 ? "none" : undefined })}>{w.strokes}</td>
                       {/* The net as a SCORE — how a low net gets read out in
-                          a car park — with the to-par beside it. */}
-                      <td style={cell({ fontSize: FS.body, fontWeight: 800, color: K.t1, borderTop: wi > 0 ? "none" : undefined })}>{w.netScore}</td>
-                      {/* Under par prints RED, the same rule the leaderboard
-                          total follows (K.under below zero, full ink at or
-                          above it). It is the one number here that is
-                          negative, and a negative number in golf is red. */}
+                          a car park — and the to-par beside it. BOTH take the
+                          under-par red: a 67 on a par 72 is a number under
+                          par whether it is written as 67 or as −5, and
+                          colouring only one of them made the pair look like
+                          two different facts. */}
+                      <td style={cell({ fontSize: FS.body, fontWeight: 800, color: w.net < 0 ? K.under : K.t1, borderTop: wi > 0 ? "none" : undefined })}>{w.netScore}</td>
                       <td style={cell({ fontWeight: 800, color: w.net < 0 ? K.under : K.t1, borderTop: wi > 0 ? "none" : undefined })}>{fmtPar(w.net)}</td>
                       {/* A day still being played can change hands as the
                           last group comes in, so the money is held rather
