@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   MARKET_OPENING_SHARES, MARKET_MID_SHARES, midRoundFor,
   normalizeLots, totalShares, sharesOn, setLotShares,
-  roundStarted, roundComplete, marketWindows,
+  roundStarted, roundComplete, marketWindows, teeOffAt,
   lotsFor, allLots, marketBoard, marketHoldings, marketPayouts, eligibleBets, rebuyers, marketRoster,
 } from "./market";
 
@@ -110,7 +110,7 @@ describe("marketWindows", () => {
     expect(w.mid.open).toBe(false);
   });
 
-  it("shuts the first window on the first score of Round 1", () => {
+  it("shuts the first window on the first score of Round 1, with no bell set", () => {
     const w = marketWindows({ holeData: { aaron_j_1: { 0: 4 } }, players, numRounds: 4 });
     expect(w.opening.open).toBe(false);
     expect(w.opening.closed).toBe(true);
@@ -142,6 +142,72 @@ describe("marketWindows", () => {
     const w = marketWindows({ holeData: {}, players, numRounds: 2 });
     expect(w.mid.exists).toBe(false);
     expect(w.mid.open).toBe(false);
+  });
+});
+
+describe("teeOffAt", () => {
+  const at = (y, mo, d, h, mi) => new Date(y, mo - 1, d, h, mi).getTime();
+
+  it("is the EARLIEST tee time on the round's date", () => {
+    expect(teeOffAt("2026-08-14", [510, 450, 540])).toBe(at(2026, 8, 14, 7, 30));
+  });
+
+  it("is local time — the phones reading it are standing on the course", () => {
+    const t = new Date(teeOffAt("2026-08-14", [8 * 60 + 5]));
+    expect([t.getHours(), t.getMinutes()]).toEqual([8, 5]);
+  });
+
+  it("is null with no date or no tee sheet — there is no bell to ring", () => {
+    expect(teeOffAt("", [420])).toBeNull();
+    expect(teeOffAt("2026-08-14", [])).toBeNull();
+    expect(teeOffAt("2026-08-14", null)).toBeNull();
+    expect(teeOffAt(null, [420])).toBeNull();
+  });
+
+  it("ignores tee times that would not parse", () => {
+    expect(teeOffAt("2026-08-14", [null, undefined, NaN, 480])).toBe(at(2026, 8, 14, 8, 0));
+  });
+
+  it("rejects a date that is not a date", () => {
+    expect(teeOffAt("August 14", [420])).toBeNull();
+  });
+});
+
+describe("the opening bell", () => {
+  const bell = new Date(2026, 7, 14, 7, 0).getTime();
+  const win = (over) => marketWindows({ holeData: {}, players, numRounds: 4, firstTeeAt: bell, ...over }).opening;
+
+  it("is open right up to the tee time", () => {
+    expect(win({ now: bell - 60_000 })).toMatchObject({ open: true, closed: false });
+  });
+
+  it("shuts ON the tee time, not a minute after", () => {
+    expect(win({ now: bell })).toMatchObject({ open: false, closed: true });
+    expect(win({ now: bell }).note).toMatch(/on the tee/);
+  });
+
+  it("stays shut once the field is out", () => {
+    expect(win({ now: bell + 3 * 3600_000 }).open).toBe(false);
+  });
+
+  // The backstop. A tournament with no date or no tee sheet has no bell, so
+  // the old rule still has to close the window.
+  it("falls back to the first score when there is no bell", () => {
+    const noBell = { holeData: { aaron_j_1: { 0: 4 } }, players, numRounds: 4 };
+    expect(marketWindows(noBell).opening).toMatchObject({ open: false, closed: true });
+    expect(marketWindows({ ...noBell, holeData: {} }).opening.open).toBe(true);
+  });
+
+  // And a round already being played must never leave the market open,
+  // whatever the clock says — a wrong date must not hand the field a market
+  // it can bet into from the 4th fairway.
+  it("a score shuts it even if the bell has not rung", () => {
+    expect(win({ now: bell - 3600_000, holeData: { aaron_j_1: { 0: 4 } } })).toMatchObject({ open: false });
+  });
+
+  it("carries the bell time so the screen can print it", () => {
+    expect(win({ now: bell - 1 }).at).toBe(bell);
+    expect(marketWindows({ holeData: {}, players, numRounds: 4 }).opening.at).toBeNull();
   });
 });
 
