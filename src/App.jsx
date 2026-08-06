@@ -441,6 +441,12 @@ const mergeSideGames = (raw) => {
     out[k] = {
       amount: Number(g.amount) || 0,
       in: Array.isArray(g.in) ? g.in : null,
+      // Who the director has confirmed has actually handed the money over.
+      // Unlike `in`, a missing list means NOBODY — paying is an affirmative
+      // act, so there is no everybody-by-default here. Only the market rebuy
+      // uses it: every other buy-in is ticked by the director as the cash
+      // arrives, so being in IS being paid.
+      ...(k === "rebuy" ? { paid: Array.isArray(g.paid) ? g.paid : [] } : {}),
       // Skins is the only one with a hand-typed pot to preserve: it is the
       // game WBC was already playing before any of this existed.
       ...(k === "skins" ? { pot: Number(g.pot) || 0 } : {}),
@@ -3324,8 +3330,13 @@ function BettingView({
             amount: sideGames?.[k]?.amount || 0,
             // The rebuy column is a readout of who has placed halfway shares,
             // not a list anybody keeps. Everything else is the director's.
+            // The rebuy column is a readout of who has placed halfway shares,
+            // not a list anybody keeps — but WHO HAS PAID for them is the
+            // director's to tick, so that half is tappable. Everything else
+            // is the director's own list and needs no payment tracking:
+            // ticking the box is the cash arriving.
             ...(k === "rebuy"
-              ? { ids: rebuyField.map(p => p.id), derived: true }
+              ? { ids: rebuyField.map(p => p.id), derived: true, paid: sideGames?.rebuy?.paid ?? [] }
               : { ids: sideGames?.[k]?.in ?? null }),
           }))}
           onChange={onUpdateSideGames}
@@ -6529,6 +6540,7 @@ function AdminView({ activePlayers, rosterPlayers, sideGames, onUpdateSideGames,
                 // so its count comes off the bets — the same list the pot is
                 // counted from. Everything else is the director's own list.
                 ids: k === "rebuy" ? rebuyIds : (sideGames?.[k]?.in ?? null),
+                ...(k === "rebuy" ? { paid: sideGames?.rebuy?.paid ?? [] } : {}),
               }))}
               onChange={onUpdateSideGames}
             />
@@ -7974,7 +7986,7 @@ export default function WBCApp() {
     ctp: { amount: 0, in: null },
     lownet: { amount: 0, in: null },
     market: { amount: 0, in: null },
-    rebuy: { amount: 0, in: null },
+    rebuy: { amount: 0, in: null, paid: [] },
   });
   const [pairingsData, setPairingsData] = useState({});
   const [teeData, setTeeData] = useState({});
