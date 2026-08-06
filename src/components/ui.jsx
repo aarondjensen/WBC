@@ -8,7 +8,7 @@
 //    • SegmentedToggle — the rounded pill tab switcher.
 //    • StickyTop       — the pinned control strip at the top of a tab.
 
-import { K, FONT, FS, R, ALPHA, SHADOW, ON_ACC, ON_DANGER, segThumb, segTrack } from "../theme";
+import { K, FONT, FS, R, ALPHA, MOTION, SHADOW, ON_ACC, ON_DANGER, segThumb, segTrack } from "../theme";
 
 // ── Btn ──
 // The one button. WBC had 126 of them written inline and no primitive, so the
@@ -239,5 +239,34 @@ export function Toast({ message, top = 30 }) {
         {message}
       </div>
     </>
+  );
+}
+
+// ── Toggle ─────────────────────────────────────────────────────────
+// The on/off switch. It lived privately inside NotificationSettings, which was
+// fine while notifications were the only thing you could switch on — then the
+// theme picker arrived beside it in My Account as a segmented control, and one
+// sheet had two different shapes meaning the same thing.
+//
+// The knob stays white in both themes. It is a physical switch, not a surface:
+// the thing that reads as "on" is the accent track behind it, and a knob that
+// followed the palette would leave the light theme with a pale knob on a pale
+// track saying nothing.
+export function Toggle({ on, busy, onChange, label }) {
+  return (
+    <button type="button" role="switch" aria-checked={on} aria-label={label}
+      onClick={onChange} disabled={busy}
+      style={{
+        width: 52, height: 30, borderRadius: R.xl, border: "none", padding: 0,
+        background: on ? K.acc : K.bdr, position: "relative", flexShrink: 0,
+        cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1,
+        transition: `background ${MOTION} ease`,
+      }}>
+      <span style={{
+        position: "absolute", top: 3, left: on ? 25 : 3, width: 24, height: 24,
+        borderRadius: "50%", background: "#fff", transition: `left ${MOTION} ease`,
+        boxShadow: `0 1px 3px ${SHADOW}`,
+      }} />
+    </button>
   );
 }

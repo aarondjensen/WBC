@@ -2,7 +2,7 @@ import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } fr
 import { createPortal } from "react-dom";
 import { _app, _db, _auth, onAuthStateChanged, doGoogleSignIn, doAppleSignIn, doSignOut, consumeRedirectResult, deleteAccount, USERS_COLLECTION, NATIVE_APPLE_ENABLED, APPLE_PROVIDER_ENABLED, isNativePlatform, isAndroidNative, AUTH_PROVIDERS_ENABLED, TOURNAMENT_ID, getEditionSlug, getTournamentYear, isDefaultEdition } from "./firebase";
 import { readMembership, isDirectorAccount, resolveMember, joinWithCode, readAccessCode, setAccessCode, setDirector, subscribeMemberships, accountsUnreadable, membershipForPlayer, playerIsDirector } from "./lib/accounts";
-import { K, ON_ACC, ON_DANGER, FS, fsStep, R, ALPHA, MOTION, FONT, SHADOW, SCRIM, getTheme, setTheme, THEMES, segTrack, segThumb} from "./theme";
+import { K, ON_ACC, ON_DANGER, FS, fsStep, R, ALPHA, MOTION, FONT, SHADOW, SCRIM, getTheme, setTheme} from "./theme";
 import { SegmentedToggle, StickyTop, SectionLabel, Card, Toast, Btn } from "./components/ui";
 import { calcCH, buildStrokesMap, computeRoundLine, computeIndividualBoard, rankIndividualBoard, rankIndividualBoardIds, WD_SCORE } from "./lib/individualBoard";
 import { fieldFor, potFor, perUnit, computeSkins, allSkins, skinCounts, lowNetRounds, lowNetRoundField } from "./lib/sideGames";
@@ -10140,17 +10140,21 @@ export default function WBCApp() {
                 </div>
 
                 {/* ── Appearance ── */}
-                <div style={{ marginBottom: 18 }}>
-                  <div style={{ fontSize: FS.label, fontWeight: 800, letterSpacing: 1, color: K.t3, textTransform: "uppercase", marginBottom: 8 }}>Appearance</div>
-                  <div style={segTrack()}>
-                    {THEMES.map(t => (
-                      <button key={t} onClick={() => pickTheme(t)} style={{
-                        ...segThumb(theme === t),
-                        flex: 1, padding: "9px 0", cursor: "pointer",
-                        fontSize: FS.small, fontWeight: 800, textTransform: "capitalize",
-                      }}>{t}</button>
-                    ))}
+                {/* Same row as the notifications switch directly below it —
+                    the title changing colour when it is on, the sentence under
+                    it, and the same Toggle. Two switches in one sheet drawn two
+                    different ways read as two different KINDS of setting. */}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 18 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: FS.body, fontWeight: 800, color: theme === "light" ? K.acc : K.t1 }}>
+                      {theme === "light" ? "Light mode" : "Dark mode"}
+                    </div>
+                    <div style={{ fontSize: FS.small, color: K.t2, lineHeight: 1.5, marginTop: 2 }}>
+                      {theme === "light" ? "Easier to read in sunlight." : "Turn on for a light background."}
+                    </div>
                   </div>
+                  <Toggle on={theme === "light"} label="Light mode"
+                    onChange={() => pickTheme(theme === "light" ? "dark" : "light")} />
                 </div>
 
                 {/* Notifications, in the sheet that is already about you.
