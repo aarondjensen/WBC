@@ -39,6 +39,7 @@ import { GroupSwitcher } from "./components/GroupSwitcher";
 import { OffRoundBanner } from "./components/OffRoundBanner";
 import { MoreMenu } from "./components/MoreMenu";
 import { PlayersView } from "./components/PlayersView";
+import { PhotosView } from "./components/PhotosView";
 import { returningPlayers, returningLine } from "./lib/returningPlayers";
 import { TROPHY_SVG_URL, WBC_LOGO, WBC_FAVICON, DEFAULT_NUM_ROUNDS, ROUND_CHOICES, clampRounds } from "./constants";
 import { collection, doc, setDoc, getDocs, query, where, writeBatch, onSnapshot, deleteDoc } from "firebase/firestore";
@@ -8604,6 +8605,9 @@ export default function WBCApp() {
   const [tPlayers, setTPlayers] = useState([]);
   const [tRounds, setTRounds] = useState([]);
   const [courseList, setCourseList] = useState([]);
+  // The photo library's index for the active edition. See src/lib/media.js —
+  // these documents point at the photos, they do not contain them.
+  const [media, setMedia] = useState([]);
   // ── The career registry, as state ──
   // DEMO_PLAYERS holds the same rows, but it is a module-level variable that
   // nothing re-renders on — which is fine for names read during a render and
@@ -8970,6 +8974,15 @@ export default function WBCApp() {
       setTPlayers(docs.map(r => ({ id: r.id, tournament_id: r.tournament_id, player_id: r.player_id, handicap_index: parseFloat(r.handicap_index) || 0, status: r.status || "active" })));
     }));
 
+    // The photo library's index — one document per photo, never the photo.
+    // Live so a group that posts from the 7th tee shows up on everybody else's
+    // phone the way a score does. The documents are small (two URLs and a
+    // caption) and an edition's worth is a few hundred of them, which is the
+    // whole reason the index can be subscribed to while the bytes cannot.
+    unsubs.push(db.subscribe("wbc_media", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
+      setMedia(docs);
+    }));
+
     return () => unsubs.forEach(u => u && u());
   }, []);
 
@@ -8986,6 +8999,48 @@ export default function WBCApp() {
       meta,
       updated_at: new Date().toISOString(),
     });
+  };
+
+  // ── The photo library's two writes ──
+  // Both go through lib/mediaUpload.js, which owns the canvas work and the
+  // bucket; this pair owns the Firestore side, because `db` lives here and a
+  // second write path into wbc_media is how two of them drift apart.
+  //
+  // The order matters in both directions and is the opposite each time:
+  //
+  //   uploading  bytes first, then the index document. A document pointing at
+  //              a photo that failed to upload is a broken tile in the grid;
+  //              bytes with no document are invisible and cost 250KB.
+  //   deleting   document first, then the bytes. The document is what makes
+  //              the photo exist in the app, so removing it is what the person
+  //              tapping Remove actually asked for — and if the byte delete
+  //              then fails, the result is a hidden orphan rather than a photo
+  //              that is still on screen after being deleted.
+  const onUploadPhoto = async (file) => {
+    const uid = fbUser?.uid;
+    if (!uid) throw new Error("You need to be signed in to add photos.");
+    const { uploadPhoto } = await import("./lib/mediaUpload");
+    const row = await uploadPhoto({
+      file,
+      slug: _e(),
+      uid,
+      uploaderName: user?.name || "",
+      // Tagged with the round in play, but only when posting into the LIVE
+      // edition — a photo added while browsing 2014 has no business claiming
+      // to be from round 2 of it. Inside the live tournament the guess is
+      // right far more often than not and saves a picker on a screen somebody
+      // is using one-handed on a tee box. A dinner photo landing under the
+      // round it was taken during is a wrong label, not a lost photo.
+      round: isDefaultEdition() ? round : null,
+    });
+    await db.upsert("wbc_media", row);
+  };
+
+  const onDeletePhoto = async (item) => {
+    if (!item?.id) return;
+    await db.deleteDoc("wbc_media", item.id);
+    const { deletePhotoBytes } = await import("./lib/mediaUpload");
+    await deletePhotoBytes(item);
   };
 
   const saveTournamentState = async (finalized, savedTees, modTees, rDates, sOpen, pStrat, tTimes) => {
@@ -9147,7 +9202,7 @@ export default function WBCApp() {
   useEffect(() => {
     const applyHash = () => {
       const h = (window.location.hash || "").replace("#", "");
-      const map = { scoring: "scoring", leaderboard: "leaderboard", board: "leaderboard", pairings: "groups", groups: "groups", betting: "skins", skins: "skins", admin: "admin" };
+      const map = { scoring: "scoring", leaderboard: "leaderboard", board: "leaderboard", pairings: "groups", groups: "groups", betting: "skins", skins: "skins", admin: "admin", photos: "photos" };
       if (map[h]) setView(map[h]);
     };
     applyHash();
@@ -10113,6 +10168,7 @@ export default function WBCApp() {
         onSelect={(key) => {
           if (key === "admin") { setView("admin"); return; }
           if (key === "players") { setView("players"); return; }
+          if (key === "photos") { setView("photos"); return; }
           if (key === "editions") { setEditionsOpen(true); return; }
           if (key === "account") { setDeleteErr(""); setDeleteStage(null); setAccountOpen(true); }
         }}
@@ -10242,8 +10298,11 @@ export default function WBCApp() {
       )}
 
       {/* Players is a career record, not a round of this tournament — the
-          round pills would be a control with nothing on the screen to steer. */}
-      {view !== "admin" && view !== "scoring" && view !== "leaderboard" && view !== "players" && (
+          round pills would be a control with nothing on the screen to steer.
+          Photos is the same case from the other direction: the gallery carries
+          its own round headings and shows every round at once, so a selector
+          that picks one would contradict the screen under it. */}
+      {view !== "admin" && view !== "scoring" && view !== "leaderboard" && view !== "players" && view !== "photos" && (
       <div style={{ display: "flex", gap: 6, padding: "10px 20px", borderBottom: `1px solid ${K.bdr}` }}>
         {Array.from({ length: NUM_ROUNDS }, (_, i) => i + 1).map(r => {
           const tr = tRounds.find(t => t.round_number === r);
@@ -10275,6 +10334,10 @@ export default function WBCApp() {
           <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeTimesData={teeTimesData} roundDates={roundDates} scoringOpen={scoringOpen} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={async (key, signerPid, signerName, present, rnd) => { const nonSigners = (present || []).filter(pid => pid !== signerPid); const autoFinal = nonSigners.length === 0; const optimistic = { signedBy: signerPid, signedByName: signerName, attestedBy: [], present: present || [] }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: optimistic })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), tournament_id: TOURNAMENT_ID, groupKey: key, round: rnd, signedBy: signerPid, signedByName: signerName, present: present || [], attestedBy: [], signedAt: new Date().toISOString() }); if (autoFinal) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onAttestScorecard={async (key, attesterPid, nonSigners) => { const cur = scorecardSigs[key]; if (!cur) return; const attestedBy = [...new Set([...(cur.attestedBy || []), attesterPid])]; const optimistic = { ...cur, attestedBy }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: { ...prev[key], attestedBy } })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), attestedBy }); const allDone = (nonSigners || []).every(pid => attestedBy.includes(pid)); if (allDone) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onUnsignScorecard={async key => { pendingSigsRef.current.delete(key); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); if (finalizedRounds[key]) { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); pendingSigsRef.current.delete(key); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); await saveTournamentState(nf); }} onGoToAdminCourses={(rnd) => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); setAdminSettingsRound(rnd || null); }} markPlayerWD={markPlayerWD} ctpData={ctpData} onSetCtp={onSetCtp} onConfirmCtp={onConfirmCtp} directorPick={directorPick} onGroupChange={setScoringGroup} onSetRound={setRound} />
         </div>
         {view === "players" && <PlayersView players={allPlayers} registry={registry} meId={user?.id} year={getTournamentYear()} isDirector={!!user.isDirector} onSetOverride={setIndexOverride} />}
+        {/* Posting requires a real account: firestore.rules pins uploadedBy to
+            the caller's uid, so a guest — who has no uid at all — can browse
+            the library but cannot add to it. */}
+        {view === "photos" && <PhotosView items={media} year={getTournamentYear()} uid={fbUser?.uid || null} isDirector={!!user.isDirector} isGuest={!!user.isGuest} canPost={!user.isGuest && !!fbUser?.uid} onUpload={onUploadPhoto} onDelete={onDeletePhoto} notify={notify} />}
         {view === "skins" && <BettingView players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} numRounds={numRounds} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} marketBets={marketBets} onSaveMarketBet={onSaveMarketBet} leaderboard={getLeaderboard} finalizedRounds={finalizedRounds} pairingsData={pairingsData} firstTeeAt={firstTeeAt} marketNudge={marketNudge} teeTimesData={teeTimesData} />}
         {view === "groups" && <GroupsView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} pairingsData={pairingsData} teeTimesData={teeTimesData} getPlayerTee={getPlayerTee} user={user} />}
         {view === "admin" && (user.isDirector ? <AdminView activePlayers={activePlayers} rosterPlayers={allPlayers} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} rebuyIds={rebuyIds} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
@@ -10317,7 +10380,7 @@ export default function WBCApp() {
           // More reads active while its menu is open OR while one of the views
           // it leads to (Admin, Players) is the one on screen — otherwise
           // opening either would leave the whole bar looking unselected.
-          const active = item.key === "more" ? (menuOpen || view === "admin" || view === "players") : view === item.key;
+          const active = item.key === "more" ? (menuOpen || view === "admin" || view === "players" || view === "photos") : view === item.key;
           const clr = active ? K.acc : K.t3;
           const iconSz = 18;
           const navIcon = () => {

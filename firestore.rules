@@ -339,6 +339,56 @@ service cloud.firestore {
     match /wbc_scorecard_sigs/{doc} { allow read: if isOpen();
                                       allow write: if canWrite(); }
 
+    // ── The photo library ─────────────────────────────────────────
+    // One document per photo. Not the photo — the INDEX of it: where the
+    // bytes are (`host`) and the two URLs to draw them from. See src/lib/
+    // media.js for why the bytes live outside Firestore and outside the app's
+    // own hosting entirely.
+    //
+    // Posting a photo is a MEMBER write, like scoring is. The tournament is
+    // sixteen people at a golf course and the photos are theirs; routing every
+    // one through a director would mean nobody posts any.
+    //
+    // Three things this block does that no other collection above needs:
+    //
+    //   1. `create` pins uploadedBy to the caller's own uid. Without it a
+    //      member could post under somebody else's name — the field is what
+    //      the delete rule below trusts, so it has to be unforgeable at the
+    //      moment it is written.
+    //
+    //   2. `update` is the poster's own, and cannot reassign the photo. A
+    //      caption fix should not be able to become a change of author, which
+    //      is exactly what an unguarded update would allow.
+    //
+    //   3. `delete` splits on host. A live photo is the poster's to remove;
+    //      an ARCHIVED one (host "pages") is director-only, because its bytes
+    //      are static assets in a Cloudflare Pages deploy and deleting the
+    //      document would strand a file that only a re-deploy can remove.
+    //      lib/media.js canDelete() mirrors this, and media.test.js pins it.
+    //
+    // Read is open, like everything else here — the gallery is meant to be
+    // openable by a spouse on the couch with a link, the same reason the
+    // leaderboard is.
+    //
+    // The bucket itself is governed by storage.rules, which CANNOT reproduce
+    // the membership gate — Storage rules have no way to read Firestore. That
+    // asymmetry is documented in full in storage.rules; the short version is
+    // that this document is what makes a photo exist in the app, so bytes
+    // written without one are invisible.
+    match /wbc_media/{doc} {
+      allow read: if isOpen();
+      allow create: if canWrite()
+                    && request.resource.data.uploadedBy == request.auth.uid;
+      allow update: if canAdmin()
+                    || (canWrite()
+                        && resource.data.uploadedBy == request.auth.uid
+                        && request.resource.data.uploadedBy == resource.data.uploadedBy);
+      allow delete: if canAdmin()
+                    || (canWrite()
+                        && resource.data.uploadedBy == request.auth.uid
+                        && resource.data.host != 'pages');
+    }
+
     // ── Push notification tokens ──────────────────────────────────
     // One document per (player, device). Holds an FCM registration token,
     // which is a send-to address, not a credential: possession lets you push

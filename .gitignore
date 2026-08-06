@@ -23,6 +23,14 @@ dist-ssr
 *.sln
 *.sw?
 
+# ── The photo archive's derivatives ──
+# `npm run ingest:photos` writes a year of downscaled WebP here on its way to a
+# Cloudflare Pages deploy. Thousands of image files per edition, rebuildable
+# from the originals at any time, and deployed with wrangler rather than served
+# from this repo — a git history carrying seventeen years of them would make
+# every clone of this app enormous to no purpose.
+build/
+
 # ── Firebase service-account keys ──
 # `npm run import:history -- --write` needs one, and the console downloads it as
 # <project>-firebase-adminsdk-<hash>.json straight into whatever folder you point
