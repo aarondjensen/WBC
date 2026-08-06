@@ -3777,7 +3777,14 @@ function BettingView({
               answers — who took which day — is a comparison across them.
               No leaders card above it: with four rounds the totals are a
               sum anybody can do off these rows, and a second card repeating
-              the same names was a longer way to say it. */}
+              the same names was a longer way to say it.
+
+              And no rules under it. The rows say what happened — a name, a
+              net, a share, "ea" when it was split — and the two rules worth
+              knowing are visible in what they produce: a tie prints two
+              names and half the money each, and a round nobody has finished
+              prints that instead of a leader. See lib/sideGames lowNetRounds
+              for why a card walked in early does not count. */}
           <div style={{ background: K.card, borderRadius: R.lg, border: `1px solid ${K.bdr}`, overflow: "hidden" }}>
             <div style={{ display: "flex", padding: "8px 14px", borderBottom: `1px solid ${K.bdr}`, fontSize: FS.label, fontWeight: 700, color: K.gold, letterSpacing: 1 }}>
               <span style={{ flex: 1 }}>BY ROUND</span>
@@ -3832,10 +3839,6 @@ function BettingView({
             })}
           </div>
 
-          <div style={{ fontSize: FS.label, color: K.t3, lineHeight: 1.5, padding: "10px 2px 0" }}>
-            The lowest net of each round takes that round&apos;s share. A tie splits it.
-            Only a full 18 counts — a card walked in early is not a low net.
-          </div>
         </div>
       )}
 
