@@ -690,7 +690,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
   useEffect(() => { setShowGross(false); setShowToPar(true); }, []);
   const containerRef = useRef(null);
   const headerRef = useRef(null);
-  const [rowStyle, setRowStyle] = useState({ padding: "6px 12px", fontSize: FS.body });
+  const [rowStyle, setRowStyle] = useState({ padding: "6px 12px", fontSize: FS.small });
   const [rowMinH, setRowMinH] = useState(0);
 
   // Compute player column width to center Total, and align trophy to match.
@@ -764,7 +764,17 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
       // The rung the whole row is built from: the name and Total sit one above
       // it, Thru and the round columns one below. A full field on a short
       // screen drops the lot back a rung rather than clipping.
-      const fSize = clampedPerRow >= 26 ? FS.body : FS.small;
+      //
+      // A rung lower than it looks like it should be, because px type is not
+      // px on a phone. Android's system font-size setting multiplies every
+      // font-size in the WebView — but not the column widths beside them, which
+      // are layout and stay put. So the board has to be drawn small enough that
+      // it still fits AFTER the user's own setting has stretched it. Measured
+      // against the real roster in uppercase: built on FS.body the names began
+      // clipping at 1.15x on a 360 phone, which is the first notch a lot of
+      // people are already on. Built on FS.small they survive that everywhere
+      // and 1.3x on a 390.
+      const fSize = clampedPerRow >= 26 ? FS.small : FS.label;
       // Same object identity when the numbers have not moved, so the delayed
       // re-measure below is free unless it actually found a different layout.
       setRowStyle(prev => (prev.fontSize === fSize && prev.lineHeight === 1 && prev.padding === undefined)
