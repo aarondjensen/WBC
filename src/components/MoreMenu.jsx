@@ -18,27 +18,15 @@
 //
 // Drag-to-dismiss is carried over because the menu opens from the bottom bar,
 // where a thumb already is — a downward flick is the gesture that hand
-// expects, and the alternative is reaching for a backdrop.
-import { useRef, useState } from "react";
-import { K, FONT, FS, R, ALPHA, SHADOW } from "../theme";
+// expects, and the alternative is reaching for a backdrop. It was written
+// inline here first; My Account needed the same gesture and it now lives in
+// lib/useSheetDrag, so both sheets answer a thumb identically. This menu never
+// scrolls, so the hook's at-the-top gate is always satisfied here.
+import { K, FONT, FS, R, ALPHA, MOTION, SHADOW } from "../theme";
+import { useSheetDrag } from "../lib/useSheetDrag";
 
 export function MoreMenu({ open, onClose, onSelect, isDirector, adminFlag, notifFlag, activeYear, navH = 62 }) {
-  const startYRef = useRef(null);
-  const [dragY, setDragY] = useState(0);
-
-  const handleTouchStart = (e) => { startYRef.current = e.touches[0].clientY; setDragY(0); };
-  const handleTouchMove = (e) => {
-    if (startYRef.current == null) return;
-    const dy = e.touches[0].clientY - startYRef.current;
-    // Downward only. An upward drag on a menu anchored to the bottom bar has
-    // nowhere to go, and following it would let the sheet tear off the bar.
-    if (dy > 0) setDragY(dy);
-  };
-  const handleTouchEnd = () => {
-    if (dragY > 80) onClose();
-    setDragY(0);
-    startYRef.current = null;
-  };
+  const { dragY, handlers } = useSheetDrag({ onClose });
 
   if (!open) return null;
 
@@ -79,17 +67,15 @@ export function MoreMenu({ open, onClose, onSelect, isDirector, adminFlag, notif
           a modal taking over the app rather than a bar opening. */}
       <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 200 }} />
       <div
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
+        {...handlers}
         style={{
           position: "fixed",
           // Flush with the top of the bar: -1px so the menu's bottom border and
           // the bar's top border stay the single hairline they are.
           bottom: navH - 1,
           right: "max(8px, calc(50vw - 232px))",
-          transform: `translateY(${dragY}px)`,
-          transition: dragY === 0 ? "transform 0.2s ease" : "none",
+          transform: dragY ? `translateY(${dragY}px)` : undefined,
+          transition: dragY === 0 ? `transform ${MOTION} ease` : "none",
           width: 220,
           background: K.card,
           borderRadius: R.lg,
