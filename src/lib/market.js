@@ -180,7 +180,7 @@ export const countdownTick = (msLeft) => ((msLeft ?? 0) <= 3600_000 ? 1000 : 30_
 // one-line explanation the screen shows when a window is shut, because
 // "you cannot place these yet" and "you left these on the table" are very
 // different messages to a player holding unspent shares.
-export function marketWindows({ holeData, players, numRounds, firstTeeAt = null, now = null }) {
+export function marketWindows({ holeData, players, numRounds, firstTeeAt = null, midTeeAt = null, now = null }) {
   const midRound = midRoundFor(numRounds);
   const started1 = roundStarted(holeData, players, 1);
   // The bell. A score in round 1 still shuts the window as a backstop — a
@@ -215,6 +215,18 @@ export function marketWindows({ holeData, players, numRounds, firstTeeAt = null,
 
   const midDone = roundComplete(holeData, players, midRound);
   const nextStarted = roundStarted(holeData, players, midRound + 1);
+  // The halfway window shuts on ITS OWN BELL, the same way the opening one
+  // does — the first tee time of the round after it. The first score stayed
+  // as the backstop for the same reason: a round with no tee sheet has no
+  // bell, and a round already being played must not leave the market open
+  // whatever the clock says.
+  //
+  // Symmetry is not the point; a DEADLINE is. A window that closes on "the
+  // first score of Round 3" cannot be counted down to, and a player deciding
+  // whether to spend ten shares wants to know how long he has, not which
+  // unrelated event will end it.
+  const midBelled = midTeeAt != null && now != null && now >= midTeeAt;
+  const midShut = midBelled || nextStarted;
   return {
     opening,
     mid: {
@@ -223,15 +235,41 @@ export function marketWindows({ holeData, players, numRounds, firstTeeAt = null,
       shares: MARKET_MID_SHARES,
       exists: true,
       round: midRound,
-      open: midDone && !nextStarted,
-      closed: nextStarted,
-      note: nextStarted
+      open: midDone && !midShut,
+      closed: midShut,
+      at: midTeeAt,
+      note: midShut
         ? `Closed — Round ${midRound + 1} is under way.`
         : midDone
-          ? `Open until the first score of Round ${midRound + 1}.`
+          ? (midTeeAt != null
+            ? `Open until Round ${midRound + 1} tees off.`
+            : `Open until the first score of Round ${midRound + 1}.`)
           : `Opens when Round ${midRound} is complete.`,
     },
   };
+}
+
+// ── What colour the clock is ───────────────────────────────────────
+// A countdown that is the same green at three days out and at three minutes
+// is a number nobody reads twice. The tone escalates on the two boundaries a
+// golfer actually feels:
+//
+//   far     more than a day  — informational
+//   today   it happens today — amber; today is the day you have to act
+//   urgent  inside the hour  — red; you are nearly out of time
+//
+// "Today" is the LOCAL CALENDAR DAY of the deadline, not 24 hours out. A
+// 7:00am tee time is "today" from midnight, which is how somebody waking up
+// on the morning of the round thinks about it — and at 8pm the night before
+// it is still tomorrow's problem, which is also true.
+export function countdownTone(msLeft, at, now) {
+  if (at == null || now == null || (msLeft ?? 0) <= 0) return "closed";
+  if (msLeft <= 3600_000) return "urgent";
+  const a = new Date(at), n = new Date(now);
+  const sameDay = a.getFullYear() === n.getFullYear()
+    && a.getMonth() === n.getMonth()
+    && a.getDate() === n.getDate();
+  return sameDay ? "today" : "far";
 }
 
 // ── Reading a bet ──────────────────────────────────────────────────
