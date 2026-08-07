@@ -138,7 +138,7 @@ function PendingTile({ item }) {
 // a delete. Arrow keys and the on-screen chevrons move through the same
 // flattened, sorted list the grid is showing, so paging never jumps between
 // groups in an order the screen did not display.
-function Lightbox({ item, items, onClose, onStep, onDelete, canRemove, busy }) {
+function Lightbox({ item, items, onClose, onStep, onDelete, onSave, canRemove, busy, saving }) {
   const idx = items.findIndex(i => i.id === item.id);
   // The key handler is bound once, but `onStep` closes over the current photo
   // and changes every time one is opened. Held in a ref — updated in an effect,
@@ -179,13 +179,20 @@ function Lightbox({ item, items, onClose, onStep, onDelete, canRemove, busy }) {
           <span>{item.uploadedByName || "—"}</span>
           <span>{items.length ? `${idx + 1} of ${items.length}` : ""}</span>
         </div>
-        {canRemove && (
-          <div style={{ marginTop: 12 }}>
-            <Btn variant="danger" size="sm" block disabled={busy} onClick={() => onDelete(item)}>
-              {busy ? "Removing…" : "Remove photo"}
+        {/* Save is for everybody, including a guest browsing on the couch —
+            it takes nothing and adds nothing to the tournament. Remove sits
+            beside it only for the people allowed to, and stays the quieter
+            outline so the destructive one is not the bigger target. */}
+        <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
+          <Btn size="sm" block disabled={saving} onClick={() => onSave(item)}>
+            {saving ? "Saving…" : "Save photo"}
+          </Btn>
+          {canRemove && (
+            <Btn variant="dangerOutline" size="sm" block disabled={busy} onClick={() => onDelete(item)}>
+              {busy ? "Removing…" : "Remove"}
             </Btn>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </Popup>
   );
@@ -216,6 +223,7 @@ export function PhotosView({
 }) {
   const [open, setOpen] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
   // Photos picked but not yet in Firestore, drawn as real tiles from local
   // object URLs. See onFiles.
   const [pending, setPending] = useState([]);
@@ -304,6 +312,28 @@ export function PhotosView({
     // messages are written to be read by whoever is holding it; a Firebase
     // error code is not, so those get translated.
     notify?.(`${done ? `${done} added. ` : ""}${uploadFailureMessage(failures[0], failures.length)}`);
+  };
+
+  // The Storage-saving code is browser-only and pulls in nothing at start —
+  // same reasoning as the upload module, loaded when somebody first saves.
+  const save = async (item) => {
+    setSaving(true);
+    try {
+      const how = await import("../lib/mediaSave").then(m => m.savePhoto(item));
+      if (how === "saved") notify?.("Photo saved.");
+      // "shared" says nothing: the OS sheet already gave its own confirmation,
+      // and a toast on top of it is the app talking over the platform.
+      // "cancelled" says nothing either — the user chose that.
+      else if (how === "opened") notify?.("Opened the photo — press and hold it to save.");
+      // Nothing opened, so point at the photo that IS on screen rather than at
+      // a tab that never appeared.
+      else if (how === "blocked") notify?.("Press and hold the photo to save it.");
+    } catch (err) {
+      console.error("photo save failed:", err);
+      notify?.("Couldn't save that photo.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const remove = async (item) => {
@@ -410,9 +440,11 @@ export function PhotosView({
           item={open}
           items={flat}
           busy={busy}
+          saving={saving}
           canRemove={canDelete(open, { uid, isDirector })}
           onStep={step}
           onDelete={remove}
+          onSave={save}
           onClose={() => setOpen(null)}
         />
       )}

@@ -6,6 +6,7 @@ import {
   resizePlan, squareCropPlan, validateSource,
   takenTime, sortByTaken, groupByRound, UNROUNDED_LABEL, canDelete,
   photoUploadsAllowed, uploadsDisabledReason, ENCODINGS, MAX_UPLOAD_BYTES,
+  extensionOf, downloadFilename,
 } from "./media";
 
 describe("archive naming", () => {
@@ -280,6 +281,47 @@ describe("groupByRound", () => {
   it("loses no photo", () => {
     const total = groupByRound(items).reduce((n, g) => n + g.items.length, 0);
     expect(total).toBe(items.length);
+  });
+});
+
+describe("extensionOf / downloadFilename", () => {
+  it("reads the extension off a plain url", () => {
+    expect(extensionOf("https://x.pages.dev/abc.webp")).toBe("webp");
+    expect(extensionOf("editions/2026/abc.jpg")).toBe("jpg");
+  });
+
+  it("ignores the query string a download url carries", () => {
+    // Firebase download URLs are ?alt=media&token=… — a naive split on "." of
+    // the whole URL picks the extension out of the token.
+    expect(extensionOf("https://f.app/o/editions%2F2026%2Fabc.webp?alt=media&token=9a.bc")).toBe("webp");
+  });
+
+  it("falls back to jpg rather than producing a file with no extension", () => {
+    expect(extensionOf("")).toBe("jpg");
+    expect(extensionOf(null)).toBe("jpg");
+    expect(extensionOf("https://example.com/no-extension-here")).toBe("jpg");
+  });
+
+  it("names a saved file after the tournament it came from", () => {
+    expect(downloadFilename({ edition: "2026", mediaId: "abc", path: "editions/2026/abc.webp" }))
+      .toBe("WBC-2026-abc.webp");
+  });
+
+  it("follows the format the photo was actually encoded in", () => {
+    // Safari uploads land as .jpg (see ENCODINGS); the saved file must agree
+    // with its own bytes or photo apps mis-handle it.
+    expect(downloadFilename({ edition: "2026", mediaId: "abc", path: "editions/2026/abc.jpg" }))
+      .toBe("WBC-2026-abc.jpg");
+  });
+
+  it("works for an archived photo, which has a url and no storage path", () => {
+    expect(downloadFilename({ edition: "2014", mediaId: "d4", url: "https://wbc-photos-2014.pages.dev/d4.webp" }))
+      .toBe("WBC-2014-d4.webp");
+  });
+
+  it("still produces a usable name from a half-empty document", () => {
+    expect(downloadFilename({})).toBe("WBC-photo.jpg");
+    expect(downloadFilename(null)).toBe("WBC-photo.jpg");
   });
 });
 

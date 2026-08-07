@@ -314,6 +314,27 @@ export function uploadFailureMessage(err, count = 1) {
   return `That photo couldn't be added.${many}`;
 }
 
+// ── Saving a photo to a phone ──────────────────────────────────────
+// What the file is called once it lands in somebody's camera roll or
+// downloads folder. `IMG_4471.webp` tells them nothing a year later; this says
+// which tournament it came from, which is the only context a file sitting in a
+// downloads folder ever has.
+//
+// The extension is read back off the stored URL rather than assumed: an
+// upload from Safari is a .jpg and one from Chrome is a .webp (see ENCODINGS),
+// and a file whose name disagrees with its bytes confuses every photo app.
+export const extensionOf = (urlOrPath) => {
+  const clean = String(urlOrPath || "").split("?")[0].split("#")[0];
+  const m = clean.match(/\.([a-z0-9]{2,5})$/i);
+  return m ? m[1].toLowerCase() : "jpg";
+};
+
+export const downloadFilename = (item) => {
+  const edition = item?.edition ? `-${item.edition}` : "";
+  const id = item?.mediaId || item?.id || "photo";
+  return `WBC${edition}-${id}.${extensionOf(item?.path || item?.url)}`;
+};
+
 // ── Deletion ───────────────────────────────────────────────────────
 // Who may remove a photo, decided here so the gallery and firestore.rules
 // agree by construction rather than by both being edited carefully.
