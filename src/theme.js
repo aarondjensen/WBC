@@ -268,6 +268,18 @@ export const ALPHA = {
   soft:  "bf", // 75% — ink pulled back far enough to still read
 };
 
+// A tile for something already dealt with — a player sitting in a group, seen
+// from the pool you drag them out of — drawn back so the eye lands on the ones
+// still waiting. It is an OPACITY rather than a rung off the ALPHA ladder above
+// because it pulls the whole tile back, border and tee dot with it, and those
+// are not all ink.
+//
+// The number is a floor, not a taste: it was 0.3, which put an 11px name at
+// 2.5:1 against the tile under it, and by the time a draw is half built MOST of
+// the pool is dimmed — so the grid read as blank cards. 0.6 clears AA in both
+// themes and still reads plainly as "already placed". theme.test.js holds it.
+export const DIM_PLACED = 0.6;
+
 // Black, for the two things black is for. Neither is a theme color — a shadow
 // is the absence of light regardless of palette.
 // Both are black in the dark theme, where a shadow is a deeper hole in an

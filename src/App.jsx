@@ -2,7 +2,7 @@ import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } fr
 import { createPortal } from "react-dom";
 import { _app, _db, _auth, onAuthStateChanged, doGoogleSignIn, doAppleSignIn, doSignOut, consumeRedirectResult, deleteAccount, USERS_COLLECTION, NATIVE_APPLE_ENABLED, APPLE_PROVIDER_ENABLED, isNativePlatform, isAndroidNative, AUTH_PROVIDERS_ENABLED, TOURNAMENT_ID, getEditionSlug, getTournamentYear, isDefaultEdition } from "./firebase";
 import { readMembership, isDirectorAccount, resolveMember, joinWithCode, readAccessCode, setAccessCode, setDirector, subscribeMemberships, accountsUnreadable, membershipForPlayer, playerIsDirector } from "./lib/accounts";
-import { K, ON_ACC, ON_DANGER, FS, fsStep, R, ALPHA, MOTION, FONT, SHADOW, SCRIM, getTheme, setTheme} from "./theme";
+import { K, ON_ACC, ON_DANGER, FS, fsStep, R, ALPHA, MOTION, FONT, SHADOW, SCRIM, DIM_PLACED, getTheme, setTheme} from "./theme";
 import { SegmentedToggle, StickyTop, SectionLabel, Card, Toast, Btn } from "./components/ui";
 import { calcCH, buildStrokesMap, computeRoundLine, computeIndividualBoard, rankIndividualBoard, rankIndividualBoardIds, WD_SCORE } from "./lib/individualBoard";
 import { fieldFor, potFor, perUnit, computeSkins, allSkins, skinCounts, lowNetRounds, lowNetRoundField } from "./lib/sideGames";
@@ -4905,13 +4905,21 @@ function GroupsView({ players, round, tRounds, courses, pairingsData, teeTimesDa
 }
 
 // ── ADMIN ──
-// A player in the pool who is already sitting in a group is dimmed, so the
-// eye lands on the ones still waiting to be placed. It was 0.3, which put an
-// 11px name at 2.5:1 against the tile it sits on — under the 4.5:1 small text
-// needs, and by the time a draw is half built MOST of the pool is dimmed, so
-// the whole grid read as blank cards. 0.6 measures 5.3:1 and still reads
-// plainly as "already placed".
-const PLACED_DIM = 0.6;
+// The tee-colour dot on a player tile in the draw. Rendered whether or not the
+// player HAS a tee yet: the slot is what lines the dots up into a column down
+// the grid, and a tile that simply omits it shunts its name left and breaks the
+// column for every tile beside it.
+//
+// The ring is what keeps a dark tee marker visible on a dark tile — so it is
+// drawn in the body ink, which is near-white in the dark theme and near-black
+// in daylight. A hardcoded white one vanishes the moment the app is light.
+const TeeDot = ({ color }) => (
+  <span style={{
+    width: 7, height: 7, borderRadius: "50%", flexShrink: 0, display: "inline-block",
+    background: color || "transparent",
+    boxShadow: color ? `0 0 0 1px ${K.t1}${ALPHA.hair}` : "none",
+  }} />
+);
 
 // ── PAIRINGS EDITOR ──
 function PairingsEditor({ activePlayers, pairingsData, setPairings, tRounds, courses, teeTimesData, setTeeTimesData, roundDates, onSetRoundDate, scoringOpen, onSetScoringOpen, pairingStrategy, onSetPairingStrategy, leaderboard, finalizedRounds, getPlayerTee, editRound, holeData }) {
@@ -5278,15 +5286,15 @@ function PairingsEditor({ activePlayers, pairingsData, setPairings, tRounds, cou
                 const _tc = (() => { const _tr = tRounds.find(t => t.round_number === editRound); const _c = _tr ? courses.find(c => c.id === _tr.course_id) : null; if (!_c || !getPlayerTee) return null; const _t = getPlayerTee(editRound, pid, _c); if (!_t) return null; const _col = (_t.color||"").toLowerCase(); const _real = _col && _col !== "#ffffff" && _col !== "white" && _col !== "#000000" && _col !== "black" && _col !== "#fff"; return _real ? _t.color : TEE_PALETTE[(_c.tee_boxes||[]).findIndex(tb=>tb.name===_t.name) % TEE_PALETTE.length] || null; })();
                 return (
                   <button key={pid} onClick={() => tapPlayer(pid)} style={{
-                    padding: "6px 4px", borderRadius: R.sm, cursor: "pointer", textAlign: "center",
-                    background: isSel ? K.acc + ALPHA.tint : K.thumb,
+                    padding: "6px 6px", borderRadius: R.sm, cursor: "pointer", textAlign: "left",
+                    background: isSel ? K.acc + ALPHA.tint : K.hover,
                     border: `1.5px solid ${isSel ? K.acc : K.bdr}`,
                     color: isSel ? K.acc : K.t1,
-                    opacity: assigned && !isSel ? PLACED_DIM : 1,
+                    opacity: assigned && !isSel ? DIM_PLACED : 1,
                     transition: `opacity ${MOTION}`,
                   }}>
-                    <div style={{ fontSize: FS.label, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "flex", alignItems: "center", justifyContent: "center", gap: 3 }}>
-                      {_tc && <span style={{ width: 7, height: 7, borderRadius: "50%", background: _tc, flexShrink: 0, display: "inline-block", boxShadow: "0 0 0 1px rgba(255,255,255,0.25)" }} />}
+                    <div style={{ fontSize: FS.label, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "flex", alignItems: "center", justifyContent: "flex-start", gap: 3 }}>
+                      <TeeDot color={_tc} />
                       {getShortName(pid)}
                     </div>
                   </button>
@@ -5345,8 +5353,11 @@ function PairingsEditor({ activePlayers, pairingsData, setPairings, tRounds, cou
                 const _tc2 = (() => { const _tr = tRounds.find(t => t.round_number === editRound); const _c = _tr ? courses.find(c => c.id === _tr.course_id) : null; if (!_c || !getPlayerTee) return null; const _t = getPlayerTee(editRound, pid, _c); if (!_t) return null; const _col = (_t.color||"").toLowerCase(); const _real = _col && _col !== "#ffffff" && _col !== "white" && _col !== "#000000" && _col !== "black" && _col !== "#fff"; return _real ? _t.color : TEE_PALETTE[(_c.tee_boxes||[]).findIndex(tb=>tb.name===_t.name) % TEE_PALETTE.length] || null; })();
                 return (
                   <button key={pid} onClick={e => { e.stopPropagation(); tapGroupPlayer(gi, pid); }} style={{
-                    padding: "6px 4px", borderRadius: R.sm, textAlign: "center", cursor: "pointer", position: "relative",
-                    background: isSel ? K.acc + ALPHA.tint : K.thumb,
+                    // Room on the right for the ✕ that sits over this corner —
+                    // a centred name cleared it by luck, a left-aligned one
+                    // would run its ellipsis underneath.
+                    padding: "6px 12px 6px 6px", borderRadius: R.sm, textAlign: "left", cursor: "pointer", position: "relative",
+                    background: isSel ? K.acc + ALPHA.tint : K.hover,
                     border: `1.5px solid ${isSel ? K.acc : K.bdr}`,
                     color: K.t1,
                   }}>
@@ -5354,8 +5365,8 @@ function PairingsEditor({ activePlayers, pairingsData, setPairings, tRounds, cou
                       position: "absolute", top: 1, right: 3, background: "transparent", border: "none",
                       color: K.t3, fontSize: FS.micro, cursor: "pointer", padding: 0, lineHeight: 1,
                     }}>✕</span>
-                    <div style={{ fontSize: FS.label, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "flex", alignItems: "center", justifyContent: "center", gap: 3 }}>
-                      {_tc2 && <span style={{ width: 7, height: 7, borderRadius: "50%", background: _tc2, flexShrink: 0, display: "inline-block", boxShadow: "0 0 0 1px rgba(255,255,255,0.25)" }} />}
+                    <div style={{ fontSize: FS.label, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "flex", alignItems: "center", justifyContent: "flex-start", gap: 3 }}>
+                      <TeeDot color={_tc2} />
                       {getShortName(pid)}
                     </div>
                   </button>
