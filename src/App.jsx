@@ -4583,20 +4583,6 @@ function BettingView({
                 </div>
               )}
 
-              {/* One line for the window you are actually in — what closes it
-                  on the left, what it costs or when it goes on the right. It
-                  replaces the two chips that used to sit above this card
-                  saying the same things twice. */}
-              <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 8, fontSize: FS.label, lineHeight: 1.4 }}>
-                <span style={{ color: canPlace ? K.t2 : K.t3, fontWeight: 600, minWidth: 0 }}>{win.note}</span>
-                <span style={{ flex: 1 }} />
-                {win.at != null && (
-                  <span style={{ flexShrink: 0, color: K.t3, fontWeight: 700 }}>
-                    {minutesToTimeStr(new Date(win.at).getHours() * 60 + new Date(win.at).getMinutes())}
-                  </span>
-                )}
-              </div>
-
               {/* What the second window costs, said before the first tap
                   rather than after. Nothing is prepaid here: placing a share
                   IS taking on the rebuy, so a player who has placed none is
@@ -4626,6 +4612,14 @@ function BettingView({
                   entering a phone that died before the bell means entering a
                   name that is not on the sheet yet. */}
               <div style={{ display: "flex", flexDirection: "column" }}>
+                {!canPlace && players.every(p => sharesOn(draftLots, p.id) === 0) && (
+                  /* A shut window with nothing in it has no rows and, since
+                     the note line came out, nothing else either — so it says
+                     what happened rather than rendering an empty card. */
+                  <div style={{ fontSize: FS.label, color: K.t3, padding: "4px 0 2px", lineHeight: 1.5 }}>
+                    {win.closed ? "Nothing wagered in this window." : win.note}
+                  </div>
+                )}
                 {(canPlace ? players : players.filter(p => sharesOn(draftLots, p.id) > 0)).map(p => {
                   const n = sharesOn(draftLots, p.id);
                   return (
