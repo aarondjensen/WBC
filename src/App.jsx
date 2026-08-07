@@ -4512,12 +4512,10 @@ function BettingView({
                 </>
               )}
 
-              {/* Each tab carries its OWN clock. Both windows close on a tee
-                  time now, so both can be counted down to — and a player
-                  looking at the halfway tab in the car park after round two
-                  needs the same answer the opening tab gave him on Friday.
-                  The tone escalates green → amber on the day → red inside the
-                  hour; see lib/market countdownTone. */}
+              {/* Both windows close on a tee time now, so both can be counted
+                  down to — a player looking at the halfway tab in the car park
+                  after round two needs the same answer the opening tab gave
+                  him on Friday. */}
               {finalSheet ? (
                 <>
                   <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 6 }}>
@@ -4552,30 +4550,38 @@ function BettingView({
                   })}
                 </>
               ) : (<>
-              {windows.mid.exists !== false && (() => {
-                const tab_ = (w, clock, count, cap) => (
-                  <span style={{ display: "flex", flexDirection: "column", alignItems: "center", lineHeight: 1.2, whiteSpace: "nowrap" }}>
-                    <span>{w.label} · {count}/{cap}</span>
-                    <span style={{
-                      fontSize: FS.micro, fontWeight: 800, letterSpacing: 0.3,
+              {windows.mid.exists !== false && (
+                <SegmentedToggle
+                  compact
+                  style={{ marginBottom: 4 }}
+                  options={[["opening", `${windows.opening.label} · ${totalShares(lotsFor(bookBet, "opening"))}/${MARKET_OPENING_SHARES}`],
+                            ["mid", `${windows.mid.label} · ${totalShares(lotsFor(bookBet, "mid"))}/${MARKET_MID_SHARES}`]]}
+                  value={activeWindow}
+                  onChange={k => { setBookWindow(k); setDraft(null); }}
+                />
+              )}
+
+              {/* The two clocks sit UNDER the switch rather than inside it —
+                  a tab is a control and a countdown is a readout, and packing
+                  one into the other made the pill two lines tall for the sake
+                  of a number that changes on its own. Each cell is half the
+                  width so it lands under the tab it belongs to.
+                  The tone escalates green → amber on the day of the tee time
+                  → red inside the last hour; see lib/market countdownTone.
+                  A window that has not opened yet prints NOTHING. "Not yet"
+                  is the tab's own share count saying 0/10 already. */}
+              {windows.mid.exists !== false && (openingClock || midClock || windows.opening.closed) && (
+                <div style={{ display: "flex", marginBottom: 6 }}>
+                  {[[windows.opening, openingClock], [windows.mid, midClock]].map(([w, clock]) => (
+                    <span key={w.key} style={{
+                      flex: 1, textAlign: "center",
+                      fontSize: FS.label, fontWeight: 800, letterSpacing: 0.4,
                       fontVariantNumeric: "tabular-nums",
                       color: clock ? toneFor(w) : K.t3,
-                    }}>{clock ? clock.label : w.closed ? "CLOSED" : "NOT YET"}</span>
-                  </span>
-                );
-                return (
-                  <SegmentedToggle
-                    compact
-                    style={{ marginBottom: 8 }}
-                    options={[
-                      ["opening", tab_(windows.opening, openingClock, totalShares(lotsFor(bookBet, "opening")), MARKET_OPENING_SHARES)],
-                      ["mid", tab_(windows.mid, midClock, totalShares(lotsFor(bookBet, "mid")), MARKET_MID_SHARES)],
-                    ]}
-                    value={activeWindow}
-                    onChange={k => { setBookWindow(k); setDraft(null); }}
-                  />
-                );
-              })()}
+                    }}>{clock ? clock.label : w.closed ? "CLOSED" : ""}</span>
+                  ))}
+                </div>
+              )}
 
               {/* One line for the window you are actually in — what closes it
                   on the left, what it costs or when it goes on the right. It
