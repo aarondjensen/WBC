@@ -18,6 +18,7 @@ import { useConfirm } from "./lib/useConfirm";
 // Tee times survive a re-group because of these two — see lib/teeSheet.js.
 import { rowsToTeeTimes, mergeTeeTimes } from "./lib/teeSheet";
 import { useDirtyForm } from "./lib/useDirtyForm";
+import { useSheetDrag } from "./lib/useSheetDrag";
 import { usePullToRefresh, hasNewBundle } from "./lib/usePullToRefresh";
 import { NotificationSettings } from "./components/NotificationSettings";
 import { registerForPush, getCachedSubscriptionStatus } from "./lib/notifications";
@@ -8545,6 +8546,14 @@ export default function WBCApp() {
   const [deleteErr, setDeleteErr] = useState("");
   // handleDeleteAccount is defined further down, AFTER notify() exists — see note there.
 
+  // The three ways out of the sheet — the backdrop, the ✕, and a swipe down —
+  // all land here, so "closing" means one thing and the confirm stage can
+  // never be left armed behind a closed sheet.
+  const closeAccount = () => { setAccountOpen(false); setDeleteStage(null); };
+  // A deletion in flight is the one state with no way out: the backdrop is
+  // already inert while it runs, and the ✕ is hidden, so the swipe goes too.
+  const accountDrag = useSheetDrag({ onClose: closeAccount, enabled: deleteStage !== "working" });
+
   // iOS standalone height fix, enforced from React. --app-height = window.innerHeight
   // (which excludes the home-indicator area that 100dvh wrongly includes). This
   // mirrors index.html but also runs after React mounts — critical now that a
@@ -10294,19 +10303,41 @@ export default function WBCApp() {
           still has exactly one home. */}
       {accountOpen && (
         <div
-          onClick={() => { if (deleteStage !== "working") { setAccountOpen(false); setDeleteStage(null); } }}
+          onClick={() => { if (deleteStage !== "working") closeAccount(); }}
           style={{ position: "fixed", inset: 0, zIndex: 400, background: "rgba(3,8,16,0.72)", backdropFilter: "blur(2px)", display: "flex", alignItems: "flex-end", justifyContent: "center" }}
         >
           <div
             onClick={e => e.stopPropagation()}
-            style={{ width: "100%", maxWidth: 480, background: K.card, borderTop: `1px solid ${K.bdr}`, borderTopLeftRadius: 18, borderTopRightRadius: 18, padding: "20px 20px calc(20px + env(safe-area-inset-bottom, 0px))", boxShadow: "0 -12px 40px rgba(0,0,0,0.6)",
+            {...accountDrag.handlers}
+            style={{ width: "100%", maxWidth: 480, background: K.card, borderTop: `1px solid ${K.bdr}`, borderTopLeftRadius: 18, borderTopRightRadius: 18, padding: "0 20px calc(20px + env(safe-area-inset-bottom, 0px))", boxShadow: "0 -12px 40px rgba(0,0,0,0.6)",
               // Folding Notifications in here roughly tripled this sheet's
               // height, and a bottom sheet grows UPWARDS — so on a small phone
               // Delete account, the last thing in it, went off the top with no
               // way to reach it. Capped and scrollable.
-              maxHeight: "calc(var(--app-height, 100dvh) - 40px)", overflowY: "auto" }}
+              maxHeight: "calc(var(--app-height, 100dvh) - 40px)", overflowY: "auto",
+              // Follows the finger on a swipe down, springs back on release
+              // unless it went far enough — see lib/useSheetDrag. Left OFF at
+              // rest rather than set to translateY(0): a transform of any value
+              // makes this element the containing block for anything fixed
+              // inside it, and this sheet is exactly the kind of place a modal
+              // gets raised from.
+              transform: accountDrag.dragY ? `translateY(${accountDrag.dragY}px)` : undefined,
+              transition: accountDrag.dragY === 0 ? `transform ${MOTION} ease` : "none" }}
           >
-            <div style={{ width: 38, height: 4, borderRadius: R.xs, background: K.bdr, margin: "0 auto 18px" }} />
+            {/* Sticky, because both things in it are ways OUT of the sheet and
+                this sheet scrolls: a ✕ that scrolls off the top is a close
+                button you have to scroll back up to find, and the swipe only
+                takes the gesture when the content is already at the top. The
+                negative side margins let the background span the full width so
+                the content passes underneath it rather than beside it. */}
+            <div style={{ position: "sticky", top: 0, zIndex: 1, background: K.card, margin: "0 -20px", padding: "20px 20px 18px" }}>
+              <div style={{ width: 38, height: 4, borderRadius: R.xs, background: K.bdr, margin: "0 auto" }} />
+              {/* Hidden mid-deletion for the same reason the backdrop stops
+                  dismissing: there is nothing to go back to yet. */}
+              {deleteStage !== "working" && (
+                <button onClick={closeAccount} aria-label="Close" style={{ position: "absolute", top: 5, right: 20, width: 32, height: 32, borderRadius: R.sm, border: `1px solid ${K.bdr}`, background: "transparent", color: K.t2, fontSize: FS.lead, cursor: "pointer", lineHeight: 1 }}>✕</button>
+              )}
+            </div>
 
             {deleteStage === null && (
               <>
