@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   MARKET_OPENING_SHARES, MARKET_MID_SHARES, midRoundFor,
   normalizeLots, totalShares, sharesOn, setLotShares,
-  roundStarted, roundComplete, marketWindows, teeOffAt, countdown, countdownTick, openingSharesLeft,
+  roundStarted, roundComplete, marketWindows, teeOffAt, countdown, countdownTick, countdownTone, openingSharesLeft,
   lotsFor, allLots, marketBoard, marketHoldings, marketPayouts, eligibleBets, rebuyers, marketRoster,
 } from "./market";
 
@@ -497,5 +497,79 @@ describe("openingSharesLeft", () => {
   it("does not confuse one player's book for another's", () => {
     const bets = [{ pid: "brad_k", opening: [{ pid: "cole_m", shares: 20 }] }];
     expect(openingSharesLeft(bets, "aaron_j")).toBe(20);
+  });
+});
+
+describe("the halfway bell", () => {
+  const at = (y, mo, d, h, mi) => new Date(y, mo - 1, d, h, mi).getTime();
+  const bell = at(2026, 8, 16, 7, 0);
+  // Rounds 1 and 2 in the book, so the halfway window has opened.
+  const played = { aaron_j_1: card(), brad_k_1: card(), aaron_j_2: card(), brad_k_2: card() };
+  const win = (over) => marketWindows({ holeData: played, players, numRounds: 4, midTeeAt: bell, ...over }).mid;
+
+  it("is open right up to Round 3's tee time", () => {
+    expect(win({ now: bell - 60_000 })).toMatchObject({ open: true, closed: false });
+  });
+
+  it("shuts ON that tee time", () => {
+    expect(win({ now: bell })).toMatchObject({ open: false, closed: true });
+    expect(win({ now: bell }).note).toMatch(/under way/i);
+  });
+
+  it("falls back to the first score of Round 3 when there is no bell", () => {
+    const noBell = { holeData: { ...played, aaron_j_3: { 0: 4 } }, players, numRounds: 4 };
+    expect(marketWindows(noBell).mid).toMatchObject({ open: false, closed: true });
+    expect(marketWindows({ holeData: played, players, numRounds: 4 }).mid.open).toBe(true);
+  });
+
+  it("says what it is counting to when a bell is set", () => {
+    expect(win({ now: bell - 3600_000 }).note).toMatch(/tees off/i);
+    expect(win({ now: bell - 3600_000 }).at).toBe(bell);
+  });
+
+  it("is still shut before Round 2 is finished, bell or no bell", () => {
+    const early = marketWindows({ holeData: {}, players, numRounds: 4, midTeeAt: bell, now: bell - 86400_000 }).mid;
+    expect(early.open).toBe(false);
+    expect(early.note).toMatch(/opens when round 2/i);
+  });
+});
+
+describe("countdownTone", () => {
+  const at = (y, mo, d, h, mi) => new Date(y, mo - 1, d, h, mi).getTime();
+  const tee = at(2026, 8, 16, 7, 0);
+  const tone = (now) => countdownTone(tee - now, tee, now);
+
+  it("is far while the deadline is another day away", () => {
+    expect(tone(at(2026, 8, 14, 9, 0))).toBe("far");
+    // 8pm the night before is still tomorrow's problem.
+    expect(tone(at(2026, 8, 15, 20, 0))).toBe("far");
+  });
+
+  it("turns amber on the calendar day of the tee time", () => {
+    // Midnight on the morning of the round, six hours out.
+    expect(tone(at(2026, 8, 16, 0, 30))).toBe("today");
+    expect(tone(at(2026, 8, 16, 5, 0))).toBe("today");
+  });
+
+  it("turns red inside the last hour", () => {
+    expect(tone(at(2026, 8, 16, 6, 1))).toBe("urgent");
+    expect(tone(at(2026, 8, 16, 6, 59))).toBe("urgent");
+  });
+
+  it("takes the hour boundary exactly", () => {
+    expect(tone(at(2026, 8, 16, 6, 0))).toBe("urgent");
+    expect(tone(at(2026, 8, 16, 5, 59))).toBe("today");
+  });
+
+  it("is closed once the deadline has passed, or with nothing to count to", () => {
+    expect(tone(tee)).toBe("closed");
+    expect(tone(at(2026, 8, 16, 9, 0))).toBe("closed");
+    expect(countdownTone(5000, null, Date.now())).toBe("closed");
+    expect(countdownTone(5000, tee, null)).toBe("closed");
+  });
+
+  it("is urgent on a deadline that lands just after midnight, not merely today", () => {
+    const midnightish = at(2026, 8, 16, 0, 30);
+    expect(countdownTone(midnightish - at(2026, 8, 16, 0, 5), midnightish, at(2026, 8, 16, 0, 5))).toBe("urgent");
   });
 });

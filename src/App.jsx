@@ -9,8 +9,8 @@ import { fieldFor, potFor, perUnit, computeSkins, allSkins, skinCounts, lowNetRo
 import { teeTimesByPlayer, roundInPlay, thruStatus } from "./lib/thruStatus";
 import {
   MARKET_OPENING_SHARES, MARKET_MID_SHARES, marketWindows, normalizeLots, totalShares,
-  countdown, countdownTick, openingSharesLeft,
-  sharesOn, setLotShares, lotsFor, marketBoard, marketHoldings, marketPayouts, roundComplete,
+  countdown, countdownTick, countdownTone, openingSharesLeft, midRoundFor,
+  sharesOn, setLotShares, lotsFor, allLots, marketBoard, marketHoldings, marketPayouts, roundComplete,
   eligibleBets, rebuyers, marketRoster, teeOffAt,
 } from "./lib/market";
 import { BuyInPrices, BuyInTracker } from "./components/BuyIns";
@@ -3090,7 +3090,7 @@ function BettingView({
   players, round, tRounds, courses, holeData, ctpData, onSetCtp, user, numRounds,
   getPlayerTee, getPlayerCH = () => null,
   sideGames, onUpdateSideGames, marketBets, onSaveMarketBet, leaderboard,
-  finalizedRounds, pairingsData, firstTeeAt, marketNudge, teeTimesData,
+  finalizedRounds, pairingsData, firstTeeAt, marketNudge, teeTimesData, roundDates,
 }) {
   const [tab, setTab] = useState("skins");
   const [expandedPlayer, setExpandedPlayer] = useState(null);
@@ -3307,11 +3307,37 @@ function BettingView({
   // arrives as a prop rather than being derived here because the header
   // counts down to the same instant, and two derivations of one moment is one
   // more than the number that can be right.
-  const windows = marketWindows({ holeData, players, numRounds, firstTeeAt, now });
-  const bellPending = firstTeeAt != null && windows.opening.open;
-  // The countdown itself. Null once there is nothing left to count — a bell
-  // already rung, or a tournament with no tee sheet to ring one from.
-  const bell = bellPending ? countdown(firstTeeAt - now) : null;
+  // Round 3's earliest tee time — the halfway window's own bell, derived the
+  // same way the opening one is. Both windows close on a clock now, which is
+  // what lets both of them be counted down to.
+  const midTeeAt = (() => {
+    const mr = midRoundFor(numRounds);
+    if (mr == null) return null;
+    const mins = ((teeTimesData || {})[mr + 1] || []).map(teeTimeToMinutes).filter(m => Number.isFinite(m));
+    return mins.length === 0 ? null : teeOffAt((roundDates || {})[mr + 1], mins);
+  })();
+  const windows = marketWindows({ holeData, players, numRounds, firstTeeAt, midTeeAt, now });
+  // Each window's own clock, and the tone it prints in. Null when there is
+  // nothing left to count — a bell already rung, a window not yet open, or a
+  // round with no tee sheet to ring one from.
+  const clockFor = (w) => (w.open && w.at != null && w.at > now ? countdown(w.at - now) : null);
+  const TONE_INK = { far: K.acc, today: K.warn, urgent: K.danger, closed: K.t3 };
+  const toneFor = (w) => TONE_INK[countdownTone(w.at == null ? 0 : w.at - now, w.at, now)];
+  const openingClock = clockFor(windows.opening);
+  const midClock = clockFor(windows.mid);
+  const anyClock = openingClock || midClock;
+  // Both windows run. There is nothing left to place and nothing left to
+  // choose between, so the book stops being an editor and becomes a receipt:
+  // one sheet, every golfer the player actually backed, opening and halfway
+  // added together. A two-tab switch over two shut windows is asking a
+  // question with no answers behind it.
+  //
+  // Directors keep the editor. The override is the only way to enter a book
+  // for a phone that died before the bell, and it has to work after the bell
+  // by definition.
+  const allShut = windows.opening.closed && (windows.mid.exists === false || windows.mid.closed);
+  const finalSheet = allShut && !user?.isDirector;
+  const bellPending = anyClock != null;
   // The clock runs for as long as there is a bell left to ring, so `now` can
   // never go stale enough to leave the market taking shares after the field
   // has teed off. What the market tab decides is only the RATE: seconds tick
@@ -3322,7 +3348,7 @@ function BettingView({
   //
   // Depending on `bellFast` rather than on the remaining milliseconds is what
   // stops the effect tearing down and rebuilding the interval every tick.
-  const bellFast = bell != null && bell.urgent && tab === "market";
+  const bellFast = anyClock != null && anyClock.urgent && tab === "market";
   useEffect(() => {
     if (!bellPending) return;
     const t = setInterval(() => setNow(Date.now()), countdownTick(bellFast ? 0 : Infinity));
@@ -4441,61 +4467,6 @@ function BettingView({
               )}
             </>
           )}
-
-          {/* The two windows, and where the tournament is relative to them.
-              A player with unspent shares needs to know whether they are early
-              or late, and those are very different messages. */}
-          <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-            {[windows.opening, windows.mid].filter(w => w.exists !== false).map(w => (
-              <div key={w.key} style={{
-                flex: 1, background: K.card, borderRadius: R.lg, padding: "10px 12px",
-                border: `1px solid ${w.open ? K.acc + ALPHA.line : K.bdr}`,
-              }}>
-                <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-                  <span style={{ fontSize: FS.lead, fontWeight: 800, color: w.open ? K.acc : K.t2 }}>{w.shares}</span>
-                  <span style={{ fontSize: FS.label, fontWeight: 700, color: K.t3, letterSpacing: 0.5 }}>SHARES</span>
-                </div>
-                <div style={{ fontSize: FS.small, fontWeight: 700, color: K.t1, marginTop: 2 }}>{w.label}</div>
-                <div style={{ fontSize: FS.label, color: w.open ? K.acc : K.t3, marginTop: 2, lineHeight: 1.4 }}>
-                  {/* A running clock in place of the note while there is one to
-                      run. "Open until the first tee time" is not something a
-                      man deciding whether to think it over can act on; "12:04"
-                      is. Once it has rung, the note takes the line back and
-                      says why the window is shut. */}
-                  {w.key === "opening" && bell ? "Closes in" : w.note}
-                  {w.key === "opening" && bell && (
-                    <span style={{
-                      display: "block", marginTop: 1,
-                      fontSize: FS.body, fontWeight: 800, letterSpacing: 0.5,
-                      fontVariantNumeric: "tabular-nums",
-                      // The last hour turns the clock amber. By then it is not
-                      // information any more, it is a deadline.
-                      color: bell.urgent ? K.warn : K.acc,
-                    }}>{bell.label}</span>
-                  )}
-                  {/* The deadline itself. The countdown says how long; this
-                      says when, which is the one a player checks against the
-                      tee sheet on the noticeboard. */}
-                  {w.key === "opening" && w.at != null && (
-                    <span style={{ display: "block", color: K.t3 }}>
-                      First tee {minutesToTimeStr(new Date(w.at).getHours() * 60 + new Date(w.at).getMinutes())}
-                    </span>
-                  )}
-                </div>
-                {/* How many are in, and nothing else. The price used to lead
-                    this line — the halfway window is a second buy-in and
-                    nothing is prepaid — but the book itself says what it
-                    costs before the first tap, which is the place a player
-                    is actually deciding. */}
-                {w.key === "mid" && (
-                  <div style={{ fontSize: FS.label, color: K.t3, marginTop: 4, lineHeight: 1.4 }}>
-                    {rebuyField.length} in so far
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-
           {/* ── Your book ── */}
           {!bookPid ? null : !marketInSet.has(bookPid) ? (
             <Card style={{ marginBottom: 10, color: K.t3, fontSize: FS.small }}>
@@ -4503,15 +4474,12 @@ function BettingView({
             </Card>
           ) : (
             <Card style={{ marginBottom: 10 }} ref={bookRef}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                <SectionLabel style={{ marginBottom: 0, flex: 1 }}>
-                  {bookPid === myPid ? "Your book" : `${players.find(p => p.id === bookPid)?.name || bookPid}'s book`}
-                </SectionLabel>
-                <span style={{ fontSize: FS.small, fontWeight: 800, color: remaining > 0 ? K.acc : K.t3 }}>
-                  {remaining} of {win.shares} left
-                </span>
-              </div>
-
+              {/* NO TITLE ROW. A player has exactly one book and cannot look
+                  at anybody else's, so "Your book" named the only thing it
+                  could have been — and "4 of 20 left" is "16/20" on the
+                  window tab said from the other end. The card starts on the
+                  shares. A director gets a heading back below, because they
+                  really can be looking at somebody else's. */}
               {/* The director places for somebody else — the path for the phone
                   that died before the bell, and the only way a shut window can
                   still be written to. */}
@@ -4544,20 +4512,84 @@ function BettingView({
                 </>
               )}
 
-              {windows.mid.exists !== false && (
-                <SegmentedToggle
-                  compact
-                  style={{ marginBottom: 8 }}
-                  options={[["opening", `Opening · ${totalShares(lotsFor(bookBet, "opening"))}/${MARKET_OPENING_SHARES}`],
-                            ["mid", `${windows.mid.label} · ${totalShares(lotsFor(bookBet, "mid"))}/${MARKET_MID_SHARES}`]]}
-                  value={activeWindow}
-                  onChange={k => { setBookWindow(k); setDraft(null); }}
-                />
-              )}
+              {/* Each tab carries its OWN clock. Both windows close on a tee
+                  time now, so both can be counted down to — and a player
+                  looking at the halfway tab in the car park after round two
+                  needs the same answer the opening tab gave him on Friday.
+                  The tone escalates green → amber on the day → red inside the
+                  hour; see lib/market countdownTone. */}
+              {finalSheet ? (
+                <>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 6 }}>
+                    <SectionLabel style={{ marginBottom: 0, flex: 1 }}>Your wagers</SectionLabel>
+                    <span style={{ fontSize: FS.label, fontWeight: 700, color: K.t3 }}>
+                      {totalShares(allLots(bookBet))} share{totalShares(allLots(bookBet)) !== 1 ? "s" : ""}
+                    </span>
+                  </div>
+                  {allLots(bookBet).length === 0 ? (
+                    <div style={{ fontSize: FS.small, color: K.t3, lineHeight: 1.5 }}>
+                      You did not place any shares. Both windows are closed.
+                    </div>
+                  ) : allLots(bookBet).map(l => {
+                    const openN = sharesOn(lotsFor(bookBet, "opening"), l.pid);
+                    const midN = sharesOn(lotsFor(bookBet, "mid"), l.pid);
+                    return (
+                      <div key={l.pid} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 0", borderBottom: `1px solid ${K.bdr}${ALPHA.hair}` }}>
+                        <span style={{ flex: 1, minWidth: 0, fontSize: FS.small, fontWeight: 700, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {players.find(p => p.id === l.pid)?.name || l.pid}
+                        </span>
+                        {/* The split, quietly, for anybody working out which
+                            of the two calls this holding came from. It only
+                            appears when the halfway ten actually went in. */}
+                        {midN > 0 && (
+                          <span style={{ flexShrink: 0, fontSize: FS.micro, fontWeight: 700, color: K.t3, letterSpacing: 0.3 }}>
+                            {openN} + {midN}
+                          </span>
+                        )}
+                        <span style={{ flexShrink: 0, width: 42, textAlign: "right", fontSize: FS.lead, fontWeight: 800, color: K.acc }}>{l.shares}</span>
+                      </div>
+                    );
+                  })}
+                </>
+              ) : (<>
+              {windows.mid.exists !== false && (() => {
+                const tab_ = (w, clock, count, cap) => (
+                  <span style={{ display: "flex", flexDirection: "column", alignItems: "center", lineHeight: 1.2, whiteSpace: "nowrap" }}>
+                    <span>{w.label} · {count}/{cap}</span>
+                    <span style={{
+                      fontSize: FS.micro, fontWeight: 800, letterSpacing: 0.3,
+                      fontVariantNumeric: "tabular-nums",
+                      color: clock ? toneFor(w) : K.t3,
+                    }}>{clock ? clock.label : w.closed ? "CLOSED" : "NOT YET"}</span>
+                  </span>
+                );
+                return (
+                  <SegmentedToggle
+                    compact
+                    style={{ marginBottom: 8 }}
+                    options={[
+                      ["opening", tab_(windows.opening, openingClock, totalShares(lotsFor(bookBet, "opening")), MARKET_OPENING_SHARES)],
+                      ["mid", tab_(windows.mid, midClock, totalShares(lotsFor(bookBet, "mid")), MARKET_MID_SHARES)],
+                    ]}
+                    value={activeWindow}
+                    onChange={k => { setBookWindow(k); setDraft(null); }}
+                  />
+                );
+              })()}
 
-              {!canPlace && (
-                <div style={{ fontSize: FS.label, color: K.t3, marginBottom: 8, lineHeight: 1.5 }}>{win.note}</div>
-              )}
+              {/* One line for the window you are actually in — what closes it
+                  on the left, what it costs or when it goes on the right. It
+                  replaces the two chips that used to sit above this card
+                  saying the same things twice. */}
+              <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 8, fontSize: FS.label, lineHeight: 1.4 }}>
+                <span style={{ color: canPlace ? K.t2 : K.t3, fontWeight: 600, minWidth: 0 }}>{win.note}</span>
+                <span style={{ flex: 1 }} />
+                {win.at != null && (
+                  <span style={{ flexShrink: 0, color: K.t3, fontWeight: 700 }}>
+                    {minutesToTimeStr(new Date(win.at).getHours() * 60 + new Date(win.at).getMinutes())}
+                  </span>
+                )}
+              </div>
 
               {/* What the second window costs, said before the first tap
                   rather than after. Nothing is prepaid here: placing a share
@@ -4576,8 +4608,19 @@ function BettingView({
                 </div>
               )}
 
+              {/* ── Who is on the sheet ──
+                  An OPEN window lists the whole field, because any of them
+                  can still be backed. A SHUT one lists only the golfers you
+                  actually wagered on — the book as it stands, with the
+                  fourteen names you passed over taken out of the way.
+                  That is the sheet a player wants in front of him at the turn
+                  while he decides where the halfway ten should go, and it is
+                  the whole of what he owns once both windows have run.
+                  Directors keep the full list on the override, because
+                  entering a phone that died before the bell means entering a
+                  name that is not on the sheet yet. */}
               <div style={{ display: "flex", flexDirection: "column" }}>
-                {players.map(p => {
+                {(canPlace ? players : players.filter(p => sharesOn(draftLots, p.id) > 0)).map(p => {
                   const n = sharesOn(draftLots, p.id);
                   return (
                     <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: `1px solid ${K.bdr}${ALPHA.hair}` }}>
@@ -4588,42 +4631,51 @@ function BettingView({
                       <span style={{ flex: 1, minWidth: 0, fontSize: FS.small, fontWeight: 600, color: n > 0 ? K.t1 : K.t3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {p.name}
                       </span>
-                      <Btn variant="secondary" size="sm" disabled={!canPlace || n <= 0}
-                        style={{ padding: "3px 10px", minWidth: 32 }}
-                        onClick={() => bump(p.id, -1)}>−</Btn>
-                      {/* The number is a FIELD, not a readout. Twenty shares
-                          is twenty taps on a stepper, and a director entering
-                          the field's picks off a sheet of paper does that
-                          sixteen times over. Typing 12 is one action.
-                          Capped through the same setLotShares the steppers
-                          use, so a window still cannot be overspent however
-                          the number got there. FS.lead because this is a real
-                          input and anything under 16px makes iOS zoom the
-                          page on focus and never zoom back. */}
-                      <input
-                        type="number" inputMode="numeric" min="0" max={win.shares}
-                        value={n === 0 ? "" : String(n)} placeholder="0"
-                        disabled={!canPlace}
-                        onChange={e => setShares(p.id, e.target.value === "" ? 0 : parseInt(e.target.value, 10) || 0)}
-                        onFocus={e => e.currentTarget.select()}
-                        style={{
-                          width: 38, textAlign: "center", fontSize: FS.lead, fontWeight: 800,
-                          color: n > 0 ? K.acc : K.t3, background: "transparent",
-                          border: "none", borderBottom: `1px solid ${canPlace ? K.bdr : "transparent"}`,
-                          outline: "none", fontFamily: FONT, padding: 0,
-                        }}
-                      />
-                      <Btn variant="secondary" size="sm" disabled={!canPlace || remaining <= 0}
-                        style={{ padding: "3px 10px", minWidth: 32 }}
-                        onClick={() => bump(p.id, 1)}>+</Btn>
-                      {/* Five at a time. Twenty shares in fives is four taps
-                          where the single stepper wanted twenty, and 5/10/15/20
-                          is how the field actually talks about a book. It
-                          clamps through the same setLotShares as everything
-                          else, so tapping it with three left adds three. */}
-                      <Btn variant="secondary" size="sm" disabled={!canPlace || remaining <= 0}
-                        style={{ padding: "3px 8px", minWidth: 32 }}
-                        onClick={() => bump(p.id, 5)}>+5</Btn>
+                      {/* A SHUT window is a receipt, not a control. The
+                          steppers were rendered disabled, which is four grey
+                          boxes per row saying "you cannot" to somebody who is
+                          only reading. */}
+                      {canPlace ? (
+                        <>
+                          <Btn variant="secondary" size="sm" disabled={n <= 0}
+                            style={{ padding: "3px 10px", minWidth: 32 }}
+                            onClick={() => bump(p.id, -1)}>−</Btn>
+                          {/* The number is a FIELD, not a readout. Twenty shares
+                              is twenty taps on a stepper, and a director entering
+                              the field's picks off a sheet of paper does that
+                              sixteen times over. Typing 12 is one action.
+                              Capped through the same setLotShares the steppers
+                              use, so a window still cannot be overspent however
+                              the number got there. FS.lead because this is a real
+                              input and anything under 16px makes iOS zoom the
+                              page on focus and never zoom back. */}
+                          <input
+                            type="number" inputMode="numeric" min="0" max={win.shares}
+                            value={n === 0 ? "" : String(n)} placeholder="0"
+                            onChange={e => setShares(p.id, e.target.value === "" ? 0 : parseInt(e.target.value, 10) || 0)}
+                            onFocus={e => e.currentTarget.select()}
+                            style={{
+                              width: 38, textAlign: "center", fontSize: FS.lead, fontWeight: 800,
+                              color: n > 0 ? K.acc : K.t3, background: "transparent",
+                              border: "none", borderBottom: `1px solid ${K.bdr}`,
+                              outline: "none", fontFamily: FONT, padding: 0,
+                            }}
+                          />
+                          <Btn variant="secondary" size="sm" disabled={remaining <= 0}
+                            style={{ padding: "3px 10px", minWidth: 32 }}
+                            onClick={() => bump(p.id, 1)}>+</Btn>
+                          {/* Five at a time. Twenty shares in fives is four taps
+                              where the single stepper wanted twenty, and 5/10/15/20
+                              is how the field actually talks about a book. It
+                              clamps through the same setLotShares as everything
+                              else, so tapping it with three left adds three. */}
+                          <Btn variant="secondary" size="sm" disabled={remaining <= 0}
+                            style={{ padding: "3px 8px", minWidth: 32 }}
+                            onClick={() => bump(p.id, 5)}>+5</Btn>
+                        </>
+                      ) : (
+                        <span style={{ flexShrink: 0, width: 42, textAlign: "right", fontSize: FS.lead, fontWeight: 800, color: K.acc }}>{n}</span>
+                      )}
                     </div>
                   );
                 })}
@@ -4643,6 +4695,7 @@ function BettingView({
                   </div>
                 </div>
               )}
+              </>)}
             </Card>
           )}
 
@@ -10388,7 +10441,7 @@ export default function WBCApp() {
             the caller's uid, so a guest — who has no uid at all — can browse
             the library but cannot add to it. */}
         {view === "photos" && <PhotosView items={media} year={getTournamentYear()} uid={fbUser?.uid || null} isDirector={!!user.isDirector} isGuest={!!user.isGuest} canPost={!user.isGuest && !!fbUser?.uid && photoUploadsAllowed(photoConfig)} uploadsBlockedReason={photoUploadsAllowed(photoConfig) ? "" : uploadsDisabledReason(photoConfig)} onUpload={onUploadPhoto} onDelete={onDeletePhoto} notify={notify} />}
-        {view === "skins" && <BettingView players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} numRounds={numRounds} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} marketBets={marketBets} onSaveMarketBet={onSaveMarketBet} leaderboard={getLeaderboard} finalizedRounds={finalizedRounds} pairingsData={pairingsData} firstTeeAt={firstTeeAt} marketNudge={marketNudge} teeTimesData={teeTimesData} />}
+        {view === "skins" && <BettingView players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} numRounds={numRounds} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} marketBets={marketBets} onSaveMarketBet={onSaveMarketBet} leaderboard={getLeaderboard} finalizedRounds={finalizedRounds} pairingsData={pairingsData} firstTeeAt={firstTeeAt} marketNudge={marketNudge} teeTimesData={teeTimesData} roundDates={roundDates} />}
         {view === "groups" && <GroupsView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} pairingsData={pairingsData} teeTimesData={teeTimesData} getPlayerTee={getPlayerTee} user={user} />}
         {view === "admin" && (user.isDirector ? <AdminView activePlayers={activePlayers} rosterPlayers={allPlayers} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} rebuyIds={rebuyIds} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
               setTeeTimesData(prev => {
