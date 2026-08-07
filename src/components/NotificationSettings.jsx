@@ -40,8 +40,8 @@ import {
 // notifications is entitled to know what they are agreeing to receive, and
 // "WBC would like to send you notifications" does not tell them.
 const TYPES = [
-  { icon: "✍️", title: "Time to attest your card", sub: "Someone in your group signed it" },
-  { icon: "🏁", title: "A round is final", sub: "Results are in — check the leaderboard" },
+  { title: "Time to attest your card", sub: "Someone in your group signed it" },
+  { title: "A round is final", sub: "Results are in — check the leaderboard" },
 ];
 
 
@@ -179,13 +179,8 @@ export function NotificationSettings({ user, notify, onPermissionChange }) {
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {TYPES.map((t, i) => (
           <Card key={i} pad="10px 14px">
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <div style={{ fontSize: FS.lead, lineHeight: 1, flexShrink: 0 }}>{t.icon}</div>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: FS.small, fontWeight: 700, color: K.t1 }}>{t.title}</div>
-                <div style={{ fontSize: FS.label, color: K.t3, marginTop: 1 }}>{t.sub}</div>
-              </div>
-            </div>
+            <div style={{ fontSize: FS.small, fontWeight: 700, color: K.t1 }}>{t.title}</div>
+            <div style={{ fontSize: FS.label, color: K.t3, marginTop: 1 }}>{t.sub}</div>
           </Card>
         ))}
       </div>
