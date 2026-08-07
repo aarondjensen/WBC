@@ -136,6 +136,45 @@ export function teeOffAt(dateStr, minutesList) {
   return new Date(+d[1], +d[2] - 1, +d[3], Math.floor(first / 60), first % 60).getTime();
 }
 
+// ── The clock on the wall ──────────────────────────────────────────
+// How long is left, broken up and pre-formatted. A deadline printed as a time
+// of day makes a player do arithmetic against their own watch; a countdown
+// answers the only question they actually have, which is whether there is
+// still time to think about it.
+//
+// Rounded UP to the second, so the last tick reads 0:01 and not 0:00 — a
+// market that says nothing is left while it is still taking shares is lying
+// about the more important of the two.
+//
+// The label changes shape with the scale, because "37h 12m 04s" is precision
+// nobody can use and "2224:04" is not a number at all:
+//
+//   days out    2d 5h      — the shape of a plan
+//   hours out   5h 12m     — the shape of a morning
+//   under 1h    12:04      — the shape of a decision, ticking
+export function countdown(msLeft) {
+  const total = Math.max(0, Math.ceil((msLeft ?? 0) / 1000));
+  const days = Math.floor(total / 86400);
+  const hours = Math.floor((total % 86400) / 3600);
+  const mins = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  const label = total <= 0 ? "Closed"
+    : days > 0 ? `${days}d ${hours}h`
+    : hours > 0 ? `${hours}h ${String(mins).padStart(2, "0")}m`
+    : `${mins}:${String(secs).padStart(2, "0")}`;
+  // `urgent` is the last hour — the point at which the screen should stop
+  // being informative and start being a warning, and also the point at which
+  // the seconds are worth ticking.
+  return { total, days, hours, mins, secs, label, urgent: total > 0 && total <= 3600, done: total <= 0 };
+}
+
+// How often the screen has to repaint to keep that label honest. Under an
+// hour the seconds are moving and it needs one a second; above it the label
+// only turns over each minute, so thirty seconds is already twice as often as
+// it can possibly change. Nobody needs a per-second interval running through
+// a Thursday night to keep "2d 5h" up to date.
+export const countdownTick = (msLeft) => ((msLeft ?? 0) <= 3600_000 ? 1000 : 30_000);
+
 // ── The windows, given where play has got to ───────────────────────
 // Each returns { key, label, shares, open, closed, note } — `note` is the
 // one-line explanation the screen shows when a window is shut, because
@@ -158,8 +197,7 @@ export function marketWindows({ holeData, players, numRounds, firstTeeAt = null,
     open: !shut,
     closed: shut,
     at: firstTeeAt,
-    note: belled ? "Closed — the field is on the tee."
-      : started1 ? "Closed — Round 1 is under way."
+    note: shut ? "Closed — tournament in progress."
       : firstTeeAt != null ? "Open until the first tee time."
       : "Open until the first score of Round 1.",
   };
@@ -210,6 +248,18 @@ export const allLots = (bet) => normalizeLots([...(bet?.opening || []), ...(bet?
 // `inMarket` is a predicate so the caller keeps the null-means-everybody rule
 // in one place (see lib/sideGames fieldFor).
 export const eligibleBets = ({ bets, inMarket }) => (bets || []).filter(b => inMarket(b.pid));
+
+// How many of the opening 20 a player has NOT placed yet. Zero once the book
+// is full, and 20 for somebody who has never opened it.
+//
+// This is what the nudge on the Betting tab counts. Unplaced shares are not a
+// smaller bet — they are no bet at all on those shares, and the window shuts
+// on a clock rather than on a reminder, so a man who meant to finish his book
+// in the car park and forgot has simply thrown that part of his buy-in away.
+export function openingSharesLeft(bets, pid) {
+  const bet = (bets || []).find(b => b.pid === pid);
+  return Math.max(0, MARKET_OPENING_SHARES - totalShares(lotsFor(bet, "opening")));
+}
 
 // ── Who owes the halfway rebuy ─────────────────────────────────────
 // The second window is a second BUY-IN, and it is INCURRED, not prepaid:

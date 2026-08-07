@@ -2,14 +2,15 @@ import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } fr
 import { createPortal } from "react-dom";
 import { _app, _db, _auth, onAuthStateChanged, doGoogleSignIn, doAppleSignIn, doSignOut, consumeRedirectResult, deleteAccount, USERS_COLLECTION, NATIVE_APPLE_ENABLED, APPLE_PROVIDER_ENABLED, isNativePlatform, isAndroidNative, AUTH_PROVIDERS_ENABLED, TOURNAMENT_ID, getEditionSlug, getTournamentYear, isDefaultEdition } from "./firebase";
 import { readMembership, isDirectorAccount, resolveMember, joinWithCode, readAccessCode, setAccessCode, setDirector, subscribeMemberships, accountsUnreadable, membershipForPlayer, playerIsDirector } from "./lib/accounts";
-import { K, ON_ACC, ON_DANGER, FS, fsStep, R, ALPHA, MOTION, FONT, SHADOW, SCRIM } from "./theme";
+import { K, ON_ACC, ON_DANGER, FS, fsStep, R, ALPHA, MOTION, FONT, SHADOW, SCRIM, getTheme, setTheme} from "./theme";
 import { SegmentedToggle, StickyTop, SectionLabel, Card, Toast, Btn } from "./components/ui";
 import { calcCH, buildStrokesMap, computeRoundLine, computeIndividualBoard, rankIndividualBoard, rankIndividualBoardIds, WD_SCORE } from "./lib/individualBoard";
-import { fieldFor, potFor, perUnit, computeSkins, allSkins, skinCounts, lowNetRounds } from "./lib/sideGames";
+import { fieldFor, potFor, perUnit, computeSkins, allSkins, skinCounts, lowNetRounds, lowNetRoundField } from "./lib/sideGames";
 import { teeTimesByPlayer, roundInPlay, thruStatus } from "./lib/thruStatus";
 import {
   MARKET_OPENING_SHARES, MARKET_MID_SHARES, marketWindows, normalizeLots, totalShares,
-  sharesOn, setLotShares, lotsFor, allLots, marketBoard, marketHoldings, marketPayouts, roundComplete,
+  countdown, countdownTick, openingSharesLeft,
+  sharesOn, setLotShares, lotsFor, marketBoard, marketHoldings, marketPayouts, roundComplete,
   eligibleBets, rebuyers, marketRoster, teeOffAt,
 } from "./lib/market";
 import { BuyInPrices, BuyInTracker } from "./components/BuyIns";
@@ -22,19 +23,24 @@ import { NotificationSettings } from "./components/NotificationSettings";
 import { registerForPush, getCachedSubscriptionStatus } from "./lib/notifications";
 import { pairingScoreImpact, orphanedScores, describeScored, totalHoles } from "./lib/scoreGuard";
 import { groupsForRound, assignToGroup, removeFromGroup as removeFromGroupPure, clearGroup, swapIntoGroup, rowsToPairings } from "./lib/pairings";
+import { fitPairings, rungLines, nameWidthCeiling, CARD_GAP } from "./lib/pairingsFit";
 import { Popup, ConfirmModal } from "./components/Popup";
 import { EditionSwitcher } from "./components/EditionSwitcher";
 import { docIds } from "./lib/editionId";
+import { isHistoryCourseId } from "./lib/historyImport";
 import { openingHole, nineComplete } from "./lib/holeAdvance";
 import { scoreWindow, nudgeUpTarget, nudgeDownTarget } from "./lib/scoreEntry";
 import { groupTrouble, roundTrouble, describeTrouble, blocksScoring, missingTees, describeMissingTees } from "./lib/roundSetup";
 import { indexFor, matchHistoryName } from "./lib/handicap";
 import { groupKey as groupKeyOf, sameGroup, liveRound, roundFinalized, switchableGroups, groupProgress } from "./lib/groupSwitch";
+import { groupTeeOrder, tagAheadOfPlay } from "./lib/ctp";
 import { AppHeader, HEADER_SAFE_PAD } from "./components/AppHeader";
 import { GroupSwitcher } from "./components/GroupSwitcher";
 import { OffRoundBanner } from "./components/OffRoundBanner";
 import { MoreMenu } from "./components/MoreMenu";
 import { PlayersView } from "./components/PlayersView";
+import { PhotosView } from "./components/PhotosView";
+import { photoUploadsAllowed, uploadsDisabledReason } from "./lib/media";
 import { returningPlayers, returningLine } from "./lib/returningPlayers";
 import { TROPHY_SVG_URL, WBC_LOGO, WBC_FAVICON, DEFAULT_NUM_ROUNDS, ROUND_CHOICES, clampRounds } from "./constants";
 import { collection, doc, setDoc, getDocs, query, where, writeBatch, onSnapshot, deleteDoc } from "firebase/firestore";
@@ -364,6 +370,23 @@ const rowsToTeeData = (rows) => {
   return td;
 };
 
+// The RECORDED course handicap, when a row carries one → { round: { pid: ch } }.
+//
+// Only imported editions have it (see lib/historyImport.js). The early WBCs set
+// a handicap once and played it on every course, so those years cannot be
+// re-derived from an index — the board reads this instead when it is present,
+// and falls through to calcCH for the running tournament, which is every row
+// this map comes out empty for.
+const rowsToCourseHandicaps = (rows) => {
+  const ch = {};
+  rows.forEach(r => {
+    if (!Number.isFinite(r.course_handicap)) return;
+    if (!ch[r.round_number]) ch[r.round_number] = {};
+    ch[r.round_number][r.player_id] = r.course_handicap;
+  });
+  return ch;
+};
+
 // Convert skins rows (skin_type "ctp") → ctpData { round: { holeNum: { playerId, distanceFt, distance, taggedByName } } }
 // CTP is TOURNAMENT-WIDE: exactly one winner per par-3 per round, held by whichever
 // group has tagged the closest ball so far. Later groups see the standing tag as the
@@ -379,6 +402,14 @@ const rowsToCtp = (rows) => {
       distanceFt: ft,
       distance: r.distance || (ft ? `${ft} ft` : ""),
       taggedByName: r.tagged_by_name || "",
+      // WHICH GROUP tagged it, and where that group tees off. The name alone
+      // says who typed; this says where they were in the field, which is the
+      // only way a group entering late can be told that the number in front
+      // of them came from BEHIND them. Null on a director's override and on
+      // any tag written before this was recorded — see lib/ctp, where an
+      // unknown order deliberately says nothing.
+      taggedGroupKey: r.tagged_group_key || null,
+      taggedGroupOrder: Number.isInteger(r.tagged_group_order) ? r.tagged_group_order : null,
       // Who has walked off this green, seen the standing tag and let it
       // stand. See onConfirmCtp — it is the other half of the on-course
       // prompt, and the only record that a group answered rather than
@@ -637,12 +668,20 @@ const TEE_PALETTE = ["#60a5fa","#f59e0b","#a78bfa","#34d399","#fb923c","#f472b6"
 // trophy it is supposed to line up with. Widths are sized to the widest string
 // each column can hold at its font size, measured rather than guessed: Total
 // takes the "STROKES" header (38px, the widest thing in that column — wider
-// than any score), Thru takes a "12:10p" tee time at 28px, the round columns
-// take a "+11" at 19px, # takes "T12" plus a movement arrow at 32px.
-const LB_COL = { num: 36, total: 40, thru: 34, prior: 24 };
-// The least gap that still reads as a gap between this round's stats and the
-// round-by-round history beside them.
-const LB_GAP_MIN = 8;
+// than any score), Thru takes a "12:10p" tee time at 28px, # takes "T12" plus
+// a movement arrow at 32px.
+//
+// The round columns are NOT in here: they split whatever is left, four ways,
+// so `prior` is only the floor below which "+11" stops fitting. Fixed widths
+// plus a flexible gap is what made them look uneven — see LB_PAD_R.
+const LB_COL = { num: 36, total: 40, thru: 34, priorMin: 24 };
+// The rows are padded on the LEFT only. A round column's cell is read as the
+// space between the two lines either side of it, and on the outside those
+// lines are the band's edge and the board's edge — so any padding at the right
+// edge is space the eye hands to R4, exactly as the gap column used to hand
+// its width to R1. Ending the last column flush on the board's inner edge is
+// what lets four equal tracks actually look equal.
+const LB_PAD_L = 12;
 
 function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getPlayerTee, finalizedRounds, skinWins, pairingsData, teeTimesData, loaded = true }) {
   const [expanded, setExpanded] = useState(null);
@@ -653,7 +692,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
   useEffect(() => { setShowGross(false); setShowToPar(true); }, []);
   const containerRef = useRef(null);
   const headerRef = useRef(null);
-  const [rowStyle, setRowStyle] = useState({ padding: "6px 12px", fontSize: FS.body });
+  const [rowStyle, setRowStyle] = useState({ padding: "6px 12px", fontSize: FS.small });
   const [rowMinH, setRowMinH] = useState(0);
 
   // Compute player column width to center Total, and align trophy to match.
@@ -668,19 +707,25 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
   useLayoutEffect(() => {
     const align = () => {
       if (!containerRef.current) return;
-      // Card has padding 12px each side, grid padding 12px each side
+      // offsetWidth counts the board's own 1px border on each side; inside it
+      // the rows are padded on the left only, and run to the board's inner edge
+      // on the right.
       const containerW = containerRef.current.offsetWidth;
-      const gridW = containerW - 24; // 12px padding each side
-      // Total's centre sits at num + playerW + total/2 from the grid's content
-      // edge, and the grid is inset equally on both sides — so centring Total
-      // in the grid centres it in the viewport, under the trophy behind it.
-      const centred = gridW / 2 - LB_COL.num - LB_COL.total / 2;
+      const innerW = containerW - 2;          // inside the board's border
+      const gridW = innerW - LB_PAD_L;        // the row's content box
+      // Total's centre sits at padL + num + playerW + total/2 from the board's
+      // inner edge, and the board is centred in the viewport — so putting that
+      // at the board's own midpoint puts it under the trophy behind it. The
+      // padding is one-sided now, so it has to be in this sum rather than
+      // cancelling out of it.
+      const centred = innerW / 2 - LB_PAD_L - LB_COL.num - LB_COL.total / 2;
       // On a narrow phone the fixed columns want more than half the width, and
-      // honouring the centring would push the round columns off the right edge.
-      // So centred is a CEILING, not a rule: the player column gives way first,
-      // and Total drifts off the trophy rather than the board losing a column.
-      const fixed = LB_COL.num + LB_COL.total + LB_COL.thru + LB_COL.prior * NUM_ROUNDS;
-      const playerW = Math.max(60, Math.min(centred, gridW - fixed - LB_GAP_MIN));
+      // honouring the centring would squeeze the round columns below the width
+      // a "+11" needs. So centred is a CEILING, not a rule: the player column
+      // gives way first, and Total drifts off the trophy rather than the round
+      // columns becoming unreadable.
+      const fixed = LB_COL.num + LB_COL.total + LB_COL.thru + LB_COL.priorMin * NUM_ROUNDS;
+      const playerW = Math.max(60, Math.min(centred, gridW - fixed));
       setPlayerColW(`${Math.floor(playerW)}px`);
     };
     align();
@@ -721,7 +766,17 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
       // The rung the whole row is built from: the name and Total sit one above
       // it, Thru and the round columns one below. A full field on a short
       // screen drops the lot back a rung rather than clipping.
-      const fSize = clampedPerRow >= 26 ? FS.body : FS.small;
+      //
+      // A rung lower than it looks like it should be, because px type is not
+      // px on a phone. Android's system font-size setting multiplies every
+      // font-size in the WebView — but not the column widths beside them, which
+      // are layout and stay put. So the board has to be drawn small enough that
+      // it still fits AFTER the user's own setting has stretched it. Measured
+      // against the real roster in uppercase: built on FS.body the names began
+      // clipping at 1.15x on a 360 phone, which is the first notch a lot of
+      // people are already on. Built on FS.small they survive that everywhere
+      // and 1.3x on a 390.
+      const fSize = clampedPerRow >= 26 ? FS.small : FS.label;
       // Same object identity when the numbers have not moved, so the delayed
       // re-measure below is free unless it actually found a different layout.
       setRowStyle(prev => (prev.fontSize === fSize && prev.lineHeight === 1 && prev.padding === undefined)
@@ -916,11 +971,19 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <h2 style={{ fontFamily: "'Montserrat', sans-serif", fontSize: FS.title, margin: 0, fontWeight: 800 }}>Leaderboard</h2>
           {(() => {
-            const isFinalized = finalizedRounds[round];
-            if (isFinalized) return <span style={{ fontSize: FS.micro, fontWeight: 700, color: K.acc, background: K.acc + ALPHA.wash, border: `1px solid ${K.acc}${ALPHA.hair}`, borderRadius: R.sm, padding: "2px 8px" }}>✓ FINAL</span>;
-            // LIVE: round not finalized AND at least one active player is mid-round (thru 1–17).
-            const live = lb.some(p => !p.isWD && p.rds?.[round - 1]?.thru > 0 && p.rds[round - 1].thru < 18);
-            if (live) return (
+            // No FINAL badge beside the title: the trophy on position 1 says
+            // the tournament is decided, and saying it twice on one screen
+            // only competes with itself.
+            //
+            // The round still has to be UNfinalized for LIVE, which is what
+            // the badge used to establish by returning before this line. A
+            // finalized round can still hold a card that stops short — a
+            // withdrawal, a group that signed at 14 — and a partial card in a
+            // closed round is not play in progress.
+            const live = !finalizedRounds[round]
+              && lb.some(p => !p.isWD && p.rds?.[round - 1]?.thru > 0 && p.rds[round - 1].thru < 18);
+            if (!live) return null;
+            return (
               <>
                 <style>{`@keyframes wbcLivePulse{0%,100%{opacity:1}50%{opacity:.4}}`}</style>
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 7px", borderRadius: R.md, background: K.danger + ALPHA.wash, border: "1px solid #ef444440" }}>
@@ -929,7 +992,6 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                 </span>
               </>
             );
-            return null;
           })()}
         </div>
         {/* Right pill — Par/Total */}
@@ -951,10 +1013,17 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
         </div>
       </div>
       <div ref={containerRef} style={{ background: "transparent", borderRadius: R.lg, border: `1px solid ${K.bdr}`, overflow: "hidden", display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
-        {/* Build dynamic grid: #, Player, Total, Thru, Rd, [8px gap], prior rounds */}
+        {/* Build dynamic grid: #, Player, Total, Thru, then one equal track per round */}
         {(() => {
           const allPriorRounds = Array.from({ length: NUM_ROUNDS }, (_, i) => i + 1);
-          const gridCols = `${LB_COL.num}px ${playerColW} ${LB_COL.total}px ${LB_COL.thru}px 1fr${allPriorRounds.map(() => ` ${LB_COL.prior}px`).join("")}`;
+          // Four EQUAL tracks filling everything left over, instead of four
+          // fixed ones with a flexible gap in front. The gap column made R1's
+          // cell — the space between the band's edge and the first rule — the
+          // width of a round plus the gap, and the row's right padding did the
+          // same for R4 against the board's edge. On a 390 phone that read as
+          // 100 / 55 / 56 / 83 against tracks that were all exactly 24: the
+          // arithmetic was even and the board was not.
+          const gridCols = `${LB_COL.num}px ${playerColW} ${LB_COL.total}px ${LB_COL.thru}px${allPriorRounds.map(() => " 1fr").join("")}`;
           const gridStyle = { display: "grid", gridTemplateColumns: gridCols, alignItems: "center" };
           // Total and Thru are drawn as one band running the whole height of
           // the board rather than as numbers sitting loose in each row. Every
@@ -964,11 +1033,15 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
           // round-by-round detail either side. The hairline is on the OUTER
           // edge of each end only: a rule between Total and Thru would split
           // the band back into two columns, which is what it exists to undo.
+          // Inset shadows rather than borders for the same reason the round
+          // columns use them — a border is width, and Total is the column the
+          // whole board is aligned to. Drawn as a border it pushed its own
+          // number half a pixel off the trophy behind it.
           const bandStart = {
             alignSelf: "stretch", display: "flex", alignItems: "center", justifyContent: "center",
-            background: K.t3 + ALPHA.wash, borderLeft: `1px solid ${K.bdr}`,
+            background: K.t3 + ALPHA.wash, boxShadow: `inset 1px 0 0 ${K.bdr}`,
           };
-          const bandEnd = { ...bandStart, borderLeft: undefined, borderRight: `1px solid ${K.bdr}` };
+          const bandEnd = { ...bandStart, boxShadow: `inset -1px 0 0 ${K.bdr}` };
           // Ruling between the round columns, so four numbers in a row read as
           // four rounds rather than one string of digits. Full-strength K.bdr,
           // the same rule the card edge and the header divider are drawn in:
@@ -977,9 +1050,19 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
           // on the screen. The band still leads on its background tint rather
           // than on having a heavier edge. None on R1 — its left edge is
           // already the gap.
+          //
+          // Drawn as an inset shadow rather than a border because a border is
+          // LAYOUT. Under border-box it ate a pixel off the left of every cell
+          // that had one, which R1 did not — so R1 centred its number in 24px
+          // while R2-R4 centred theirs in 23px starting a pixel over, and the
+          // four columns came out spaced 24.5, 24, 24. The same pixel pushed
+          // every number half a pixel right of its own track, giving each cell
+          // 12.5 of air on one side of its value and 11.5 on the other. A
+          // shadow paints the identical line and costs no width, so all four
+          // tracks are the same box and the numbers sit dead centre in them.
           const roundCell = (i) => ({
             alignSelf: "stretch", display: "flex", alignItems: "center", justifyContent: "center",
-            borderLeft: i === 0 ? undefined : `1px solid ${K.bdr}`,
+            boxShadow: i === 0 ? undefined : `inset 1px 0 0 ${K.bdr}`,
           });
           return (
             <>
@@ -987,7 +1070,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                   These are eyebrows, not data, and "STROKES" already fills the
                   Total column at micro — a rung up and it spills over the band
                   it is supposed to cap. */}
-              <div ref={headerRef} style={{ ...gridStyle, padding: "7px 12px", fontSize: FS.micro, fontWeight: 600, color: K.t2, textTransform: "uppercase", letterSpacing: "0.06em", borderBottom: `1px solid ${K.bdr}` }}>
+              <div ref={headerRef} style={{ ...gridStyle, padding: `7px 0 7px ${LB_PAD_L}px`, fontSize: FS.micro, fontWeight: 600, color: K.t2, textTransform: "uppercase", letterSpacing: "0.06em", borderBottom: `1px solid ${K.bdr}` }}>
                 <span>#</span>
                 <span>Player</span>
                 {/* Negative margin eats the header's own padding so the band
@@ -1002,7 +1085,6 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                   return <span style={{ ...bandStart, margin: "-7px 0", padding: "7px 0", fontWeight: 700, color: K.t2, letterSpacing: label.length > 5 ? 0 : undefined }}>{label}</span>;
                 })()}
                 <span style={{ ...bandEnd, margin: "-7px 0", padding: "7px 0", fontWeight: 700, color: K.t2 }}>Thru</span>
-                <span />
                 {allPriorRounds.map((r, i) => <span key={r} style={{ ...roundCell(i), margin: "-7px 0", padding: "7px 0" }}>R{r}</span>)}
               </div>
               {/* Only once the round data is actually in. An empty `lb` also means
@@ -1061,7 +1143,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                       })();
                 return (
                   <div key={p.id} style={{ flex: isExpanded ? "0 0 auto" : 1, minHeight: (expanded && !isExpanded) ? rowMinH : 0, display: "flex", flexDirection: "column", justifyContent: "center" }}>
-                    <div onClick={() => { setExpanded(isExpanded ? null : p.id); setScorecardRound(null); }} style={{ ...gridStyle, padding: "0 12px", minHeight: 28, height: "100%", alignItems: "center", borderBottom: `1px solid ${K.bdr}${ALPHA.wash}`, background: "transparent", cursor: "pointer", fontSize: rowStyle.fontSize, lineHeight: 1 }}>
+                    <div onClick={() => { setExpanded(isExpanded ? null : p.id); setScorecardRound(null); }} style={{ ...gridStyle, padding: `0 0 0 ${LB_PAD_L}px`, minHeight: 28, height: "100%", alignItems: "center", borderBottom: `1px solid ${K.bdr}${ALPHA.wash}`, background: "transparent", cursor: "pointer", fontSize: rowStyle.fontSize, lineHeight: 1 }}>
                       {/* # */}
                       <span style={{ fontWeight: 800, fontSize: rowStyle.fontSize, color: top3 ? K.acc : K.t2, display: "flex", alignItems: "center", gap: 1 }}>
                         {isChampion
@@ -1082,7 +1164,7 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                             it was landing in a different place on every row.
                             minWidth:0 keeps the ellipsis working inside a flex
                             item that is now allowed to grow. */}
-                        <span className="wbc-name" style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
+                        <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
                         {/* FS.micro flat, not a step off the row size: this is
                             an affordance, not data, and stepping it meant it
                             grew whenever the board had room to grow — which is
@@ -1137,8 +1219,6 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
                           </span>
                         );
                       })()}
-                      {/* Gap between current round stats and prior rounds */}
-                      <span />
                       {/* Prior rounds — always show all 4 */}
                       {allPriorRounds.map((r, i) => {
                         const prRd = p.rds[r - 1];
@@ -1826,7 +1906,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
                   }}>
                     <div>
                       <div style={{ fontSize: FS.label, fontWeight: 700, color: K.acc, marginBottom: 4 }}>Group {gi + 1}</div>
-                      <div className="wbc-name" style={{ fontSize: FS.small, fontWeight: 600, color: K.t1 }}>{grpPlayers.map(p => p.name.split(" ")[0]).join(", ")}</div>
+                      <div style={{ fontSize: FS.small, fontWeight: 600, color: K.t1 }}>{grpPlayers.map(p => p.name.split(" ")[0]).join(", ")}</div>
                     </div>
                     <div style={{ textAlign: "right" }}>
                       {isFinalized
@@ -2198,7 +2278,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
               }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <span className="wbc-name" style={{ fontSize: FS.body, fontWeight: 700 }}>{p.name}</span>
+                    <span style={{ fontSize: FS.body, fontWeight: 700 }}>{p.name}</span>
                     <span style={{ fontSize: FS.label, color: K.acc, fontWeight: 700 }}>{ch}</span>
                     {strokes > 0 && <span style={{ color: K.acc, fontSize: FS.label, letterSpacing: "-1px" }}>{"●".repeat(strokes)}</span>}
                   </div>
@@ -2262,7 +2342,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
               {/* Player header row */}
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <span className="wbc-name" style={{ fontSize: FS.body, fontWeight: 700 }}>{p.name}</span>
+                  <span style={{ fontSize: FS.body, fontWeight: 700 }}>{p.name}</span>
                   <span style={{ fontSize: FS.label, color: K.acc, fontWeight: 700 }}>{ch}</span>
                   {strokes > 0 && <span style={{ color: K.acc, fontSize: FS.label, letterSpacing: "-1px" }}>{"●".repeat(strokes)}</span>}
                 </div>
@@ -2329,7 +2409,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
                   const pl = players.find(pp => pp.id === pid);
                   const done = attestedPids.includes(pid);
                   return (
-                    <button className="wbc-name" key={pid} disabled={done} onClick={() => handleAttest(pid)} style={{
+                    <button key={pid} disabled={done} onClick={() => handleAttest(pid)} style={{
                       fontSize: FS.small, fontWeight: 700, padding: "8px 12px", borderRadius: R.sm,
                       background: done ? K.acc + ALPHA.wash : K.inp,
                       border: `1.5px solid ${done ? K.acc + ALPHA.line : K.bdr}`,
@@ -2401,7 +2481,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
                       const sum18 = Array.from({ length: 18 }, (_, h) => h).reduce((a, h) => { const v = scMap[h]; return a + ((v > 0 && v < 90) ? v : 0); }, 0);
                       const cells = [
                         <div key={p.id + "-n"} style={{ ...cb, justifyContent: "flex-start", overflow: "hidden" }}>
-                          <span className="wbc-name" style={{ fontSize: FS.label, fontWeight: 700, color: K.t1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name.split(" ")[0]}</span>
+                          <span style={{ fontSize: FS.label, fontWeight: 700, color: K.t1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name.split(" ")[0]}</span>
                         </div>,
                         ...holes.map(h => {
                           const v = scMap[h];
@@ -2477,7 +2557,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
                   const out = holes.reduce((a, h) => { const v = scMap[h]; return a + ((v > 0 && v < 90) ? v : 0); }, 0);
                   return [
                     <div key={p.id + "-n"} style={{ ...cb, justifyContent: "flex-start", overflow: "hidden" }}>
-                      <span className="wbc-name" style={{ fontSize: FS.label, fontWeight: 700, color: K.t1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name.split(" ")[0]}</span>
+                      <span style={{ fontSize: FS.label, fontWeight: 700, color: K.t1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name.split(" ")[0]}</span>
                     </div>,
                     ...holes.map(h => {
                       const v = scMap[h];
@@ -2511,6 +2591,19 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
         const leaderPl = leader ? players.find(p => p.id === leader.playerId) : null;
         const leaderDist = leader ? (leader.distanceFt ? `${leader.distanceFt} ft` : (leader.distance || "")) : "";
         const closeAndAdvance = () => { setShowCtpForHole(null); setCtpPickPlayer(""); };
+        // Was this tag made by a group PLAYING BEHIND us? A group that walks
+        // off a par 3 to make its tee time and puts the hole in fifteen
+        // minutes later is shown a "current CTP" that did not exist when they
+        // were on the green. Without saying so, the number reads as the group
+        // ahead of them — and the tie rule, which hands the pin to whoever
+        // tagged first, quietly runs backwards. See lib/ctp.
+        const myTeeOrder = groupTeeOrder(pairingsData, round, group);
+        const outOfOrder = leader ? tagAheadOfPlay({
+          leaderOrder: leader.taggedGroupOrder,
+          leaderKey: leader.taggedGroupKey,
+          myOrder: myTeeOrder,
+          myKey: _groupKey,
+        }) : null;
         // Beating the standing tag is a strictly-shorter distance. Equal isn't closer —
         // ties keep the earlier group's tag (first to hole it holds the pin).
         // Undecided is not "beats it": until a distance is chosen there is
@@ -2524,7 +2617,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
         const save = async () => {
           if (!canTag) return;
           tapBigAction();
-          try { await onSetCtp?.(round, holeNum, ctpPickPlayer, ctpFeet); } catch {}
+          try { await onSetCtp?.(round, holeNum, ctpPickPlayer, ctpFeet, { key: _groupKey, order: myTeeOrder }); } catch {}
           closeAndAdvance();
         };
         // Wheel: park it on ctpFeetStart when the scroll node mounts, then derive feet
@@ -2557,13 +2650,33 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
 
               {/* Current-leader bar — the number to beat, tagged by an earlier group */}
               {leader && leaderPl && (
-                <div style={{ display: "flex", alignItems: "center", gap: 8, background: K.warn + ALPHA.wash, border: `1px solid ${K.warn}${ALPHA.line}`, borderRadius: R.md, padding: "8px 10px", marginBottom: 12 }}>
-                  <span style={{ fontSize: FS.body }}>⛳</span>
-                  <span style={{ flex: 1, minWidth: 0 }}>
-                    <span style={{ display: "block", fontSize: FS.micro, fontWeight: 800, color: K.warn, letterSpacing: 1.2, textTransform: "uppercase" }}>Current CTP</span>
-                    <span className="wbc-name" style={{ fontSize: FS.small, fontWeight: 700, color: K.t1 }}>{leaderPl.name}</span>
-                  </span>
-                  {leaderDist && <span style={{ fontSize: FS.small, fontWeight: 800, color: K.warn }}>{leaderDist}</span>}
+                <div style={{ background: K.warn + ALPHA.wash, border: `1px solid ${K.warn}${ALPHA.line}`, borderRadius: R.md, marginBottom: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px" }}>
+                    <span style={{ fontSize: FS.body }}>⛳</span>
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ display: "block", fontSize: FS.micro, fontWeight: 800, color: K.warn, letterSpacing: 1.2, textTransform: "uppercase" }}>Current CTP</span>
+                      <span style={{ fontSize: FS.small, fontWeight: 700, color: K.t1 }}>{leaderPl.name}</span>
+                    </span>
+                    {leaderDist && <span style={{ fontSize: FS.small, fontWeight: 800, color: K.warn }}>{leaderDist}</span>}
+                  </div>
+                  {/* Tagged out of order — the group BEHIND us got in first.
+                      Inside this bar rather than above it, because it is not a
+                      second thing to read: it is what this number is. A group
+                      that walked off to make its tee time is being shown a tag
+                      from players who were still waiting to hit, and left to
+                      itself the bar reads as the group ahead of them.
+                      Two amber boxes stacked also read as one wall of shouting
+                      on a phone in sunlight — the app's face is all caps, so
+                      the copy stays short and there is only ever one box. */}
+                  {outOfOrder && (
+                    <div style={{ borderTop: `1px solid ${K.warn}${ALPHA.hair}`, padding: "7px 10px 8px", display: "flex", gap: 6 }}>
+                      <span style={{ fontSize: FS.label }}>⏱</span>
+                      <span style={{ fontSize: FS.label, color: K.t2, lineHeight: 1.45, minWidth: 0 }}>
+                        <span style={{ fontWeight: 800, color: K.warn }}>{outOfOrder.label} tagged this after you finished.</span>
+                        {" "}Tag it if you were closer — a tie stays theirs.
+                      </span>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -2583,7 +2696,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
                     if (!pl) return null;
                     const sel = ctpPickPlayer === pid;
                     return (
-                      <button className="wbc-name" key={pid}
+                      <button key={pid}
                         onClick={() => {
                           tapNudge();
                           // Changing who it was un-answers the distance: the
@@ -2791,7 +2904,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
                 return (
                   <div key={p.id} style={{ background: K.inp, borderRadius: R.sm, marginBottom: 8, overflow: "hidden", border: `1px solid ${K.bdr}` }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "5px 8px", borderBottom: cellBorder }}>
-                      <span className="wbc-name" style={{ fontSize: FS.small, fontWeight: 700, color: K.t1 }}>{p.name}</span>
+                      <span style={{ fontSize: FS.small, fontWeight: 700, color: K.t1 }}>{p.name}</span>
                       <div style={{ display: "flex", gap: 8, fontSize: FS.small }}>
                         <span style={{ color: K.t3 }}>Gross <strong style={{ color: K.t2 }}>{gross || "—"}</strong></span>
                         <span style={{ color: K.t3 }}>Net <strong style={{ color: net && (net - parTotal) < 0 ? K.under : K.t1 }}>{net || "—"}</strong></span>
@@ -2930,10 +3043,7 @@ function GroupSetup({ user, players, onStart, presetGroup }) {
                   display: "flex", alignItems: "center", justifyContent: "center",
                   color: isSelected ? K.bg : K.t3, fontSize: FS.small, fontWeight: 800,
                 }}>{isSelected ? "✓" : ""}</div>
-                {/* The class goes on the name alone — "(you)" is an annotation,
-                    not part of what the man is called, and inside the small
-                    caps it would shrink along with the name. */}
-                <span style={{ fontWeight: 600, fontSize: FS.small }}><span className="wbc-name">{p.name}</span>{isSelf ? " (you)" : ""}</span>
+                <span style={{ fontWeight: 600, fontSize: FS.small }}>{p.name}{isSelf ? " (you)" : ""}</span>
               </div>
               <span style={{ fontSize: FS.label, color: K.t3 }}>HI: {p.handicap_index}</span>
             </button>
@@ -2978,12 +3088,18 @@ function GroupSetup({ user, players, onStart, presetGroup }) {
 // lowNetRounds drops a withdrawn card outright.
 function BettingView({
   players, round, tRounds, courses, holeData, ctpData, onSetCtp, user, numRounds,
-  getPlayerTee, sideGames, onUpdateSideGames, marketBets, onSaveMarketBet, leaderboard,
-  finalizedRounds, pairingsData, roundDates, teeTimesData,
+  getPlayerTee, getPlayerCH = () => null,
+  sideGames, onUpdateSideGames, marketBets, onSaveMarketBet, leaderboard,
+  finalizedRounds, pairingsData, firstTeeAt, marketNudge, teeTimesData,
 }) {
   const [tab, setTab] = useState("skins");
   const [expandedPlayer, setExpandedPlayer] = useState(null);
   const [grossMode, setGrossMode] = useState(true);
+  // Which round's full field is open in the Low Net ledger. One at a time —
+  // four open rounds is the same wall of numbers the ledger exists to avoid.
+  const [openNetRound, setOpenNetRound] = useState(null);
+  // Whose pins are itemized in the CTP leaders card.
+  const [openCtpPlayer, setOpenCtpPlayer] = useState(null);
   // Each tab keeps its OWN round and its own open drawer. Sharing them would
   // mean opening one tab silently rearranged the other.
   const [skinsRound, setSkinsRound] = useState(null);
@@ -3081,10 +3197,18 @@ function BettingView({
     const { course } = roundSetup(r);
     const maps = {}; const chs = {};
     skinsField.forEach(p => {
+      // Same precedence as the leaderboard: a RECORDED handicap wins over a
+      // derived one. This is the second place the app turns an index into
+      // strokes, and it has to agree with the first — on a flat imported year
+      // calcCH gives out the wrong NUMBER of strokes, not merely the wrong
+      // holes, so net skins would disagree with the leaderboard beside it.
+      const recorded = getPlayerCH(r, p.id);
       const tee = course ? getPlayerTee(r, p.id, course) : null;
-      const ch = course
-        ? calcCH(p.handicap_index, tee?.slope || course.slope, tee?.rating || course.rating, tee?.par || course.par)
-        : 0;
+      const ch = Number.isFinite(recorded)
+        ? recorded
+        : course
+          ? calcCH(p.handicap_index, tee?.slope || course.slope, tee?.rating || course.rating, tee?.par || course.par)
+          : 0;
       chs[p.id] = ch;
       maps[p.id] = buildStrokesMap(ch, course?.hole_handicaps || []);
     });
@@ -3164,27 +3288,46 @@ function BettingView({
   // tees off, so winning Thursday is worth the same whatever happens Friday.
   const lowNetPerRound = perUnit(lowNetPot, roundList.length);
   const lowNetRows = lowNetRounds({ players: lowNetField, rounds: roundList, lineFor });
-  const settledPins = ctpTags.filter(t => roundSettled(t.round)).length;
+
+  // The round's tee sheet as one line — first off to last off. A round
+  // nobody has finished has no result to print, and "nobody has finished
+  // yet" only says what the empty row already says; when it goes off is the
+  // thing somebody looking at an unplayed round actually wants.
+  const teeWindowFor = (r) => {
+    const mins = ((teeTimesData || {})[r] || []).map(teeTimeToMinutes).filter(m => Number.isFinite(m));
+    if (mins.length === 0) return null;
+    const lo = Math.min(...mins), hi = Math.max(...mins);
+    return lo === hi ? minutesToTimeStr(lo) : `${minutesToTimeStr(lo)} – ${minutesToTimeStr(hi)}`;
+  };
 
   // ── The market tab ──
   // ── The opening bell ──
-  // Round one's earliest tee time, which is when the market shuts. See
-  // lib/market teeOffAt for why a clock rather than the first score.
-  const firstTeeAt = teeOffAt(
-    (roundDates || {})[1],
-    ((teeTimesData || {})[1] || []).map(teeTimeToMinutes),
-  );
+  // `firstTeeAt` — round one's earliest tee time — is when the market shuts.
+  // See lib/market teeOffAt for why a clock rather than the first score. It
+  // arrives as a prop rather than being derived here because the header
+  // counts down to the same instant, and two derivations of one moment is one
+  // more than the number that can be right.
   const windows = marketWindows({ holeData, players, numRounds, firstTeeAt, now });
   const bellPending = firstTeeAt != null && windows.opening.open;
-  // Half a minute is plenty: the bell is a tee time, not a stopwatch, and a
-  // market that shuts within thirty seconds of 7:00 is shut at 7:00 as far as
-  // anybody standing on the tee is concerned. The interval only exists while
-  // there is a bell left to ring, so a finished tournament costs nothing.
+  // The countdown itself. Null once there is nothing left to count — a bell
+  // already rung, or a tournament with no tee sheet to ring one from.
+  const bell = bellPending ? countdown(firstTeeAt - now) : null;
+  // The clock runs for as long as there is a bell left to ring, so `now` can
+  // never go stale enough to leave the market taking shares after the field
+  // has teed off. What the market tab decides is only the RATE: seconds tick
+  // in the last hour while somebody is watching them, and everything else
+  // settles for thirty, which is already twice as often as the label above an
+  // hour can change. A per-second re-render of the whole Betting view behind
+  // a tab nobody is on is battery spent on nothing.
+  //
+  // Depending on `bellFast` rather than on the remaining milliseconds is what
+  // stops the effect tearing down and rebuilding the interval every tick.
+  const bellFast = bell != null && bell.urgent && tab === "market";
   useEffect(() => {
     if (!bellPending) return;
-    const t = setInterval(() => setNow(Date.now()), 30_000);
+    const t = setInterval(() => setNow(Date.now()), countdownTick(bellFast ? 0 : Infinity));
     return () => clearInterval(t);
-  }, [bellPending]);
+  }, [bellPending, bellFast]);
   const eventComplete = roundList.length > 0 && roundList.every(r => roundComplete(holeData, players, r));
   // ── The market is SEALED until the tournament is over ──
   // Everything a player could read another player's hand off — the board, the
@@ -3387,26 +3530,36 @@ function BettingView({
     </>
   );
 
-  // A leaders card — the same row in all three games, only the trailing
-  // numbers differ.
-  const leadersCard = (title, rows) => rows.length === 0 ? null : (
-    <div style={{ background: K.card, borderRadius: R.lg, border: `1px solid ${K.bdr}`, marginBottom: 10, overflow: "hidden" }}>
-      <div style={{ padding: "8px 14px", borderBottom: `1px solid ${K.bdr}`, fontSize: FS.label, fontWeight: 700, color: K.gold, letterSpacing: 1 }}>{title}</div>
-      {rows.map(r => (
-        <div key={r.key} style={{ display: "flex", alignItems: "center", padding: "8px 14px", borderBottom: `1px solid ${K.bdr}${ALPHA.hair}`, gap: 8 }}>
-          <span className="wbc-name" style={{ flex: 1, minWidth: 0, fontSize: FS.body, fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</span>
-          <span style={{ fontSize: FS.body, fontWeight: 700, color: K.acc, flexShrink: 0 }}>{r.mid}</span>
-          <span style={{ fontSize: FS.small, color: K.t3, flexShrink: 0, minWidth: 54, textAlign: "right" }}>{r.right}</span>
-        </div>
-      ))}
-    </div>
-  );
-
   // ── Scorecards ──
   // Both renderers highlight the holes the SELECTED mode won, so a gold circle
   // on a card is always the skin the tab is currently paying for.
   const skinHolesFor = (pid) => new Set(won.filter(s => s.winner.pid === pid).map(s => `${s.round}_${s.hole}`));
 
+  // Add up a nine — or a whole card — over the holes ACTUALLY PLAYED. Par is
+  // accumulated alongside rather than taken from the course total, so a man
+  // walking in after thirteen gets a to-par measured against thirteen holes
+  // instead of being handed five phantom pars.
+  const tallyHoles = (scores, pars, holes) => {
+    let gross = 0, par = 0, played = 0;
+    holes.forEach(i => {
+      const raw = scores[i];
+      if (raw > 0 && raw < WD_SCORE) { gross += raw; par += pars[i] || 0; played += 1; }
+    });
+    return { gross, par, played, toPar: gross - par };
+  };
+  const toParStr = (n) => (n === 0 ? "E" : n > 0 ? `+${n}` : `${n}`);
+
+  // ── One player's week, round by round ──────────────────────────────
+  // What this card is FOR is answering "where did his six skins come from",
+  // and the old one made that nearly impossible: eight anonymous blocks of
+  // nine, no round headings, no course names, no totals, and nothing but
+  // whitespace between one round and the next. A gold circle told you a skin
+  // landed but not which day it landed on.
+  //
+  // So each round is now its own bordered card with a heading — round, course,
+  // skins taken that day, and the score — and the nines carry a ruled grid
+  // with OUT and IN totals, which is the shape every golfer already knows how
+  // to read.
   const renderInlineScorecard = (playerId) => {
     const p = players.find(pl => pl.id === playerId);
     if (!p) return null;
@@ -3417,48 +3570,169 @@ function BettingView({
       if (!course) continue;
       const scores = holeData[`${p.id}_${r}`] || {};
       if (!Object.values(scores).some(v => v > 0)) continue;
-      rows.push({ r, scores, pars: course.hole_pars || [] });
+      // Strokes are only drawn in NET mode, where they are the whole
+      // explanation for a gold circle sitting on an ordinary-looking number:
+      // the card prints gross all week, so a skin won with a stroke is
+      // otherwise a 5 that beat a field of 4s for no visible reason.
+      const strokes = grossMode ? null : (strokesFor(r).maps[p.id] || {});
+      rows.push({ r, scores, pars: course.hole_pars || [], courseName: course.name || "", strokes });
     }
-    // Circles for under par only; gold number + single circle for skin winners; plain number otherwise
-    const ScoreCell = ({ score: raw, par, isSkin }) => {
+    if (rows.length === 0) return null;
+
+    // Two weights. `hair` rules the cells apart inside a nine — it has to be
+    // visible enough to follow a column down three rows on a phone, which is
+    // what the old borderless grid never let anybody do. `edge` frames the
+    // round and fences off the totals.
+    const hair = `1px solid ${K.bdr}${ALPHA.hair}`;
+    const edge = `1px solid ${K.bdr}`;
+
+    // Circles for under par; gold for a skin. A double circle is an eagle or
+    // better, which is the convention the round card and the paper scorecard
+    // both use.
+    const ScoreCell = ({ score: raw, par, isSkin, strokes }) => {
       // Same rule as the field card: a WD hole is a dash, not a 99.
       const score = raw > 0 && raw < WD_SCORE ? raw : 0;
-      if (!score) return <div style={{ width: "100%", aspectRatio: "1", display: "flex", alignItems: "center", justifyContent: "center" }}><span style={{ fontSize: FS.micro, color: K.t3 }}>–</span></div>;
+      if (!score) return <span style={{ fontSize: FS.micro, color: K.t3 }}>–</span>;
       const d = score - par;
       const isUnder = d < 0;
       const isDouble = d <= -2;
       const circleClr = isSkin ? K.gold : K.t2;
       return (
-        <div style={{ width: "100%", aspectRatio: "1", display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ position: "relative", width: "85%", aspectRatio: "1", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            {(isUnder || isSkin) && <div style={{ position: "absolute", inset: 0, borderRadius: "50%", border: `1.5px solid ${circleClr}` }} />}
-            {isDouble && <div style={{ position: "absolute", inset: 3, borderRadius: "50%", border: `1px solid ${circleClr}` }} />}
-            <span style={{ fontSize: FS.micro, fontWeight: 700, color: isSkin ? K.gold : K.t2, position: "relative", zIndex: 1 }}>{score}</span>
-          </div>
-        </div>
+        <span style={{ position: "relative", display: "inline-flex", alignItems: "center", justifyContent: "center", width: 19, height: 19 }}>
+          {(isUnder || isSkin) && <span style={{ position: "absolute", inset: 0, borderRadius: "50%", border: `1.5px solid ${circleClr}` }} />}
+          {isDouble && <span style={{ position: "absolute", inset: 3, borderRadius: "50%", border: `1px solid ${circleClr}` }} />}
+          {/* Strokes received, as the dots they are on a paper card. */}
+          {strokes > 0 && (
+            <span style={{ position: "absolute", top: -2, right: -4, display: "flex", gap: 1 }}>
+              {Array.from({ length: Math.min(strokes, 3) }, (_, k) => (
+                <span key={k} style={{ width: 2.5, height: 2.5, borderRadius: "50%", background: K.t3 }} />
+              ))}
+            </span>
+          )}
+          <span style={{ fontSize: FS.label, fontWeight: 700, color: isSkin ? K.gold : K.t2, position: "relative", zIndex: 1 }}>{score}</span>
+        </span>
       );
     };
+
     return (
-      <div style={{ padding: "8px 10px 6px", borderTop: `1px solid ${K.bdr}${ALPHA.tint}` }}>
-        {rows.map(({ r, scores, pars }) => {
-          const front9 = Array.from({length: 9}, (_, i) => i);
-          const back9  = Array.from({length: 9}, (_, i) => i + 9);
-          const HalfGrid = ({ holes }) => (
-            <div style={{ paddingBottom: 5, borderBottom: holes[0] === 0 ? `1px solid ${K.bdr}${ALPHA.tint}` : "none", marginBottom: holes[0] === 0 ? 5 : 0 }}>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(9, 1fr)", gap: 2 }}>
-                {holes.map(i => <div key={i} style={{ textAlign: "center", fontSize: FS.micro, fontWeight: 600, color: K.t2 }}>{i + 1}</div>)}
-                {holes.map(i => <div key={i} style={{ textAlign: "center", fontSize: FS.micro, color: K.t3, opacity: 0.45 }}>{pars[i] || ""}</div>)}
-                {holes.map(i => <ScoreCell key={i} score={scores[i]} par={pars[i] || 0} isSkin={skinSet.has(`${r}_${i}`)} />)}
-              </div>
-            </div>
-          );
+      <div style={{ padding: "8px 10px 10px", borderTop: hair }}>
+        {rows.map(({ r, scores, pars, courseName, strokes }) => {
+          const all = Array.from({ length: 18 }, (_, i) => i);
+          const round = tallyHoles(scores, pars, all);
+          const roundSkins = won.filter(s => s.winner.pid === p.id && s.round === r).length;
+
+          const Nine = ({ holes, label }) => {
+            const t = tallyHoles(scores, pars, holes);
+            // The totals column is held at a fixed width rather than a share
+            // of the table, so OUT and IN line up under one another whatever
+            // the hole numbers do.
+            const totCell = { textAlign: "center", padding: "3px 2px", borderLeft: edge, background: `${K.bdr}${ALPHA.wash}` };
+            return (
+              <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+                <colgroup>
+                  {holes.map((_, i) => <col key={i} />)}
+                  <col style={{ width: 34 }} />
+                </colgroup>
+                <tbody>
+                  <tr style={{ background: `${K.bdr}${ALPHA.wash}` }}>
+                    {holes.map(i => {
+                      const isSkin = skinSet.has(`${r}_${i}`);
+                      return (
+                        <td key={i} style={{
+                          textAlign: "center", fontSize: FS.micro, fontWeight: isSkin ? 800 : 700,
+                          color: isSkin ? K.gold : K.t2, padding: "3px 1px",
+                          borderLeft: i === holes[0] ? "none" : hair,
+                          borderBottom: hair,
+                          // A gold TICK under the number, not a gold cell and
+                          // not a full-width rule. Filling the cell makes
+                          // three skins on 7-8-9 run together into one block,
+                          // and an edge-to-edge underline does the same thing
+                          // one step later — the column definition this
+                          // rebuild exists for disappears exactly where the
+                          // card matters most. Inset to 55% and it reads as
+                          // three marks on three holes.
+                          ...(isSkin ? {
+                            backgroundImage: `linear-gradient(${K.gold}, ${K.gold})`,
+                            backgroundSize: "55% 2px",
+                            backgroundPosition: "center bottom",
+                            backgroundRepeat: "no-repeat",
+                          } : null),
+                        }}>{i + 1}</td>
+                      );
+                    })}
+                    <td style={{ ...totCell, fontSize: FS.micro, fontWeight: 800, color: K.t3, letterSpacing: 0.5, borderBottom: hair }}>{label}</td>
+                  </tr>
+                  <tr>
+                    {holes.map(i => (
+                      <td key={i} style={{
+                        textAlign: "center", fontSize: FS.micro, color: K.t3, padding: "2px 1px",
+                        borderLeft: i === holes[0] ? "none" : hair, borderBottom: hair,
+                      }}>{pars[i] || ""}</td>
+                    ))}
+                    <td style={{ ...totCell, fontSize: FS.micro, color: K.t3, borderBottom: hair }}>{t.par || ""}</td>
+                  </tr>
+                  <tr>
+                    {holes.map(i => (
+                      <td key={i} style={{ textAlign: "center", padding: "2px 1px", borderLeft: i === holes[0] ? "none" : hair }}>
+                        <ScoreCell score={scores[i]} par={pars[i] || 0} isSkin={skinSet.has(`${r}_${i}`)} strokes={strokes ? strokes[i] || 0 : 0} />
+                      </td>
+                    ))}
+                    <td style={{ ...totCell, fontSize: FS.label, fontWeight: 800, color: K.t1 }}>{t.gross || "–"}</td>
+                  </tr>
+                </tbody>
+              </table>
+            );
+          };
+
           return (
-            <div key={r} style={{ marginBottom: 8 }}>
-              <HalfGrid holes={front9} />
-              <HalfGrid holes={back9} />
+            <div key={r} style={{ border: edge, borderRadius: R.sm, overflow: "hidden", marginBottom: 8 }}>
+              {/* Which round, which course, what it was worth. The heading is
+                  the entire point of the rebuild — without it the grids below
+                  are eight interchangeable blocks of nine numbers. */}
+              <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 7px", background: `${K.bdr}${ALPHA.wash}`, borderBottom: edge }}>
+                <span style={{ fontSize: FS.micro, fontWeight: 800, color: K.acc, letterSpacing: 0.5, flexShrink: 0 }}>RD {r}</span>
+                <span style={{ fontSize: FS.micro, color: K.t3, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{courseName}</span>
+                {roundSkins > 0 && (
+                  <span style={{ fontSize: FS.micro, fontWeight: 800, color: K.gold, flexShrink: 0 }}>
+                    {roundSkins} SKIN{roundSkins !== 1 ? "S" : ""}
+                  </span>
+                )}
+                {/* A card still out on the course says so, rather than showing
+                    a total that looks like a finished round eight shots low. */}
+                {round.played < 18 && (
+                  <span style={{ fontSize: FS.micro, fontWeight: 700, color: K.t3, flexShrink: 0 }}>THRU {round.played}</span>
+                )}
+                <span style={{ fontSize: FS.label, fontWeight: 800, color: K.t1, flexShrink: 0 }}>{round.gross}</span>
+                {/* Under par is RED, the same rule the leaderboard total
+                    follows. A negative number in golf is red — teal here
+                    was the app saying "accent" where the game says "under
+                    par", and the two are not the same thing. */}
+                <span style={{ fontSize: FS.micro, fontWeight: 800, color: round.toPar < 0 ? K.under : K.t3, flexShrink: 0, minWidth: 18, textAlign: "right" }}>
+                  {toParStr(round.toPar)}
+                </span>
+              </div>
+              <Nine holes={Array.from({ length: 9 }, (_, i) => i)} label="OUT" />
+              <div style={{ height: 1, background: `${K.bdr}${ALPHA.line}` }} />
+              <Nine holes={Array.from({ length: 9 }, (_, i) => i + 9)} label="IN" />
             </div>
           );
         })}
+        {/* One line, once, at the foot of the whole card — the two circles are
+            not self-explanatory and a player asked to take them on trust will
+            read a birdie as a skin. */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, fontSize: FS.micro, color: K.t3, paddingTop: 2 }}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+            <span style={{ width: 11, height: 11, borderRadius: "50%", border: `1.5px solid ${K.gold}`, display: "inline-block" }} /> SKIN
+          </span>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+            <span style={{ width: 11, height: 11, borderRadius: "50%", border: `1.5px solid ${K.t2}`, display: "inline-block" }} /> UNDER PAR
+          </span>
+          {!grossMode && (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+              <span style={{ width: 3, height: 3, borderRadius: "50%", background: K.t3, display: "inline-block" }} /> STROKE
+            </span>
+          )}
+        </div>
       </div>
     );
   };
@@ -3506,7 +3780,7 @@ function BettingView({
               const scores = holeData[`${p.id}_${shownRound}`] || {};
               return (
                 <tr key={p.id} style={{ borderTop: cellBdr, background: pi % 2 === 1 ? `${K.bdr}${ALPHA.wash}` : "transparent" }}>
-                  <td className="wbc-name" style={{ fontSize: FS.label, fontWeight: 600, color: K.t1, padding: "3px 4px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  <td style={{ fontSize: FS.label, fontWeight: 600, color: K.t1, padding: "3px 4px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                     {p.name.split(" ")[0]}
                   </td>
                   {holes.map(i => {
@@ -3568,7 +3842,12 @@ function BettingView({
           away. */}
       <StickyTop>
         <SegmentedToggle
-          options={[["skins", "💰 Skins"], ["ctp", "🎯 CTP"], ["lownet", "🏅 Low Net"], ["market", "📈 Market"]]}
+          /* The same red dot the nav tab carries, on the sub-tab that can
+             actually do something about it. Getting a player as far as the
+             Betting tab and then leaving them to guess which of four games
+             wanted them is most of the way to not telling them at all. */
+          options={[["skins", "Skins"], ["ctp", "CTP"], ["lownet", "Low Net"],
+                    ["market", "Market", marketNudge ? K.danger : undefined]]}
           value={tab} onChange={setTab}
         />
       </StickyTop>
@@ -3598,19 +3877,37 @@ function BettingView({
               names underneath was just a longer way to ask it. */}
           {Object.keys(skinTotals).length > 0 && (
             <div style={{ background: K.card, borderRadius: R.lg, border: `1px solid ${K.bdr}`, marginBottom: 10, overflow: "hidden" }}>
-              <div style={{ padding: "8px 14px", borderBottom: `1px solid ${K.bdr}`, fontSize: FS.label, fontWeight: 700, color: K.gold, letterSpacing: 1 }}>SKINS LEADERS</div>
+              {/* The two trailing numbers get COLUMN HEADINGS rather than
+                  each row re-labelling itself. "4 skins / 3 skins / 1 skin"
+                  down a column is the same word printed six times to say
+                  something the heading says once — and the word was doing the
+                  work of telling you which number was which, so the heading
+                  frees the row to be a number. Widths match the cells below
+                  so the three line up. */}
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", borderBottom: `1px solid ${K.bdr}`, fontSize: FS.label, fontWeight: 700, color: K.gold, letterSpacing: 1 }}>
+                <span style={{ flex: 1, minWidth: 0 }}>SKINS LEADERS</span>
+                <span style={{ fontSize: FS.micro, color: K.t3, letterSpacing: 0.5, flexShrink: 0, width: 48, textAlign: "center" }}>COUNT</span>
+                <span style={{ fontSize: FS.micro, color: K.t3, letterSpacing: 0.5, flexShrink: 0, width: 66, textAlign: "center" }}>$</span>
+              </div>
               {Object.entries(skinTotals).sort((a, b) => b[1] - a[1]).map(([pid, count]) => {
                 const isExpanded = expandedPlayer === pid;
                 return (
                   <div key={pid} style={{ borderBottom: `1px solid ${K.bdr}${ALPHA.hair}` }}>
                     <div onClick={() => setExpandedPlayer(isExpanded ? null : pid)}
                       style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", cursor: "pointer" }}>
-                      <span style={{ fontSize: FS.micro, color: isExpanded ? K.acc : K.t3, transition: `transform ${MOTION}`, display: "inline-block", transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)", flexShrink: 0 }}>▶</span>
-                      <span className="wbc-name" style={{ flex: 1, minWidth: 0, fontSize: FS.body, fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {/* The leaderboard's chevron — a ▼ that turns over
+                          rather than a ▶ that swings, scaled below the type
+                          scale's floor because this is an affordance and not
+                          data — but LEADING the row rather than trailing the
+                          name. On the board it sits after the name because
+                          the name is the row; here the row is a name and two
+                          numbers, and the mark belongs where the eye starts. */}
+                      <span style={{ fontSize: FS.micro, flexShrink: 0, color: isExpanded ? K.acc : K.t2, transition: `transform ${MOTION}`, display: "inline-block", transform: `${isExpanded ? "rotate(180deg)" : "rotate(0)"} scale(0.75)` }}>▼</span>
+                      <span style={{ flex: 1, minWidth: 0, fontSize: FS.small, fontWeight: 700, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {players.find(p => p.id === pid)?.name || pid}
                       </span>
-                      <span style={{ fontSize: FS.body, fontWeight: 700, color: K.acc, flexShrink: 0 }}>{count} skin{count !== 1 ? "s" : ""}</span>
-                      <span style={{ fontSize: FS.small, color: K.t3, flexShrink: 0, minWidth: 56, textAlign: "right" }}>{money(count * perSkin)}</span>
+                      <span style={{ fontSize: FS.body, fontWeight: 700, color: K.acc, flexShrink: 0, width: 48, textAlign: "center" }}>{count}</span>
+                      <span style={{ fontSize: FS.small, color: K.t3, flexShrink: 0, width: 66, textAlign: "center" }}>{money(count * perSkin)}</span>
                     </div>
                     {isExpanded && renderInlineScorecard(pid)}
                   </div>
@@ -3638,21 +3935,83 @@ function BettingView({
                 {(ctpPot > 0 || user?.isDirector) && potCard({
                   label: "CTP POT", pot: ctpPot,
                   summary: `${ctpField.length} IN${(sideGames?.ctp?.amount || 0) > 0 ? ` · $${sideGames.ctp.amount} EACH` : ""}`,
-                  rightTop: `${ctpTags.length} of ${par3Count} taken · ${settledPins} final`,
+                  // Just the count of pins the tournament HAS, which is what
+                  // the pot divides by. How many are taken and how many are
+                  // final are both said better further down — on the pin
+                  // itself, where a taken hole carries a name and a FINAL
+                  // marker — and a running "2 of 7 taken" up here was a
+                  // progress bar for something nobody is waiting on.
+                  rightTop: `${par3Count} total`,
                   rightBottom: `${money(perPin)} / pin`,
                 })}
 
-                {/* Where skins print money, this prints the closest the player
-                    has been all week — the only other number a CTP has. */}
-                {leadersCard("CTP LEADERS", ctpLeaders.map(({ pid, count, best }) => ({
-                  key: pid,
-                  name: players.find(p => p.id === pid)?.name || pid,
-                  // The closest shot all week rides with the count rather than
-                  // in its own column: it is the tiebreak between two men on
-                  // the same number of pins, so it belongs beside that number.
-                  mid: `${count} CTP${count !== 1 ? "s" : ""}${best != null ? ` · ${best} ft` : ""}`,
-                  right: money(count * perPin),
-                })))}
+                {/* CTP LEADERS, with each row opening that player's own pins.
+                    NO DISTANCE ON THE ROW. It used to carry the closest shot
+                    of the week beside the count, which is one number standing
+                    for several — a man with four pins has four distances and
+                    the row printed his best as though it described all of
+                    them. The count and the money are what the row is for;
+                    every distance lives one tap down, on the pin it belongs
+                    to. */}
+                {ctpLeaders.length > 0 && (
+                  <div style={{ background: K.card, borderRadius: R.lg, border: `1px solid ${K.bdr}`, marginBottom: 10, overflow: "hidden" }}>
+                    {/* The same two headings the skins card carries, at the
+                        same widths, so the two leader boards in this tab read
+                        as one idea rather than two layouts. */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", borderBottom: `1px solid ${K.bdr}`, fontSize: FS.label, fontWeight: 700, color: K.gold, letterSpacing: 1 }}>
+                      <span style={{ flex: 1, minWidth: 0 }}>CTP LEADERS</span>
+                      <span style={{ fontSize: FS.micro, color: K.t3, letterSpacing: 0.5, flexShrink: 0, width: 48, textAlign: "center" }}>COUNT</span>
+                      <span style={{ fontSize: FS.micro, color: K.t3, letterSpacing: 0.5, flexShrink: 0, width: 66, textAlign: "center" }}>$</span>
+                    </div>
+                    {ctpLeaders.map(({ pid, count }) => {
+                      const isOpen = openCtpPlayer === pid;
+                      const mine = ctpTags
+                        .filter(t => t.playerId === pid)
+                        .sort((a, b) => a.round - b.round || a.hole - b.hole);
+                      return (
+                        <div key={pid} style={{ borderBottom: `1px solid ${K.bdr}${ALPHA.hair}` }}>
+                          <div onClick={() => setOpenCtpPlayer(isOpen ? null : pid)}
+                            style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", cursor: "pointer" }}>
+                            {/* Chevron first, then the name — the affordance
+                                sits where the eye starts the row rather than
+                                at the far end of a name it has to read past. */}
+                            <span style={{ fontSize: FS.micro, flexShrink: 0, color: isOpen ? K.acc : K.t2, transition: `transform ${MOTION}`, display: "inline-block", transform: `${isOpen ? "rotate(180deg)" : "rotate(0)"} scale(0.75)` }}>▼</span>
+                            <span style={{ flex: 1, minWidth: 0, fontSize: FS.small, fontWeight: 700, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {players.find(p => p.id === pid)?.name || pid}
+                            </span>
+                            {/* The count alone. The heading says what it is,
+                                so the row does not have to say "CTPs" once
+                                per line down the column. */}
+                            <span style={{ fontSize: FS.body, fontWeight: 700, color: K.acc, flexShrink: 0, width: 48, textAlign: "center" }}>{count}</span>
+                            <span style={{ fontSize: FS.small, color: K.t3, flexShrink: 0, width: 66, textAlign: "center" }}>{money(count * perPin)}</span>
+                          </div>
+                          {isOpen && (
+                            <div style={{ padding: "2px 14px 8px", borderTop: `1px solid ${K.bdr}${ALPHA.tint}` }}>
+                              {mine.map(t => (
+                                <div key={`${t.round}_${t.hole}`} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0" }}>
+                                  <span style={{ fontSize: FS.label, fontWeight: 700, color: K.t3, flexShrink: 0, minWidth: 34 }}>Rd {t.round}</span>
+                                  <span style={{ fontSize: FS.label, color: K.t2, flex: 1, minWidth: 0 }}>Hole {t.hole}</span>
+                                  {/* The distance, here and nowhere else. A pin
+                                      tagged without one prints a dash rather
+                                      than a zero — nobody paced it, which is
+                                      not the same as it being on the lip. */}
+                                  <span style={{ fontSize: FS.small, fontWeight: 800, color: t.distanceFt != null ? K.warn : K.t3, flexShrink: 0, minWidth: 44, textAlign: "right" }}>
+                                    {t.distanceFt != null ? `${t.distanceFt} ft` : "–"}
+                                  </span>
+                                  {/* A pin in a round still being played can
+                                      still be taken off him. */}
+                                  <span style={{ fontSize: FS.micro, fontWeight: 800, letterSpacing: 0.4, flexShrink: 0, minWidth: 46, textAlign: "right", color: roundSettled(t.round) ? K.acc : K.t3 }}>
+                                    {roundSettled(t.round) ? "FINAL" : "PENDING"}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
 
                 {roundPills(ctpShownRound, setCtpRound)}
 
@@ -3693,7 +4052,7 @@ function BettingView({
                               </div>
                               {winner ? (
                                 <span style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
-                                  <span className="wbc-name" style={{ fontSize: FS.body, fontWeight: 700, color: K.acc, whiteSpace: "nowrap" }}>🎯 {winner.name}</span>
+                                  <span style={{ fontSize: FS.body, fontWeight: 700, color: K.acc, whiteSpace: "nowrap" }}>🎯 {winner.name}</span>
                                   {dist && <span style={{ fontSize: FS.small, fontWeight: 800, color: K.warn }}>{dist}</span>}
                                 </span>
                               ) : <span style={{ fontSize: FS.small, color: K.t3 }}>No winner yet</span>}
@@ -3805,68 +4164,200 @@ function BettingView({
           {/* Every round on one screen rather than behind pills: there are
               four of them, each is one line, and the question this tab
               answers — who took which day — is a comparison across them.
-              No leaders card above it: with four rounds the totals are a
-              sum anybody can do off these rows, and a second card repeating
-              the same names was a longer way to say it.
 
-              And no rules under it. The rows say what happened — a name, a
-              net, a share, "ea" when it was split — and the two rules worth
-              knowing are visible in what they produce: a tie prints two
-              names and half the money each, and a round nobody has finished
-              prints that instead of a leader. See lib/sideGames lowNetRounds
-              for why a card walked in early does not count. */}
+              A LEDGER, not a list. Gross, strokes and net each get a column
+              and line up down the page, which is what turns "who won Rd 2"
+              into "Rd 2 was tied off a 78 and an 85" without anybody doing
+              arithmetic. The old row stacked those three numbers into a grey
+              sub-line under the name, where they could not be compared with
+              the round above.
+
+              A tie is simply a second row under the same round number,
+              carrying that man's OWN gross and strokes — two players tie on
+              the net off different cards, so the single "2 tied on 71 net"
+              the old row printed was true of the pair and a lie about each
+              of them. */}
           <div style={{ background: K.card, borderRadius: R.lg, border: `1px solid ${K.bdr}`, overflow: "hidden" }}>
             <div style={{ display: "flex", padding: "8px 14px", borderBottom: `1px solid ${K.bdr}`, fontSize: FS.label, fontWeight: 700, color: K.gold, letterSpacing: 1 }}>
               <span style={{ flex: 1 }}>BY ROUND</span>
-              <span style={{ color: K.t3 }}>NET · PAYS</span>
+              <span style={{ color: K.t3 }}>{lowNetRows.filter(r => r.decided).length} OF {roundList.length}</span>
             </div>
-            {lowNetRows.map(r => {
-              const settled = roundSettled(r.round);
-              const share = r.winners.length > 0 ? lowNetPerRound / r.winners.length : 0;
-              return (
-                <div key={r.round} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 14px", borderBottom: `1px solid ${K.bdr}${ALPHA.hair}` }}>
-                  <span style={{ fontSize: FS.label, fontWeight: 800, color: K.t3, width: 32, flexShrink: 0 }}>Rd {r.round}</span>
-                  {r.decided ? (
-                    <>
-                      <span style={{ flex: 1, minWidth: 0, fontSize: FS.small, fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {r.winners.map(w => w.name).join(", ")}
-                        {/* A day still being played can change hands as the
-                            last group comes in, so it says so rather than
-                            reading like a result. */}
-                        {!settled && <span style={{ color: K.warn, fontWeight: 700 }}> · still out</span>}
-                        {/* The gross it came off, so the number can be
-                            checked against the card rather than taken on
-                            trust — this is the line that gets argued about.
-                            Only for a lone winner: two men tie on the NET,
-                            off different grosses and different strokes, so
-                            one gross printed under both names is a sum that
-                            does not work for either of them. */}
-                        <span style={{ display: "block", fontSize: FS.label, color: K.t3, fontWeight: 600 }}>
-                          {r.winners.length === 1
-                            ? `${r.winners[0].gross} gross · ${r.winners[0].strokes} stroke${r.winners[0].strokes !== 1 ? "s" : ""}`
-                            : `${r.winners.length} tied on ${r.winners[0].netScore} net`}
+            <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+              <colgroup>
+                {/* The four score columns are held at near-equal widths so
+                    the block of numbers reads as a block. WINNER takes the
+                    slack; PAYS is the widest because "$15.63" is the longest
+                    string on the row. */}
+                <col style={{ width: 34 }} />
+                <col />
+                <col style={{ width: 36 }} />
+                <col style={{ width: 32 }} />
+                <col style={{ width: 34 }} />
+                <col style={{ width: 32 }} />
+                <col style={{ width: 54 }} />
+              </colgroup>
+              <thead>
+                <tr style={{ background: `${K.bdr}${ALPHA.wash}` }}>
+                  {[["RD", "left"], ["WINNER", "left"], ["Gross", "right"], ["CH", "right"], ["NET", "right"], ["±", "right"], ["PAYS", "right"]].map(([label, align], i, all) => (
+                    <th key={label} style={{
+                      textAlign: align, fontSize: FS.micro, fontWeight: 700, letterSpacing: 0.5, color: K.t3,
+                      padding: "5px 4px", borderBottom: `1px solid ${K.bdr}${ALPHA.line}`,
+                      paddingLeft: i === 0 ? 10 : 4, paddingRight: i === all.length - 1 ? 12 : 4,
+                    }}>{label}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {lowNetRows.map((r, ri) => {
+                  const settled = roundSettled(r.round);
+                  const share = r.winners.length > 0 ? lowNetPerRound / r.winners.length : 0;
+                  const courseName = roundSetup(r.round).course?.name || "";
+                  const open = openNetRound === r.round;
+                  const toggle = () => setOpenNetRound(open ? null : r.round);
+                  // Banded by ROUND rather than by row, so a tie's two lines
+                  // read as one day rather than as two separate results.
+                  const band = ri % 2 === 1 ? `${K.bdr}${ALPHA.wash}` : "transparent";
+                  const cell = (extra = {}) => ({
+                    padding: "7px 4px", textAlign: "right", fontSize: FS.small, fontWeight: 600,
+                    color: K.t2, borderTop: `1px solid ${K.bdr}${ALPHA.hair}`, ...extra,
+                  });
+                  // ── The round's own header strip ──
+                  // Round, chevron and COURSE, on a line of their own above
+                  // the winner. The course used to sit under the winner's
+                  // name, which read as though it belonged to him rather than
+                  // to the day — and on a tie it could only be printed under
+                  // one of the two men who played it.
+                  const headerRow = (
+                    <tr key={`${r.round}_h`} onClick={toggle} style={{ background: `${K.bdr}${ALPHA.wash}`, cursor: "pointer" }}>
+                      <td style={cell({ textAlign: "left", paddingLeft: 10, padding: "5px 4px 5px 10px" })}>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+                          <span style={{ fontSize: FS.label, fontWeight: 800, color: open ? K.acc : K.t3 }}>{r.round}</span>
+                          {/* The leaderboard's chevron, same as everywhere. */}
+                          <span style={{ fontSize: FS.micro, flexShrink: 0, color: open ? K.acc : K.t2, transition: `transform ${MOTION}`, display: "inline-block", transform: `${open ? "rotate(180deg)" : "rotate(0)"} scale(0.75)` }}>▼</span>
                         </span>
-                      </span>
-                      {/* The net as a SCORE, which is how a low net is read
-                          out, with the to-par under it — the figure the
-                          leaderboard ranks on and the one that decided the
-                          round. */}
-                      <span style={{ textAlign: "right", flexShrink: 0 }}>
-                        <span style={{ display: "block", fontSize: FS.body, fontWeight: 800, color: K.acc }}>{r.winners[0].netScore}</span>
-                        <span style={{ display: "block", fontSize: FS.label, color: K.t3, fontWeight: 700 }}>{fmtPar(r.net)}</span>
-                      </span>
-                      <span style={{ fontSize: FS.small, color: K.t3, flexShrink: 0, minWidth: 64, textAlign: "right" }}>
-                        {money(share)}{r.winners.length > 1 ? " ea" : ""}
-                      </span>
-                    </>
-                  ) : (
-                    <span style={{ flex: 1, fontSize: FS.small, color: K.t3 }}>
-                      {roundSetup(r.round).course ? "Nobody has finished yet" : "No course set"}
-                    </span>
-                  )}
-                </div>
-              );
-            })}
+                      </td>
+                      <td colSpan={6} style={cell({ textAlign: "left", padding: "5px 12px 5px 4px", fontSize: FS.micro, fontWeight: 700, letterSpacing: 0.4, color: K.t3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })}>
+                        {courseName || "No course set"}
+                      </td>
+                    </tr>
+                  );
+                  // The whole field for the day, lowest net first. It answers
+                  // the question the winner's name provokes — by how much —
+                  // and on a round still being played it is the only thing
+                  // this tab can say at all.
+                  // The rest of the field, starting at second. The winners
+                  // are already printed above in full, so repeating them at
+                  // the head of the list was the same two lines twice — the
+                  // question this opens is who ELSE was out there.
+                  const fieldRows = !open ? [] : lowNetRoundField({ players: lowNetField, round: r.round, lineFor })
+                    .filter(f => !r.winners.some(w => w.pid === f.pid))
+                    .map(f => {
+                    const sub = (extra = {}) => cell({
+                      fontSize: FS.label, borderTop: "none", color: K.t3,
+                      background: `${K.bdr}${ALPHA.wash}`, padding: "5px 4px", ...extra,
+                    });
+                    return (
+                      <tr key={`${r.round}_f_${f.pid}`}>
+                        <td style={sub({ paddingLeft: 10 })} />
+                        <td style={sub({ textAlign: "left", color: K.t2, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })}>
+                          {f.name}
+                        </td>
+                        <td style={sub()}>{f.gross}</td>
+                        <td style={sub()}>{f.strokes}</td>
+                        {/* A card still out has a gross and no round. Printing
+                            its net would rank a man on the 14th against men
+                            who have signed — the same thing lowNetRounds
+                            refuses to do. */}
+                        <td style={sub({ color: f.complete ? (f.net < 0 ? K.under : K.t2) : K.t3, fontWeight: 700 })}>
+                          {f.complete ? f.netScore : "–"}
+                        </td>
+                        {/* A card still out takes BOTH trailing cells for its
+                            standing. "THRU 16" does not fit the PAYS column
+                            alone and wrapped onto two lines; the ± beside it
+                            is empty on these rows anyway. */}
+                        {f.complete ? (
+                          <>
+                            <td style={sub({ color: f.net < 0 ? K.under : K.t3, fontWeight: 700 })}>{fmtPar(f.net)}</td>
+                            <td style={sub({ paddingRight: 12 })} />
+                          </>
+                        ) : (
+                          <td colSpan={2} style={sub({ paddingRight: 12, fontSize: FS.micro, fontWeight: 700, letterSpacing: 0.3, whiteSpace: "nowrap" })}>
+                            {f.wd ? "WD" : `THRU ${f.thru}`}
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  });
+                  // A day the whole field tied, or one only the winner
+                  // finished, opens onto nothing — which looks broken rather
+                  // than empty unless it says so.
+                  if (open && fieldRows.length === 0) fieldRows.push(
+                    <tr key={`${r.round}_f_none`}>
+                      <td style={cell({ paddingLeft: 10, borderTop: "none", background: `${K.bdr}${ALPHA.wash}`, padding: "5px 4px 5px 10px" })} />
+                      <td colSpan={6} style={cell({ textAlign: "left", borderTop: "none", background: `${K.bdr}${ALPHA.wash}`, padding: "5px 12px 5px 4px", fontSize: FS.label, color: K.t3 })}>
+                        Nobody else has posted
+                      </td>
+                    </tr>,
+                  );
+
+                  if (!r.decided) return [
+                    headerRow,
+                    <tr key={r.round} style={{ background: band }}>
+                      <td style={cell({ paddingLeft: 10 })} />
+                      <td colSpan={6} onClick={toggle} style={cell({ textAlign: "left", color: K.t3, paddingRight: 12, cursor: "pointer" })}>
+                        {(() => {
+                          const tee = teeWindowFor(r.round);
+                          if (tee) return (
+                            <>
+                              <span style={{ fontSize: FS.micro, fontWeight: 800, letterSpacing: 0.5, color: K.t3 }}>TEE </span>
+                              <span style={{ color: K.t2, fontWeight: 700 }}>{tee}</span>
+                            </>
+                          );
+                          // No sheet drawn yet, so there is nothing to say
+                          // except that the day is still empty.
+                          return roundSetup(r.round).course ? "Nobody has finished yet" : "No scores yet";
+                        })()}
+                      </td>
+                    </tr>,
+                    ...fieldRows,
+                  ];
+
+                  return [
+                    headerRow,
+                    ...r.winners.map((w, wi) => (
+                      <tr key={`${r.round}_${w.pid}`} style={{ background: band }}>
+                        {/* The round number lives on the header strip above,
+                            so the winner rows start at the name — and a tie's
+                            two lines are simply two names under one day. */}
+                        <td style={cell({ paddingLeft: 10, borderTop: wi > 0 ? "none" : undefined })} />
+                        <td onClick={toggle} style={cell({ textAlign: "left", fontSize: FS.small, fontWeight: 700, color: K.t1, borderTop: wi > 0 ? "none" : undefined, cursor: "pointer", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })}>
+                          {w.name}
+                        </td>
+                        <td style={cell({ borderTop: wi > 0 ? "none" : undefined })}>{w.gross}</td>
+                        <td style={cell({ borderTop: wi > 0 ? "none" : undefined })}>{w.strokes}</td>
+                        {/* The net as a SCORE — how a low net gets read out in
+                            a car park — and the to-par beside it. BOTH take the
+                            under-par red: a 67 on a par 72 is a number under
+                            par whether it is written as 67 or as −5, and
+                            colouring only one of them made the pair look like
+                            two different facts. */}
+                        <td style={cell({ fontSize: FS.body, fontWeight: 800, color: w.net < 0 ? K.under : K.t1, borderTop: wi > 0 ? "none" : undefined })}>{w.netScore}</td>
+                        <td style={cell({ fontWeight: 800, color: w.net < 0 ? K.under : K.t1, borderTop: wi > 0 ? "none" : undefined })}>{fmtPar(w.net)}</td>
+                        {/* A day still being played can change hands as the
+                            last group comes in, so the money is held rather
+                            than printed as though it had been paid. */}
+                        <td style={cell({ paddingRight: 12, borderTop: wi > 0 ? "none" : undefined })}>
+                          {settled
+                            ? money(share)
+                            : <span style={{ fontSize: FS.micro, fontWeight: 800, letterSpacing: 0.5, color: K.warn }}>OUT</span>}
+                        </td>
+                      </tr>
+                    )),
+                    ...fieldRows,
+                  ];
+                })}
+              </tbody>
+            </table>
           </div>
 
         </div>
@@ -3935,7 +4426,7 @@ function BettingView({
                           borderBottom: `1px solid ${K.bdr}${ALPHA.hair}`,
                           background: r.placed === 0 ? K.warn + ALPHA.wash : "transparent",
                         }}>
-                        <span className="wbc-name" style={{ minWidth: 0, fontSize: FS.small, fontWeight: 600, color: r.placed > 0 ? K.t1 : K.t2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        <span style={{ minWidth: 0, fontSize: FS.small, fontWeight: 600, color: r.placed > 0 ? K.t1 : K.t2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           {r.name}
                         </span>
                         {cell(r.opening, openFull, r.opening > 0)}
@@ -3963,24 +4454,39 @@ function BettingView({
                 </div>
                 <div style={{ fontSize: FS.small, fontWeight: 700, color: K.t1, marginTop: 2 }}>{w.label}</div>
                 <div style={{ fontSize: FS.label, color: w.open ? K.acc : K.t3, marginTop: 2, lineHeight: 1.4 }}>
-                  {w.note}
-                  {/* The deadline itself. "Open until the first tee time" is
-                      not a time anybody can act on. */}
+                  {/* A running clock in place of the note while there is one to
+                      run. "Open until the first tee time" is not something a
+                      man deciding whether to think it over can act on; "12:04"
+                      is. Once it has rung, the note takes the line back and
+                      says why the window is shut. */}
+                  {w.key === "opening" && bell ? "Closes in" : w.note}
+                  {w.key === "opening" && bell && (
+                    <span style={{
+                      display: "block", marginTop: 1,
+                      fontSize: FS.body, fontWeight: 800, letterSpacing: 0.5,
+                      fontVariantNumeric: "tabular-nums",
+                      // The last hour turns the clock amber. By then it is not
+                      // information any more, it is a deadline.
+                      color: bell.urgent ? K.warn : K.acc,
+                    }}>{bell.label}</span>
+                  )}
+                  {/* The deadline itself. The countdown says how long; this
+                      says when, which is the one a player checks against the
+                      tee sheet on the noticeboard. */}
                   {w.key === "opening" && w.at != null && (
                     <span style={{ display: "block", color: K.t3 }}>
                       First tee {minutesToTimeStr(new Date(w.at).getHours() * 60 + new Date(w.at).getMinutes())}
                     </span>
                   )}
                 </div>
-                {/* The halfway window is a second buy-in, so its chip has to
-                    say what it costs. Without that line it reads as ten free
-                    shares for the field — and since nothing is prepaid, the
-                    only thing standing between a player and a debt they did
-                    not mean to take on is this sentence. */}
+                {/* How many are in, and nothing else. The price used to lead
+                    this line — the halfway window is a second buy-in and
+                    nothing is prepaid — but the book itself says what it
+                    costs before the first tap, which is the place a player
+                    is actually deciding. */}
                 {w.key === "mid" && (
                   <div style={{ fontSize: FS.label, color: K.t3, marginTop: 4, lineHeight: 1.4 }}>
-                    {rebuyAmount > 0 ? `$${rebuyAmount} if you place any` : "No rebuy price set"}
-                    {" · "}{rebuyField.length} in so far
+                    {rebuyField.length} in so far
                   </div>
                 )}
               </div>
@@ -4070,13 +4576,14 @@ function BettingView({
               <div style={{ display: "flex", flexDirection: "column" }}>
                 {players.map(p => {
                   const n = sharesOn(draftLots, p.id);
-                  const held = sharesOn(allLots(bookBet), p.id);
                   return (
                     <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: `1px solid ${K.bdr}${ALPHA.hair}` }}>
+                      {/* The name alone. It used to carry a "· 4 held" tail
+                          repeating what the accent number beside it already
+                          says, and the name brightening from t3 to t1 is the
+                          same fact a third time. */}
                       <span style={{ flex: 1, minWidth: 0, fontSize: FS.small, fontWeight: 600, color: n > 0 ? K.t1 : K.t3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {/* Name only — the share count beside it is not a name. */}
-                        <span className="wbc-name">{p.name}</span>
-                        {held > 0 && <span style={{ color: K.t3, fontWeight: 600 }}> · {held} held</span>}
+                        {p.name}
                       </span>
                       <Btn variant="secondary" size="sm" disabled={!canPlace || n <= 0}
                         style={{ padding: "3px 10px", minWidth: 32 }}
@@ -4106,6 +4613,14 @@ function BettingView({
                       <Btn variant="secondary" size="sm" disabled={!canPlace || remaining <= 0}
                         style={{ padding: "3px 10px", minWidth: 32 }}
                         onClick={() => bump(p.id, 1)}>+</Btn>
+                      {/* Five at a time. Twenty shares in fives is four taps
+                          where the single stepper wanted twenty, and 5/10/15/20
+                          is how the field actually talks about a book. It
+                          clamps through the same setLotShares as everything
+                          else, so tapping it with three left adds three. */}
+                      <Btn variant="secondary" size="sm" disabled={!canPlace || remaining <= 0}
+                        style={{ padding: "3px 8px", minWidth: 32 }}
+                        onClick={() => bump(p.id, 5)}>+5</Btn>
                     </div>
                   );
                 })}
@@ -4113,7 +4628,7 @@ function BettingView({
 
               {canPlace && (
                 <div style={{ marginTop: 10 }}>
-                  <Btn block disabled={!dirty} onClick={commitBook}>{dirty ? "Place shares" : "Placed"}</Btn>
+                  <Btn block disabled={!dirty} onClick={commitBook}>{dirty ? "Wager shares" : "Wagered"}</Btn>
                   {/* The two ways back, under the commit rather than beside
                       it: three block buttons do not fit a phone, and these
                       are the undo pair, not alternatives to saving.
@@ -4154,7 +4669,7 @@ function BettingView({
                   const isLeader = r.pid === winnerId;
                   return (
                     <div key={r.pid} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", borderBottom: `1px solid ${K.bdr}${ALPHA.hair}`, background: isLeader ? K.accGlow : "transparent" }}>
-                      <span className="wbc-name" style={{ flex: 1, minWidth: 0, fontSize: FS.body, fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <span style={{ flex: 1, minWidth: 0, fontSize: FS.body, fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {isLeader && <span style={{ color: K.gold }}>🏆 </span>}{r.name}
                       </span>
                       {/* The share of the market, as a bar rather than a second
@@ -4210,8 +4725,8 @@ function BettingView({
                     <div onClick={() => setOpenHolder(isOpen ? null : h.pid)}
                       style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 4px", cursor: "pointer" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-                        <span style={{ fontSize: FS.micro, color: isOpen ? K.acc : K.t3, transition: `transform ${MOTION}`, display: "inline-block", transform: isOpen ? "rotate(90deg)" : "rotate(0deg)" }}>▶</span>
-                        <span className="wbc-name" style={{ fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.name}</span>
+                        <span style={{ fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.name}</span>
+                        <span style={{ fontSize: FS.micro, flexShrink: 0, color: isOpen ? K.acc : K.t2, transition: `transform ${MOTION}`, display: "inline-block", transform: `${isOpen ? "rotate(180deg)" : "rotate(0)"} scale(0.75)` }}>▼</span>
                       </div>
                       <span style={{ color: K.acc, fontWeight: 800, flexShrink: 0 }}>{h.shares} sh</span>
                     </div>
@@ -4251,8 +4766,76 @@ function BettingView({
 function GroupsView({ players, round, tRounds, courses, pairingsData, teeTimesData, getPlayerTee, user }) {
   const tr = tRounds.find(t => t.round_number === round);
   const course = tr ? courses.find(c => c.id === tr.course_id) : null;
-  const groups = (pairingsData || {})[round] || [];
+  const groups = useMemo(() => (pairingsData || {})[round] || [], [pairingsData, round]);
   const roundTeeTimes = (teeTimesData || {})[round] || [];
+
+  // The draw is a handful of cards and it used to sit at FS.small with a third
+  // of the tab empty below it. So the size comes from the space: measure what
+  // the stack has been given and take the biggest rung that fits it — the same
+  // bargain the leaderboard strikes, and the one the type scale is written for.
+  //
+  // Only the players actually on a card count towards the shape, because that
+  // is what gets drawn: a pairing pointing at a player who has left the roster
+  // renders nothing, and counting it would buy height for a row that is not
+  // there and step the whole tab down a rung to pay for it.
+  const stackRef = useRef(null);
+  const [box, setBox] = useState({ h: 0, w: 0 });
+  const drawn = useMemo(
+    () => groups.map(grp => grp.map(pid => players.find(p => p.id === pid)).filter(Boolean)),
+    [groups, players],
+  );
+  const sizes = useMemo(() => drawn.map(grp => grp.length), [drawn]);
+  // Re-measure when the shape of the draw changes, not when its identity does:
+  // a Firestore snapshot that rewrites the same four foursomes is not a reason
+  // to read the layout again. The names ride along because the longest one is
+  // the other half of the fit, and a substitution can change it.
+  const drawShape = `${sizes.join(",")}|${drawn.flat().map(p => p.name).join("|")}`;
+  // useLayoutEffect, not useEffect: this measures and then restyles from the
+  // measurement, so running it after paint shows one frame at the wrong size.
+  // The stack is flex: 1 against a floor, so its height is the space on offer
+  // and does NOT move when the rung it feeds changes — no measure/grow loop.
+  useLayoutEffect(() => {
+    const measure = () => {
+      const el = stackRef.current;
+      if (!el) return;
+      setBox(prev => (prev.h === el.clientHeight && prev.w === el.clientWidth
+        ? prev
+        : { h: el.clientHeight, w: el.clientWidth }));
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [drawShape]);
+
+  // The longest name on the stack, in pixels per pixel of font size — the other
+  // half of the fit. Canvas rather than the DOM because a name only overflows
+  // once it has been drawn too big, and the point is not to draw it too big.
+  //
+  // Measured at 100px and divided down, so one measurement covers every rung.
+  // toUpperCase() because the app paints names in capitals and text-transform
+  // is a CSS thing the canvas knows nothing about — measure the string the
+  // browser will draw, not the one Firestore stores. And measured a second
+  // time on fonts.ready, because Montserrat arrives over the network and the
+  // fallback it is measured against until then is the narrower of the two,
+  // which is the direction that truncates.
+  const [nameWidthPerPx, setNameWidthPerPx] = useState(0);
+  useLayoutEffect(() => {
+    const names = drawn.flat().map(p => p.name);
+    if (names.length === 0) return undefined;
+    let live = true;
+    const measureNames = () => {
+      const ctx = document.createElement("canvas").getContext("2d");
+      if (!ctx || !live) return;
+      ctx.font = `600 100px ${FONT}`;
+      setNameWidthPerPx(nameWidthCeiling(names.map(n => ctx.measureText(n.toUpperCase()).width / 100)));
+    };
+    measureNames();
+    if (document.fonts) document.fonts.ready.then(measureNames);
+    return () => { live = false; };
+  }, [drawn]);
+
+  const fit = fitPairings(box.h, sizes, box.w, nameWidthPerPx);
+  const { rowLine, headLine } = rungLines(fit);
 
   const getTeeColor = (p) => {
     if (!course) return "#e8e8e8";
@@ -4266,39 +4849,44 @@ function GroupsView({ players, round, tRounds, courses, pairingsData, teeTimesDa
   };
 
   return (
-    <div>
+    <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
       <div style={{ marginBottom: 14 }}>
         <h2 style={{ fontFamily: "'Montserrat', sans-serif", fontSize: FS.title, margin: 0, fontWeight: 800, display: "inline" }}>Round {round}</h2>
         {course && <span style={{ fontSize: FS.small, color: K.t3, marginLeft: 10 }}>{course.name} · Par {course.par}</span>}
       </div>
       {groups.length > 0 ? (
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {groups.map((grp, gi) => {
+        // The stack takes the rest of the tab whatever it holds — that height
+        // IS the input to the fit above. overflowY stays auto as a backstop:
+        // a draw too deep for even the smallest rung scrolls rather than
+        // losing its last group off the bottom.
+        <div ref={stackRef} style={{ display: "flex", flexDirection: "column", gap: CARD_GAP, flex: 1, minHeight: 0, overflowY: "auto" }}>
+          {drawn.map((rows, gi) => {
             const teeTime = roundTeeTimes[gi];
             return (
-            <div key={gi} style={{ background: K.card, borderRadius: R.md, border: `1px solid ${K.bdr}`, overflow: "hidden" }}>
-              <div style={{ padding: "6px 12px", fontSize: FS.label, fontWeight: 700, color: K.acc, borderBottom: `1px solid ${K.bdr}`, background: K.accGlow, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div key={gi} style={{ background: K.card, borderRadius: R.md, border: `1px solid ${K.bdr}`, overflow: "hidden", flexShrink: 0 }}>
+              <div style={{ padding: `${fit.headPad}px 12px`, fontSize: fit.head, lineHeight: `${headLine}px`, fontWeight: 700, color: K.acc, borderBottom: `1px solid ${K.bdr}`, background: K.accGlow, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <span>{teeTime || `Group ${gi + 1}`}</span>
-                {teeTime && <span style={{ fontSize: FS.micro, fontWeight: 500, color: K.t3 }}>Group {gi + 1}</span>}
+                {teeTime && <span style={{ fontSize: fit.headSub, fontWeight: 500, color: K.t3 }}>Group {gi + 1}</span>}
               </div>
-              {grp.map((pid, pi) => {
-                const p = players.find(pl => pl.id === pid);
-                if (!p) return null;
-                const ch = course ? (() => { const tee = getPlayerTee(round, pid, course); return calcCH(p.handicap_index, tee?.slope || course.slope, tee?.rating || course.rating, tee?.par || course.par); })() : 0;
+              {rows.map((p, pi) => {
+                const ch = course ? (() => { const tee = getPlayerTee(round, p.id, course); return calcCH(p.handicap_index, tee?.slope || course.slope, tee?.rating || course.rating, tee?.par || course.par); })() : 0;
                 const teeName = getTeeName(p);
                 const teeClr = getTeeColor(p);
-                const isMe = pid === user.id;
+                const isMe = p.id === user.id;
                 return (
-                  <div key={pid} style={{ padding: "5px 12px", display: "grid", gridTemplateColumns: "5fr 1.6fr 2.4fr 2fr", alignItems: "center", borderBottom: pi < grp.length - 1 ? `1px solid ${K.bdr}${ALPHA.wash}` : "none", background: isMe ? K.t2 + ALPHA.wash : "transparent" }}>
-                    <span className="wbc-name" style={{ fontWeight: 600, fontSize: FS.small, color: isMe ? K.gold : K.t1 }}>{p.name}</span>
-                    <span style={{ fontSize: FS.label, fontWeight: 600, color: K.t2, textAlign: "center" }}>{p.handicap_index}</span>
-                    <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: FS.label, fontWeight: 600, color: isDarkTee(teeClr) ? "#9ca3af" : isLightTee(teeClr) ? K.t3 : teeClr }}>
+                  <div key={p.id} style={{ padding: `${fit.rowPad}px 12px`, lineHeight: `${rowLine}px`, display: "grid", gridTemplateColumns: "5fr 1.6fr 2.4fr 2fr", alignItems: "center", borderBottom: pi < rows.length - 1 ? `1px solid ${K.bdr}${ALPHA.wash}` : "none", background: isMe ? K.t2 + ALPHA.wash : "transparent" }}>
+                    {/* The name is the one cell that can outgrow its column as
+                        the rung climbs, so it ellipses rather than wrapping —
+                        a wrapped row is a row taller than the fit paid for. */}
+                    <span style={{ fontWeight: 600, fontSize: fit.name, color: isMe ? K.gold : K.t1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
+                    <span style={{ fontSize: fit.cell, fontWeight: 600, color: K.t2, textAlign: "center" }}>{p.handicap_index}</span>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: fit.cell, fontWeight: 600, minWidth: 0, overflow: "hidden", whiteSpace: "nowrap", color: isDarkTee(teeClr) ? "#9ca3af" : isLightTee(teeClr) ? K.t3 : teeClr }}>
                       {teeName && <>
-                        <TeeColorSwatch color={teeClr} name={teeName} size={7} />
+                        <TeeColorSwatch color={teeClr} name={teeName} size={fit.swatch} />
                         {teeName}
                       </>}
                     </span>
-                    <span style={{ color: K.t2, fontSize: FS.label, fontWeight: 500, textAlign: "right" }}>{course ? `CH ${ch}` : "–"}</span>
+                    <span style={{ color: K.t2, fontSize: fit.cell, fontWeight: 500, textAlign: "right", whiteSpace: "nowrap" }}>{course ? `CH ${ch}` : "–"}</span>
                   </div>
                 );
               })}
@@ -5145,7 +5733,7 @@ function PlayerRow({ player, isLast, onOpen, isDirector, account }) {
       padding: "10px 14px", display: "flex", alignItems: "center", gap: 8,
     }}>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div className="wbc-name" style={{ fontSize: FS.body, fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <div style={{ fontSize: FS.body, fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {/* 🔗 = this name is claimed by a signed-in account. It replaces the
               "Signed in" list that used to sit in the Event tab restating the
               roster: the question it answered — who can actually post a score —
@@ -5346,7 +5934,7 @@ function PlayerEditor({ editing, set, onClose, tPlayers, players, memberships, c
           }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: FS.small, fontWeight: 700, color: K.acc, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                Returning · <span className="wbc-name">{editing.linked.name}</span>
+                Returning · {editing.linked.name}
               </div>
               <div style={{ fontSize: FS.micro, color: K.t3, marginTop: 1 }}>
                 Keeps their career, their index and their sign-in.
@@ -5367,7 +5955,7 @@ function PlayerEditor({ editing, set, onClose, tPlayers, players, memberships, c
                   padding: "8px 10px", display: "flex", alignItems: "center", gap: 8, fontFamily: FONT,
                 }}>
                   <span style={{ flex: 1, minWidth: 0 }}>
-                    <span className="wbc-name" style={{ display: "block", fontSize: FS.small, fontWeight: 700, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    <span style={{ display: "block", fontSize: FS.small, fontWeight: 700, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {r.name}
                     </span>
                     <span style={{ display: "block", fontSize: FS.micro, color: K.t3, marginTop: 1 }}>
@@ -6311,7 +6899,7 @@ function AdminView({ activePlayers, rosterPlayers, sideGames, onUpdateSideGames,
                 return (
                   <div key={p.id} style={{ display: "grid", gridTemplateColumns: "32px 1fr 56px 56px", alignItems: "center", padding: "7px 12px", margin: "3px 8px", borderRadius: R.sm, border: `1px solid ${K.bdr}`, background: K.card }}>
                     <span style={{ fontSize: FS.label, fontWeight: 700, color: pos === 1 && !tiedAbove ? K.acc : K.t3 }}>{posLabel}</span>
-                    <span className="wbc-name" style={{ fontSize: FS.small, fontWeight: 600, color: K.t1 }}>{p.name}</span>
+                    <span style={{ fontSize: FS.small, fontWeight: 600, color: K.t1 }}>{p.name}</span>
                     <span style={{ fontSize: FS.small, fontWeight: 800, textAlign: "center", color: p.netToPar < 0 ? K.under : p.netToPar > 0 ? K.t2 : K.t1 }}>
                       {p.netToPar === 0 ? "E" : p.netToPar > 0 ? `+${p.netToPar}` : p.netToPar}
                     </span>
@@ -6811,13 +7399,18 @@ function AdminView({ activePlayers, rosterPlayers, sideGames, onUpdateSideGames,
             {picking && (() => {
               const q = courseSearch.trim().toLowerCase();
               const searching = q.length >= 2;
+              // The imported years brought ~50 courses in with them, each frozen
+              // at the rating it was played off a decade ago. They belong to
+              // their edition, not to a director setting up next Saturday, and
+              // unfiltered they bury the handful actually in rotation.
+              const pickable = courses.filter(c => !isHistoryCourseId(c.id));
               const lib = searching
-                ? courses.filter(c => (c.name || "").toLowerCase().includes(q) || (c.city || "").toLowerCase().includes(q))
-                : courses;
+                ? pickable.filter(c => (c.name || "").toLowerCase().includes(q) || (c.city || "").toLowerCase().includes(q))
+                : pickable;
               const use = (c) => { setCourseForRound(editRound, c); closePicker(); };
               return (
                 <>
-                  {courses.length === 0 && (
+                  {pickable.length === 0 && (
                     <div style={{ padding: 14, textAlign: "center", color: K.t3, fontSize: FS.label, lineHeight: 1.5 }}>No courses yet — search above to pull one from GolfCourseAPI, or add it by hand.</div>
                   )}
                   {courses.length > 0 && lib.length === 0 && (
@@ -7490,7 +8083,7 @@ function AdminView({ activePlayers, rosterPlayers, sideGames, onUpdateSideGames,
               {posted.map(({ p, holes }, i) => (
                 <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", borderBottom: i < posted.length - 1 ? `1px solid ${K.bdr}${ALPHA.hair}` : "none" }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="wbc-name" style={{ fontSize: FS.small, fontWeight: 700, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
+                    <div style={{ fontSize: FS.small, fontWeight: 700, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
                     <div style={{ fontSize: FS.label, color: K.t3 }}>{holes} hole{holes === 1 ? "" : "s"} posted</div>
                   </div>
                   <Btn onClick={async () => {
@@ -7854,8 +8447,12 @@ export default function WBCApp() {
   // the app stores require to be deletable. PIN-only players have no such
   // account to delete. deleteStage: null | "confirm" | "working".
   const [accountOpen, setAccountOpen] = useState(false);
+  // Light or dark. The VALUE lives in theme.js (K is mutated in place, so every
+  // call site repaints); this state exists only to make React re-render when it
+  // changes — the palette is not React's to own.
+  const [theme, setThemeState] = useState(getTheme);
+  const pickTheme = (name) => { setThemeState(setTheme(name)); };
   const [menuOpen, setMenuOpen] = useState(false);
-  const [notifOpen, setNotifOpen] = useState(false);
   // Every year the tournament has been run in this app. A sheet rather than a
   // view because opening one RELOADS the app onto that edition (see
   // lib/editions.js), so there is nothing to route back from.
@@ -8017,6 +8614,11 @@ export default function WBCApp() {
   const [tPlayers, setTPlayers] = useState([]);
   const [tRounds, setTRounds] = useState([]);
   const [courseList, setCourseList] = useState([]);
+  // The photo library's index for the active edition. See src/lib/media.js —
+  // these documents point at the photos, they do not contain them.
+  const [media, setMedia] = useState([]);
+  // wbc_config/photos — the budget circuit breaker's flag. Null until read.
+  const [photoConfig, setPhotoConfig] = useState(null);
   // ── The career registry, as state ──
   // DEMO_PLAYERS holds the same rows, but it is a module-level variable that
   // nothing re-renders on — which is fine for names read during a render and
@@ -8041,6 +8643,10 @@ export default function WBCApp() {
   });
   const [pairingsData, setPairingsData] = useState({});
   const [teeData, setTeeData] = useState({});
+  // Recorded course handicaps, for imported editions only — empty for the
+  // running tournament. Loaded from the same rows as teeData because it rides
+  // on them; see rowsToCourseHandicaps.
+  const [courseHandicaps, setCourseHandicaps] = useState({});
   const [teesSaved, setTeesSaved] = useState({});
   const [teesModified, setTeesModified] = useState({});
   const [teeTimesData, setTeeTimesData] = useState({});
@@ -8100,6 +8706,17 @@ export default function WBCApp() {
   const [tournamentMeta, setTournamentMeta] = useState(null);
   const tournamentName = tournamentMeta?.name || TOURNAMENT.name;
   const tournamentLocation = tournamentMeta?.location || "";
+
+  // When the field tees off — round one's earliest tee time. The same instant
+  // the market's opening bell rings, off the same derivation, so the header
+  // and the Betting tab can never be counting to two different moments.
+  // Null until the round has both a date and a tee sheet, which is what keeps
+  // a countdown off a tournament nobody has scheduled yet.
+  //
+  // Up here beside the location because both render branches want it: the
+  // guest leaderboard gets the same header, and a spectator waiting on the
+  // first tee is the person most likely to be watching a countdown to it.
+  const firstTeeAt = teeOffAt(roundDates[1], (teeTimesData[1] || []).map(teeTimeToMinutes));
 
   // Point the module-level NUM_ROUNDS at the saved count, DURING render rather
   // than from an effect. Everything below — and every child this render is
@@ -8268,7 +8885,7 @@ export default function WBCApp() {
         }
 
         const teeRows = await db.get("tee_assignments", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
-        if (teeRows?.length) setTeeData(rowsToTeeData(teeRows));
+        if (teeRows?.length) { setTeeData(rowsToTeeData(teeRows)); setCourseHandicaps(rowsToCourseHandicaps(teeRows)); }
 
         // CTP tags live in `skins` (skin_type "ctp"). This collection was written but
         // NEVER read — ctpData started empty on every load, so the on-course prompt
@@ -8326,6 +8943,7 @@ export default function WBCApp() {
 
     unsubs.push(db.subscribe("tee_assignments", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
       setTeeData(rowsToTeeData(docs));
+      setCourseHandicaps(rowsToCourseHandicaps(docs));
     }));
 
     // CTP is tournament-wide, so a tag from Group 1's phone has to reach Group 4's phone
@@ -8367,8 +8985,41 @@ export default function WBCApp() {
       setTPlayers(docs.map(r => ({ id: r.id, tournament_id: r.tournament_id, player_id: r.player_id, handicap_index: parseFloat(r.handicap_index) || 0, status: r.status || "active" })));
     }));
 
+    // Whether photo uploads are switched on. One tiny document, subscribed
+    // with the rest because every phone needs it and it never changes — see
+    // onBudgetAlert in functions/index.js, which only writes it on a
+    // transition precisely so this listener stays quiet.
+    unsubs.push(db.subscribe("wbc_config", [], (docs) => {
+      setPhotoConfig(docs.find(d => d.id === "photos") || null);
+    }));
+
     return () => unsubs.forEach(u => u && u());
   }, []);
+
+  // ── The photo index, subscribed only once somebody opens Photos ──
+  // Deliberately NOT in the block above. Every other subscription there is
+  // bounded by the shape of a tournament — twelve players, four rounds,
+  // eighteen holes — but this one grows with however many photos get posted,
+  // and Firestore bills a read per document each time a listener attaches.
+  //
+  // The app has no persistent cache, so every cold start re-reads everything
+  // it subscribes to. Attaching this on load would mean a phone that never
+  // opens the gallery still paying for the whole index on each launch, times
+  // twelve phones, times however often a phone reloads over a tournament
+  // weekend. Mounting it on first open instead makes the cost proportional to
+  // people actually looking at photos.
+  //
+  // `photosOpened` latches: once opened, the subscription stays for the rest
+  // of the session, so coming back to the gallery is instant and posting a
+  // photo still shows up live on every phone that has it open.
+  const [photosOpened, setPhotosOpened] = useState(false);
+  useEffect(() => { if (view === "photos") setPhotosOpened(true); }, [view]);
+  useEffect(() => {
+    if (!photosOpened) return;
+    return db.subscribe("wbc_media", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
+      setMedia(docs);
+    });
+  }, [photosOpened]);
 
   // Save tournament state to Firestore
   // Written on its own rather than through saveTournamentState: that helper
@@ -8383,6 +9034,49 @@ export default function WBCApp() {
       meta,
       updated_at: new Date().toISOString(),
     });
+  };
+
+  // ── The photo library's two writes ──
+  // Both go through lib/mediaUpload.js, which owns the canvas work and the
+  // bucket; this pair owns the Firestore side, because `db` lives here and a
+  // second write path into wbc_media is how two of them drift apart.
+  //
+  // The order matters in both directions and is the opposite each time:
+  //
+  //   uploading  bytes first, then the index document. A document pointing at
+  //              a photo that failed to upload is a broken tile in the grid;
+  //              bytes with no document are invisible and cost 250KB.
+  //   deleting   document first, then the bytes. The document is what makes
+  //              the photo exist in the app, so removing it is what the person
+  //              tapping Remove actually asked for — and if the byte delete
+  //              then fails, the result is a hidden orphan rather than a photo
+  //              that is still on screen after being deleted.
+  const onUploadPhoto = async (file, onProgress) => {
+    const uid = fbUser?.uid;
+    if (!uid) throw new Error("You need to be signed in to add photos.");
+    const { uploadPhoto } = await import("./lib/mediaUpload");
+    const row = await uploadPhoto({
+      file,
+      onProgress,
+      slug: _e(),
+      uid,
+      uploaderName: user?.name || "",
+      // Tagged with the round in play, but only when posting into the LIVE
+      // edition — a photo added while browsing 2014 has no business claiming
+      // to be from round 2 of it. Inside the live tournament the guess is
+      // right far more often than not and saves a picker on a screen somebody
+      // is using one-handed on a tee box. A dinner photo landing under the
+      // round it was taken during is a wrong label, not a lost photo.
+      round: isDefaultEdition() ? round : null,
+    });
+    await db.upsert("wbc_media", row);
+  };
+
+  const onDeletePhoto = async (item) => {
+    if (!item?.id) return;
+    await db.deleteDoc("wbc_media", item.id);
+    const { deletePhotoBytes } = await import("./lib/mediaUpload");
+    await deletePhotoBytes(item);
   };
 
   const saveTournamentState = async (finalized, savedTees, modTees, rDates, sOpen, pStrat, tTimes) => {
@@ -8544,7 +9238,7 @@ export default function WBCApp() {
   useEffect(() => {
     const applyHash = () => {
       const h = (window.location.hash || "").replace("#", "");
-      const map = { scoring: "scoring", leaderboard: "leaderboard", board: "leaderboard", pairings: "groups", groups: "groups", betting: "skins", skins: "skins", admin: "admin" };
+      const map = { scoring: "scoring", leaderboard: "leaderboard", board: "leaderboard", pairings: "groups", groups: "groups", betting: "skins", skins: "skins", admin: "admin", photos: "photos" };
       if (map[h]) setView(map[h]);
     };
     applyHash();
@@ -8695,6 +9389,12 @@ export default function WBCApp() {
 
 
   // Get a player's tee box for a round (returns tee object or null)
+  // Null for the running tournament, which is what sends the board to calcCH.
+  const getPlayerCH = (rnd, pid) => {
+    const ch = courseHandicaps[rnd]?.[pid];
+    return Number.isFinite(ch) ? ch : null;
+  };
+
   const getPlayerTee = (rnd, pid, course) => {
     if (!course || !course.tee_boxes || course.tee_boxes.length === 0) return null;
     const assigned = (teeData[rnd] || {})[pid];
@@ -8727,8 +9427,9 @@ export default function WBCApp() {
       tRounds,
       courses: courseList,
       getPlayerTee,
+      getPlayerCH,
     })),
-  [allPlayers, tRounds, courseList, holeData, teeData, numRounds]);
+  [allPlayers, tRounds, courseList, holeData, teeData, courseHandicaps, numRounds]);
 
   const onSaveHole = async (pid, rnd, holeIdx, score) => {
     // Optimistic update
@@ -9024,14 +9725,19 @@ export default function WBCApp() {
   //
   // distance_ft is written EXPLICITLY (null when unknown) rather than omitted: db.upsert
   // uses setDoc(merge:true), so an omitted field would silently retain the previous
-  // player's distance and attach it to the new winner.
-  const onSetCtp = async (rnd, hole, pid, distanceFt = null) => {
+  // player's distance and attach it to the new winner. The tagging GROUP is written the
+  // same way and for the same reason: a director's override off the Betting tab carries
+  // no group, and inheriting the last group's tee order would have the prompt telling
+  // the next group the field is out of order on the strength of a stale field.
+  const onSetCtp = async (rnd, hole, pid, distanceFt = null, taggedGroup = null) => {
     const ft = (distanceFt === null || distanceFt === undefined || distanceFt === "") ? null : Number(distanceFt);
     const distance = ft ? `${ft} ft` : "";
     const taggedByName = user?.name || "";
+    const taggedGroupKey = taggedGroup?.key || null;
+    const taggedGroupOrder = Number.isInteger(taggedGroup?.order) ? taggedGroup.order : null;
     setCtpData(prev => ({
       ...prev,
-      [rnd]: { ...(prev[rnd] || {}), [hole]: { playerId: pid, distanceFt: ft, distance, taggedByName, confirmedBy: [] } },
+      [rnd]: { ...(prev[rnd] || {}), [hole]: { playerId: pid, distanceFt: ft, distance, taggedByName, taggedGroupKey, taggedGroupOrder, confirmedBy: [] } },
     }));
     // Store CTP as a skin type in the skins table.
     // tournament_id was previously MISSING — which meant these docs were invisible to
@@ -9050,6 +9756,8 @@ export default function WBCApp() {
       distance,
       tagged_by: user?.id || null,
       tagged_by_name: taggedByName,
+      tagged_group_key: taggedGroupKey,
+      tagged_group_order: taggedGroupOrder,
       tagged_at: new Date().toISOString(),
       // Cleared, not merged: a confirmation was agreement with a distance
       // that has just been beaten, and carrying it onto the new tag would
@@ -9350,6 +10058,7 @@ export default function WBCApp() {
             same header rather than a second left-aligned copy of one. */}
         <AppHeader
           location={tournamentLocation}
+          countdownAt={firstTeeAt}
           right={<button onClick={handleLogout} style={{ background: "transparent", border: `1px solid ${K.bdr}`, borderRadius: R.sm, color: K.t3, fontSize: FS.small, fontWeight: 600, padding: "5px 12px", cursor: "pointer" }}>Exit</button>}
         />
         <div style={{ padding: "14px 20px 0 20px", flex: 1, overflowY: "hidden", overflowX: "hidden", display: "flex", flexDirection: "column", minHeight: 0, marginBottom: 8 }}>
@@ -9373,6 +10082,23 @@ export default function WBCApp() {
   // the inset for the ones that have it, since the same slip is merely less
   // likely there rather than impossible.
   const NAV_BOTTOM_PAD = "max(16px, calc(env(safe-area-inset-bottom, 0px) + 6px))";
+
+  // ── The nudge on the Betting tab ───────────────────────────────────
+  // A red dot while YOU still have opening shares unplaced and the bell has
+  // not rung. Unplaced shares are not a smaller bet — they are no bet at all
+  // on those shares — and the window shuts on a clock, so the only thing
+  // between a man who meant to finish his book and a wasted buy-in is being
+  // told. It goes quiet the moment the book is full or the field tees off,
+  // because after that there is nothing he can do about it.
+  const marketNudge = (() => {
+    if (!user || user.isGuest) return false;
+    const ids = sideGames?.market?.in;
+    if (ids != null && !ids.includes(user.id)) return false;
+    if (openingSharesLeft(marketBets, user.id) === 0) return false;
+    return marketWindows({
+      holeData, players: allPlayers, numRounds, firstTeeAt, now: Date.now(),
+    }).opening.open;
+  })();
 
   const navItems = [
     { key: "groups", label: "Pairings", icon: "pairings" },
@@ -9450,6 +10176,7 @@ export default function WBCApp() {
            at, since with one it would be a control that changes nothing.
            Up here it costs the scoring screen nothing at all — not a row,
            not a corner of one. */
+        countdownAt={firstTeeAt}
         right={user.isDirector && view === "scoring" && switchableGroupList.length > 1 && (
           <GroupSwitcher
             groups={switchableGroupList}
@@ -9477,8 +10204,8 @@ export default function WBCApp() {
         onSelect={(key) => {
           if (key === "admin") { setView("admin"); return; }
           if (key === "players") { setView("players"); return; }
+          if (key === "photos") { setView("photos"); return; }
           if (key === "editions") { setEditionsOpen(true); return; }
-          if (key === "notifications") { setNotifOpen(true); return; }
           if (key === "account") { setDeleteErr(""); setDeleteStage(null); setAccountOpen(true); }
         }}
       />
@@ -9498,26 +10225,6 @@ export default function WBCApp() {
           Account. They are a menu entry now, so they need somewhere to land —
           and they are no longer rendered in the Account sheet, so a preference
           still has exactly one home. */}
-      {notifOpen && (
-        <div
-          onClick={() => setNotifOpen(false)}
-          data-popup="1"
-          style={{ position: "fixed", inset: 0, zIndex: 400, background: "rgba(3,8,16,0.72)", backdropFilter: "blur(2px)", display: "flex", alignItems: "flex-end", justifyContent: "center" }}
-        >
-          <div
-            onClick={e => e.stopPropagation()}
-            style={{ width: "100%", maxWidth: 480, background: K.card, borderTop: `1px solid ${K.bdr}`, borderTopLeftRadius: 18, borderTopRightRadius: 18, padding: "14px 20px calc(20px + env(safe-area-inset-bottom, 0px))", maxHeight: "88vh", overflowY: "auto" }}
-          >
-            <div style={{ width: 38, height: 4, borderRadius: R.xs, background: K.bdr, margin: "0 auto 6px" }} />
-            <NotificationSettings
-              user={user}
-              notify={notify}
-              onPermissionChange={setNotifPerm}
-            />
-          </div>
-        </div>
-      )}
-
       {accountOpen && (
         <div
           onClick={() => { if (deleteStage !== "working") { setAccountOpen(false); setDeleteStage(null); } }}
@@ -9525,7 +10232,12 @@ export default function WBCApp() {
         >
           <div
             onClick={e => e.stopPropagation()}
-            style={{ width: "100%", maxWidth: 480, background: K.card, borderTop: `1px solid ${K.bdr}`, borderTopLeftRadius: 18, borderTopRightRadius: 18, padding: "20px 20px calc(20px + env(safe-area-inset-bottom, 0px))", boxShadow: "0 -12px 40px rgba(0,0,0,0.6)" }}
+            style={{ width: "100%", maxWidth: 480, background: K.card, borderTop: `1px solid ${K.bdr}`, borderTopLeftRadius: 18, borderTopRightRadius: 18, padding: "20px 20px calc(20px + env(safe-area-inset-bottom, 0px))", boxShadow: "0 -12px 40px rgba(0,0,0,0.6)",
+              // Folding Notifications in here roughly tripled this sheet's
+              // height, and a bottom sheet grows UPWARDS — so on a small phone
+              // Delete account, the last thing in it, went off the top with no
+              // way to reach it. Capped and scrollable.
+              maxHeight: "calc(var(--app-height, 100dvh) - 40px)", overflowY: "auto" }}
           >
             <div style={{ width: 38, height: 4, borderRadius: R.xs, background: K.bdr, margin: "0 auto 18px" }} />
 
@@ -9536,10 +10248,40 @@ export default function WBCApp() {
                     {(user.name || "?").trim().charAt(0).toUpperCase()}
                   </div>
                   <div style={{ minWidth: 0 }}>
-                    <div className="wbc-name" style={{ fontSize: FS.body, fontWeight: 700, color: K.t1 }}>{user.name}</div>
+                    <div style={{ fontSize: FS.body, fontWeight: 700, color: K.t1 }}>{user.name}</div>
                     <div style={{ fontSize: FS.label, color: K.t3 }}>{user.isDirector ? "Tournament director" : "Player"}</div>
                   </div>
                 </div>
+
+                {/* ── Appearance ── */}
+                {/* Same row as the notifications switch directly below it —
+                    the title changing colour when it is on, the sentence under
+                    it, and the same Toggle. Two switches in one sheet drawn two
+                    different ways read as two different KINDS of setting. */}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 18 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: FS.body, fontWeight: 800, color: theme === "light" ? K.acc : K.t1 }}>
+                      {theme === "light" ? "Light mode" : "Dark mode"}
+                    </div>
+                    <div style={{ fontSize: FS.small, color: K.t2, lineHeight: 1.5, marginTop: 2 }}>
+                      {theme === "light" ? "Easier to read in sunlight." : "Turn on for a light background."}
+                    </div>
+                  </div>
+                  <Toggle on={theme === "light"} label="Light mode"
+                    onChange={() => pickTheme(theme === "light" ? "dark" : "light")} />
+                </div>
+
+                {/* Notifications, in the sheet that is already about you.
+                    It was a menu row of its own, which put "which of my devices
+                    buzzes" a level up alongside the tournament itself — and
+                    made My Account a screen with two buttons on it. */}
+                <NotificationSettings
+                  user={user}
+                  notify={notify}
+                  onPermissionChange={setNotifPerm}
+                />
+
+                <div style={{ height: 1, background: K.bdr, margin: "18px 0 14px" }} />
 
                 <Btn variant="secondary" block onClick={() => { setAccountOpen(false); handleLogout(); }}>
                   Log out
@@ -9592,8 +10334,11 @@ export default function WBCApp() {
       )}
 
       {/* Players is a career record, not a round of this tournament — the
-          round pills would be a control with nothing on the screen to steer. */}
-      {view !== "admin" && view !== "scoring" && view !== "leaderboard" && view !== "players" && (
+          round pills would be a control with nothing on the screen to steer.
+          Photos is the same case from the other direction: the gallery carries
+          its own round headings and shows every round at once, so a selector
+          that picks one would contradict the screen under it. */}
+      {view !== "admin" && view !== "scoring" && view !== "leaderboard" && view !== "players" && view !== "photos" && (
       <div style={{ display: "flex", gap: 6, padding: "10px 20px", borderBottom: `1px solid ${K.bdr}` }}>
         {Array.from({ length: NUM_ROUNDS }, (_, i) => i + 1).map(r => {
           const tr = tRounds.find(t => t.round_number === r);
@@ -9616,13 +10361,20 @@ export default function WBCApp() {
       </div>
       )}
 
-      <div className="wbc-app-body" style={{ padding: (view === "leaderboard" || view === "admin") ? "14px 20px 0 20px" : "14px 20px", flex: 1, overflowY: "auto", overflowX: "hidden", display: (view === "leaderboard" || view === "admin") ? "flex" : "block", flexDirection: "column", minHeight: 0, paddingBottom: (view === "leaderboard" || view === "admin") ? "28px" : 0 }}>
+      {/* Pairings joins the two views that lay out to the height they have
+          rather than to the height of what is in them — the tab sizes its own
+          type from that measurement, so it needs a floor to measure against. */}
+      <div className="wbc-app-body" style={{ padding: (view === "leaderboard" || view === "admin") ? "14px 20px 0 20px" : "14px 20px", flex: 1, overflowY: "auto", overflowX: "hidden", display: (view === "leaderboard" || view === "admin" || view === "groups") ? "flex" : "block", flexDirection: "column", minHeight: 0, paddingBottom: (view === "leaderboard" || view === "admin") ? "28px" : 0 }}>
         {view === "leaderboard" && <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} pairingsData={pairingsData} teeTimesData={teeTimesData} loaded={storageLoaded} />}
         <div style={{ display: view === "scoring" ? "block" : "none", paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
           <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeTimesData={teeTimesData} roundDates={roundDates} scoringOpen={scoringOpen} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={async (key, signerPid, signerName, present, rnd) => { const nonSigners = (present || []).filter(pid => pid !== signerPid); const autoFinal = nonSigners.length === 0; const optimistic = { signedBy: signerPid, signedByName: signerName, attestedBy: [], present: present || [] }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: optimistic })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), tournament_id: TOURNAMENT_ID, groupKey: key, round: rnd, signedBy: signerPid, signedByName: signerName, present: present || [], attestedBy: [], signedAt: new Date().toISOString() }); if (autoFinal) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onAttestScorecard={async (key, attesterPid, nonSigners) => { const cur = scorecardSigs[key]; if (!cur) return; const attestedBy = [...new Set([...(cur.attestedBy || []), attesterPid])]; const optimistic = { ...cur, attestedBy }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: { ...prev[key], attestedBy } })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), attestedBy }); const allDone = (nonSigners || []).every(pid => attestedBy.includes(pid)); if (allDone) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onUnsignScorecard={async key => { pendingSigsRef.current.delete(key); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); if (finalizedRounds[key]) { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); pendingSigsRef.current.delete(key); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); await saveTournamentState(nf); }} onGoToAdminCourses={(rnd) => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); setAdminSettingsRound(rnd || null); }} markPlayerWD={markPlayerWD} ctpData={ctpData} onSetCtp={onSetCtp} onConfirmCtp={onConfirmCtp} directorPick={directorPick} onGroupChange={setScoringGroup} onSetRound={setRound} />
         </div>
         {view === "players" && <PlayersView players={allPlayers} registry={registry} meId={user?.id} year={getTournamentYear()} isDirector={!!user.isDirector} onSetOverride={setIndexOverride} />}
-        {view === "skins" && <BettingView players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} numRounds={numRounds} getPlayerTee={getPlayerTee} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} marketBets={marketBets} onSaveMarketBet={onSaveMarketBet} leaderboard={getLeaderboard} finalizedRounds={finalizedRounds} pairingsData={pairingsData} roundDates={roundDates} teeTimesData={teeTimesData} />}
+        {/* Posting requires a real account: firestore.rules pins uploadedBy to
+            the caller's uid, so a guest — who has no uid at all — can browse
+            the library but cannot add to it. */}
+        {view === "photos" && <PhotosView items={media} year={getTournamentYear()} uid={fbUser?.uid || null} isDirector={!!user.isDirector} isGuest={!!user.isGuest} canPost={!user.isGuest && !!fbUser?.uid && photoUploadsAllowed(photoConfig)} uploadsBlockedReason={photoUploadsAllowed(photoConfig) ? "" : uploadsDisabledReason(photoConfig)} onUpload={onUploadPhoto} onDelete={onDeletePhoto} notify={notify} />}
+        {view === "skins" && <BettingView players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} numRounds={numRounds} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} marketBets={marketBets} onSaveMarketBet={onSaveMarketBet} leaderboard={getLeaderboard} finalizedRounds={finalizedRounds} pairingsData={pairingsData} firstTeeAt={firstTeeAt} marketNudge={marketNudge} teeTimesData={teeTimesData} />}
         {view === "groups" && <GroupsView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} pairingsData={pairingsData} teeTimesData={teeTimesData} getPlayerTee={getPlayerTee} user={user} />}
         {view === "admin" && (user.isDirector ? <AdminView activePlayers={activePlayers} rosterPlayers={allPlayers} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} rebuyIds={rebuyIds} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
               setTeeTimesData(prev => {
@@ -9664,7 +10416,7 @@ export default function WBCApp() {
           // More reads active while its menu is open OR while one of the views
           // it leads to (Admin, Players) is the one on screen — otherwise
           // opening either would leave the whole bar looking unselected.
-          const active = item.key === "more" ? (menuOpen || view === "admin" || view === "players") : view === item.key;
+          const active = item.key === "more" ? (menuOpen || view === "admin" || view === "players" || view === "photos") : view === item.key;
           const clr = active ? K.acc : K.t3;
           const iconSz = 18;
           const navIcon = () => {
@@ -9721,7 +10473,9 @@ export default function WBCApp() {
                 }} />
               )}
               {navIcon()}
-              {item.key === "more" && ((adminActionNeeded && user.isDirector) || (notifPerm !== "granted" && !user.isGuest)) && (
+              {(item.key === "more"
+                  ? ((adminActionNeeded && user.isDirector) || (notifPerm !== "granted" && !user.isGuest))
+                  : item.key === "skins" && marketNudge) && (
                 <span style={{
                   position: "absolute", top: 6, right: "50%", marginRight: -14,
                   width: 8, height: 8, borderRadius: "50%", background: K.danger,

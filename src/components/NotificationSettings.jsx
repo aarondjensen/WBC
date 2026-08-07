@@ -28,7 +28,7 @@
 // actually arrive.
 import { useState, useEffect } from "react";
 import { K, FONT, FS, R, ALPHA, MOTION } from "../theme";
-import { Card, SectionLabel } from "./ui";
+import { Card, SectionLabel, Toggle} from "./ui";
 import {
   registerForPush, unsubscribeFromPush, getNotificationPermissionState,
   isStandalonePWA, isIOSPushCapable, checkSubscriptionStatus,
@@ -44,23 +44,6 @@ const TYPES = [
   { icon: "🏁", title: "A round is final", sub: "Results are in — check the leaderboard" },
 ];
 
-function Toggle({ on, busy, onChange }) {
-  return (
-    <button type="button" role="switch" aria-checked={on} onClick={onChange} disabled={busy}
-      style={{
-        width: 52, height: 30, borderRadius: R.xl, border: "none", padding: 0,
-        background: on ? K.acc : K.bdr, position: "relative", flexShrink: 0,
-        cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1,
-        transition: `background ${MOTION} ease`,
-      }}>
-      <span style={{
-        position: "absolute", top: 3, left: on ? 25 : 3, width: 24, height: 24,
-        borderRadius: "50%", background: "#fff", transition: `left ${MOTION} ease`,
-        boxShadow: "0 1px 3px rgba(0,0,0,.3)",
-      }} />
-    </button>
-  );
-}
 
 export function NotificationSettings({ user, notify, onPermissionChange }) {
   const [permission, setPermission] = useState("default");

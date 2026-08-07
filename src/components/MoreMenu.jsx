@@ -56,8 +56,18 @@ export function MoreMenu({ open, onClose, onSelect, isDirector, adminFlag, notif
     // this is one year across the golfers. The active year rides on the row
     // so the menu says which tournament is on screen without opening it.
     { key: "editions", label: "Tournaments", value: activeYear ? String(activeYear) : null },
-    { key: "notifications", label: "Notifications", person: true, flag: notifFlag },
-    { key: "account", label: "My Account", person: true },
+    // The photo library, under the year it belongs to. It follows the active
+    // edition the same way the leaderboard does, so it sits directly below the
+    // control that changes which year is on screen rather than above it — the
+    // row that answers "which tournament" reads first, then the two rows that
+    // show one.
+    { key: "photos", label: "Photos" },
+    // Notifications used to be a row of its own here. It is a setting ABOUT
+    // YOU — which device buzzes, and for what — so it lives inside My Account
+    // beside the other two, rather than as a sibling of the tournament. The
+    // flag comes with it: the dot that said "your notifications need a
+    // decision" now rides the row that opens them.
+    { key: "account", label: "My Account", person: true, flag: notifFlag },
   ];
   // Index of the first personal item — the one that gets the full-weight rule.
   const firstPersonIdx = items.findIndex(i => i.person);
