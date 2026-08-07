@@ -1,16 +1,18 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-/* ── This app is dark, whatever the phone is set to ────────────────
-   WBC has one palette (src/theme.js) and no light theme. Without this
-   declaration the browser assumes a LIGHT page whenever the device is in
-   light appearance, and paints everything it owns rather than the app on
-   that assumption: the canvas behind the app, scrollbars, the caret and
-   selection, form-control internals, and — on Android — Chrome's automatic
-   darkening, which recolours an already-dark page into something neither
-   light nor dark. Declaring it is the documented way to say "the colours
-   here are deliberate, leave them alone". Mirrored in index.html so the
-   first paint agrees. */
+/* ── The app's theme is the app's choice, not the phone's ──────────
+   WBC picks its palette from `wbc_theme`, so which theme is on has nothing to
+   do with the device's appearance setting. Without this declaration the browser
+   guesses from the DEVICE and paints everything IT owns on that guess — the
+   canvas behind the app, scrollbars, the caret and the selection, form-control
+   internals, and on Android Chrome's automatic darkening, which recolours a
+   page it thinks is the wrong way round. A director running the dark theme on a
+   phone set to light gets all of those backwards.
+
+   Keyed off the same data-theme attribute the palette is, so the two can never
+   disagree. Mirrored in index.html so the first paint agrees. */
 :root { color-scheme: dark; }
+html[data-theme="light"] { color-scheme: light; }
 
 /* Matches K.bg in src/theme.js and the inline style in index.html — see the
    comment there. The letterbox either side of the app column on wide screens

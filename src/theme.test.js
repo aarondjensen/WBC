@@ -11,7 +11,7 @@
 // text clears AA on both of its surfaces, in both themes, and the two themes are
 // held to the same hierarchy — light is not allowed to be a flatter app.
 import { describe, it, expect, afterEach } from "vitest";
-import { K, THEMES, THEME_KEY, getTheme, setTheme, toggleTheme, ON_ACC, SHADOW } from "./theme";
+import { K, THEMES, THEME_KEY, getTheme, setTheme, toggleTheme, ON_ACC, SHADOW, DIM_PLACED } from "./theme";
 import { readFileSync } from "node:fs";
 
 // WCAG 2.1 relative luminance and contrast.
@@ -178,5 +178,42 @@ describe("the backgrounds hardcoded outside theme.js", () => {
     const css = read("./index.css");
     expect(css).toContain(dark);
     expect(css).toContain(light);
+  });
+
+  // The browser paints what the app does not — scrollbars, the caret, control
+  // internals, Android's auto-darkening — and guesses which way round from the
+  // DEVICE unless told. Told in both files, and keyed off the app's theme
+  // rather than pinned, or the guess is simply wrong the other way.
+  it.each([["../index.html", read("../index.html")], ["./index.css", read("./index.css")]])(
+    "%s declares a colour scheme that follows the theme", (_f, src) => {
+      expect(src).toMatch(/color-scheme:\s*dark/);
+      expect(src).toMatch(/\[data-theme="light"\][^{]*\{[^}]*color-scheme:\s*light/);
+    });
+});
+
+// ── The pairing pool's player tiles ────────────────────────────────
+// These were the last raw hex in the app — a dark navy typed straight into the
+// style, which the light theme could not reach. It survived the switch as a
+// dark tile carrying dark ink: the director's whole roster, unreadable, on the
+// screen where the draw gets made. Held here because the tile is built from
+// tokens now and the only thing keeping it legible is what those tokens are.
+describe("a player tile in the pairing pool", () => {
+  it.each(THEMES)("%s: separates from the card it sits on", (theme) => {
+    const P = paletteFor(theme);
+    // Enough to read as a tile, little enough to still read as one surface.
+    expect(contrast(P.hover, P.card)).toBeGreaterThan(1.05);
+    expect(contrast(P.hover, P.card)).toBeLessThan(1.5);
+  });
+
+  it.each(THEMES)("%s: a name stays readable once the player is placed", (theme) => {
+    const P = paletteFor(theme);
+    // DIM_PLACED is an opacity, so the ink lands part-way to the tile under it.
+    const mix = (a, b, o) => {
+      const px = (h) => [0, 2, 4].map(i => parseInt(String(h).replace("#", "").slice(i, i + 2), 16));
+      const [x, y] = [px(a), px(b)];
+      return "#" + x.map((c, i) => Math.round(o * c + (1 - o) * y[i]).toString(16).padStart(2, "0")).join("");
+    };
+    // AA for the 11px name it is — the whole reason 0.3 had to go.
+    expect(contrast(mix(P.t1, P.hover, DIM_PLACED), P.hover)).toBeGreaterThanOrEqual(4.5);
   });
 });
