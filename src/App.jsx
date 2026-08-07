@@ -4367,9 +4367,12 @@ function BettingView({
         <div>
           {potCard({
             label: "MARKET POT", pot: marketPot,
-            // Two buy-ins in one pot, so the summary names both counts — the
-            // rebuy is the one the director is still chasing at the turn.
-            summary: `${marketField.length} IN · ${rebuyField.length} REBUYING`,
+            // Two buy-ins in one pot, but the second count only appears once
+            // it is FINAL. While the halfway window is open "3 rebuying" is a
+            // running total that moves every time somebody taps, and a player
+            // reading it as the field's verdict is reading a number that is
+            // still being written. Shut, it is a fact: this many rebought.
+            summary: `${marketField.length} IN${windows.mid.closed ? ` · ${rebuyField.length} REBUYS` : ""}`,
             rightTop: `${board.reduce((a, b) => a + b.shares, 0)} share${board.reduce((a, b) => a + b.shares, 0) !== 1 ? "s" : ""} placed`,
             rightBottom: `${holders.length} holder${holders.length !== 1 ? "s" : ""}`,
           })}
@@ -4390,8 +4393,8 @@ function BettingView({
                 }}
               >
                 <span style={{ flex: 1, fontSize: FS.label, fontWeight: 700, color: K.t3, letterSpacing: 0.6 }}>
-                  {roster.rows.length - roster.outstanding} OF {roster.rows.length} HAVE PLACED
-                  {roster.outstanding > 0 ? ` · ${roster.outstanding} TO ENTER` : ""}
+                  {roster.rows.length - roster.outstanding} OF {roster.rows.length} HAVE WAGERED
+                  {roster.outstanding > 0 ? ` · ${roster.outstanding} PENDING` : ""}
                 </span>
                 <span style={{ fontSize: FS.label, fontWeight: 700, color: K.acc, letterSpacing: 0.6 }}>
                   SHARES {showRoster ? "▾" : "▸"}
