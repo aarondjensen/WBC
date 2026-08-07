@@ -18,6 +18,9 @@
          be here for them to have a font to inherit. -->
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
     <meta name="theme-color" content="#080f1a" />
+    <!-- One palette, and it is dark. See the note in src/index.css — both
+         copies exist so the first paint and the mounted app agree. -->
+    <meta name="color-scheme" content="dark" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <!-- Opaque dark status bar (white text), content sits BELOW it. With no
          viewport-fit=cover this avoids the under-status-bar overlay entirely. -->
@@ -43,6 +46,7 @@
     </script>
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
+      :root { color-scheme: dark; }
       /* Must match K.bg in src/theme.js and the background in src/index.css.
          This is the colour on screen from the first paint until React mounts;
          if it differs from the app's own background the whole screen changes

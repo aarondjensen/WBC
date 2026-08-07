@@ -1,5 +1,17 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* ── This app is dark, whatever the phone is set to ────────────────
+   WBC has one palette (src/theme.js) and no light theme. Without this
+   declaration the browser assumes a LIGHT page whenever the device is in
+   light appearance, and paints everything it owns rather than the app on
+   that assumption: the canvas behind the app, scrollbars, the caret and
+   selection, form-control internals, and — on Android — Chrome's automatic
+   darkening, which recolours an already-dark page into something neither
+   light nor dark. Declaring it is the documented way to say "the colours
+   here are deliberate, leave them alone". Mirrored in index.html so the
+   first paint agrees. */
+:root { color-scheme: dark; }
+
 /* Matches K.bg in src/theme.js and the inline style in index.html — see the
    comment there. The letterbox either side of the app column on wide screens
    is painted by the app's own outer wrapper, so it stays #030810 without this

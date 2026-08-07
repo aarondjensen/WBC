@@ -4905,6 +4905,14 @@ function GroupsView({ players, round, tRounds, courses, pairingsData, teeTimesDa
 }
 
 // ── ADMIN ──
+// A player in the pool who is already sitting in a group is dimmed, so the
+// eye lands on the ones still waiting to be placed. It was 0.3, which put an
+// 11px name at 2.5:1 against the tile it sits on — under the 4.5:1 small text
+// needs, and by the time a draw is half built MOST of the pool is dimmed, so
+// the whole grid read as blank cards. 0.6 measures 5.3:1 and still reads
+// plainly as "already placed".
+const PLACED_DIM = 0.6;
+
 // ── PAIRINGS EDITOR ──
 function PairingsEditor({ activePlayers, pairingsData, setPairings, tRounds, courses, teeTimesData, setTeeTimesData, roundDates, onSetRoundDate, scoringOpen, onSetScoringOpen, pairingStrategy, onSetPairingStrategy, leaderboard, finalizedRounds, getPlayerTee, editRound, holeData }) {
   // Themed confirmations. Also closes a latent hazard: the generate guard
@@ -5271,10 +5279,10 @@ function PairingsEditor({ activePlayers, pairingsData, setPairings, tRounds, cou
                 return (
                   <button key={pid} onClick={() => tapPlayer(pid)} style={{
                     padding: "6px 4px", borderRadius: R.sm, cursor: "pointer", textAlign: "center",
-                    background: isSel ? K.acc + ALPHA.tint : "#162238",
+                    background: isSel ? K.acc + ALPHA.tint : K.thumb,
                     border: `1.5px solid ${isSel ? K.acc : K.bdr}`,
                     color: isSel ? K.acc : K.t1,
-                    opacity: assigned && !isSel ? 0.3 : 1,
+                    opacity: assigned && !isSel ? PLACED_DIM : 1,
                     transition: `opacity ${MOTION}`,
                   }}>
                     <div style={{ fontSize: FS.label, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "flex", alignItems: "center", justifyContent: "center", gap: 3 }}>
@@ -5338,7 +5346,7 @@ function PairingsEditor({ activePlayers, pairingsData, setPairings, tRounds, cou
                 return (
                   <button key={pid} onClick={e => { e.stopPropagation(); tapGroupPlayer(gi, pid); }} style={{
                     padding: "6px 4px", borderRadius: R.sm, textAlign: "center", cursor: "pointer", position: "relative",
-                    background: isSel ? K.acc + ALPHA.tint : "#162238",
+                    background: isSel ? K.acc + ALPHA.tint : K.thumb,
                     border: `1.5px solid ${isSel ? K.acc : K.bdr}`,
                     color: K.t1,
                   }}>
