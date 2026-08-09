@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────
-//  functions/index.js — WBC 2026 push notification Cloud Functions
+//  functions/index.js — WBC push notification Cloud Functions
 // ─────────────────────────────────────────────────────────────────────────
 // Mirrors the MnQ Golf League pattern. Two real Firestore document triggers
 // plus a manual test endpoint:
@@ -37,29 +37,64 @@ admin.initializeApp();
 const db = admin.firestore();
 const messaging = admin.messaging();
 
-const TOURNAMENT_ID = "wbc_2026";
+// ─── Which tournament ───────────────────────────────────────────────────
+// This used to be `const TOURNAMENT_ID = "wbc_2026"`, and it was wrong the
+// moment the app grew editions. The client writes every row under the ACTIVE
+// edition (see src/firebase.js) — wbc_2027, wbc_2028 — so a hardcoded id here
+// meant the first round of the next WBC would fire no attest nudges, send no
+// "round is final", and read the wrong year's roster to decide who to send it
+// to. Silently: a trigger that returns early logs nothing anybody would look at.
+//
+// The triggering document already says which edition it belongs to. That is
+// the authority now; the constant below is only the fallback for a document
+// written before the field existed.
+const DEFAULT_TOURNAMENT_ID = "wbc_2026";
+const editionOf = (doc) => doc?.tournament_id || DEFAULT_TOURNAMENT_ID;
+
+// The event's name, for the one line of a notification that is not about a
+// specific round. Deliberately not "WBC 2026" any more — see above.
+const APP_NAME = "Wanna Be Cup";
 
 // ─── Core send helper (data-only messages) ───────────────────────────────
 // Data-only (no FCM `notification` block) so the service worker fully
 // controls how the notification renders — matches the league contract and
 // the firebase-messaging-sw.js on the client.
+//
+// ── Why tokens are NOT filtered by edition ──
+// A token is a device address for a PERSON, not a fact about a tournament.
+// It is registered once, whenever that phone last turned notifications on,
+// and stamped with whichever edition happened to be active at that moment.
+// Filtering on that stamp meant a player who enabled push during 2026 stopped
+// receiving anything the day the app moved to 2027 — with the app still
+// showing notifications as ON, because the client checks by player.
+//
+// Two queries rather than one because the field name is not consistent in the
+// wild: an older bundle wrote `playerId` and the shared shape uses
+// `player_id`, and both are still out there. Deduped by document id.
+async function tokenDocsFor(playerId) {
+  const [byCamel, bySnake] = await Promise.all([
+    db.collection("wbc_notifications_tokens").where("playerId", "==", playerId).get(),
+    db.collection("wbc_notifications_tokens").where("player_id", "==", playerId).get(),
+  ]);
+  const seen = new Map();
+  [...byCamel.docs, ...bySnake.docs].forEach(d => seen.set(d.id, d));
+  return [...seen.values()];
+}
+
 async function sendToPlayer(playerId, payload) {
   if (!playerId) {
     return { sent: 0, failed: 0, cleanedTokens: 0, errors: ["missing_playerId"] };
   }
 
-  let snap;
+  let docs;
   try {
-    snap = await db.collection("wbc_notifications_tokens")
-      .where("tournament_id", "==", TOURNAMENT_ID)
-      .where("playerId", "==", playerId)
-      .get();
+    docs = await tokenDocsFor(playerId);
   } catch (err) {
     logger.error("Firestore query failed", { playerId, err: err?.message });
     throw new HttpsError("internal", `Firestore query failed: ${err?.message || err}`);
   }
 
-  if (snap.empty) {
+  if (!docs.length) {
     return { sent: 0, failed: 0, cleanedTokens: 0, errors: ["no_tokens_registered"] };
   }
 
@@ -68,11 +103,11 @@ async function sendToPlayer(playerId, payload) {
 
   const dataPayload = {
     ...stringifyDataValues(payload.data || {}),
-    title: payload.notification?.title || "WBC 2026",
+    title: payload.notification?.title || APP_NAME,
     body: payload.notification?.body || "",
   };
 
-  for (const tokenDoc of snap.docs) {
+  for (const tokenDoc of docs) {
     const data = tokenDoc.data();
     const token = data.token;
     if (!token) continue;
@@ -122,9 +157,12 @@ function stringifyDataValues(obj) {
 // ─── Helper: fetch all active players for the tournament ─────────────────
 // Matches App.jsx's activePlayers filter: status !== "WD". Returns player_id
 // values (the id used everywhere as the user/player id, e.g. "aaron_j").
-async function fetchActivePlayers() {
+//
+// This one IS edition-scoped, and correctly so: a roster is a fact about a
+// tournament, unlike the device tokens above.
+async function fetchActivePlayers(tournamentId) {
   const snap = await db.collection("tournament_players")
-    .where("tournament_id", "==", TOURNAMENT_ID)
+    .where("tournament_id", "==", tournamentId)
     .get();
   return snap.docs
     .map(d => d.data())
@@ -181,8 +219,6 @@ exports.onScorecardSigned = onDocumentWritten(
       // CREATE only — not on attestation updates
       if (before) return;
 
-      if (after.tournament_id && after.tournament_id !== TOURNAMENT_ID) return;
-
       const { round, signedBy, present = [], attestedBy = [] } = after;
       if (!signedBy || !Array.isArray(present)) {
         logger.warn("onScorecardSigned: missing required fields", { signedBy, present });
@@ -233,12 +269,11 @@ exports.onRoundFinalized = onDocumentWritten(
       const nowFinal = after?.finalized === true;
       if (wasFinal || !nowFinal) return;
 
-      if (after.tournament_id && after.tournament_id !== TOURNAMENT_ID) return;
-
       const round = after.round;
-      logger.info("onRoundFinalized firing", { round, docId: event.params.docId });
+      const tournamentId = editionOf(after);
+      logger.info("onRoundFinalized firing", { round, tournamentId, docId: event.params.docId });
 
-      const recipients = await fetchActivePlayers();
+      const recipients = await fetchActivePlayers(tournamentId);
 
       await broadcast(recipients, {
         notification: {
@@ -258,14 +293,14 @@ exports.onRoundFinalized = onDocumentWritten(
 // ═════════════════════════════════════════════════════════════════════════
 exports.sendTestPush = onCall(async (request) => {
   try {
-    const { playerId, message = "This is a test push from WBC 2026." } = request.data || {};
+    const { playerId, message = `This is a test push from the ${APP_NAME} app.` } = request.data || {};
     if (!playerId) {
       throw new HttpsError("invalid-argument", "playerId required");
     }
     logger.info("Test push starting", { playerId });
 
     const result = await sendToPlayer(playerId, {
-      notification: { title: "WBC 2026 — test", body: message },
+      notification: { title: `${APP_NAME} — test`, body: message },
       data: { type: "test", url: "/" },
     });
 

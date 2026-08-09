@@ -22,6 +22,20 @@
 // wbc_scorecard_sigs are keyed by — so it is spelled once, here.
 export const groupKey = (round, ids) => `${round}_${[...(ids || [])].sort().join(",")}`;
 
+// Which round a group key belongs to — the inverse of the line above, and here
+// for the same reason it is: whoever knows how the key is spelled is the only
+// one who should be taking it apart.
+//
+// `finalizedRounds` is keyed by BOTH group keys and bare round numbers, so a
+// caller holding one of its keys often cannot tell which it has. A bare number
+// answers as itself; anything unparseable answers null rather than 1, because
+// "I do not know which round this is" and "round 1" must not be the same
+// answer to a caller about to publish a round as finished.
+export function roundOfGroupKey(key) {
+  const m = String(key ?? "").match(/^(\d+)(_|$)/);
+  return m ? parseInt(m[1], 10) : null;
+}
+
 // Two group rosters naming the same four people, whatever order they arrived
 // in. Pairings come back from Firestore as arrays, and an array is not a set.
 export const sameGroup = (a, b) =>

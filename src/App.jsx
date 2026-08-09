@@ -4,7 +4,7 @@ import { _app, _db, _auth, onAuthStateChanged, doGoogleSignIn, doAppleSignIn, do
 import { readMembership, isDirectorAccount, resolveMember, joinWithCode, readAccessCode, setAccessCode, setDirector, subscribeMemberships, accountsUnreadable, membershipForPlayer, playerIsDirector } from "./lib/accounts";
 import { K, ON_ACC, ON_DANGER, FS, fsStep, R, ALPHA, MOTION, FONT, SHADOW, SCRIM, DIM_PLACED, getTheme, setTheme} from "./theme";
 import { SegmentedToggle, Toggle, StickyTop, SectionLabel, Card, Toast, Btn } from "./components/ui";
-import { calcCH, buildStrokesMap, computeRoundLine, computeIndividualBoard, rankIndividualBoard, rankIndividualBoardIds, WD_SCORE } from "./lib/individualBoard";
+import { calcCH, courseHandicapFor, buildStrokesMap, computeRoundLine, computeIndividualBoard, rankIndividualBoard, rankIndividualBoardIds, WD_SCORE } from "./lib/individualBoard";
 import { fieldFor, potFor, perUnit, computeSkins, allSkins, skinCounts, lowNetRounds, lowNetRoundField } from "./lib/sideGames";
 import { teeTimesByPlayer, roundInPlay, thruStatus } from "./lib/thruStatus";
 import {
@@ -14,9 +14,15 @@ import {
   eligibleBets, rebuyers, marketRoster, teeOffAt,
 } from "./lib/market";
 import { BuyInPrices, BuyInTracker } from "./components/BuyIns";
+import { SyncBanner } from "./components/SyncBanner";
 import { useConfirm } from "./lib/useConfirm";
 // Tee times survive a re-group because of these two — see lib/teeSheet.js.
 import { rowsToTeeTimes, mergeTeeTimes } from "./lib/teeSheet";
+// Score documents → the holeData map, deletions included — see lib/holeScores.
+import { applyScoreChanges, roundOf } from "./lib/holeScores";
+// Whether this phone is actually reaching the server — see lib/connection.
+import { createWriteTracker } from "./lib/connection";
+import { useSyncStatus } from "./lib/useSyncStatus";
 import { useDirtyForm } from "./lib/useDirtyForm";
 import { useSheetDrag } from "./lib/useSheetDrag";
 import { usePullToRefresh, hasNewBundle } from "./lib/usePullToRefresh";
@@ -33,7 +39,7 @@ import { openingHole, nineComplete } from "./lib/holeAdvance";
 import { scoreWindow, nudgeUpTarget, nudgeDownTarget } from "./lib/scoreEntry";
 import { groupTrouble, roundTrouble, describeTrouble, blocksScoring, missingTees, describeMissingTees } from "./lib/roundSetup";
 import { indexFor, matchHistoryName } from "./lib/handicap";
-import { groupKey as groupKeyOf, sameGroup, liveRound, roundFinalized, switchableGroups, groupProgress } from "./lib/groupSwitch";
+import { groupKey as groupKeyOf, roundOfGroupKey, sameGroup, liveRound, roundFinalized, switchableGroups, groupProgress } from "./lib/groupSwitch";
 import { groupTeeOrder, tagAheadOfPlay } from "./lib/ctp";
 import { AppHeader, HEADER_SAFE_PAD } from "./components/AppHeader";
 import { GroupSwitcher } from "./components/GroupSwitcher";
@@ -121,6 +127,14 @@ const CLAIM_REQUIRES_APPROVAL = false;
 // Firebase Console → Project Settings → Cloud Messaging → Web Push certificates.
 const VAPID_KEY = "BF3PLSs3kpCVHbhnbuBo1gSYeLKhYYwEgICUo07xRpuQP8LyxqkLkSV969ZcIptb1ZSY81h8738lblo9N2goNGo";
 
+// ── Writes handed over but not yet acknowledged ──
+// Every write below is registered here on its way out. See lib/connection for
+// why this is the only honest way to know whether a phone is really talking to
+// the server: a Firestore write with no signal does not fail, it simply never
+// resolves, so a queue that is not draining is the symptom and there is no
+// error anywhere to catch.
+const writes = createWriteTracker();
+
 // ── db: Firestore data layer ──
 const db = {
   _q: (col, filters = []) => {
@@ -136,7 +150,7 @@ const db = {
   upsert: async (col, data) => {
     if (!data.id) { console.error("db.upsert: missing id", col, data); return null; }
     try {
-      await setDoc(doc(_db, col, String(data.id)), data, { merge: true });
+      await writes.track(setDoc(doc(_db, col, String(data.id)), data, { merge: true }), col);
       return data;
     } catch(e) { console.error("db.upsert error:", col, e); return null; }
   },
@@ -154,7 +168,7 @@ const db = {
       for (let i = 0; i < valid.length; i += 490) {
         const batch = writeBatch(_db);
         valid.slice(i, i + 490).forEach(r => batch.set(doc(_db, col, String(r.id)), r, { merge: true }));
-        await batch.commit();
+        await writes.track(batch.commit(), col);
       }
       return true;
     } catch(e) { console.error("db.upsertMany error:", col, e); return null; }
@@ -180,7 +194,7 @@ const db = {
           if (op.kind === "del") batch.delete(doc(_db, col, String(op.id)));
           else batch.set(doc(_db, col, String(op.row.id)), op.row, { merge: true });
         });
-        await batch.commit();
+        await writes.track(batch.commit(), col);
       }
       return true;
     } catch(e) { console.error("db.replaceMany error:", col, e); return null; }
@@ -193,23 +207,32 @@ const db = {
       for (let i = 0; i < docs.length; i += 490) {
         const batch = writeBatch(_db);
         docs.slice(i, i + 490).forEach(d => batch.delete(d.ref));
-        await batch.commit();
+        await writes.track(batch.commit(), col);
       }
       return true;
     } catch(e) { console.error("db.delete error:", col, e); return null; }
   },
   deleteDoc: async (col, id) => {
-    try { await deleteDoc(doc(_db, col, String(id))); return true; }
+    try { await writes.track(deleteDoc(doc(_db, col, String(id))), col); return true; }
     catch(e) { console.error("db.deleteDoc error:", col, e); return null; }
   },
-  subscribe: (col, filters = [], callback) => {
+  // `onError` is optional and exists for the one caller that has to know the
+  // difference between "not answered yet" and "answered no": the roster
+  // listener, which owns `storageLoaded`. Without it a refused read would
+  // leave the leaderboard in its pre-load blank state forever, waiting for a
+  // snapshot that is never coming.
+  subscribe: (col, filters = [], callback, onError) => {
     try {
       return onSnapshot(
         db._q(col, filters),
         snap => callback(snap.docs.map(d => d.data()), snap.docChanges()),
-        err => console.error("db.subscribe error:", col, err)
+        err => { console.error("db.subscribe error:", col, err); if (onError) onError(err); }
       );
-    } catch(e) { console.error("db.subscribe setup error:", col, e); return () => {}; }
+    } catch(e) {
+      console.error("db.subscribe setup error:", col, e);
+      if (onError) onError(e);
+      return () => {};
+    }
   },
 };
 
@@ -229,20 +252,12 @@ const db = {
 // on TOURNAMENT_ID exists to avoid.
 const _e = () => getEditionSlug();
 
-// Helper: convert Firestore hole_scores docs → holeData format { "pid_round": { holeIdx: score } }
-const extractRound = (roundScoreId) => {
-  const m = roundScoreId?.match(/_r(\d+)_/);
-  return m ? parseInt(m[1]) : 1;
-};
-const rowsToHoleData = (rows) => {
-  const hd = {};
-  rows.forEach(r => {
-    const key = `${r.player_id}_${r.round_number || extractRound(r.round_score_id)}`;
-    if (!hd[key]) hd[key] = {};
-    hd[key][r.hole_number - 1] = r.score;
-  });
-  return hd;
-};
+// Which round a score document belongs to, and the fold that turns those
+// documents into holeData, both live in lib/holeScores — imported at the top
+// of this file. There is no second bulk parser beside them any more: there
+// used to be one, for a cold-start read of the whole collection that ran
+// alongside the subscription, so a score document had two readings that could
+// disagree. The subscription's fold is the only one now.
 // Convert holeData entry to a Firestore document
 const holeDataToRow = (pid, rnd, holeIdx, score, courseId) => ({
   id: docIds.holeScore(_e(), rnd, pid, holeIdx),
@@ -395,7 +410,7 @@ const rowsToCourseHandicaps = (rows) => {
 const rowsToCtp = (rows) => {
   const cd = {};
   (rows || []).filter(r => r.skin_type === "ctp" && r.player_id).forEach(r => {
-    const rnd = r.round_number || extractRound(r.id);
+    const rnd = roundOf(r);
     if (!cd[rnd]) cd[rnd] = {};
     const ft = (r.distance_ft === 0 || r.distance_ft) ? r.distance_ft : null;
     cd[rnd][r.hole_number] = {
@@ -684,7 +699,7 @@ const LB_COL = { num: 36, total: 40, thru: 34, priorMin: 24 };
 // what lets four equal tracks actually look equal.
 const LB_PAD_L = 12;
 
-function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getPlayerTee, finalizedRounds, skinWins, pairingsData, teeTimesData, loaded = true }) {
+function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getPlayerTee, getPlayerCH = () => null, finalizedRounds, skinWins, pairingsData, teeTimesData, loaded = true }) {
   const [expanded, setExpanded] = useState(null);
   const [scorecardRound, setScorecardRound] = useState(null);
   const [showGross, setShowGross] = useState(false);
@@ -830,22 +845,30 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
     const holePars = course.hole_pars || [];
     const holeHcps = course.hole_handicaps || [];
     const tee = getPlayerTee(viewRound, p.id, course);
-    const ch = calcCH(hi, tee?.slope || course.slope, tee?.rating || course.rating, tee?.par || course.par);
-    const sorted = holeHcps.map((h, i) => ({ idx: i, hcp: h })).sort((a, b) => a.hcp - b.hcp);
-    const strokeMap = {};
-    let rem = Math.abs(ch);
-    for (let pass = 0; pass < 3 && rem > 0; pass++) {
-      for (const h of sorted) { if (rem <= 0) break; strokeMap[h.idx] = (strokeMap[h.idx] || 0) + 1; rem--; }
-    }
+    // Same two shared functions the board itself ranks on — this card used to
+    // derive the handicap without consulting the recorded one, and re-roll the
+    // stroke allocation by hand, so an imported year could print a scorecard
+    // whose net did not add up to the total on the row that opened it.
+    const ch = courseHandicapFor({
+      handicapIndex: hi,
+      course,
+      tee,
+      recorded: getPlayerCH(viewRound, p.id),
+    });
+    const strokeMap = buildStrokesMap(ch, holeHcps);
     const frontPar = holePars.slice(0,9).reduce((a,b)=>a+b,0);
     const backPar = holePars.slice(9).reduce((a,b)=>a+b,0);
     let frontGross = 0, backGross = 0, frontNet = 0, backNet = 0;
     for (let h = 0; h < 18; h++) {
-      if (scores[h]) {
-        const g = scores[h];
-        const st = strokeMap[h] || 0;
-        if (h < 9) { frontGross += g; frontNet += (g - st); } else { backGross += g; backNet += (g - st); }
-      }
+      const g = scores[h];
+      // A withdrawal fills its remaining holes with the sentinel so the card
+      // stays structurally complete; totalling those would print a gross in
+      // the hundreds. Same exclusion computeRoundLine makes.
+      if (!(g > 0) || g === WD_SCORE) continue;
+      // A plus handicap gives strokes BACK, so the sign travels with the map —
+      // buildStrokesMap allocates by magnitude and leaves it to the caller.
+      const st = (strokeMap[h] || 0) * (ch < 0 ? -1 : 1);
+      if (h < 9) { frontGross += g; frontNet += (g - st); } else { backGross += g; backNet += (g - st); }
     }
     const rc = { r: viewRound, course, holePars, scores, strokeMap, ch, frontPar, backPar, frontGross, backGross, frontNet, backNet, tee };
 
@@ -1375,7 +1398,7 @@ const holeBarBtn = (fill) => ({
   color: ON_ACC, fontSize: FS.label, fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap",
 });
 
-function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPlayers, onSaveHole, notify, pairingsData, teeTimesData, roundDates, scoringOpen, setTee, getPlayerTee, finalizedRounds, scorecardSigs, onSignScorecard, onAttestScorecard, onUnsignScorecard, onFinalizeRound, onUnfinalizeRound, onGoToAdminCourses, markPlayerWD, ctpData, onSetCtp, onConfirmCtp, directorPick, onGroupChange, onSetRound }) {
+function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPlayers, onSaveHole, notify, pairingsData, teeTimesData, roundDates, scoringOpen, setTee, getPlayerTee, getPlayerCH = () => null, finalizedRounds, scorecardSigs, onSignScorecard, onAttestScorecard, onUnsignScorecard, onFinalizeRound, onUnfinalizeRound, onGoToAdminCourses, markPlayerWD, ctpData, onSetCtp, onConfirmCtp, directorPick, onGroupChange, onSetRound }) {
   const [group, setGroup] = useState(null);
   const [currentHole, setCurrentHole] = useState(0);
   const [manualOverride, setManualOverride] = useState(false);
@@ -1739,59 +1762,47 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
     }
   }, [allScored, currentHole, editingCompleted, showCtpForHole]);
 
-  const getCH = (p) => {
-    if (!course) return 0;
-    const tp = tPlayers.find(t => t.player_id === p.id);
-    const hi = parseFloat(tp?.handicap_index) || 0;
-    const tee = getPlayerTee(round, p.id, course);
-    return calcCH(hi, tee?.slope || course.slope, tee?.rating || course.rating, tee?.par || course.par);
-  };
+  // ── The scorecard's three numbers, off the board's own math ──
+  //
+  // All three used to be written out longhand here, and being a second
+  // implementation is exactly how they came to be wrong:
+  //
+  //   • the stroke allocation was a hand-rolled three-pass copy of
+  //     buildStrokesMap, which this file already imports;
+  //   • the running total counted the WD sentinel as a real score, so a
+  //     withdrawn playing partner sat there with a gross in the hundreds and
+  //     a card that claimed to be thru 18 while the leaderboard, which knows
+  //     to skip those holes, showed him thru 9;
+  //   • it subtracted strokes unconditionally, so a plus handicap got them
+  //     the wrong way round — they add to a net score, they do not come off.
+  //
+  // computeRoundLine has all three rules and a test file. This is now a call
+  // into it, which is also what makes the running net on a tee box and the
+  // number on the board the same number rather than two that agree.
+  const getCH = (p) => courseHandicapFor({
+    handicapIndex: p?.handicap_index,
+    course,
+    tee: course ? getPlayerTee(round, p.id, course) : null,
+    recorded: getPlayerCH(round, p?.id),
+  });
 
   const getTeeName = (p) => {
     const tee = getPlayerTee(round, p.id, course);
     return tee?.name || "Default";
   };
 
-  // Calculate strokes per hole - handles CH > 18 (wraps around)
-  const getStrokesMap = (ch) => {
-    const map = {};
-    const sorted = holeHcps.map((h, i) => ({ idx: i, hcp: h })).sort((a, b) => a.hcp - b.hcp);
-    let rem = Math.abs(ch);
-    // First pass: 1 stroke each, easiest-to-hardest by handicap index
-    for (const h of sorted) { if (rem <= 0) break; map[h.idx] = (map[h.idx] || 0) + 1; rem--; }
-    // Second pass: if CH > 18, wrap around for 2nd strokes
-    for (const h of sorted) { if (rem <= 0) break; map[h.idx] = (map[h.idx] || 0) + 1; rem--; }
-    // Third pass: if CH > 36 (unlikely but safe)
-    for (const h of sorted) { if (rem <= 0) break; map[h.idx] = (map[h.idx] || 0) + 1; rem--; }
-    return map;
-  };
-
-  const getStrokes = (p, holeIdx) => {
-    const ch = getCH(p);
-    const map = getStrokesMap(ch);
-    return map[holeIdx] || 0;
-  };
+  const getStrokes = (p, holeIdx) => buildStrokesMap(getCH(p), holeHcps)[holeIdx] || 0;
 
   const getRunning = (pid) => {
-    const key = `${pid}_${round}`;
-    const scores = holeData[key] || {};
-    let gross = 0, netToPar = 0, thru = 0;
-    if (!course) return { gross, netToPar, thru };
-    const tp = tPlayers.find(t => t.player_id === pid);
-    const hi = parseFloat(tp?.handicap_index) || 0;
-    const tee = getPlayerTee(round, pid, course);
-    const ch = calcCH(hi, tee?.slope || course.slope, tee?.rating || course.rating, tee?.par || course.par);
-    const strokeMap = getStrokesMap(ch);
-    for (let h = 0; h < 18; h++) {
-      if (scores[h]) {
-        gross += scores[h];
-        const p = holePars[h] || 4;
-        const stroke = strokeMap[h] || 0;
-        netToPar += (scores[h] - stroke - p);
-        thru++;
-      }
-    }
-    return { gross, netToPar, thru };
+    const p = players.find(x => x.id === pid);
+    if (!course || !p) return { gross: 0, netToPar: 0, thru: 0 };
+    const line = computeRoundLine({
+      scores: holeData[`${pid}_${round}`] || {},
+      holePars,
+      holeHcps,
+      ch: getCH(p),
+    });
+    return { gross: line.gross, netToPar: line.netToPar, thru: line.thru };
   };
 
   // ── The off-round banner ────────────────────────────────────────────
@@ -2839,24 +2850,18 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
 
               {/* Mini scorecards per player */}
               {groupPlayers.map(p => {
-                const tp = tPlayers.find(t => t.player_id === p.id);
-                const hi = parseFloat(tp?.handicap_index) || 0;
-                const tee = getPlayerTee(round, p.id, course);
-                const ch = calcCH(hi, tee?.slope || course.slope, tee?.rating || course.rating, tee?.par || course.par);
+                // Same handicap and the same stroke allocation as everything
+                // else on this screen — see the note above getCH.
+                const ch = getCH(p);
                 const scores = holeData[`${p.id}_${round}`] || {};
                 let gross = 0, net = 0, frontGross = 0, backGross = 0;
-                const sorted = holeHcps.map((h, i) => ({ idx: i, hcp: h })).sort((a, b) => a.hcp - b.hcp);
-                const strokeMap = {};
-                let rem = Math.abs(ch);
-                for (let pass = 0; pass < 3 && rem > 0; pass++) {
-                  for (const h of sorted) { if (rem <= 0) break; strokeMap[h.idx] = (strokeMap[h.idx] || 0) + 1; rem--; }
-                }
+                const strokeMap = buildStrokesMap(ch, holeHcps);
                 for (let h = 0; h < 18; h++) {
-                  if (scores[h]) {
-                    const g = scores[h]; const st = strokeMap[h] || 0;
-                    gross += g; net += g - st;
-                    if (h < 9) { frontGross += g; } else { backGross += g; }
-                  }
+                  const g = scores[h];
+                  if (!(g > 0) || g === WD_SCORE) continue;
+                  const st = (strokeMap[h] || 0) * (ch < 0 ? -1 : 1);
+                  gross += g; net += g - st;
+                  if (h < 9) { frontGross += g; } else { backGross += g; }
                 }
                 const parTotal = holePars.reduce((a, b) => a + b, 0);
                 const cellBorder = `1px solid ${K.bdr}${ALPHA.line}`;
@@ -3198,18 +3203,12 @@ function BettingView({
     const { course } = roundSetup(r);
     const maps = {}; const chs = {};
     skinsField.forEach(p => {
-      // Same precedence as the leaderboard: a RECORDED handicap wins over a
-      // derived one. This is the second place the app turns an index into
-      // strokes, and it has to agree with the first — on a flat imported year
-      // calcCH gives out the wrong NUMBER of strokes, not merely the wrong
-      // holes, so net skins would disagree with the leaderboard beside it.
-      const recorded = getPlayerCH(r, p.id);
-      const tee = course ? getPlayerTee(r, p.id, course) : null;
-      const ch = Number.isFinite(recorded)
-        ? recorded
-        : course
-          ? calcCH(p.handicap_index, tee?.slope || course.slope, tee?.rating || course.rating, tee?.par || course.par)
-          : 0;
+      const ch = courseHandicapFor({
+        handicapIndex: p.handicap_index,
+        course,
+        tee: course ? getPlayerTee(r, p.id, course) : null,
+        recorded: getPlayerCH(r, p.id),
+      });
       chs[p.id] = ch;
       maps[p.id] = buildStrokesMap(ch, course?.hole_handicaps || []);
     });
@@ -3271,17 +3270,24 @@ function BettingView({
   // resolves it — same tee, same course handicap, same computeRoundLine — so
   // the low net paid here and the number on the board are the same number by
   // construction rather than by two implementations agreeing.
+  //
+  // The course handicap used to be a bare calcCH here, which quietly made that
+  // paragraph untrue on an imported year: the board reads the RECORDED handicap
+  // those years carry and this read a derived one, so the day's low net could
+  // be paid to somebody the leaderboard did not have winning it.
   const lineFor = (pid, r) => {
     const { course } = roundSetup(r);
     if (!course) return null;
-    const p = players.find(x => x.id === pid);
-    const tee = getPlayerTee(r, pid, course);
-    const ch = calcCH(p?.handicap_index, tee?.slope || course.slope, tee?.rating || course.rating, tee?.par || course.par);
     return computeRoundLine({
       scores: holeData[`${pid}_${r}`] || {},
       holePars: course.hole_pars || [],
       holeHcps: course.hole_handicaps || [],
-      ch,
+      ch: courseHandicapFor({
+        handicapIndex: players.find(x => x.id === pid)?.handicap_index,
+        course,
+        tee: getPlayerTee(r, pid, course),
+        recorded: getPlayerCH(r, pid),
+      }),
     });
   };
   // The pot divides by the rounds the event HAS, not the rounds decided so
@@ -6732,21 +6738,24 @@ function AdminView({ activePlayers, rosterPlayers, sideGames, onUpdateSideGames,
   const buildFinalizeModal = (r) => {
     const tr = tRounds.find(t => t.round_number === r);
     const course = tr ? courses.find(c => c.id === tr.course_id) : null;
+    // The standings a director is shown before finalizing, off the same
+    // computeRoundLine the leaderboard ranks on. It used to total the card by
+    // hand and take the whole course handicap off the end, which counted a
+    // withdrawal's sentinel holes as strokes played and gave a partial card
+    // every one of its strokes on holes it had not reached — so the preview
+    // could disagree with the board it was about to publish.
     const scores = activePlayers.map(p => {
-      const key = `${p.id}_${r}`;
-      const s = holeData[key] || {};
-      const tee = getPlayerTee(r, p.id, course);
-      const slope = tee?.slope || course?.slope || 113;
-      const rating = tee?.rating || course?.rating || 72;
-      const par = tee?.par || course?.par || 72;
-      const ch = calcCH(p.handicap_index, slope, rating, par);
-      const holePars = course?.hole_pars || [];
-      let gross = 0, netToPar = 0;
-      for (let h = 0; h < 18; h++) {
-        if (s[h] > 0) { gross += s[h]; netToPar += s[h] - (holePars[h] || 4); }
-      }
-      netToPar -= ch;
-      return { id: p.id, name: p.name, gross, netToPar };
+      const line = computeRoundLine({
+        scores: holeData[`${p.id}_${r}`] || {},
+        holePars: course?.hole_pars || [],
+        holeHcps: course?.hole_handicaps || [],
+        ch: courseHandicapFor({
+          handicapIndex: p.handicap_index,
+          course: course || { slope: 113, rating: 72, par: 72 },
+          tee: course ? getPlayerTee(r, p.id, course) : null,
+        }),
+      });
+      return { id: p.id, name: p.name, gross: line.gross, netToPar: line.netToPar };
     }).sort((a, b) => a.netToPar - b.netToPar);
     const missing = activePlayers.filter(p => {
       const wdTp = tPlayers.find(tp => tp.player_id === p.id);
@@ -8648,6 +8657,9 @@ export default function WBCApp() {
   const [scoringGroup, setScoringGroup] = useState(null);
   const [directorPick, setDirectorPick] = useState(null);
   const pickSeq = useRef(0);
+  // Is this phone actually reaching the server. Null — and so nothing on
+  // screen — whenever the answer is yes, which is nearly always.
+  const syncStatus = useSyncStatus(writes);
   const [notif, setNotif] = useState(null);
   // Kept next to the state it drives, and above every caller: several hook
   // dependency arrays name `notify`, and those are evaluated during render.
@@ -8877,17 +8889,51 @@ export default function WBCApp() {
   });
 
   // ── Load all data from Firestore on mount ──
+  //
+  // Two halves, and the split is the whole point of this block.
+  //
+  // READ ONCE: `players`, `tournament_rounds`, `courses`, `tee_boxes`. A
+  // director edits these rarely, so four more live listeners on every phone
+  // would be a poor trade; pull-to-refresh is what picks up a mid-trip change
+  // (see refreshStaticData).
+  //
+  // SUBSCRIBED: everything else. A listener delivers a FULL initial snapshot
+  // the moment it attaches, so it is already the load — which is why this
+  // block no longer also db.get()s hole_scores, pairings, tee_assignments,
+  // skins, tournament_state and tournament_players. Fetching them twice cost
+  // three things and bought none:
+  //
+  //   • double the billed reads on every cold start, on the collection set
+  //     that dominates them — hole_scores alone is 12 × 4 × 18 documents;
+  //   • two parsers per collection, one incremental and one wholesale, free
+  //     to drift apart;
+  //   • a race. The read was never awaited before the listeners attached, so
+  //     whichever landed second replaced the other's state wholesale, and the
+  //     loser could be the newer answer.
+  //
+  // It also worked against the persistent cache firebase.js goes to some
+  // trouble to enable: getDocs asks the SERVER, while a listener resumes from
+  // its stored token and is sent only what changed since this phone last had
+  // it. On the collections that matter the listener is strictly cheaper.
   useEffect(() => {
+    // The registry, as a promise. The roster bootstrap below needs it and the
+    // two now arrive on different clocks — this one over a one-shot read, the
+    // roster over its subscription — so the seeding awaits it rather than
+    // racing it.
+    const registryReady = (async () => {
+      const playerRows = await db.get("players");
+      if (playerRows?.length) {
+        DEMO_PLAYERS = playerRows
+          .map(r => ({ id: r.id, name: r.name, first_name: r.first_name || "", last_name: r.last_name || "", index_override: r.index_override ?? null }))
+          .sort((a, b) => a.name.localeCompare(b.name));
+        setRegistry(DEMO_PLAYERS);
+      }
+      return playerRows || [];
+    })();
+    registryReady.catch(e => console.error("Registry load failed:", e));
+
     (async () => {
       try {
-        const playerRows = await db.get("players");
-        if (playerRows?.length) {
-          DEMO_PLAYERS = playerRows
-            .map(r => ({ id: r.id, name: r.name, first_name: r.first_name || "", last_name: r.last_name || "", index_override: r.index_override ?? null }))
-            .sort((a, b) => a.name.localeCompare(b.name));
-          setRegistry(DEMO_PLAYERS);
-        }
-
         // Existing uid→player_id claims (wbc_users). Doc id is the uid.
         // DEFERRED (non-blocking): this feeds only the claim flow, which is
         // inert while AUTH_PROVIDERS_ENABLED is false. It used to sit here as an
@@ -8902,34 +8948,6 @@ export default function WBCApp() {
             setClaims(Object.fromEntries(userRows.map(r => [r.uid || r.id, r.player_id]).filter(([u, pid]) => u && pid)));
           }
         }).catch(e => console.warn("[claims] wbc_users load skipped:", e?.message || e));
-
-        const tpRows = await db.get("tournament_players", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
-        if (tpRows?.length) {
-          setTPlayers(tpRows.map(r => ({ id: r.id, tournament_id: r.tournament_id, player_id: r.player_id, handicap_index: parseFloat(r.handicap_index) || 0, status: r.status || "active" })));
-        } else if (playerRows?.length && isDefaultEdition()) {
-          // One-time bootstrap for the ORIGINAL edition only: lift the global
-          // player registry into a roster the first time this edition loads
-          // without one.
-          //
-          // Gated on isDefaultEdition() because a NEW edition legitimately has
-          // no roster — that is what "start blank" means. Without the guard,
-          // creating an empty 2027 and switching to it would silently import
-          // every golfer who has ever played, at index 0, and the director
-          // would have to work out which ones to delete.
-          // Seeded from the WBC Index, not from zero. The index computed off a
-          // golfer's own history is the source of truth for what they play
-          // off; a roster that starts everybody at scratch makes the director
-          // type fourteen numbers that the app already knows, and a missed one
-          // is a player scoring gross by accident. Admin can still override
-          // any of them — that is what the Index field there is for.
-          const seeded = playerRows.map(r => {
-            const hist = matchHistoryName(r);
-            const seedIdx = hist ? indexFor(hist, { override: r.index_override ?? null }).index : null;
-            return { id: docIds.tournamentPlayer(_e(), r.id), tournament_id: TOURNAMENT_ID, player_id: r.id, handicap_index: seedIdx ?? 0, status: "active" };
-          });
-          setTPlayers(seeded);
-          for (const tp of seeded) await db.upsert("tournament_players", tp);
-        }
 
         const trRows = await db.get("tournament_rounds", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
         const sortedTRounds = (trRows || []).sort((a, b) => a.round_number - b.round_number);
@@ -8949,61 +8967,20 @@ export default function WBCApp() {
             setCourseList(sortCoursesByRound(coursesWithTees, sortedTRounds));
           }
         }
-
-        const hsRows = await db.get("hole_scores", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
-        if (hsRows?.length) setHoleData(rowsToHoleData(hsRows));
-
-        const pairRows = await db.get("pairings", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
-        if (pairRows?.length) {
-          const sorted = pairRows.sort((a, b) => a.round_number - b.round_number || a.group_number - b.group_number || (a.player_id || "").localeCompare(b.player_id || ""));
-          setPairingsData(rowsToPairings(sorted));
-          setTeeTimesData(prev => mergeTeeTimes(rowsToTeeTimes(sorted), prev));
-        }
-
-        const teeRows = await db.get("tee_assignments", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
-        if (teeRows?.length) { setTeeData(rowsToTeeData(teeRows)); setCourseHandicaps(rowsToCourseHandicaps(teeRows)); }
-
-        // CTP tags live in `skins` (skin_type "ctp"). This collection was written but
-        // NEVER read — ctpData started empty on every load, so the on-course prompt
-        // treated already-tagged holes as untagged and the Betting tab showed nothing.
-        const skinRows = await db.get("skins", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
-        if (skinRows?.length) { setCtpData(rowsToCtp(skinRows)); setMarketBets(rowsToMarket(skinRows)); }
-
-        const stateRows = await db.get("tournament_state", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
-        if (stateRows?.length) {
-          const s = stateRows[0];
-          if (s.finalized_rounds) setFinalizedRounds(s.finalized_rounds);
-          if (s.tees_saved) setTeesSaved(s.tees_saved);
-          if (s.tees_modified) setTeesModified(s.tees_modified);
-          if (s.round_dates) setRoundDates(s.round_dates);
-          // State wins over whatever the pairing rows carry: it is the copy a
-          // director edited, and it exists for groups that have no players yet.
-          if (s.tee_times) setTeeTimesData(prev => mergeTeeTimes(prev, s.tee_times));
-          if (s.scoring_open) setScoringOpen(s.scoring_open);
-          if (s.pairing_strategy) setPairingStrategy(s.pairing_strategy);
-          if (s.meta) setTournamentMeta(s.meta);
-          if (s.side_games) setSideGames(mergeSideGames(s.side_games));
-        }
-
       } catch(e) { console.error("Load failed:", e); }
-      finally { setStorageLoaded(true); }
     })();
 
     // ── Real-time subscriptions via Firestore onSnapshot ──
     const unsubs = [];
 
+    // Scores, applied as CHANGES rather than rebuilt. See lib/holeScores for
+    // why the fold lives there — the short version is that a deletion is as
+    // much a fact about a card as a score is, and this handler used to drop
+    // them on the floor: a discarded round vanished on the director's phone
+    // and stayed on everybody else's until they relaunched.
     unsubs.push(db.subscribe("hole_scores", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs, changes) => {
-      setHoleData(prev => {
-        const next = { ...prev };
-        (changes || []).forEach(change => {
-          if (change.type === "removed") return;
-          const row = change.doc.data();
-          const rnd = row.round_number || extractRound(row.round_score_id);
-          const key = `${row.player_id}_${rnd}`;
-          next[key] = { ...(next[key] || {}), [row.hole_number - 1]: row.score };
-        });
-        return next;
-      });
+      const normalized = (changes || []).map(c => ({ type: c.type, row: c.doc.data() }));
+      setHoleData(prev => applyScoreChanges(prev, normalized));
     }));
 
     unsubs.push(db.subscribe("pairings", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
@@ -9057,9 +9034,55 @@ export default function WBCApp() {
       setScorecardSigs(mergePendingSigs(fromDocs));
     }));
 
+    // ── The roster, and the one-time bootstrap under it ──
+    //
+    // This listener's FIRST snapshot is also the answer to "does this edition
+    // have a roster yet", which is what the seeding below keys on — so it no
+    // longer needs a one-shot read of its own to ask.
+    //
+    // `rosterSeeded` keeps the seeding a one-time act. Without it, a director
+    // who legitimately empties the roster would have it re-filled from the
+    // registry on the very next snapshot.
+    //
+    // It is also what `storageLoaded` means now: `lb` is built from the
+    // roster, so "the roster has answered" is exactly the question the
+    // leaderboard's empty state has to have answered before it can say "no
+    // scores yet" rather than flashing that at somebody mid-load.
+    let rosterSeeded = false;
     unsubs.push(db.subscribe("tournament_players", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
       setTPlayers(docs.map(r => ({ id: r.id, tournament_id: r.tournament_id, player_id: r.player_id, handicap_index: parseFloat(r.handicap_index) || 0, status: r.status || "active" })));
-    }));
+      setStorageLoaded(true);
+      if (docs.length || rosterSeeded || !isDefaultEdition()) return;
+      rosterSeeded = true;
+      // One-time bootstrap for the ORIGINAL edition only: lift the global
+      // player registry into a roster the first time this edition loads
+      // without one.
+      //
+      // Gated on isDefaultEdition() because a NEW edition legitimately has
+      // no roster — that is what "start blank" means. Without the guard,
+      // creating an empty 2027 and switching to it would silently import
+      // every golfer who has ever played, at index 0, and the director
+      // would have to work out which ones to delete.
+      // Seeded from the WBC Index, not from zero. The index computed off a
+      // golfer's own history is the source of truth for what they play
+      // off; a roster that starts everybody at scratch makes the director
+      // type fourteen numbers that the app already knows, and a missed one
+      // is a player scoring gross by accident. Admin can still override
+      // any of them — that is what the Index field there is for.
+      registryReady.then(playerRows => {
+        if (!playerRows?.length) return;
+        const seeded = playerRows.map(r => {
+          const hist = matchHistoryName(r);
+          const seedIdx = hist ? indexFor(hist, { override: r.index_override ?? null }).index : null;
+          return { id: docIds.tournamentPlayer(_e(), r.id), tournament_id: TOURNAMENT_ID, player_id: r.id, handicap_index: seedIdx ?? 0, status: "active" };
+        });
+        setTPlayers(seeded);
+        // One commit, not fourteen: the listener above republishes on every
+        // one of them, so a per-row loop paints the roster filling in a name
+        // at a time. See db.upsertMany.
+        return db.upsertMany("tournament_players", seeded);
+      }).catch(e => console.error("Roster bootstrap failed:", e));
+    }, () => setStorageLoaded(true)));
 
     // Whether photo uploads are switched on. One tiny document, subscribed
     // with the rest because every phone needs it and it never changes — see
@@ -9519,26 +9542,42 @@ export default function WBCApp() {
     await db.upsert("hole_scores", row);
   };
 
-  // Mark player as WD: set status, fill all unfilled holes in current and future rounds with sentinel 99
+  // ── Withdraw a player ──
+  // Sets the roster status and fills the rest of THIS round's card with the
+  // sentinel, so the card stays structurally complete and every total knows to
+  // skip those holes (see lib/individualBoard). Later rounds need no filling:
+  // they have no card to complete, and the roster flag is what takes the player
+  // out of contention on the board.
+  //
+  // Nothing here waits on the server, and that is the point. This used to
+  // await nineteen writes in a row and only then raise its confirmation —
+  // which is fine in a car park and useless on the twelfth hole, where a
+  // Firestore write does not fail without signal but does not resolve either.
+  // Withdrawing somebody out of range appeared to do nothing at all: no
+  // confirmation, no error, for as long as the phone stayed out of range.
+  //
+  // Local state moves first, the confirmation follows it, and the writes go in
+  // ONE batch behind both. Whether that batch has landed is the sync banner's
+  // job to report — it is counting them.
   const markPlayerWD = async (pid) => {
     const tr = tRounds.find(t => t.round_number === round);
     const key = `${pid}_${round}`;
     const existing = holeData[key] || {};
     const updates = [];
     for (let h = 0; h < 18; h++) {
-      if (!(existing[h] > 0)) updates.push(holeDataToRow(pid, round, h, 99, tr?.course_id));
+      if (!(existing[h] > 0)) updates.push(holeDataToRow(pid, round, h, WD_SCORE, tr?.course_id));
     }
     setHoleData(prev => {
-      const existing = prev[key] || {};
-      const filled = { ...existing };
-      for (let h = 0; h < 18; h++) { if (!(filled[h] > 0)) filled[h] = 99; }
+      const filled = { ...(prev[key] || {}) };
+      for (let h = 0; h < 18; h++) { if (!(filled[h] > 0)) filled[h] = WD_SCORE; }
       return { ...prev, [key]: filled };
     });
-    const tp = tPlayers.find(t => t.player_id === pid);
-    if (tp) await db.upsert("tournament_players", { ...tp, status: "WD" }, "id");
-    setTPlayers(prev => prev.map(tp => tp.player_id === pid ? { ...tp, status: "WD" } : tp));
-    for (const row of updates) await db.upsert("hole_scores", row);
+    setTPlayers(prev => prev.map(t => t.player_id === pid ? { ...t, status: "WD" } : t));
     notify(`Player withdrawn from tournament`);
+
+    const tp = tPlayers.find(t => t.player_id === pid);
+    if (tp) db.upsert("tournament_players", { ...tp, status: "WD" }, "id");
+    if (updates.length) db.upsertMany("hole_scores", updates);
   };
 
   const setCourseForRound = async (rnd, course) => {
@@ -9696,19 +9735,25 @@ export default function WBCApp() {
   // was written under — the pre-editions bare `2026` ids and the edition-slug
   // ids both — falling back to rebuilding the id only if a row somehow lacks
   // one. Returns the number of holes removed so the caller can report it.
+  //
+  // ONE commit for the whole card. A per-hole delete loop is eighteen commits,
+  // and every phone in the field publishes a repaint on each of them — the
+  // discarded round visibly erodes a hole at a time on somebody else's
+  // leaderboard. Batched, it is gone everywhere in one frame.
   const onDiscardRoundScores = async (round, pid) => {
     const rows = await db.get("hole_scores", [
       { field: "tournament_id", op: "==", value: TOURNAMENT_ID },
       { field: "player_id", op: "==", value: pid },
       { field: "round_number", op: "==", value: round },
     ]);
-    for (const r of (rows || [])) {
-      await db.deleteDoc("hole_scores", r.id || docIds.holeScore(_e(), round, pid, (r.hole_number || 1) - 1));
-    }
-    // The subscription says the same thing a moment later; this keeps the
-    // panel that raised the action from re-rendering against the stale card.
+    const ids = (rows || []).map(r => r.id || docIds.holeScore(_e(), round, pid, (r.hole_number || 1) - 1));
+    if (ids.length) await db.replaceMany("hole_scores", [], ids);
+    // The subscription now says the same thing a moment later — it applies
+    // removals, which is what it did not used to do — so this is only about
+    // the panel that raised the action not re-rendering against a stale card
+    // in the meantime.
     setHoleData(prev => { const n = { ...prev }; delete n[`${pid}_${round}`]; return n; });
-    return (rows || []).length;
+    return ids.length;
   };
 
   const updateHI = async (pid, newHI) => {
@@ -9924,6 +9969,129 @@ export default function WBCApp() {
     // Same as onSetCtp: the prompt closing is the acknowledgement.
   };
 
+  // ── The scorecard: signing, attesting, and calling a round done ──
+  //
+  // These five were inline arrow props on <OnCourseScoring> — one JSX
+  // attribute list three thousand characters long, holding the rules for how
+  // a card is signed. They are up here now because the paragraph below had to
+  // be added to four of them, and a rule nobody can find is a rule that gets
+  // added to three places out of four.
+
+  // ── Telling the field a round is done ──
+  //
+  // `wbc_rounds_state` is the document the onRoundFinalized Cloud Function
+  // watches; writing it is what sends "Round N is final" to every phone.
+  // Until now only Admin's whole-round finalize button wrote it — and that is
+  // not how a round normally ends. It normally ends on a tee box, with the
+  // last group signing and attesting its own card, which writes a GROUP KEY
+  // into tournament_state and nothing else. So the notification never went
+  // out on the path the tournament actually takes.
+  //
+  // A round is done when every group drawn into it is done (lib/groupSwitch
+  // roundFinalized), and that can only be asked AFTER the group's key lands —
+  // which is why every path that finalizes a group asks it here rather than
+  // each of them deciding for itself.
+  //
+  // Only the EDGES are written. A round of four groups would otherwise rewrite
+  // this document every time a card was signed, and every phone in the field
+  // holds a listener on it.
+  //
+  // Safe to race: four phones can notice the same round finish at the same
+  // moment, and the function fires on the false→true transition, so the second
+  // and later writes are not transitions and send nothing.
+  const publishRoundFinalized = async (nextFinalized, key) => {
+    const rnd = roundOfGroupKey(key);
+    if (!rnd) return;
+    const wasFinal = roundFinalized(finalizedRounds, pairingsData, rnd);
+    const isFinal = roundFinalized(nextFinalized, pairingsData, rnd);
+    if (wasFinal === isFinal) return;
+    await db.upsert("wbc_rounds_state", {
+      id: `${TOURNAMENT_ID}_r${rnd}`,
+      tournament_id: TOURNAMENT_ID,
+      round: rnd,
+      finalized: isFinal,
+    });
+  };
+
+  // Finalizing a group, and the two ways in: it is the last thing a signature
+  // or the last attestation does, and it is also its own button.
+  const finalizeGroup = async (key) => {
+    const nf = { ...finalizedRounds, [key]: true };
+    setFinalizedRounds(nf);
+    await saveTournamentState(nf);
+    await publishRoundFinalized(nf, key);
+  };
+
+  const onSignScorecard = async (key, signerPid, signerName, present, rnd) => {
+    const nonSigners = (present || []).filter(pid => pid !== signerPid);
+    const optimistic = { signedBy: signerPid, signedByName: signerName, attestedBy: [], present: present || [] };
+    pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 });
+    setScorecardSigs(prev => ({ ...prev, [key]: optimistic }));
+    await db.upsert("wbc_scorecard_sigs", {
+      id: docIds.scorecardSig(_e(), key, isDefaultEdition()),
+      tournament_id: TOURNAMENT_ID, groupKey: key, round: rnd,
+      signedBy: signerPid, signedByName: signerName,
+      present: present || [], attestedBy: [], signedAt: new Date().toISOString(),
+    });
+    // A group of one has nobody left to attest, so signing IS finalizing.
+    if (nonSigners.length === 0) await finalizeGroup(key);
+  };
+
+  const onAttestScorecard = async (key, attesterPid, nonSigners) => {
+    const cur = scorecardSigs[key];
+    if (!cur) return;
+    const attestedBy = [...new Set([...(cur.attestedBy || []), attesterPid])];
+    pendingSigsRef.current.set(key, { sig: { ...cur, attestedBy }, expiresAt: Date.now() + 8000 });
+    setScorecardSigs(prev => ({ ...prev, [key]: { ...prev[key], attestedBy } }));
+    await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), attestedBy });
+    if ((nonSigners || []).every(pid => attestedBy.includes(pid))) await finalizeGroup(key);
+  };
+
+  const onUnsignScorecard = async (key) => {
+    pendingSigsRef.current.delete(key);
+    setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; });
+    await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition()));
+    if (!finalizedRounds[key]) return;
+    const nf = { ...finalizedRounds };
+    delete nf[key];
+    setFinalizedRounds(nf);
+    await saveTournamentState(nf);
+    await publishRoundFinalized(nf, key);
+  };
+
+  const onUnfinalizeGroup = async (key) => {
+    const nf = { ...finalizedRounds };
+    delete nf[key];
+    setFinalizedRounds(nf);
+    setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; });
+    pendingSigsRef.current.delete(key);
+    await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition()));
+    await saveTournamentState(nf);
+    await publishRoundFinalized(nf, key);
+  };
+
+  // Admin's whole-round finalize. It goes through the same publish path a
+  // group signing off does — the only difference is which key lands in
+  // finalizedRounds, a bare round number rather than a group's.
+  const finalizeWholeRound = async (rnd) => {
+    const nf = { ...finalizedRounds, [rnd]: true };
+    setFinalizedRounds(nf);
+    await saveTournamentState(nf);
+    await publishRoundFinalized(nf, rnd);
+    if (rnd < NUM_ROUNDS) setRound(rnd + 1);
+  };
+
+  // Admin's undo, which can be handed either kind of key: a round number from
+  // the round panel, or a group key from the per-card list beside it.
+  const unfinalizeFromAdmin = async (key) => {
+    if (!/^\d+$/.test(String(key))) return onUnfinalizeGroup(key);
+    const nf = { ...finalizedRounds };
+    delete nf[key];
+    setFinalizedRounds(nf);
+    await saveTournamentState(nf);
+    await publishRoundFinalized(nf, key);
+  };
+
   const setPairings = async (rnd, groups) => {
     const existing = JSON.stringify(pairingsData[rnd] || []);
     const incoming = JSON.stringify(groups);
@@ -10137,8 +10305,11 @@ export default function WBCApp() {
           countdownAt={firstTeeAt}
           right={<button onClick={handleLogout} style={{ background: "transparent", border: `1px solid ${K.bdr}`, borderRadius: R.sm, color: K.t3, fontSize: FS.small, fontWeight: 600, padding: "5px 12px", cursor: "pointer" }}>Exit</button>}
         />
+        {/* A spectator watching a board that has stopped updating deserves to
+            be told, the same as a scorer does. */}
+        <SyncBanner status={syncStatus} />
         <div style={{ padding: "14px 20px 0 20px", flex: 1, overflowY: "hidden", overflowX: "hidden", display: "flex", flexDirection: "column", minHeight: 0, marginBottom: 8 }}>
-          <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} pairingsData={pairingsData} teeTimesData={teeTimesData} loaded={storageLoaded} />
+          <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} finalizedRounds={finalizedRounds} skinWins={skinWins} pairingsData={pairingsData} teeTimesData={teeTimesData} loaded={storageLoaded} />
         </div>
       </div>
       </div>
@@ -10198,6 +10369,10 @@ export default function WBCApp() {
           admin settings modal's header, so a message raised anywhere else —
           or from admin once that modal closed — was set and never shown. */}
       <Toast message={notif} />
+
+      {/* "This phone is on its own." Renders nothing at all unless it has
+          something to say — see components/SyncBanner. */}
+      <SyncBanner status={syncStatus} />
 
       {/* Pull-to-refresh indicator. The app logo (golfer) as a MASK rather
           than an <img>, the same technique the nav uses, so the silhouette can
@@ -10469,9 +10644,9 @@ export default function WBCApp() {
           rather than to the height of what is in them — the tab sizes its own
           type from that measurement, so it needs a floor to measure against. */}
       <div className="wbc-app-body" style={{ padding: (view === "leaderboard" || view === "admin") ? "14px 20px 0 20px" : "14px 20px", flex: 1, overflowY: "auto", overflowX: "hidden", display: (view === "leaderboard" || view === "admin" || view === "groups") ? "flex" : "block", flexDirection: "column", minHeight: 0, paddingBottom: (view === "leaderboard" || view === "admin") ? "28px" : 0 }}>
-        {view === "leaderboard" && <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} pairingsData={pairingsData} teeTimesData={teeTimesData} loaded={storageLoaded} />}
+        {view === "leaderboard" && <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} finalizedRounds={finalizedRounds} skinWins={skinWins} pairingsData={pairingsData} teeTimesData={teeTimesData} loaded={storageLoaded} />}
         <div style={{ display: view === "scoring" ? "block" : "none", paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
-          <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeTimesData={teeTimesData} roundDates={roundDates} scoringOpen={scoringOpen} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={async (key, signerPid, signerName, present, rnd) => { const nonSigners = (present || []).filter(pid => pid !== signerPid); const autoFinal = nonSigners.length === 0; const optimistic = { signedBy: signerPid, signedByName: signerName, attestedBy: [], present: present || [] }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: optimistic })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), tournament_id: TOURNAMENT_ID, groupKey: key, round: rnd, signedBy: signerPid, signedByName: signerName, present: present || [], attestedBy: [], signedAt: new Date().toISOString() }); if (autoFinal) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onAttestScorecard={async (key, attesterPid, nonSigners) => { const cur = scorecardSigs[key]; if (!cur) return; const attestedBy = [...new Set([...(cur.attestedBy || []), attesterPid])]; const optimistic = { ...cur, attestedBy }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: { ...prev[key], attestedBy } })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), attestedBy }); const allDone = (nonSigners || []).every(pid => attestedBy.includes(pid)); if (allDone) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onUnsignScorecard={async key => { pendingSigsRef.current.delete(key); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); if (finalizedRounds[key]) { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); pendingSigsRef.current.delete(key); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); await saveTournamentState(nf); }} onGoToAdminCourses={(rnd) => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); setAdminSettingsRound(rnd || null); }} markPlayerWD={markPlayerWD} ctpData={ctpData} onSetCtp={onSetCtp} onConfirmCtp={onConfirmCtp} directorPick={directorPick} onGroupChange={setScoringGroup} onSetRound={setRound} />
+          <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeTimesData={teeTimesData} roundDates={roundDates} scoringOpen={scoringOpen} setTee={setTee} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={onSignScorecard} onAttestScorecard={onAttestScorecard} onUnsignScorecard={onUnsignScorecard} onFinalizeRound={finalizeGroup} onUnfinalizeRound={onUnfinalizeGroup} onGoToAdminCourses={(rnd) => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); setAdminSettingsRound(rnd || null); }} markPlayerWD={markPlayerWD} ctpData={ctpData} onSetCtp={onSetCtp} onConfirmCtp={onConfirmCtp} directorPick={directorPick} onGroupChange={setScoringGroup} onSetRound={setRound} />
         </div>
         {view === "players" && <PlayersView players={allPlayers} registry={registry} meId={user?.id} year={getTournamentYear()} isDirector={!!user.isDirector} onSetOverride={setIndexOverride} />}
         {/* Posting requires a real account: firestore.rules pins uploadedBy to
@@ -10506,7 +10681,7 @@ export default function WBCApp() {
                 if (rows.length) db.upsertMany("pairings", rows);
                 return next;
               });
-            }} roundDates={roundDates} onSetRoundDate={async (rnd, dateStr) => { const next = { ...roundDates }; if (dateStr) next[rnd] = dateStr; else delete next[rnd]; setRoundDates(next); await saveTournamentState(finalizedRounds, teesSaved, teesModified, next, scoringOpen); }} scoringOpen={scoringOpen} onSetScoringOpen={async (rnd, open) => { const next = { ...scoringOpen }; if (open) next[rnd] = true; else delete next[rnd]; setScoringOpen(next); await saveTournamentState(finalizedRounds, teesSaved, teesModified, roundDates, next); }} pairingStrategy={pairingStrategy} onSetPairingStrategy={async (rnd, cfg) => { const next = { ...pairingStrategy }; if (cfg) next[rnd] = cfg; else delete next[rnd]; setPairingStrategy(next); await saveTournamentState(finalizedRounds, teesSaved, teesModified, roundDates, scoringOpen, next); }} leaderboard={getLeaderboard} holeData={holeData} finalizedRounds={finalizedRounds} onDiscardRoundScores={onDiscardRoundScores} onFinalizeRound={async rnd => { const nf = { ...finalizedRounds, [rnd]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${rnd}`, tournament_id: TOURNAMENT_ID, round: rnd, finalized: true }); if (rnd < NUM_ROUNDS) setRound(rnd + 1); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf); if (/^\d+$/.test(String(key))) { await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${key}`, tournament_id: TOURNAMENT_ID, round: Number(key), finalized: false }); } else { setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); } }} notify={notify} getPlayerTee={getPlayerTee} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} externalSettingsRound={adminSettingsRound} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); setAdminSettingsRound(null); }} teesSaved={teesSaved} onTeesSave={async r => { const next = { ...teesSaved, [r]: true }; const nextMod = { ...teesModified, [r]: false }; setTeesSaved(next); setTeesModified(nextMod); await saveTournamentState(finalizedRounds, next, nextMod); }} teesModified={teesModified} onTeesModify={async r => { const nextMod = { ...teesModified, [r]: true }; setTeesModified(nextMod); await saveTournamentState(finalizedRounds, teesSaved, nextMod); }} memberships={memberships} onSetDirector={onSetDirector} claims={claims} authUid={fbUser?.uid || null} tournamentMeta={tournamentMeta} onSaveTournamentMeta={saveTournamentMeta} /> : (
+            }} roundDates={roundDates} onSetRoundDate={async (rnd, dateStr) => { const next = { ...roundDates }; if (dateStr) next[rnd] = dateStr; else delete next[rnd]; setRoundDates(next); await saveTournamentState(finalizedRounds, teesSaved, teesModified, next, scoringOpen); }} scoringOpen={scoringOpen} onSetScoringOpen={async (rnd, open) => { const next = { ...scoringOpen }; if (open) next[rnd] = true; else delete next[rnd]; setScoringOpen(next); await saveTournamentState(finalizedRounds, teesSaved, teesModified, roundDates, next); }} pairingStrategy={pairingStrategy} onSetPairingStrategy={async (rnd, cfg) => { const next = { ...pairingStrategy }; if (cfg) next[rnd] = cfg; else delete next[rnd]; setPairingStrategy(next); await saveTournamentState(finalizedRounds, teesSaved, teesModified, roundDates, scoringOpen, next); }} leaderboard={getLeaderboard} holeData={holeData} finalizedRounds={finalizedRounds} onDiscardRoundScores={onDiscardRoundScores} onFinalizeRound={finalizeWholeRound} onUnfinalizeRound={unfinalizeFromAdmin} notify={notify} getPlayerTee={getPlayerTee} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} externalSettingsRound={adminSettingsRound} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); setAdminSettingsRound(null); }} teesSaved={teesSaved} onTeesSave={async r => { const next = { ...teesSaved, [r]: true }; const nextMod = { ...teesModified, [r]: false }; setTeesSaved(next); setTeesModified(nextMod); await saveTournamentState(finalizedRounds, next, nextMod); }} teesModified={teesModified} onTeesModify={async r => { const nextMod = { ...teesModified, [r]: true }; setTeesModified(nextMod); await saveTournamentState(finalizedRounds, teesSaved, nextMod); }} memberships={memberships} onSetDirector={onSetDirector} claims={claims} authUid={fbUser?.uid || null} tournamentMeta={tournamentMeta} onSaveTournamentMeta={saveTournamentMeta} /> : (
           <div style={{ textAlign: "center", padding: "40px 20px" }}>
             <div style={{ fontSize: FS.jumbo, marginBottom: 12 }}>🔒</div>
             <div style={{ fontSize: FS.lead, fontWeight: 700, color: K.t1, marginBottom: 6 }}>Directors Only</div>

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { groupKey, sameGroup, liveRound, switchableGroups, groupProgress, roundFinalized } from "./groupSwitch";
+import { groupKey, roundOfGroupKey, sameGroup, liveRound, switchableGroups, groupProgress, roundFinalized } from "./groupSwitch";
 
 // n holes posted for a player, as holeData files them: `${pid}_${round}`.
 const card = (n, s = 4) => Object.fromEntries(Array.from({ length: n }, (_, i) => [i, s]));
@@ -11,6 +11,28 @@ describe("groupKey", () => {
 
   it("carries the round, so the same four in round 2 are a different card", () => {
     expect(groupKey(1, ["a", "b"])).not.toBe(groupKey(2, ["a", "b"]));
+  });
+});
+
+describe("roundOfGroupKey", () => {
+  it("reads back the round groupKey wrote", () => {
+    expect(roundOfGroupKey(groupKey(3, ["a", "b"]))).toBe(3);
+  });
+
+  it("handles a round in double figures", () => {
+    expect(roundOfGroupKey(groupKey(12, ["a"]))).toBe(12);
+  });
+
+  it("answers a bare round number as itself — finalizedRounds holds both", () => {
+    expect(roundOfGroupKey(2)).toBe(2);
+    expect(roundOfGroupKey("2")).toBe(2);
+  });
+
+  it("answers null rather than guessing round 1", () => {
+    expect(roundOfGroupKey("")).toBe(null);
+    expect(roundOfGroupKey(null)).toBe(null);
+    expect(roundOfGroupKey(undefined)).toBe(null);
+    expect(roundOfGroupKey("aaron_j,dave_s")).toBe(null);
   });
 });
 
