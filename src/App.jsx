@@ -17,6 +17,8 @@ import { BuyInPrices, BuyInTracker } from "./components/BuyIns";
 import { useConfirm } from "./lib/useConfirm";
 // Tee times survive a re-group because of these two — see lib/teeSheet.js.
 import { rowsToTeeTimes, mergeTeeTimes } from "./lib/teeSheet";
+// Score documents → the holeData map, deletions included — see lib/holeScores.
+import { applyScoreChanges, roundOf } from "./lib/holeScores";
 import { useDirtyForm } from "./lib/useDirtyForm";
 import { useSheetDrag } from "./lib/useSheetDrag";
 import { usePullToRefresh, hasNewBundle } from "./lib/usePullToRefresh";
@@ -238,19 +240,12 @@ const db = {
 // on TOURNAMENT_ID exists to avoid.
 const _e = () => getEditionSlug();
 
-// Which round a hole_scores document belongs to. `round_number` is the field
-// every row written by this app carries; the id is parsed only as a fallback
-// for the oldest imported rows, which predate it.
-//
-// There is no rows → holeData bulk parser beside this any more. There used to
-// be, for a cold-start read of the whole collection that ran alongside the
-// subscription; the subscription's own handler is the only place hole_scores
-// documents become holeData now, so there is one reading of a score document
-// rather than two that could disagree.
-const extractRound = (roundScoreId) => {
-  const m = roundScoreId?.match(/_r(\d+)_/);
-  return m ? parseInt(m[1]) : 1;
-};
+// Which round a score document belongs to, and the fold that turns those
+// documents into holeData, both live in lib/holeScores — imported at the top
+// of this file. There is no second bulk parser beside them any more: there
+// used to be one, for a cold-start read of the whole collection that ran
+// alongside the subscription, so a score document had two readings that could
+// disagree. The subscription's fold is the only one now.
 // Convert holeData entry to a Firestore document
 const holeDataToRow = (pid, rnd, holeIdx, score, courseId) => ({
   id: docIds.holeScore(_e(), rnd, pid, holeIdx),
@@ -403,7 +398,7 @@ const rowsToCourseHandicaps = (rows) => {
 const rowsToCtp = (rows) => {
   const cd = {};
   (rows || []).filter(r => r.skin_type === "ctp" && r.player_id).forEach(r => {
-    const rnd = r.round_number || extractRound(r.id);
+    const rnd = roundOf(r);
     if (!cd[rnd]) cd[rnd] = {};
     const ft = (r.distance_ft === 0 || r.distance_ft) ? r.distance_ft : null;
     cd[rnd][r.hole_number] = {
@@ -8969,18 +8964,14 @@ export default function WBCApp() {
     // ── Real-time subscriptions via Firestore onSnapshot ──
     const unsubs = [];
 
+    // Scores, applied as CHANGES rather than rebuilt. See lib/holeScores for
+    // why the fold lives there — the short version is that a deletion is as
+    // much a fact about a card as a score is, and this handler used to drop
+    // them on the floor: a discarded round vanished on the director's phone
+    // and stayed on everybody else's until they relaunched.
     unsubs.push(db.subscribe("hole_scores", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs, changes) => {
-      setHoleData(prev => {
-        const next = { ...prev };
-        (changes || []).forEach(change => {
-          if (change.type === "removed") return;
-          const row = change.doc.data();
-          const rnd = row.round_number || extractRound(row.round_score_id);
-          const key = `${row.player_id}_${rnd}`;
-          next[key] = { ...(next[key] || {}), [row.hole_number - 1]: row.score };
-        });
-        return next;
-      });
+      const normalized = (changes || []).map(c => ({ type: c.type, row: c.doc.data() }));
+      setHoleData(prev => applyScoreChanges(prev, normalized));
     }));
 
     unsubs.push(db.subscribe("pairings", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
@@ -9719,19 +9710,25 @@ export default function WBCApp() {
   // was written under — the pre-editions bare `2026` ids and the edition-slug
   // ids both — falling back to rebuilding the id only if a row somehow lacks
   // one. Returns the number of holes removed so the caller can report it.
+  //
+  // ONE commit for the whole card. A per-hole delete loop is eighteen commits,
+  // and every phone in the field publishes a repaint on each of them — the
+  // discarded round visibly erodes a hole at a time on somebody else's
+  // leaderboard. Batched, it is gone everywhere in one frame.
   const onDiscardRoundScores = async (round, pid) => {
     const rows = await db.get("hole_scores", [
       { field: "tournament_id", op: "==", value: TOURNAMENT_ID },
       { field: "player_id", op: "==", value: pid },
       { field: "round_number", op: "==", value: round },
     ]);
-    for (const r of (rows || [])) {
-      await db.deleteDoc("hole_scores", r.id || docIds.holeScore(_e(), round, pid, (r.hole_number || 1) - 1));
-    }
-    // The subscription says the same thing a moment later; this keeps the
-    // panel that raised the action from re-rendering against the stale card.
+    const ids = (rows || []).map(r => r.id || docIds.holeScore(_e(), round, pid, (r.hole_number || 1) - 1));
+    if (ids.length) await db.replaceMany("hole_scores", [], ids);
+    // The subscription now says the same thing a moment later — it applies
+    // removals, which is what it did not used to do — so this is only about
+    // the panel that raised the action not re-rendering against a stale card
+    // in the meantime.
     setHoleData(prev => { const n = { ...prev }; delete n[`${pid}_${round}`]; return n; });
-    return (rows || []).length;
+    return ids.length;
   };
 
   const updateHI = async (pid, newHI) => {
