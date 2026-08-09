@@ -4,7 +4,7 @@ import { _app, _db, _auth, onAuthStateChanged, doGoogleSignIn, doAppleSignIn, do
 import { readMembership, isDirectorAccount, resolveMember, joinWithCode, readAccessCode, setAccessCode, setDirector, subscribeMemberships, accountsUnreadable, membershipForPlayer, playerIsDirector } from "./lib/accounts";
 import { K, ON_ACC, ON_DANGER, FS, fsStep, R, ALPHA, MOTION, FONT, SHADOW, SCRIM, DIM_PLACED, getTheme, setTheme} from "./theme";
 import { SegmentedToggle, Toggle, StickyTop, SectionLabel, Card, Toast, Btn } from "./components/ui";
-import { calcCH, buildStrokesMap, computeRoundLine, computeIndividualBoard, rankIndividualBoard, rankIndividualBoardIds, WD_SCORE } from "./lib/individualBoard";
+import { calcCH, courseHandicapFor, buildStrokesMap, computeRoundLine, computeIndividualBoard, rankIndividualBoard, rankIndividualBoardIds, WD_SCORE } from "./lib/individualBoard";
 import { fieldFor, potFor, perUnit, computeSkins, allSkins, skinCounts, lowNetRounds, lowNetRoundField } from "./lib/sideGames";
 import { teeTimesByPlayer, roundInPlay, thruStatus } from "./lib/thruStatus";
 import {
@@ -687,7 +687,7 @@ const LB_COL = { num: 36, total: 40, thru: 34, priorMin: 24 };
 // what lets four equal tracks actually look equal.
 const LB_PAD_L = 12;
 
-function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getPlayerTee, finalizedRounds, skinWins, pairingsData, teeTimesData, loaded = true }) {
+function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getPlayerTee, getPlayerCH = () => null, finalizedRounds, skinWins, pairingsData, teeTimesData, loaded = true }) {
   const [expanded, setExpanded] = useState(null);
   const [scorecardRound, setScorecardRound] = useState(null);
   const [showGross, setShowGross] = useState(false);
@@ -833,22 +833,30 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
     const holePars = course.hole_pars || [];
     const holeHcps = course.hole_handicaps || [];
     const tee = getPlayerTee(viewRound, p.id, course);
-    const ch = calcCH(hi, tee?.slope || course.slope, tee?.rating || course.rating, tee?.par || course.par);
-    const sorted = holeHcps.map((h, i) => ({ idx: i, hcp: h })).sort((a, b) => a.hcp - b.hcp);
-    const strokeMap = {};
-    let rem = Math.abs(ch);
-    for (let pass = 0; pass < 3 && rem > 0; pass++) {
-      for (const h of sorted) { if (rem <= 0) break; strokeMap[h.idx] = (strokeMap[h.idx] || 0) + 1; rem--; }
-    }
+    // Same two shared functions the board itself ranks on — this card used to
+    // derive the handicap without consulting the recorded one, and re-roll the
+    // stroke allocation by hand, so an imported year could print a scorecard
+    // whose net did not add up to the total on the row that opened it.
+    const ch = courseHandicapFor({
+      handicapIndex: hi,
+      course,
+      tee,
+      recorded: getPlayerCH(viewRound, p.id),
+    });
+    const strokeMap = buildStrokesMap(ch, holeHcps);
     const frontPar = holePars.slice(0,9).reduce((a,b)=>a+b,0);
     const backPar = holePars.slice(9).reduce((a,b)=>a+b,0);
     let frontGross = 0, backGross = 0, frontNet = 0, backNet = 0;
     for (let h = 0; h < 18; h++) {
-      if (scores[h]) {
-        const g = scores[h];
-        const st = strokeMap[h] || 0;
-        if (h < 9) { frontGross += g; frontNet += (g - st); } else { backGross += g; backNet += (g - st); }
-      }
+      const g = scores[h];
+      // A withdrawal fills its remaining holes with the sentinel so the card
+      // stays structurally complete; totalling those would print a gross in
+      // the hundreds. Same exclusion computeRoundLine makes.
+      if (!(g > 0) || g === WD_SCORE) continue;
+      // A plus handicap gives strokes BACK, so the sign travels with the map —
+      // buildStrokesMap allocates by magnitude and leaves it to the caller.
+      const st = (strokeMap[h] || 0) * (ch < 0 ? -1 : 1);
+      if (h < 9) { frontGross += g; frontNet += (g - st); } else { backGross += g; backNet += (g - st); }
     }
     const rc = { r: viewRound, course, holePars, scores, strokeMap, ch, frontPar, backPar, frontGross, backGross, frontNet, backNet, tee };
 
@@ -1378,7 +1386,7 @@ const holeBarBtn = (fill) => ({
   color: ON_ACC, fontSize: FS.label, fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap",
 });
 
-function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPlayers, onSaveHole, notify, pairingsData, teeTimesData, roundDates, scoringOpen, setTee, getPlayerTee, finalizedRounds, scorecardSigs, onSignScorecard, onAttestScorecard, onUnsignScorecard, onFinalizeRound, onUnfinalizeRound, onGoToAdminCourses, markPlayerWD, ctpData, onSetCtp, onConfirmCtp, directorPick, onGroupChange, onSetRound }) {
+function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPlayers, onSaveHole, notify, pairingsData, teeTimesData, roundDates, scoringOpen, setTee, getPlayerTee, getPlayerCH = () => null, finalizedRounds, scorecardSigs, onSignScorecard, onAttestScorecard, onUnsignScorecard, onFinalizeRound, onUnfinalizeRound, onGoToAdminCourses, markPlayerWD, ctpData, onSetCtp, onConfirmCtp, directorPick, onGroupChange, onSetRound }) {
   const [group, setGroup] = useState(null);
   const [currentHole, setCurrentHole] = useState(0);
   const [manualOverride, setManualOverride] = useState(false);
@@ -1742,59 +1750,47 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
     }
   }, [allScored, currentHole, editingCompleted, showCtpForHole]);
 
-  const getCH = (p) => {
-    if (!course) return 0;
-    const tp = tPlayers.find(t => t.player_id === p.id);
-    const hi = parseFloat(tp?.handicap_index) || 0;
-    const tee = getPlayerTee(round, p.id, course);
-    return calcCH(hi, tee?.slope || course.slope, tee?.rating || course.rating, tee?.par || course.par);
-  };
+  // ── The scorecard's three numbers, off the board's own math ──
+  //
+  // All three used to be written out longhand here, and being a second
+  // implementation is exactly how they came to be wrong:
+  //
+  //   • the stroke allocation was a hand-rolled three-pass copy of
+  //     buildStrokesMap, which this file already imports;
+  //   • the running total counted the WD sentinel as a real score, so a
+  //     withdrawn playing partner sat there with a gross in the hundreds and
+  //     a card that claimed to be thru 18 while the leaderboard, which knows
+  //     to skip those holes, showed him thru 9;
+  //   • it subtracted strokes unconditionally, so a plus handicap got them
+  //     the wrong way round — they add to a net score, they do not come off.
+  //
+  // computeRoundLine has all three rules and a test file. This is now a call
+  // into it, which is also what makes the running net on a tee box and the
+  // number on the board the same number rather than two that agree.
+  const getCH = (p) => courseHandicapFor({
+    handicapIndex: p?.handicap_index,
+    course,
+    tee: course ? getPlayerTee(round, p.id, course) : null,
+    recorded: getPlayerCH(round, p?.id),
+  });
 
   const getTeeName = (p) => {
     const tee = getPlayerTee(round, p.id, course);
     return tee?.name || "Default";
   };
 
-  // Calculate strokes per hole - handles CH > 18 (wraps around)
-  const getStrokesMap = (ch) => {
-    const map = {};
-    const sorted = holeHcps.map((h, i) => ({ idx: i, hcp: h })).sort((a, b) => a.hcp - b.hcp);
-    let rem = Math.abs(ch);
-    // First pass: 1 stroke each, easiest-to-hardest by handicap index
-    for (const h of sorted) { if (rem <= 0) break; map[h.idx] = (map[h.idx] || 0) + 1; rem--; }
-    // Second pass: if CH > 18, wrap around for 2nd strokes
-    for (const h of sorted) { if (rem <= 0) break; map[h.idx] = (map[h.idx] || 0) + 1; rem--; }
-    // Third pass: if CH > 36 (unlikely but safe)
-    for (const h of sorted) { if (rem <= 0) break; map[h.idx] = (map[h.idx] || 0) + 1; rem--; }
-    return map;
-  };
-
-  const getStrokes = (p, holeIdx) => {
-    const ch = getCH(p);
-    const map = getStrokesMap(ch);
-    return map[holeIdx] || 0;
-  };
+  const getStrokes = (p, holeIdx) => buildStrokesMap(getCH(p), holeHcps)[holeIdx] || 0;
 
   const getRunning = (pid) => {
-    const key = `${pid}_${round}`;
-    const scores = holeData[key] || {};
-    let gross = 0, netToPar = 0, thru = 0;
-    if (!course) return { gross, netToPar, thru };
-    const tp = tPlayers.find(t => t.player_id === pid);
-    const hi = parseFloat(tp?.handicap_index) || 0;
-    const tee = getPlayerTee(round, pid, course);
-    const ch = calcCH(hi, tee?.slope || course.slope, tee?.rating || course.rating, tee?.par || course.par);
-    const strokeMap = getStrokesMap(ch);
-    for (let h = 0; h < 18; h++) {
-      if (scores[h]) {
-        gross += scores[h];
-        const p = holePars[h] || 4;
-        const stroke = strokeMap[h] || 0;
-        netToPar += (scores[h] - stroke - p);
-        thru++;
-      }
-    }
-    return { gross, netToPar, thru };
+    const p = players.find(x => x.id === pid);
+    if (!course || !p) return { gross: 0, netToPar: 0, thru: 0 };
+    const line = computeRoundLine({
+      scores: holeData[`${pid}_${round}`] || {},
+      holePars,
+      holeHcps,
+      ch: getCH(p),
+    });
+    return { gross: line.gross, netToPar: line.netToPar, thru: line.thru };
   };
 
   // ── The off-round banner ────────────────────────────────────────────
@@ -2842,24 +2838,18 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
 
               {/* Mini scorecards per player */}
               {groupPlayers.map(p => {
-                const tp = tPlayers.find(t => t.player_id === p.id);
-                const hi = parseFloat(tp?.handicap_index) || 0;
-                const tee = getPlayerTee(round, p.id, course);
-                const ch = calcCH(hi, tee?.slope || course.slope, tee?.rating || course.rating, tee?.par || course.par);
+                // Same handicap and the same stroke allocation as everything
+                // else on this screen — see the note above getCH.
+                const ch = getCH(p);
                 const scores = holeData[`${p.id}_${round}`] || {};
                 let gross = 0, net = 0, frontGross = 0, backGross = 0;
-                const sorted = holeHcps.map((h, i) => ({ idx: i, hcp: h })).sort((a, b) => a.hcp - b.hcp);
-                const strokeMap = {};
-                let rem = Math.abs(ch);
-                for (let pass = 0; pass < 3 && rem > 0; pass++) {
-                  for (const h of sorted) { if (rem <= 0) break; strokeMap[h.idx] = (strokeMap[h.idx] || 0) + 1; rem--; }
-                }
+                const strokeMap = buildStrokesMap(ch, holeHcps);
                 for (let h = 0; h < 18; h++) {
-                  if (scores[h]) {
-                    const g = scores[h]; const st = strokeMap[h] || 0;
-                    gross += g; net += g - st;
-                    if (h < 9) { frontGross += g; } else { backGross += g; }
-                  }
+                  const g = scores[h];
+                  if (!(g > 0) || g === WD_SCORE) continue;
+                  const st = (strokeMap[h] || 0) * (ch < 0 ? -1 : 1);
+                  gross += g; net += g - st;
+                  if (h < 9) { frontGross += g; } else { backGross += g; }
                 }
                 const parTotal = holePars.reduce((a, b) => a + b, 0);
                 const cellBorder = `1px solid ${K.bdr}${ALPHA.line}`;
@@ -3201,18 +3191,12 @@ function BettingView({
     const { course } = roundSetup(r);
     const maps = {}; const chs = {};
     skinsField.forEach(p => {
-      // Same precedence as the leaderboard: a RECORDED handicap wins over a
-      // derived one. This is the second place the app turns an index into
-      // strokes, and it has to agree with the first — on a flat imported year
-      // calcCH gives out the wrong NUMBER of strokes, not merely the wrong
-      // holes, so net skins would disagree with the leaderboard beside it.
-      const recorded = getPlayerCH(r, p.id);
-      const tee = course ? getPlayerTee(r, p.id, course) : null;
-      const ch = Number.isFinite(recorded)
-        ? recorded
-        : course
-          ? calcCH(p.handicap_index, tee?.slope || course.slope, tee?.rating || course.rating, tee?.par || course.par)
-          : 0;
+      const ch = courseHandicapFor({
+        handicapIndex: p.handicap_index,
+        course,
+        tee: course ? getPlayerTee(r, p.id, course) : null,
+        recorded: getPlayerCH(r, p.id),
+      });
       chs[p.id] = ch;
       maps[p.id] = buildStrokesMap(ch, course?.hole_handicaps || []);
     });
@@ -3274,17 +3258,24 @@ function BettingView({
   // resolves it — same tee, same course handicap, same computeRoundLine — so
   // the low net paid here and the number on the board are the same number by
   // construction rather than by two implementations agreeing.
+  //
+  // The course handicap used to be a bare calcCH here, which quietly made that
+  // paragraph untrue on an imported year: the board reads the RECORDED handicap
+  // those years carry and this read a derived one, so the day's low net could
+  // be paid to somebody the leaderboard did not have winning it.
   const lineFor = (pid, r) => {
     const { course } = roundSetup(r);
     if (!course) return null;
-    const p = players.find(x => x.id === pid);
-    const tee = getPlayerTee(r, pid, course);
-    const ch = calcCH(p?.handicap_index, tee?.slope || course.slope, tee?.rating || course.rating, tee?.par || course.par);
     return computeRoundLine({
       scores: holeData[`${pid}_${r}`] || {},
       holePars: course.hole_pars || [],
       holeHcps: course.hole_handicaps || [],
-      ch,
+      ch: courseHandicapFor({
+        handicapIndex: players.find(x => x.id === pid)?.handicap_index,
+        course,
+        tee: getPlayerTee(r, pid, course),
+        recorded: getPlayerCH(r, pid),
+      }),
     });
   };
   // The pot divides by the rounds the event HAS, not the rounds decided so
@@ -6735,21 +6726,24 @@ function AdminView({ activePlayers, rosterPlayers, sideGames, onUpdateSideGames,
   const buildFinalizeModal = (r) => {
     const tr = tRounds.find(t => t.round_number === r);
     const course = tr ? courses.find(c => c.id === tr.course_id) : null;
+    // The standings a director is shown before finalizing, off the same
+    // computeRoundLine the leaderboard ranks on. It used to total the card by
+    // hand and take the whole course handicap off the end, which counted a
+    // withdrawal's sentinel holes as strokes played and gave a partial card
+    // every one of its strokes on holes it had not reached — so the preview
+    // could disagree with the board it was about to publish.
     const scores = activePlayers.map(p => {
-      const key = `${p.id}_${r}`;
-      const s = holeData[key] || {};
-      const tee = getPlayerTee(r, p.id, course);
-      const slope = tee?.slope || course?.slope || 113;
-      const rating = tee?.rating || course?.rating || 72;
-      const par = tee?.par || course?.par || 72;
-      const ch = calcCH(p.handicap_index, slope, rating, par);
-      const holePars = course?.hole_pars || [];
-      let gross = 0, netToPar = 0;
-      for (let h = 0; h < 18; h++) {
-        if (s[h] > 0) { gross += s[h]; netToPar += s[h] - (holePars[h] || 4); }
-      }
-      netToPar -= ch;
-      return { id: p.id, name: p.name, gross, netToPar };
+      const line = computeRoundLine({
+        scores: holeData[`${p.id}_${r}`] || {},
+        holePars: course?.hole_pars || [],
+        holeHcps: course?.hole_handicaps || [],
+        ch: courseHandicapFor({
+          handicapIndex: p.handicap_index,
+          course: course || { slope: 113, rating: 72, par: 72 },
+          tee: course ? getPlayerTee(r, p.id, course) : null,
+        }),
+      });
+      return { id: p.id, name: p.name, gross: line.gross, netToPar: line.netToPar };
     }).sort((a, b) => a.netToPar - b.netToPar);
     const missing = activePlayers.filter(p => {
       const wdTp = tPlayers.find(tp => tp.player_id === p.id);
@@ -10281,7 +10275,7 @@ export default function WBCApp() {
           right={<button onClick={handleLogout} style={{ background: "transparent", border: `1px solid ${K.bdr}`, borderRadius: R.sm, color: K.t3, fontSize: FS.small, fontWeight: 600, padding: "5px 12px", cursor: "pointer" }}>Exit</button>}
         />
         <div style={{ padding: "14px 20px 0 20px", flex: 1, overflowY: "hidden", overflowX: "hidden", display: "flex", flexDirection: "column", minHeight: 0, marginBottom: 8 }}>
-          <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} pairingsData={pairingsData} teeTimesData={teeTimesData} loaded={storageLoaded} />
+          <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} finalizedRounds={finalizedRounds} skinWins={skinWins} pairingsData={pairingsData} teeTimesData={teeTimesData} loaded={storageLoaded} />
         </div>
       </div>
       </div>
@@ -10612,9 +10606,9 @@ export default function WBCApp() {
           rather than to the height of what is in them — the tab sizes its own
           type from that measurement, so it needs a floor to measure against. */}
       <div className="wbc-app-body" style={{ padding: (view === "leaderboard" || view === "admin") ? "14px 20px 0 20px" : "14px 20px", flex: 1, overflowY: "auto", overflowX: "hidden", display: (view === "leaderboard" || view === "admin" || view === "groups") ? "flex" : "block", flexDirection: "column", minHeight: 0, paddingBottom: (view === "leaderboard" || view === "admin") ? "28px" : 0 }}>
-        {view === "leaderboard" && <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} pairingsData={pairingsData} teeTimesData={teeTimesData} loaded={storageLoaded} />}
+        {view === "leaderboard" && <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} finalizedRounds={finalizedRounds} skinWins={skinWins} pairingsData={pairingsData} teeTimesData={teeTimesData} loaded={storageLoaded} />}
         <div style={{ display: view === "scoring" ? "block" : "none", paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
-          <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeTimesData={teeTimesData} roundDates={roundDates} scoringOpen={scoringOpen} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={onSignScorecard} onAttestScorecard={onAttestScorecard} onUnsignScorecard={onUnsignScorecard} onFinalizeRound={finalizeGroup} onUnfinalizeRound={onUnfinalizeGroup} onGoToAdminCourses={(rnd) => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); setAdminSettingsRound(rnd || null); }} markPlayerWD={markPlayerWD} ctpData={ctpData} onSetCtp={onSetCtp} onConfirmCtp={onConfirmCtp} directorPick={directorPick} onGroupChange={setScoringGroup} onSetRound={setRound} />
+          <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeTimesData={teeTimesData} roundDates={roundDates} scoringOpen={scoringOpen} setTee={setTee} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={onSignScorecard} onAttestScorecard={onAttestScorecard} onUnsignScorecard={onUnsignScorecard} onFinalizeRound={finalizeGroup} onUnfinalizeRound={onUnfinalizeGroup} onGoToAdminCourses={(rnd) => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); setAdminSettingsRound(rnd || null); }} markPlayerWD={markPlayerWD} ctpData={ctpData} onSetCtp={onSetCtp} onConfirmCtp={onConfirmCtp} directorPick={directorPick} onGroupChange={setScoringGroup} onSetRound={setRound} />
         </div>
         {view === "players" && <PlayersView players={allPlayers} registry={registry} meId={user?.id} year={getTournamentYear()} isDirector={!!user.isDirector} onSetOverride={setIndexOverride} />}
         {/* Posting requires a real account: firestore.rules pins uploadedBy to

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   calcCH,
+  courseHandicapFor,
   buildStrokesMap,
   computeRoundLine,
   computeIndividualBoard,
@@ -43,6 +44,59 @@ describe("calcCH", () => {
 
   it("keeps a plus handicap negative", () => {
     expect(calcCH(-2, 113, 72, 72)).toBe(-2);
+  });
+});
+
+describe("courseHandicapFor", () => {
+  it("derives from the index when nothing is on record", () => {
+    expect(courseHandicapFor({ handicapIndex: 12, course: COURSE })).toBe(12);
+  });
+
+  it("prefers the tee's ratings over the course's", () => {
+    const tee = { slope: 130, rating: 73.5, par: 72 };
+    expect(courseHandicapFor({ handicapIndex: 10, course: COURSE, tee })).toBe(13);
+  });
+
+  it("falls back to the course's own ratings when no tee is assigned", () => {
+    expect(courseHandicapFor({ handicapIndex: 10, course: COURSE, tee: null })).toBe(10);
+  });
+
+  // The whole reason this function exists: the imported years carry a handicap
+  // that no index reproduces, and two screens had quietly stopped reading it.
+  it("a recorded handicap beats the derived one", () => {
+    expect(courseHandicapFor({ handicapIndex: 12, course: COURSE, recorded: 18 })).toBe(18);
+  });
+
+  it("honours a recorded ZERO rather than re-deriving", () => {
+    expect(courseHandicapFor({ handicapIndex: 12, course: COURSE, recorded: 0 })).toBe(0);
+  });
+
+  it("ignores a non-numeric recorded value and derives instead", () => {
+    expect(courseHandicapFor({ handicapIndex: 12, course: COURSE, recorded: null })).toBe(12);
+    expect(courseHandicapFor({ handicapIndex: 12, course: COURSE, recorded: undefined })).toBe(12);
+    expect(courseHandicapFor({ handicapIndex: 12, course: COURSE, recorded: NaN })).toBe(12);
+  });
+
+  it("keeps a plus handicap negative", () => {
+    expect(courseHandicapFor({ handicapIndex: -2, course: COURSE })).toBe(-2);
+  });
+
+  it("is 0 with no course, but still honours a recorded handicap", () => {
+    expect(courseHandicapFor({ handicapIndex: 12, course: null })).toBe(0);
+    expect(courseHandicapFor({ handicapIndex: 12, course: null, recorded: 14 })).toBe(14);
+  });
+
+  it("agrees with the board — same inputs, same number", () => {
+    const [row] = computeIndividualBoard({
+      players: [{ id: "a", name: "A", handicap_index: 12 }],
+      numRounds: 1,
+      holeData: { a_1: fullRound(5) },
+      tRounds: [{ round_number: 1, course_id: "c1" }],
+      courses: [COURSE],
+    });
+    const ch = courseHandicapFor({ handicapIndex: 12, course: COURSE });
+    // 18 bogeys is +18 gross; a 12 handicap takes 12 of them off.
+    expect(row.totalNetToPar).toBe(18 - ch);
   });
 });
 

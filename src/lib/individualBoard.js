@@ -51,6 +51,38 @@ export const calcCH = (hi, slope, rating, par) =>
 // The WD sentinel written into unplayed holes when a player withdraws.
 export const WD_SCORE = 99;
 
+// ── courseHandicapFor ──────────────────────────────────────────────
+// The one answer to "how many strokes does this player get in this round",
+// including the precedence between the two ways of knowing it.
+//
+// A RECORDED handicap wins over a derived one. Only an imported year carries
+// one — the early WBCs set a handicap once and played it on every course, so
+// there is no index that reproduces the record (see lib/historyImport) — and
+// the running tournament falls straight through to calcCH.
+//
+// Guarded on Number.isFinite rather than truthiness: a scratch player's
+// recorded 0 is a real answer, and `recorded || calcCH(…)` would throw it away
+// and quietly re-derive, which is the one case where the two disagree most.
+//
+// `tee` may be null. A round whose tee sheet is not filled in yet falls back
+// to the course's own ratings, which is what makes a board renderable before
+// the director has finished assigning tees.
+//
+// This exists because the rule above was written out longhand in four places —
+// the leaderboard, net skins, the low net ledger and the on-course scorecard —
+// and two of them had quietly dropped the recorded half, so an imported year
+// paid its low net off a handicap the leaderboard beside it disagreed with.
+export function courseHandicapFor({ handicapIndex, course, tee = null, recorded = null }) {
+  if (Number.isFinite(recorded)) return recorded;
+  if (!course) return 0;
+  return calcCH(
+    handicapIndex,
+    tee?.slope || course.slope,
+    tee?.rating || course.rating,
+    tee?.par || course.par,
+  );
+}
+
 // ── buildStrokesMap ────────────────────────────────────────────────
 // Distribute `ch` handicap strokes across 18 holes in hole-handicap order
 // (stroke index 1 = hardest hole gets the first stroke). Returns a map of
@@ -189,21 +221,15 @@ export function computeIndividualBoard({
       // a slot in `rds` so the leaderboard's round columns stay aligned.
       if (!course) { rds.push({ netToPar: null, thru: 0, wd: false }); continue; }
 
-      // A RECORDED handicap wins over a derived one. Only an imported year has
-      // one; the running tournament falls straight through to calcCH, so this
-      // changes nothing about how a live round is scored.
-      //
-      // Guarded on Number.isFinite rather than truthiness: a scratch player's
-      // recorded 0 is a real answer, and `|| calcCH(...)` would throw it away
-      // and quietly re-derive — the one case where the two disagree most.
-      const recordedCH = getPlayerCH(r, p.id);
-      const tee = getPlayerTee(r, p.id, course);
-      const ch = Number.isFinite(recordedCH) ? recordedCH : calcCH(
-        p.handicap_index,
-        tee?.slope || course.slope,
-        tee?.rating || course.rating,
-        tee?.par || course.par,
-      );
+      // Recorded wins over derived — see courseHandicapFor, which is where
+      // that precedence is spelled out and which every other screen that
+      // needs this number now calls too.
+      const ch = courseHandicapFor({
+        handicapIndex: p.handicap_index,
+        course,
+        tee: getPlayerTee(r, p.id, course),
+        recorded: getPlayerCH(r, p.id),
+      });
 
       const line = computeRoundLine({
         scores: holeData[`${p.id}_${r}`] || {},
