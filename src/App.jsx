@@ -221,11 +221,17 @@ const db = {
   // listener, which owns `storageLoaded`. Without it a refused read would
   // leave the leaderboard in its pre-load blank state forever, waiting for a
   // snapshot that is never coming.
+  // The third callback argument is the snapshot's METADATA, and `fromCache` on
+  // it is load-bearing for exactly one caller. A listener answers from the
+  // on-disk cache first and the server a moment later, so an EMPTY first
+  // snapshot means "this phone has not been told yet", not "there is nothing".
+  // Anything that would act on emptiness has to be able to tell those apart —
+  // see the roster bootstrap, which writes a whole roster on that decision.
   subscribe: (col, filters = [], callback, onError) => {
     try {
       return onSnapshot(
         db._q(col, filters),
-        snap => callback(snap.docs.map(d => d.data()), snap.docChanges()),
+        snap => callback(snap.docs.map(d => d.data()), snap.docChanges(), snap.metadata),
         err => { console.error("db.subscribe error:", col, err); if (onError) onError(err); }
       );
     } catch(e) {
@@ -9049,9 +9055,17 @@ export default function WBCApp() {
     // leaderboard's empty state has to have answered before it can say "no
     // scores yet" rather than flashing that at somebody mid-load.
     let rosterSeeded = false;
-    unsubs.push(db.subscribe("tournament_players", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
+    unsubs.push(db.subscribe("tournament_players", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs, _changes, meta) => {
       setTPlayers(docs.map(r => ({ id: r.id, tournament_id: r.tournament_id, player_id: r.player_id, handicap_index: parseFloat(r.handicap_index) || 0, status: r.status || "active" })));
       setStorageLoaded(true);
+      // ONLY THE SERVER MAY SAY A ROSTER IS EMPTY. A cached snapshot arrives
+      // within a millisecond of the listener attaching and is empty whenever
+      // this phone has not synced this query before — a fresh install, a
+      // cleared browser, a device that has never opened this edition. Acting
+      // on that would rewrite the whole roster from the registry: every
+      // handicap the director typed replaced by a computed one, and everybody
+      // moved to inactive quietly restored.
+      if (meta?.fromCache) return;
       if (docs.length || rosterSeeded || !isDefaultEdition()) return;
       rosterSeeded = true;
       // One-time bootstrap for the ORIGINAL edition only: lift the global
@@ -9345,20 +9359,46 @@ export default function WBCApp() {
     return () => window.removeEventListener("hashchange", applyHash);
   }, []);
 
+  // ── The roster, as the app sees it ──
+  //
+  // A JOIN of two things that arrive separately: this edition's
+  // tournament_players rows, and the career registry that carries the names.
+  // A row whose registry entry is missing is dropped — it has no name to
+  // render — and THAT is the line to be careful around, because "the registry
+  // has not loaded yet" and "this player does not exist" look identical to it.
+  //
+  // Which is exactly how this once emptied the app. `registry` MUST stay in
+  // the dependency list. The rows arrive over a subscription that answers from
+  // the on-disk cache in a millisecond; the registry is a one-shot network
+  // read that takes far longer. So the roster is routinely computed once with
+  // rows and no names, drops every one of them, and produces an empty
+  // tournament — and if the registry landing does not re-run this, that empty
+  // answer is what the whole app keeps: no players, no leaderboard, nothing.
+  //
+  // These read `registry` — the STATE — rather than the module-level
+  // DEMO_PLAYERS they used to, and that is the whole fix. They are the same
+  // array: setRegistry is handed DEMO_PLAYERS itself, by every one of the
+  // three places that replaces it, so the callers that mutate it in place
+  // (updateName, addPlayerToTournament) still see their edit through here.
+  // The difference is only that React now knows when it changed.
+  //
+  // Reading it also keeps the dependency HONEST. Named but unused, it is an
+  // "unnecessary dependency" the linter complains about and the next person
+  // deletes — and deleting it empties the tournament again.
   const activePlayers = useMemo(() => {
     return tPlayers.filter(tp => tp.status !== "WD").map(tp => {
-      const p = DEMO_PLAYERS.find(pl => pl.id === tp.player_id);
+      const p = registry.find(pl => pl.id === tp.player_id);
       return p ? { ...p, handicap_index: parseFloat(tp.handicap_index) || 0, tp_id: tp.id } : null;
     }).filter(Boolean).sort((a,b) => a.name.localeCompare(b.name));
-  }, [tPlayers]);
+  }, [tPlayers, registry]);
 
   // All players including WD — used for leaderboard display
   const allPlayers = useMemo(() => {
     return tPlayers.map(tp => {
-      const p = DEMO_PLAYERS.find(pl => pl.id === tp.player_id);
+      const p = registry.find(pl => pl.id === tp.player_id);
       return p ? { ...p, handicap_index: parseFloat(tp.handicap_index) || 0, tp_id: tp.id, isWD: tp.status === "WD" } : null;
     }).filter(Boolean).sort((a,b) => a.name.localeCompare(b.name));
-  }, [tPlayers]);
+  }, [tPlayers, registry]);
 
   // ── Claim flow ──
   // Set of player_ids already bound to a Firebase uid (single source of truth
