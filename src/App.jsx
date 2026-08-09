@@ -35,7 +35,7 @@ import { openingHole, nineComplete } from "./lib/holeAdvance";
 import { scoreWindow, nudgeUpTarget, nudgeDownTarget } from "./lib/scoreEntry";
 import { groupTrouble, roundTrouble, describeTrouble, blocksScoring, missingTees, describeMissingTees } from "./lib/roundSetup";
 import { indexFor, matchHistoryName } from "./lib/handicap";
-import { groupKey as groupKeyOf, sameGroup, liveRound, roundFinalized, switchableGroups, groupProgress } from "./lib/groupSwitch";
+import { groupKey as groupKeyOf, roundOfGroupKey, sameGroup, liveRound, roundFinalized, switchableGroups, groupProgress } from "./lib/groupSwitch";
 import { groupTeeOrder, tagAheadOfPlay } from "./lib/ctp";
 import { AppHeader, HEADER_SAFE_PAD } from "./components/AppHeader";
 import { GroupSwitcher } from "./components/GroupSwitcher";
@@ -9944,6 +9944,129 @@ export default function WBCApp() {
     // Same as onSetCtp: the prompt closing is the acknowledgement.
   };
 
+  // ── The scorecard: signing, attesting, and calling a round done ──
+  //
+  // These five were inline arrow props on <OnCourseScoring> — one JSX
+  // attribute list three thousand characters long, holding the rules for how
+  // a card is signed. They are up here now because the paragraph below had to
+  // be added to four of them, and a rule nobody can find is a rule that gets
+  // added to three places out of four.
+
+  // ── Telling the field a round is done ──
+  //
+  // `wbc_rounds_state` is the document the onRoundFinalized Cloud Function
+  // watches; writing it is what sends "Round N is final" to every phone.
+  // Until now only Admin's whole-round finalize button wrote it — and that is
+  // not how a round normally ends. It normally ends on a tee box, with the
+  // last group signing and attesting its own card, which writes a GROUP KEY
+  // into tournament_state and nothing else. So the notification never went
+  // out on the path the tournament actually takes.
+  //
+  // A round is done when every group drawn into it is done (lib/groupSwitch
+  // roundFinalized), and that can only be asked AFTER the group's key lands —
+  // which is why every path that finalizes a group asks it here rather than
+  // each of them deciding for itself.
+  //
+  // Only the EDGES are written. A round of four groups would otherwise rewrite
+  // this document every time a card was signed, and every phone in the field
+  // holds a listener on it.
+  //
+  // Safe to race: four phones can notice the same round finish at the same
+  // moment, and the function fires on the false→true transition, so the second
+  // and later writes are not transitions and send nothing.
+  const publishRoundFinalized = async (nextFinalized, key) => {
+    const rnd = roundOfGroupKey(key);
+    if (!rnd) return;
+    const wasFinal = roundFinalized(finalizedRounds, pairingsData, rnd);
+    const isFinal = roundFinalized(nextFinalized, pairingsData, rnd);
+    if (wasFinal === isFinal) return;
+    await db.upsert("wbc_rounds_state", {
+      id: `${TOURNAMENT_ID}_r${rnd}`,
+      tournament_id: TOURNAMENT_ID,
+      round: rnd,
+      finalized: isFinal,
+    });
+  };
+
+  // Finalizing a group, and the two ways in: it is the last thing a signature
+  // or the last attestation does, and it is also its own button.
+  const finalizeGroup = async (key) => {
+    const nf = { ...finalizedRounds, [key]: true };
+    setFinalizedRounds(nf);
+    await saveTournamentState(nf);
+    await publishRoundFinalized(nf, key);
+  };
+
+  const onSignScorecard = async (key, signerPid, signerName, present, rnd) => {
+    const nonSigners = (present || []).filter(pid => pid !== signerPid);
+    const optimistic = { signedBy: signerPid, signedByName: signerName, attestedBy: [], present: present || [] };
+    pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 });
+    setScorecardSigs(prev => ({ ...prev, [key]: optimistic }));
+    await db.upsert("wbc_scorecard_sigs", {
+      id: docIds.scorecardSig(_e(), key, isDefaultEdition()),
+      tournament_id: TOURNAMENT_ID, groupKey: key, round: rnd,
+      signedBy: signerPid, signedByName: signerName,
+      present: present || [], attestedBy: [], signedAt: new Date().toISOString(),
+    });
+    // A group of one has nobody left to attest, so signing IS finalizing.
+    if (nonSigners.length === 0) await finalizeGroup(key);
+  };
+
+  const onAttestScorecard = async (key, attesterPid, nonSigners) => {
+    const cur = scorecardSigs[key];
+    if (!cur) return;
+    const attestedBy = [...new Set([...(cur.attestedBy || []), attesterPid])];
+    pendingSigsRef.current.set(key, { sig: { ...cur, attestedBy }, expiresAt: Date.now() + 8000 });
+    setScorecardSigs(prev => ({ ...prev, [key]: { ...prev[key], attestedBy } }));
+    await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), attestedBy });
+    if ((nonSigners || []).every(pid => attestedBy.includes(pid))) await finalizeGroup(key);
+  };
+
+  const onUnsignScorecard = async (key) => {
+    pendingSigsRef.current.delete(key);
+    setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; });
+    await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition()));
+    if (!finalizedRounds[key]) return;
+    const nf = { ...finalizedRounds };
+    delete nf[key];
+    setFinalizedRounds(nf);
+    await saveTournamentState(nf);
+    await publishRoundFinalized(nf, key);
+  };
+
+  const onUnfinalizeGroup = async (key) => {
+    const nf = { ...finalizedRounds };
+    delete nf[key];
+    setFinalizedRounds(nf);
+    setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; });
+    pendingSigsRef.current.delete(key);
+    await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition()));
+    await saveTournamentState(nf);
+    await publishRoundFinalized(nf, key);
+  };
+
+  // Admin's whole-round finalize. It goes through the same publish path a
+  // group signing off does — the only difference is which key lands in
+  // finalizedRounds, a bare round number rather than a group's.
+  const finalizeWholeRound = async (rnd) => {
+    const nf = { ...finalizedRounds, [rnd]: true };
+    setFinalizedRounds(nf);
+    await saveTournamentState(nf);
+    await publishRoundFinalized(nf, rnd);
+    if (rnd < NUM_ROUNDS) setRound(rnd + 1);
+  };
+
+  // Admin's undo, which can be handed either kind of key: a round number from
+  // the round panel, or a group key from the per-card list beside it.
+  const unfinalizeFromAdmin = async (key) => {
+    if (!/^\d+$/.test(String(key))) return onUnfinalizeGroup(key);
+    const nf = { ...finalizedRounds };
+    delete nf[key];
+    setFinalizedRounds(nf);
+    await saveTournamentState(nf);
+    await publishRoundFinalized(nf, key);
+  };
+
   const setPairings = async (rnd, groups) => {
     const existing = JSON.stringify(pairingsData[rnd] || []);
     const incoming = JSON.stringify(groups);
@@ -10491,7 +10614,7 @@ export default function WBCApp() {
       <div className="wbc-app-body" style={{ padding: (view === "leaderboard" || view === "admin") ? "14px 20px 0 20px" : "14px 20px", flex: 1, overflowY: "auto", overflowX: "hidden", display: (view === "leaderboard" || view === "admin" || view === "groups") ? "flex" : "block", flexDirection: "column", minHeight: 0, paddingBottom: (view === "leaderboard" || view === "admin") ? "28px" : 0 }}>
         {view === "leaderboard" && <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} skinWins={skinWins} pairingsData={pairingsData} teeTimesData={teeTimesData} loaded={storageLoaded} />}
         <div style={{ display: view === "scoring" ? "block" : "none", paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
-          <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeTimesData={teeTimesData} roundDates={roundDates} scoringOpen={scoringOpen} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={async (key, signerPid, signerName, present, rnd) => { const nonSigners = (present || []).filter(pid => pid !== signerPid); const autoFinal = nonSigners.length === 0; const optimistic = { signedBy: signerPid, signedByName: signerName, attestedBy: [], present: present || [] }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: optimistic })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), tournament_id: TOURNAMENT_ID, groupKey: key, round: rnd, signedBy: signerPid, signedByName: signerName, present: present || [], attestedBy: [], signedAt: new Date().toISOString() }); if (autoFinal) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onAttestScorecard={async (key, attesterPid, nonSigners) => { const cur = scorecardSigs[key]; if (!cur) return; const attestedBy = [...new Set([...(cur.attestedBy || []), attesterPid])]; const optimistic = { ...cur, attestedBy }; pendingSigsRef.current.set(key, { sig: optimistic, expiresAt: Date.now() + 8000 }); setScorecardSigs(prev => ({ ...prev, [key]: { ...prev[key], attestedBy } })); await db.upsert("wbc_scorecard_sigs", { id: docIds.scorecardSig(_e(), key, isDefaultEdition()), attestedBy }); const allDone = (nonSigners || []).every(pid => attestedBy.includes(pid)); if (allDone) { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onUnsignScorecard={async key => { pendingSigsRef.current.delete(key); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); if (finalizedRounds[key]) { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf); } }} onFinalizeRound={async key => { const nf = { ...finalizedRounds, [key]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); pendingSigsRef.current.delete(key); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); await saveTournamentState(nf); }} onGoToAdminCourses={(rnd) => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); setAdminSettingsRound(rnd || null); }} markPlayerWD={markPlayerWD} ctpData={ctpData} onSetCtp={onSetCtp} onConfirmCtp={onConfirmCtp} directorPick={directorPick} onGroupChange={setScoringGroup} onSetRound={setRound} />
+          <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeTimesData={teeTimesData} roundDates={roundDates} scoringOpen={scoringOpen} setTee={setTee} getPlayerTee={getPlayerTee} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={onSignScorecard} onAttestScorecard={onAttestScorecard} onUnsignScorecard={onUnsignScorecard} onFinalizeRound={finalizeGroup} onUnfinalizeRound={onUnfinalizeGroup} onGoToAdminCourses={(rnd) => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); setAdminSettingsRound(rnd || null); }} markPlayerWD={markPlayerWD} ctpData={ctpData} onSetCtp={onSetCtp} onConfirmCtp={onConfirmCtp} directorPick={directorPick} onGroupChange={setScoringGroup} onSetRound={setRound} />
         </div>
         {view === "players" && <PlayersView players={allPlayers} registry={registry} meId={user?.id} year={getTournamentYear()} isDirector={!!user.isDirector} onSetOverride={setIndexOverride} />}
         {/* Posting requires a real account: firestore.rules pins uploadedBy to
@@ -10526,7 +10649,7 @@ export default function WBCApp() {
                 if (rows.length) db.upsertMany("pairings", rows);
                 return next;
               });
-            }} roundDates={roundDates} onSetRoundDate={async (rnd, dateStr) => { const next = { ...roundDates }; if (dateStr) next[rnd] = dateStr; else delete next[rnd]; setRoundDates(next); await saveTournamentState(finalizedRounds, teesSaved, teesModified, next, scoringOpen); }} scoringOpen={scoringOpen} onSetScoringOpen={async (rnd, open) => { const next = { ...scoringOpen }; if (open) next[rnd] = true; else delete next[rnd]; setScoringOpen(next); await saveTournamentState(finalizedRounds, teesSaved, teesModified, roundDates, next); }} pairingStrategy={pairingStrategy} onSetPairingStrategy={async (rnd, cfg) => { const next = { ...pairingStrategy }; if (cfg) next[rnd] = cfg; else delete next[rnd]; setPairingStrategy(next); await saveTournamentState(finalizedRounds, teesSaved, teesModified, roundDates, scoringOpen, next); }} leaderboard={getLeaderboard} holeData={holeData} finalizedRounds={finalizedRounds} onDiscardRoundScores={onDiscardRoundScores} onFinalizeRound={async rnd => { const nf = { ...finalizedRounds, [rnd]: true }; setFinalizedRounds(nf); await saveTournamentState(nf); await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${rnd}`, tournament_id: TOURNAMENT_ID, round: rnd, finalized: true }); if (rnd < NUM_ROUNDS) setRound(rnd + 1); }} onUnfinalizeRound={async key => { const nf = { ...finalizedRounds }; delete nf[key]; setFinalizedRounds(nf); await saveTournamentState(nf); if (/^\d+$/.test(String(key))) { await db.upsert("wbc_rounds_state", { id: `${TOURNAMENT_ID}_r${key}`, tournament_id: TOURNAMENT_ID, round: Number(key), finalized: false }); } else { setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; }); await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition())); } }} notify={notify} getPlayerTee={getPlayerTee} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} externalSettingsRound={adminSettingsRound} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); setAdminSettingsRound(null); }} teesSaved={teesSaved} onTeesSave={async r => { const next = { ...teesSaved, [r]: true }; const nextMod = { ...teesModified, [r]: false }; setTeesSaved(next); setTeesModified(nextMod); await saveTournamentState(finalizedRounds, next, nextMod); }} teesModified={teesModified} onTeesModify={async r => { const nextMod = { ...teesModified, [r]: true }; setTeesModified(nextMod); await saveTournamentState(finalizedRounds, teesSaved, nextMod); }} memberships={memberships} onSetDirector={onSetDirector} claims={claims} authUid={fbUser?.uid || null} tournamentMeta={tournamentMeta} onSaveTournamentMeta={saveTournamentMeta} /> : (
+            }} roundDates={roundDates} onSetRoundDate={async (rnd, dateStr) => { const next = { ...roundDates }; if (dateStr) next[rnd] = dateStr; else delete next[rnd]; setRoundDates(next); await saveTournamentState(finalizedRounds, teesSaved, teesModified, next, scoringOpen); }} scoringOpen={scoringOpen} onSetScoringOpen={async (rnd, open) => { const next = { ...scoringOpen }; if (open) next[rnd] = true; else delete next[rnd]; setScoringOpen(next); await saveTournamentState(finalizedRounds, teesSaved, teesModified, roundDates, next); }} pairingStrategy={pairingStrategy} onSetPairingStrategy={async (rnd, cfg) => { const next = { ...pairingStrategy }; if (cfg) next[rnd] = cfg; else delete next[rnd]; setPairingStrategy(next); await saveTournamentState(finalizedRounds, teesSaved, teesModified, roundDates, scoringOpen, next); }} leaderboard={getLeaderboard} holeData={holeData} finalizedRounds={finalizedRounds} onDiscardRoundScores={onDiscardRoundScores} onFinalizeRound={finalizeWholeRound} onUnfinalizeRound={unfinalizeFromAdmin} notify={notify} getPlayerTee={getPlayerTee} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} externalSettingsRound={adminSettingsRound} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); setAdminSettingsRound(null); }} teesSaved={teesSaved} onTeesSave={async r => { const next = { ...teesSaved, [r]: true }; const nextMod = { ...teesModified, [r]: false }; setTeesSaved(next); setTeesModified(nextMod); await saveTournamentState(finalizedRounds, next, nextMod); }} teesModified={teesModified} onTeesModify={async r => { const nextMod = { ...teesModified, [r]: true }; setTeesModified(nextMod); await saveTournamentState(finalizedRounds, teesSaved, nextMod); }} memberships={memberships} onSetDirector={onSetDirector} claims={claims} authUid={fbUser?.uid || null} tournamentMeta={tournamentMeta} onSaveTournamentMeta={saveTournamentMeta} /> : (
           <div style={{ textAlign: "center", padding: "40px 20px" }}>
             <div style={{ fontSize: FS.jumbo, marginBottom: 12 }}>🔒</div>
             <div style={{ fontSize: FS.lead, fontWeight: 700, color: K.t1, marginBottom: 6 }}>Directors Only</div>
