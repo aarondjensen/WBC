@@ -202,14 +202,23 @@ const db = {
     try { await deleteDoc(doc(_db, col, String(id))); return true; }
     catch(e) { console.error("db.deleteDoc error:", col, e); return null; }
   },
-  subscribe: (col, filters = [], callback) => {
+  // `onError` is optional and exists for the one caller that has to know the
+  // difference between "not answered yet" and "answered no": the roster
+  // listener, which owns `storageLoaded`. Without it a refused read would
+  // leave the leaderboard in its pre-load blank state forever, waiting for a
+  // snapshot that is never coming.
+  subscribe: (col, filters = [], callback, onError) => {
     try {
       return onSnapshot(
         db._q(col, filters),
         snap => callback(snap.docs.map(d => d.data()), snap.docChanges()),
-        err => console.error("db.subscribe error:", col, err)
+        err => { console.error("db.subscribe error:", col, err); if (onError) onError(err); }
       );
-    } catch(e) { console.error("db.subscribe setup error:", col, e); return () => {}; }
+    } catch(e) {
+      console.error("db.subscribe setup error:", col, e);
+      if (onError) onError(e);
+      return () => {};
+    }
   },
 };
 
@@ -229,19 +238,18 @@ const db = {
 // on TOURNAMENT_ID exists to avoid.
 const _e = () => getEditionSlug();
 
-// Helper: convert Firestore hole_scores docs → holeData format { "pid_round": { holeIdx: score } }
+// Which round a hole_scores document belongs to. `round_number` is the field
+// every row written by this app carries; the id is parsed only as a fallback
+// for the oldest imported rows, which predate it.
+//
+// There is no rows → holeData bulk parser beside this any more. There used to
+// be, for a cold-start read of the whole collection that ran alongside the
+// subscription; the subscription's own handler is the only place hole_scores
+// documents become holeData now, so there is one reading of a score document
+// rather than two that could disagree.
 const extractRound = (roundScoreId) => {
   const m = roundScoreId?.match(/_r(\d+)_/);
   return m ? parseInt(m[1]) : 1;
-};
-const rowsToHoleData = (rows) => {
-  const hd = {};
-  rows.forEach(r => {
-    const key = `${r.player_id}_${r.round_number || extractRound(r.round_score_id)}`;
-    if (!hd[key]) hd[key] = {};
-    hd[key][r.hole_number - 1] = r.score;
-  });
-  return hd;
 };
 // Convert holeData entry to a Firestore document
 const holeDataToRow = (pid, rnd, holeIdx, score, courseId) => ({
@@ -8877,17 +8885,51 @@ export default function WBCApp() {
   });
 
   // ── Load all data from Firestore on mount ──
+  //
+  // Two halves, and the split is the whole point of this block.
+  //
+  // READ ONCE: `players`, `tournament_rounds`, `courses`, `tee_boxes`. A
+  // director edits these rarely, so four more live listeners on every phone
+  // would be a poor trade; pull-to-refresh is what picks up a mid-trip change
+  // (see refreshStaticData).
+  //
+  // SUBSCRIBED: everything else. A listener delivers a FULL initial snapshot
+  // the moment it attaches, so it is already the load — which is why this
+  // block no longer also db.get()s hole_scores, pairings, tee_assignments,
+  // skins, tournament_state and tournament_players. Fetching them twice cost
+  // three things and bought none:
+  //
+  //   • double the billed reads on every cold start, on the collection set
+  //     that dominates them — hole_scores alone is 12 × 4 × 18 documents;
+  //   • two parsers per collection, one incremental and one wholesale, free
+  //     to drift apart;
+  //   • a race. The read was never awaited before the listeners attached, so
+  //     whichever landed second replaced the other's state wholesale, and the
+  //     loser could be the newer answer.
+  //
+  // It also worked against the persistent cache firebase.js goes to some
+  // trouble to enable: getDocs asks the SERVER, while a listener resumes from
+  // its stored token and is sent only what changed since this phone last had
+  // it. On the collections that matter the listener is strictly cheaper.
   useEffect(() => {
+    // The registry, as a promise. The roster bootstrap below needs it and the
+    // two now arrive on different clocks — this one over a one-shot read, the
+    // roster over its subscription — so the seeding awaits it rather than
+    // racing it.
+    const registryReady = (async () => {
+      const playerRows = await db.get("players");
+      if (playerRows?.length) {
+        DEMO_PLAYERS = playerRows
+          .map(r => ({ id: r.id, name: r.name, first_name: r.first_name || "", last_name: r.last_name || "", index_override: r.index_override ?? null }))
+          .sort((a, b) => a.name.localeCompare(b.name));
+        setRegistry(DEMO_PLAYERS);
+      }
+      return playerRows || [];
+    })();
+    registryReady.catch(e => console.error("Registry load failed:", e));
+
     (async () => {
       try {
-        const playerRows = await db.get("players");
-        if (playerRows?.length) {
-          DEMO_PLAYERS = playerRows
-            .map(r => ({ id: r.id, name: r.name, first_name: r.first_name || "", last_name: r.last_name || "", index_override: r.index_override ?? null }))
-            .sort((a, b) => a.name.localeCompare(b.name));
-          setRegistry(DEMO_PLAYERS);
-        }
-
         // Existing uid→player_id claims (wbc_users). Doc id is the uid.
         // DEFERRED (non-blocking): this feeds only the claim flow, which is
         // inert while AUTH_PROVIDERS_ENABLED is false. It used to sit here as an
@@ -8902,34 +8944,6 @@ export default function WBCApp() {
             setClaims(Object.fromEntries(userRows.map(r => [r.uid || r.id, r.player_id]).filter(([u, pid]) => u && pid)));
           }
         }).catch(e => console.warn("[claims] wbc_users load skipped:", e?.message || e));
-
-        const tpRows = await db.get("tournament_players", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
-        if (tpRows?.length) {
-          setTPlayers(tpRows.map(r => ({ id: r.id, tournament_id: r.tournament_id, player_id: r.player_id, handicap_index: parseFloat(r.handicap_index) || 0, status: r.status || "active" })));
-        } else if (playerRows?.length && isDefaultEdition()) {
-          // One-time bootstrap for the ORIGINAL edition only: lift the global
-          // player registry into a roster the first time this edition loads
-          // without one.
-          //
-          // Gated on isDefaultEdition() because a NEW edition legitimately has
-          // no roster — that is what "start blank" means. Without the guard,
-          // creating an empty 2027 and switching to it would silently import
-          // every golfer who has ever played, at index 0, and the director
-          // would have to work out which ones to delete.
-          // Seeded from the WBC Index, not from zero. The index computed off a
-          // golfer's own history is the source of truth for what they play
-          // off; a roster that starts everybody at scratch makes the director
-          // type fourteen numbers that the app already knows, and a missed one
-          // is a player scoring gross by accident. Admin can still override
-          // any of them — that is what the Index field there is for.
-          const seeded = playerRows.map(r => {
-            const hist = matchHistoryName(r);
-            const seedIdx = hist ? indexFor(hist, { override: r.index_override ?? null }).index : null;
-            return { id: docIds.tournamentPlayer(_e(), r.id), tournament_id: TOURNAMENT_ID, player_id: r.id, handicap_index: seedIdx ?? 0, status: "active" };
-          });
-          setTPlayers(seeded);
-          for (const tp of seeded) await db.upsert("tournament_players", tp);
-        }
 
         const trRows = await db.get("tournament_rounds", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
         const sortedTRounds = (trRows || []).sort((a, b) => a.round_number - b.round_number);
@@ -8949,44 +8963,7 @@ export default function WBCApp() {
             setCourseList(sortCoursesByRound(coursesWithTees, sortedTRounds));
           }
         }
-
-        const hsRows = await db.get("hole_scores", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
-        if (hsRows?.length) setHoleData(rowsToHoleData(hsRows));
-
-        const pairRows = await db.get("pairings", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
-        if (pairRows?.length) {
-          const sorted = pairRows.sort((a, b) => a.round_number - b.round_number || a.group_number - b.group_number || (a.player_id || "").localeCompare(b.player_id || ""));
-          setPairingsData(rowsToPairings(sorted));
-          setTeeTimesData(prev => mergeTeeTimes(rowsToTeeTimes(sorted), prev));
-        }
-
-        const teeRows = await db.get("tee_assignments", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
-        if (teeRows?.length) { setTeeData(rowsToTeeData(teeRows)); setCourseHandicaps(rowsToCourseHandicaps(teeRows)); }
-
-        // CTP tags live in `skins` (skin_type "ctp"). This collection was written but
-        // NEVER read — ctpData started empty on every load, so the on-course prompt
-        // treated already-tagged holes as untagged and the Betting tab showed nothing.
-        const skinRows = await db.get("skins", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
-        if (skinRows?.length) { setCtpData(rowsToCtp(skinRows)); setMarketBets(rowsToMarket(skinRows)); }
-
-        const stateRows = await db.get("tournament_state", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
-        if (stateRows?.length) {
-          const s = stateRows[0];
-          if (s.finalized_rounds) setFinalizedRounds(s.finalized_rounds);
-          if (s.tees_saved) setTeesSaved(s.tees_saved);
-          if (s.tees_modified) setTeesModified(s.tees_modified);
-          if (s.round_dates) setRoundDates(s.round_dates);
-          // State wins over whatever the pairing rows carry: it is the copy a
-          // director edited, and it exists for groups that have no players yet.
-          if (s.tee_times) setTeeTimesData(prev => mergeTeeTimes(prev, s.tee_times));
-          if (s.scoring_open) setScoringOpen(s.scoring_open);
-          if (s.pairing_strategy) setPairingStrategy(s.pairing_strategy);
-          if (s.meta) setTournamentMeta(s.meta);
-          if (s.side_games) setSideGames(mergeSideGames(s.side_games));
-        }
-
       } catch(e) { console.error("Load failed:", e); }
-      finally { setStorageLoaded(true); }
     })();
 
     // ── Real-time subscriptions via Firestore onSnapshot ──
@@ -9057,9 +9034,55 @@ export default function WBCApp() {
       setScorecardSigs(mergePendingSigs(fromDocs));
     }));
 
+    // ── The roster, and the one-time bootstrap under it ──
+    //
+    // This listener's FIRST snapshot is also the answer to "does this edition
+    // have a roster yet", which is what the seeding below keys on — so it no
+    // longer needs a one-shot read of its own to ask.
+    //
+    // `rosterSeeded` keeps the seeding a one-time act. Without it, a director
+    // who legitimately empties the roster would have it re-filled from the
+    // registry on the very next snapshot.
+    //
+    // It is also what `storageLoaded` means now: `lb` is built from the
+    // roster, so "the roster has answered" is exactly the question the
+    // leaderboard's empty state has to have answered before it can say "no
+    // scores yet" rather than flashing that at somebody mid-load.
+    let rosterSeeded = false;
     unsubs.push(db.subscribe("tournament_players", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
       setTPlayers(docs.map(r => ({ id: r.id, tournament_id: r.tournament_id, player_id: r.player_id, handicap_index: parseFloat(r.handicap_index) || 0, status: r.status || "active" })));
-    }));
+      setStorageLoaded(true);
+      if (docs.length || rosterSeeded || !isDefaultEdition()) return;
+      rosterSeeded = true;
+      // One-time bootstrap for the ORIGINAL edition only: lift the global
+      // player registry into a roster the first time this edition loads
+      // without one.
+      //
+      // Gated on isDefaultEdition() because a NEW edition legitimately has
+      // no roster — that is what "start blank" means. Without the guard,
+      // creating an empty 2027 and switching to it would silently import
+      // every golfer who has ever played, at index 0, and the director
+      // would have to work out which ones to delete.
+      // Seeded from the WBC Index, not from zero. The index computed off a
+      // golfer's own history is the source of truth for what they play
+      // off; a roster that starts everybody at scratch makes the director
+      // type fourteen numbers that the app already knows, and a missed one
+      // is a player scoring gross by accident. Admin can still override
+      // any of them — that is what the Index field there is for.
+      registryReady.then(playerRows => {
+        if (!playerRows?.length) return;
+        const seeded = playerRows.map(r => {
+          const hist = matchHistoryName(r);
+          const seedIdx = hist ? indexFor(hist, { override: r.index_override ?? null }).index : null;
+          return { id: docIds.tournamentPlayer(_e(), r.id), tournament_id: TOURNAMENT_ID, player_id: r.id, handicap_index: seedIdx ?? 0, status: "active" };
+        });
+        setTPlayers(seeded);
+        // One commit, not fourteen: the listener above republishes on every
+        // one of them, so a per-row loop paints the roster filling in a name
+        // at a time. See db.upsertMany.
+        return db.upsertMany("tournament_players", seeded);
+      }).catch(e => console.error("Roster bootstrap failed:", e));
+    }, () => setStorageLoaded(true)));
 
     // Whether photo uploads are switched on. One tiny document, subscribed
     // with the rest because every phone needs it and it never changes — see
