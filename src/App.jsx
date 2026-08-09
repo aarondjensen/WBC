@@ -14,11 +14,15 @@ import {
   eligibleBets, rebuyers, marketRoster, teeOffAt,
 } from "./lib/market";
 import { BuyInPrices, BuyInTracker } from "./components/BuyIns";
+import { SyncBanner } from "./components/SyncBanner";
 import { useConfirm } from "./lib/useConfirm";
 // Tee times survive a re-group because of these two — see lib/teeSheet.js.
 import { rowsToTeeTimes, mergeTeeTimes } from "./lib/teeSheet";
 // Score documents → the holeData map, deletions included — see lib/holeScores.
 import { applyScoreChanges, roundOf } from "./lib/holeScores";
+// Whether this phone is actually reaching the server — see lib/connection.
+import { createWriteTracker } from "./lib/connection";
+import { useSyncStatus } from "./lib/useSyncStatus";
 import { useDirtyForm } from "./lib/useDirtyForm";
 import { useSheetDrag } from "./lib/useSheetDrag";
 import { usePullToRefresh, hasNewBundle } from "./lib/usePullToRefresh";
@@ -123,6 +127,14 @@ const CLAIM_REQUIRES_APPROVAL = false;
 // Firebase Console → Project Settings → Cloud Messaging → Web Push certificates.
 const VAPID_KEY = "BF3PLSs3kpCVHbhnbuBo1gSYeLKhYYwEgICUo07xRpuQP8LyxqkLkSV969ZcIptb1ZSY81h8738lblo9N2goNGo";
 
+// ── Writes handed over but not yet acknowledged ──
+// Every write below is registered here on its way out. See lib/connection for
+// why this is the only honest way to know whether a phone is really talking to
+// the server: a Firestore write with no signal does not fail, it simply never
+// resolves, so a queue that is not draining is the symptom and there is no
+// error anywhere to catch.
+const writes = createWriteTracker();
+
 // ── db: Firestore data layer ──
 const db = {
   _q: (col, filters = []) => {
@@ -138,7 +150,7 @@ const db = {
   upsert: async (col, data) => {
     if (!data.id) { console.error("db.upsert: missing id", col, data); return null; }
     try {
-      await setDoc(doc(_db, col, String(data.id)), data, { merge: true });
+      await writes.track(setDoc(doc(_db, col, String(data.id)), data, { merge: true }), col);
       return data;
     } catch(e) { console.error("db.upsert error:", col, e); return null; }
   },
@@ -156,7 +168,7 @@ const db = {
       for (let i = 0; i < valid.length; i += 490) {
         const batch = writeBatch(_db);
         valid.slice(i, i + 490).forEach(r => batch.set(doc(_db, col, String(r.id)), r, { merge: true }));
-        await batch.commit();
+        await writes.track(batch.commit(), col);
       }
       return true;
     } catch(e) { console.error("db.upsertMany error:", col, e); return null; }
@@ -182,7 +194,7 @@ const db = {
           if (op.kind === "del") batch.delete(doc(_db, col, String(op.id)));
           else batch.set(doc(_db, col, String(op.row.id)), op.row, { merge: true });
         });
-        await batch.commit();
+        await writes.track(batch.commit(), col);
       }
       return true;
     } catch(e) { console.error("db.replaceMany error:", col, e); return null; }
@@ -195,13 +207,13 @@ const db = {
       for (let i = 0; i < docs.length; i += 490) {
         const batch = writeBatch(_db);
         docs.slice(i, i + 490).forEach(d => batch.delete(d.ref));
-        await batch.commit();
+        await writes.track(batch.commit(), col);
       }
       return true;
     } catch(e) { console.error("db.delete error:", col, e); return null; }
   },
   deleteDoc: async (col, id) => {
-    try { await deleteDoc(doc(_db, col, String(id))); return true; }
+    try { await writes.track(deleteDoc(doc(_db, col, String(id))), col); return true; }
     catch(e) { console.error("db.deleteDoc error:", col, e); return null; }
   },
   // `onError` is optional and exists for the one caller that has to know the
@@ -8645,6 +8657,9 @@ export default function WBCApp() {
   const [scoringGroup, setScoringGroup] = useState(null);
   const [directorPick, setDirectorPick] = useState(null);
   const pickSeq = useRef(0);
+  // Is this phone actually reaching the server. Null — and so nothing on
+  // screen — whenever the answer is yes, which is nearly always.
+  const syncStatus = useSyncStatus(writes);
   const [notif, setNotif] = useState(null);
   // Kept next to the state it drives, and above every caller: several hook
   // dependency arrays name `notify`, and those are evaluated during render.
@@ -9527,26 +9542,42 @@ export default function WBCApp() {
     await db.upsert("hole_scores", row);
   };
 
-  // Mark player as WD: set status, fill all unfilled holes in current and future rounds with sentinel 99
+  // ── Withdraw a player ──
+  // Sets the roster status and fills the rest of THIS round's card with the
+  // sentinel, so the card stays structurally complete and every total knows to
+  // skip those holes (see lib/individualBoard). Later rounds need no filling:
+  // they have no card to complete, and the roster flag is what takes the player
+  // out of contention on the board.
+  //
+  // Nothing here waits on the server, and that is the point. This used to
+  // await nineteen writes in a row and only then raise its confirmation —
+  // which is fine in a car park and useless on the twelfth hole, where a
+  // Firestore write does not fail without signal but does not resolve either.
+  // Withdrawing somebody out of range appeared to do nothing at all: no
+  // confirmation, no error, for as long as the phone stayed out of range.
+  //
+  // Local state moves first, the confirmation follows it, and the writes go in
+  // ONE batch behind both. Whether that batch has landed is the sync banner's
+  // job to report — it is counting them.
   const markPlayerWD = async (pid) => {
     const tr = tRounds.find(t => t.round_number === round);
     const key = `${pid}_${round}`;
     const existing = holeData[key] || {};
     const updates = [];
     for (let h = 0; h < 18; h++) {
-      if (!(existing[h] > 0)) updates.push(holeDataToRow(pid, round, h, 99, tr?.course_id));
+      if (!(existing[h] > 0)) updates.push(holeDataToRow(pid, round, h, WD_SCORE, tr?.course_id));
     }
     setHoleData(prev => {
-      const existing = prev[key] || {};
-      const filled = { ...existing };
-      for (let h = 0; h < 18; h++) { if (!(filled[h] > 0)) filled[h] = 99; }
+      const filled = { ...(prev[key] || {}) };
+      for (let h = 0; h < 18; h++) { if (!(filled[h] > 0)) filled[h] = WD_SCORE; }
       return { ...prev, [key]: filled };
     });
-    const tp = tPlayers.find(t => t.player_id === pid);
-    if (tp) await db.upsert("tournament_players", { ...tp, status: "WD" }, "id");
-    setTPlayers(prev => prev.map(tp => tp.player_id === pid ? { ...tp, status: "WD" } : tp));
-    for (const row of updates) await db.upsert("hole_scores", row);
+    setTPlayers(prev => prev.map(t => t.player_id === pid ? { ...t, status: "WD" } : t));
     notify(`Player withdrawn from tournament`);
+
+    const tp = tPlayers.find(t => t.player_id === pid);
+    if (tp) db.upsert("tournament_players", { ...tp, status: "WD" }, "id");
+    if (updates.length) db.upsertMany("hole_scores", updates);
   };
 
   const setCourseForRound = async (rnd, course) => {
@@ -10274,6 +10305,9 @@ export default function WBCApp() {
           countdownAt={firstTeeAt}
           right={<button onClick={handleLogout} style={{ background: "transparent", border: `1px solid ${K.bdr}`, borderRadius: R.sm, color: K.t3, fontSize: FS.small, fontWeight: 600, padding: "5px 12px", cursor: "pointer" }}>Exit</button>}
         />
+        {/* A spectator watching a board that has stopped updating deserves to
+            be told, the same as a scorer does. */}
+        <SyncBanner status={syncStatus} />
         <div style={{ padding: "14px 20px 0 20px", flex: 1, overflowY: "hidden", overflowX: "hidden", display: "flex", flexDirection: "column", minHeight: 0, marginBottom: 8 }}>
           <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} finalizedRounds={finalizedRounds} skinWins={skinWins} pairingsData={pairingsData} teeTimesData={teeTimesData} loaded={storageLoaded} />
         </div>
@@ -10335,6 +10369,10 @@ export default function WBCApp() {
           admin settings modal's header, so a message raised anywhere else —
           or from admin once that modal closed — was set and never shown. */}
       <Toast message={notif} />
+
+      {/* "This phone is on its own." Renders nothing at all unless it has
+          something to say — see components/SyncBanner. */}
+      <SyncBanner status={syncStatus} />
 
       {/* Pull-to-refresh indicator. The app logo (golfer) as a MASK rather
           than an <img>, the same technique the nav uses, so the silhouette can
