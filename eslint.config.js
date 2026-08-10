@@ -1,5 +1,6 @@
 import js from '@eslint/js'
 import globals from 'globals'
+import react from 'eslint-plugin-react'
 import reactHooks from 'eslint-plugin-react-hooks'
 import reactRefresh from 'eslint-plugin-react-refresh'
 import { defineConfig, globalIgnores } from 'eslint/config'
@@ -8,6 +9,7 @@ export default defineConfig([
   globalIgnores(['dist', 'android', 'ios', 'functions/node_modules']),
   {
     files: ['**/*.{js,jsx}'],
+    plugins: { react },
     extends: [
       js.configs.recommended,
       reactHooks.configs.flat.recommended,
@@ -34,6 +36,16 @@ export default defineConfig([
       // `catch {}` is a deliberate shape here: browser APIs that are absent or
       // permission-blocked on some platforms should degrade quietly, not crash.
       'no-empty': ['error', { allowEmptyCatch: true }],
+      // ── A component that isn't imported ──
+      // `no-undef` does not see JSX element names, so `<StickyTop>` with no
+      // import lints perfectly clean, builds perfectly clean, and throws
+      // "Can't find variable" the moment somebody opens that tab. That is
+      // exactly how a screen extracted out of App.jsx shipped with two of its
+      // imports missing: everything green, and the Betting tab dead on tap.
+      //
+      // This is the rule that catches it, and it is why the whole plugin is
+      // here — nothing else from it is switched on.
+      'react/jsx-no-undef': 'error',
     },
   },
   // ── The design scales are the only source of these numbers ──

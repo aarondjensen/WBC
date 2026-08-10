@@ -6947,6 +6947,11 @@ export default function WBCApp() {
   // iOS Safari has ignored user-scalable=no since iOS 10 anyway, so on the
   // platform this was written for it was never doing the job — it was only
   // taking pinch away from Android and desktop.
+  //
+  // NO viewport-fit=cover, and it must MATCH index.html exactly — see the note
+  // there. Cover makes iOS report a real safe-area-inset-bottom; the nav bar
+  // pads itself by --sab and lifts off the bottom of the screen. This string
+  // and that one are one policy in two places, and they have to agree.
   useEffect(() => {
     let meta = document.querySelector('meta[name="viewport"]');
     if (!meta) {
@@ -6954,7 +6959,7 @@ export default function WBCApp() {
       meta.name = 'viewport';
       document.head.appendChild(meta);
     }
-    meta.content = 'width=device-width, initial-scale=1, viewport-fit=cover';
+    meta.content = 'width=device-width, initial-scale=1';
 
     // The actual fix for focus-zoom: a font size iOS will not zoom to reach.
     // `touch-action: manipulation` still suppresses the double-tap-to-zoom

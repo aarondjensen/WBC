@@ -11,8 +11,14 @@
          the header from being clipped or over-padded. -->
     <!-- Pinch-to-zoom stays available: this app is read outdoors, in sun, at
          arm's length. Focus-zoom on inputs is prevented by the 16px rule in
-         App.jsx, which removes the trigger rather than banning the gesture. -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+         App.jsx, which removes the trigger rather than banning the gesture.
+         `maximum-scale`/`user-scalable` were what banned it and are gone.
+
+         viewport-fit IS STILL ABSENT, and that is the note above, not an
+         omission. Adding cover makes iOS report a real safe-area-inset-bottom,
+         the bottom nav pads itself by --sab, and the whole bar lifts off the
+         bottom of the screen. Learned twice now. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <!-- The app font, loaded from the document rather than only from whichever
