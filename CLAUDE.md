@@ -82,6 +82,24 @@ build all green, because nothing exercised the order they arrive in. If a value
 is derived from two things that load separately, there should be a test that
 lands them the slow way round.
 
+### A screen in `src/components/` gets a mount test
+
+Not a test of what it computes — the arithmetic belongs in `src/lib/` with its
+own suite. A test that the screen APPEARS: mount it with plausible props, click
+through every sub-tab, assert nothing threw. `BettingView.test.js` is the
+pattern; cover the empty tournament and the finished one too, since those are
+the states nobody develops against.
+
+This is cheap and it catches the one thing nothing else does. `no-undef` cannot
+see JSX element names, so a component used but never imported lints clean and
+builds clean — `react/jsx-no-undef` is switched on for exactly that reason, but
+a mount test is what catches everything downstream of it. The Betting tab
+shipped dead on tap, with every check green, because no test had ever rendered
+it.
+
+Anything lazy-loaded needs this most: its chunk is only fetched when somebody
+taps the tab, so a broken import cannot fail anywhere else first.
+
 ## Layout
 
 - `src/App.jsx` — the app shell and most screen routing
