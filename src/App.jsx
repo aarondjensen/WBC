@@ -1,7 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, lazy, Suspense } from "react";
 import { createPortal } from "react-dom";
 import { _app, _db, _auth, onAuthStateChanged, doGoogleSignIn, doAppleSignIn, doSignOut, consumeRedirectResult, deleteAccount, USERS_COLLECTION, NATIVE_APPLE_ENABLED, APPLE_PROVIDER_ENABLED, isNativePlatform, isAndroidNative, AUTH_PROVIDERS_ENABLED, TOURNAMENT_ID, getEditionSlug, getTournamentYear, isDefaultEdition } from "./firebase";
-import { readMembership, isDirectorAccount, resolveMember, joinWithCode, readAccessCode, setAccessCode, setDirector, subscribeMemberships, accountsUnreadable, membershipForPlayer, playerIsDirector } from "./lib/accounts";
+import { readMembership, isDirectorAccount, resolveMember, setDirector, subscribeMemberships, accountsUnreadable, membershipForPlayer, playerIsDirector } from "./lib/accounts";
 import { K, ON_ACC, ON_DANGER, FS, R, ALPHA, MOTION, FONT, SHADOW, SCRIM, DIM_PLACED, getTheme, setTheme} from "./theme";
 import { SegmentedToggle, Toggle, StickyTop, SectionLabel, Card, Toast, Btn } from "./components/ui";
 import { calcCH, courseHandicapFor, computeRoundLine, computeIndividualBoard, rankIndividualBoard, rankIndividualBoardIds, WD_SCORE } from "./lib/individualBoard";
@@ -15,8 +15,13 @@ import { SyncBanner } from "./components/SyncBanner";
 import { TeeColorSwatch } from "./components/TeeColorSwatch";
 import { OnCourseScoring } from "./components/OnCourseScoring";
 import { LeaderboardView } from "./components/LeaderboardView";
+import { GroupsView } from "./components/GroupsView";
+import { GroupSetup } from "./components/GroupSetup";
+import { AccessPanel } from "./components/AccessPanel";
+import { ClaimScreen } from "./components/ClaimScreen";
+import { GateScreen } from "./components/GateScreen";
 // What colour a set of tees is — see lib/teeColors.
-import { resolveTeeColor, isLightTee, isDarkTee, TEE_COLOR_MAP } from "./lib/teeColors";
+import { resolveTeeColor, TEE_COLOR_MAP } from "./lib/teeColors";
 import { useConfirm } from "./lib/useConfirm";
 // Tee times survive a re-group because of these two — see lib/teeSheet.js.
 import { rowsToTeeTimes, mergeTeeTimes } from "./lib/teeSheet";
@@ -35,7 +40,6 @@ import { NotificationSettings } from "./components/NotificationSettings";
 import { registerForPush, getCachedSubscriptionStatus } from "./lib/notifications";
 import { pairingScoreImpact, orphanedScores, describeScored, totalHoles } from "./lib/scoreGuard";
 import { groupsForRound, assignToGroup, removeFromGroup as removeFromGroupPure, clearGroup, swapIntoGroup, rowsToPairings } from "./lib/pairings";
-import { fitPairings, rungLines, nameWidthCeiling, CARD_GAP } from "./lib/pairingsFit";
 import { Popup, ConfirmModal } from "./components/Popup";
 import { EditionSwitcher } from "./components/EditionSwitcher";
 import { docIds } from "./lib/editionId";
@@ -572,235 +576,12 @@ const getDefaultTee = (tees) => {
 
 const TEE_PALETTE = ["#60a5fa","#f59e0b","#a78bfa","#34d399","#fb923c","#f472b6","#38bdf8","#e879f9"];
 
-// ── LEADERBOARD ──
+// GroupSetup moved to components/GroupSetup.jsx — see the header there.
 
-// LeaderboardView, and the column widths it and the shell both measure
-// against, moved to components/LeaderboardView.jsx. See the header there.
-
-function GroupSetup({ user, players, onStart, presetGroup }) {
-  const [selected, setSelected] = useState(presetGroup || [user.id]);
-
-  const toggle = (id) => {
-    if (id === user.id) return;
-    setSelected(prev => prev.includes(id) ? prev.filter(x => x !== id) : prev.length < 4 ? [...prev, id] : prev);
-  };
-
-  return (
-    <div>
-      {presetGroup && (
-        <button onClick={() => onStart(presetGroup)} style={{
-          width: "100%", padding: "14px 0", borderRadius: R.xl, marginBottom: 12,
-          background: `linear-gradient(135deg, ${K.acc}, ${K.accDim})`,
-          color: K.bg, border: "none", fontSize: FS.lead, fontWeight: 800, cursor: "pointer",
-          boxShadow: `0 4px 20px ${K.accGlow}`,
-        }}>
-          Start Round — {presetGroup.length} Players ⛳
-        </button>
-      )}
-
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-        <div>
-          <span style={{ fontFamily: "'Montserrat', sans-serif", fontSize: FS.lead, fontWeight: 800 }}>Group Setup</span>
-          <span style={{ fontSize: FS.small, color: K.t3, marginLeft: 8 }}>{selected.length} player{selected.length !== 1 ? "s" : ""}</span>
-        </div>
-        {selected.length >= 2 && (
-          <button onClick={() => onStart(selected)} style={{
-            padding: "8px 20px", borderRadius: R.md,
-            background: `linear-gradient(135deg, ${K.acc}, ${K.accDim})`,
-            color: K.bg, border: "none", fontSize: FS.small, fontWeight: 800, cursor: "pointer",
-            boxShadow: `0 2px 12px ${K.accGlow}`,
-          }}>Done ⛳</button>
-        )}
-      </div>
-
-      <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-        {players.map(p => {
-          const isSelf = p.id === user.id;
-          const isSelected = selected.includes(p.id);
-          return (
-            <button key={p.id} onClick={() => toggle(p.id)} style={{
-              background: isSelected ? K.accGlow : K.card,
-              border: `1.5px solid ${isSelected ? K.acc : K.bdr}`,
-              borderRadius: R.md, padding: "10px 14px",
-              display: "flex", justifyContent: "space-between", alignItems: "center",
-              cursor: isSelf ? "default" : "pointer", color: K.t1,
-              opacity: !isSelected && selected.length >= 4 ? 0.4 : 1,
-            }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <div style={{
-                  width: 24, height: 24, borderRadius: R.sm,
-                  background: isSelected ? K.acc : K.inp,
-                  border: `1.5px solid ${isSelected ? K.acc : K.bdr}`,
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  color: isSelected ? K.bg : K.t3, fontSize: FS.small, fontWeight: 800,
-                }}>{isSelected ? "✓" : ""}</div>
-                <span style={{ fontWeight: 600, fontSize: FS.small }}>{p.name}{isSelf ? " (you)" : ""}</span>
-              </div>
-              <span style={{ fontSize: FS.label, color: K.t3 }}>HI: {p.handicap_index}</span>
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-// ── The Betting tab, fetched only if somebody opens it ──
-// It moved to components/BettingView.jsx — see the header there. Loaded on
-// demand for the same reason the gallery is: it is the largest view in the
-// app and nobody opens it walking down a fairway, so a phone on a course has
-// no business carrying it until it is asked for.
 const BettingView = lazy(() => import("./components/BettingView"));
 
-function GroupsView({ players, round, tRounds, courses, pairingsData, teeTimesData, getPlayerTee, user }) {
-  const tr = tRounds.find(t => t.round_number === round);
-  const course = tr ? courses.find(c => c.id === tr.course_id) : null;
-  const groups = useMemo(() => (pairingsData || {})[round] || [], [pairingsData, round]);
-  const roundTeeTimes = (teeTimesData || {})[round] || [];
+// GroupsView moved to components/GroupsView.jsx — see the header there.
 
-  // The draw is a handful of cards and it used to sit at FS.small with a third
-  // of the tab empty below it. So the size comes from the space: measure what
-  // the stack has been given and take the biggest rung that fits it — the same
-  // bargain the leaderboard strikes, and the one the type scale is written for.
-  //
-  // Only the players actually on a card count towards the shape, because that
-  // is what gets drawn: a pairing pointing at a player who has left the roster
-  // renders nothing, and counting it would buy height for a row that is not
-  // there and step the whole tab down a rung to pay for it.
-  const stackRef = useRef(null);
-  const [box, setBox] = useState({ h: 0, w: 0 });
-  const drawn = useMemo(
-    () => groups.map(grp => grp.map(pid => players.find(p => p.id === pid)).filter(Boolean)),
-    [groups, players],
-  );
-  const sizes = useMemo(() => drawn.map(grp => grp.length), [drawn]);
-  // Re-measure when the shape of the draw changes, not when its identity does:
-  // a Firestore snapshot that rewrites the same four foursomes is not a reason
-  // to read the layout again. The names ride along because the longest one is
-  // the other half of the fit, and a substitution can change it.
-  const drawShape = `${sizes.join(",")}|${drawn.flat().map(p => p.name).join("|")}`;
-  // useLayoutEffect, not useEffect: this measures and then restyles from the
-  // measurement, so running it after paint shows one frame at the wrong size.
-  // The stack is flex: 1 against a floor, so its height is the space on offer
-  // and does NOT move when the rung it feeds changes — no measure/grow loop.
-  useLayoutEffect(() => {
-    const measure = () => {
-      const el = stackRef.current;
-      if (!el) return;
-      setBox(prev => (prev.h === el.clientHeight && prev.w === el.clientWidth
-        ? prev
-        : { h: el.clientHeight, w: el.clientWidth }));
-    };
-    measure();
-    window.addEventListener("resize", measure);
-    return () => window.removeEventListener("resize", measure);
-  }, [drawShape]);
-
-  // The longest name on the stack, in pixels per pixel of font size — the other
-  // half of the fit. Canvas rather than the DOM because a name only overflows
-  // once it has been drawn too big, and the point is not to draw it too big.
-  //
-  // Measured at 100px and divided down, so one measurement covers every rung.
-  // toUpperCase() because the app paints names in capitals and text-transform
-  // is a CSS thing the canvas knows nothing about — measure the string the
-  // browser will draw, not the one Firestore stores. And measured a second
-  // time on fonts.ready, because Montserrat arrives over the network and the
-  // fallback it is measured against until then is the narrower of the two,
-  // which is the direction that truncates.
-  const [nameWidthPerPx, setNameWidthPerPx] = useState(0);
-  useLayoutEffect(() => {
-    const names = drawn.flat().map(p => p.name);
-    if (names.length === 0) return undefined;
-    let live = true;
-    const measureNames = () => {
-      const ctx = document.createElement("canvas").getContext("2d");
-      if (!ctx || !live) return;
-      ctx.font = `600 100px ${FONT}`;
-      setNameWidthPerPx(nameWidthCeiling(names.map(n => ctx.measureText(n.toUpperCase()).width / 100)));
-    };
-    measureNames();
-    if (document.fonts) document.fonts.ready.then(measureNames);
-    return () => { live = false; };
-  }, [drawn]);
-
-  const fit = fitPairings(box.h, sizes, box.w, nameWidthPerPx);
-  const { rowLine, headLine } = rungLines(fit);
-
-  const getTeeColor = (p) => {
-    if (!course) return "#e8e8e8";
-    const tee = getPlayerTee(round, p.id, course);
-    return tee?.color || "#e8e8e8";
-  };
-  const getTeeName = (p) => {
-    if (!course) return "";
-    const tee = getPlayerTee(round, p.id, course);
-    return tee?.name || "";
-  };
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
-      <div style={{ marginBottom: 14 }}>
-        <h2 style={{ fontFamily: "'Montserrat', sans-serif", fontSize: FS.title, margin: 0, fontWeight: 800, display: "inline" }}>Round {round}</h2>
-        {course && <span style={{ fontSize: FS.small, color: K.t3, marginLeft: 10 }}>{course.name} · Par {course.par}</span>}
-      </div>
-      {groups.length > 0 ? (
-        // The stack takes the rest of the tab whatever it holds — that height
-        // IS the input to the fit above. overflowY stays auto as a backstop:
-        // a draw too deep for even the smallest rung scrolls rather than
-        // losing its last group off the bottom.
-        <div ref={stackRef} style={{ display: "flex", flexDirection: "column", gap: CARD_GAP, flex: 1, minHeight: 0, overflowY: "auto" }}>
-          {drawn.map((rows, gi) => {
-            const teeTime = roundTeeTimes[gi];
-            return (
-            <div key={gi} style={{ background: K.card, borderRadius: R.md, border: `1px solid ${K.bdr}`, overflow: "hidden", flexShrink: 0 }}>
-              <div style={{ padding: `${fit.headPad}px 12px`, fontSize: fit.head, lineHeight: `${headLine}px`, fontWeight: 700, color: K.acc, borderBottom: `1px solid ${K.bdr}`, background: K.accGlow, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span>{teeTime || `Group ${gi + 1}`}</span>
-                {teeTime && <span style={{ fontSize: fit.headSub, fontWeight: 500, color: K.t3 }}>Group {gi + 1}</span>}
-              </div>
-              {rows.map((p, pi) => {
-                const ch = course ? (() => { const tee = getPlayerTee(round, p.id, course); return calcCH(p.handicap_index, tee?.slope || course.slope, tee?.rating || course.rating, tee?.par || course.par); })() : 0;
-                const teeName = getTeeName(p);
-                const teeClr = getTeeColor(p);
-                const isMe = p.id === user.id;
-                return (
-                  <div key={p.id} style={{ padding: `${fit.rowPad}px 12px`, lineHeight: `${rowLine}px`, display: "grid", gridTemplateColumns: "5fr 1.6fr 2.4fr 2fr", alignItems: "center", borderBottom: pi < rows.length - 1 ? `1px solid ${K.bdr}${ALPHA.wash}` : "none", background: isMe ? K.t2 + ALPHA.wash : "transparent" }}>
-                    {/* The name is the one cell that can outgrow its column as
-                        the rung climbs, so it ellipses rather than wrapping —
-                        a wrapped row is a row taller than the fit paid for. */}
-                    <span style={{ fontWeight: 600, fontSize: fit.name, color: isMe ? K.gold : K.t1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
-                    <span style={{ fontSize: fit.cell, fontWeight: 600, color: K.t2, textAlign: "center" }}>{p.handicap_index}</span>
-                    <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: fit.cell, fontWeight: 600, minWidth: 0, overflow: "hidden", whiteSpace: "nowrap", color: isDarkTee(teeClr) ? "#9ca3af" : isLightTee(teeClr) ? K.t3 : teeClr }}>
-                      {teeName && <>
-                        <TeeColorSwatch color={teeClr} name={teeName} size={fit.swatch} />
-                        {teeName}
-                      </>}
-                    </span>
-                    <span style={{ color: K.t2, fontSize: fit.cell, fontWeight: 500, textAlign: "right", whiteSpace: "nowrap" }}>{course ? `CH ${ch}` : "–"}</span>
-                  </div>
-                );
-              })}
-            </div>
-          )})}
-        </div>
-      ) : (
-        <div style={{ textAlign: "center", padding: "40px 20px" }}>
-          <div style={{ fontSize: FS.jumbo, marginBottom: 12 }}>👥</div>
-          <div style={{ fontSize: FS.body, fontWeight: 700, color: K.t1, marginBottom: 6 }}>No Pairings Set</div>
-          <div style={{ fontSize: FS.small, color: K.t3 }}>Pairings will appear here once the tournament director sets them up.</div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── ADMIN ──
-// The tee-colour dot on a player tile in the draw. Rendered whether or not the
-// player HAS a tee yet: the slot is what lines the dots up into a column down
-// the grid, and a tile that simply omits it shunts its name left and breaks the
-// column for every tile beside it.
-//
-// The ring is what keeps a dark tee marker visible on a dark tile — so it is
-// drawn in the body ink, which is near-white in the dark theme and near-black
-// in daylight. A hardcoded white one vanishes the moment the app is light.
 const TeeDot = ({ color }) => (
   <span style={{
     width: 7, height: 7, borderRadius: "50%", flexShrink: 0, display: "inline-block",
@@ -2358,108 +2139,7 @@ function TournamentPanel({ meta, onSave, notify, confirm, scoredRounds = [] }) {
   );
 }
 
-function AccessPanel({ notify, confirm }) {
-  const [code, setCode] = useState("");
-  const [revealed, setRevealed] = useState(false);
-  // Distinct from `busy`: `loading` is the ONE read that happens on open, and
-  // it is what stops the retry button flashing "Try again" before anything has
-  // been tried.
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
-
-  const reveal = async () => {
-    setBusy(true); setErr("");
-    const res = await readAccessCode();
-    setBusy(false);
-    // Three answers, and the third is why readAccessCode does not just return
-    // a string: "no password set" and "I was not allowed to look" are the same
-    // absence, and opposite instructions to the person reading this screen.
-    if (!res.ok) { setErr(res.error); return; }
-    setCode(res.code || "");
-    setRevealed(true);
-  };
-
-  // Read it on open rather than behind a tap. The reveal button was guarding
-  // against a shoulder over the screen, but this is a director-only tab and
-  // the password's whole life is being said out loud across a table — while
-  // the cost of hiding it was that the one field standing between a stranger
-  // and somebody else's scorecard looked, to a director setting the event up,
-  // like it wasn't there. The button stays as the retry when the read fails.
-  //
-  // Not a call to reveal(): that flips `busy` before it awaits anything, and a
-  // setState in the same tick as the effect is a cascading render. Everything
-  // here happens after the await, so the first paint is the `loading` one.
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      const res = await readAccessCode();
-      if (!alive) return;
-      setLoading(false);
-      if (!res.ok) { setErr(res.error); return; }
-      setCode(res.code || "");
-      setRevealed(true);
-    })();
-    return () => { alive = false; };
-  }, []);
-
-  const save = async () => {
-    const next = (code || "").trim();
-    // Ported from Bourbon Cup: taking the password OFF is a one-tap action
-    // with no undo that opens the tournament to anyone with a Google account,
-    // and it is one keystroke away from a normal edit. Ask first, and say
-    // which of the two things is about to happen.
-    if (confirm) {
-      const ok = await confirm({
-        title: next ? "Change the password?" : "Remove the password?",
-        message: next
-          ? `Anyone signing in from now on needs "${next}" before they can claim a name or post a score.\n\nNobody already through the door is affected — this does not sign anybody out.`
-          : "Anybody who signs in with Google or Apple will be able to claim a name and post scores.",
-        confirmLabel: next ? "Change it" : "Remove it",
-        destructive: !next,
-      });
-      if (!ok) return;
-    }
-    setBusy(true); setErr("");
-    const res = await setAccessCode(code);
-    setBusy(false);
-    if (!res.ok) { setErr(res.error); return; }
-    notify?.(next ? "Password saved" : "Password cleared — anyone can sign in");
-  };
-
-  const label = { fontSize: FS.label, fontWeight: 700, color: K.t3, textTransform: "uppercase", letterSpacing: "0.06em" };
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      {/* The password */}
-      <div style={{ background: K.card, borderRadius: R.lg, border: `1px solid ${K.bdr}`, padding: "12px 14px" }}>
-        <div style={{ ...label, marginBottom: 8 }}>Event password</div>
-        {revealed ? (
-          <div style={{ display: "flex", gap: 8 }}>
-            <input value={code} onChange={e => { setCode(e.target.value); if (err) setErr(""); }}
-              type="text" autoCapitalize="none" autoCorrect="off" spellCheck={false}
-              placeholder="No password set"
-              style={{ flex: 1, minWidth: 0, padding: "10px 12px", borderRadius: R.md, background: K.inp, border: `1px solid ${K.bdr}`, color: K.t1, fontSize: FS.lead, fontWeight: 700, outline: "none", fontFamily: "'Montserrat', sans-serif", boxSizing: "border-box" }} />
-            <Btn onClick={save} disabled={busy} style={{ flexShrink: 0 }}>
-              {busy ? "…" : "Save"}
-            </Btn>
-          </div>
-        ) : (
-          <button onClick={reveal} disabled={loading || busy} style={{ padding: "9px 16px", borderRadius: R.md, background: "transparent", border: `1px solid ${K.acc}${ALPHA.line}`, color: K.acc, fontSize: FS.small, fontWeight: 700, cursor: loading || busy ? "default" : "pointer" }}>
-            {loading || busy ? "Reading…" : "Try again"}
-          </button>
-        )}
-        {revealed && !(code || "").trim() && (
-          <div style={{ fontSize: FS.label, fontWeight: 600, color: K.warn, marginTop: 8 }}>
-            No password set — anyone with a Google or Apple account can sign in and claim a name.
-          </div>
-        )}
-      </div>
-
-      {err && <div style={{ fontSize: FS.label, fontWeight: 600, color: K.danger, lineHeight: 1.5 }}>{err}</div>}
-    </div>
-  );
-}
+// AccessPanel moved to components/AccessPanel.jsx — see the header there.
 
 function AdminView({ activePlayers, rosterPlayers, sideGames, onUpdateSideGames, rebuyIds, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, roundDates, onSetRoundDate, scoringOpen, onSetScoringOpen, pairingStrategy, onSetPairingStrategy, leaderboard, holeData, finalizedRounds, onFinalizeRound, onUnfinalizeRound, onDiscardRoundScores, notify, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, externalSettingsRound, onExternalSettingsHandled, teesSaved, onTeesSave, teesModified, onTeesModify, memberships, onSetDirector, claims, authUid, tournamentMeta, onSaveTournamentMeta }) {
   const [tab, setTab] = useState("rounds");
@@ -4130,137 +3810,8 @@ function AdminView({ activePlayers, rosterPlayers, sideGames, onUpdateSideGames,
 
 
 
-// ── GATE SCREEN — the tournament password ──
-// Three steps to get in, each seen once: sign in with Google or Apple, enter
-// the tournament password, then claim your name off the roster. This is the
-// middle one, and it is the one that actually decides who can change
-// anything.
-//
-// Signing in proves who you are. It does not prove you were invited — anybody
-// can make a Google account, and this app's Firebase config ships in the
-// bundle by design. So an account has to present the tournament password and
-// be issued a membership document (wbc_accounts/{uid}), which every write in
-// the project is gated on.
-//
-// The check happens in the SECURITY RULES, not here. Submitting writes a
-// membership document carrying the typed code, and the database rejects it if
-// the code is wrong (src/lib/accounts.js, firestore.rules). Nothing on this
-// screen knows the password, so nothing on this screen can leak it — which is
-// the difference between this and a client-side password check that anybody
-// can walk past with devtools open.
-//
-// A blank or missing code in wbc_secrets/access means the door is open and
-// any password (including none) is accepted. That is the bootstrap, not a
-// bug: before anybody has set one there is no way to present the right one.
-function GateScreen({ fbUser, onPassed, onCancel }) {
-  const [code, setCode] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
+// GateScreen moved to components/GateScreen.jsx — see the header there.
 
-  const submit = async (e) => {
-    e?.preventDefault?.();
-    if (busy) return;
-    setBusy(true); setErr("");
-    const res = await joinWithCode(fbUser, code);
-    setBusy(false);
-    if (!res.ok) { setErr(res.error); return; }
-    onPassed();
-  };
-
-  return (
-    <div style={{ minHeight: "var(--app-height, 100dvh)", background: `radial-gradient(ellipse at 20% 50%, #0d1f3c 0%, ${K.bg} 70%)`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", padding: 20 }}>
-      <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
-      <div style={{ width: "100%", maxWidth: 340, textAlign: "center" }}>
-        <img src={WBC_LOGO} alt="WBC" style={{ height: 64, margin: "0 auto 16px", display: "block", filter: "drop-shadow(0 4px 16px rgba(34,211,167,0.3))" }} />
-        <h1 style={{ fontSize: FS.hero, color: K.t1, margin: "0 0 6px", fontWeight: 800, letterSpacing: "-0.02em" }}>Event password</h1>
-        <p style={{ color: K.t2, fontSize: FS.small, margin: "0 0 20px", lineHeight: 1.5 }}>
-          Signed in as {fbUser?.email || "your account"}.<br />Ask a director for the password — you&rsquo;ll only need it once.
-        </p>
-        <form onSubmit={submit}>
-          <input
-            value={code}
-            onChange={e => { setCode(e.target.value); if (err) setErr(""); }}
-            // Not type="password": there is no privacy to protect from
-            // somebody standing on the same tee box, and a masked field on a
-            // phone keyboard is how you get three failed attempts.
-            type="text" autoCapitalize="none" autoCorrect="off" spellCheck={false}
-            autoComplete="one-time-code" autoFocus
-            placeholder="Password"
-            style={{
-              width: "100%", boxSizing: "border-box", padding: "14px 16px", borderRadius: R.lg,
-              textAlign: "center", background: K.inp,
-              border: `2px solid ${err ? K.danger : K.bdr}`, color: K.t1,
-              // 16px or larger, or iOS Safari zooms the page on focus.
-              fontSize: FS.lead, fontWeight: 700, outline: "none", fontFamily: "'Montserrat', sans-serif",
-            }} />
-          <Btn type="submit" size="lg" block disabled={busy} style={{ marginTop: 14 }}>{busy ? "Checking…" : "Continue"}</Btn>
-        </form>
-        <div style={{ minHeight: 34, marginTop: 10, fontSize: FS.small, lineHeight: 1.4, fontWeight: 600, color: K.danger }}>{err}</div>
-        <Btn variant="ghost" size="sm" onClick={onCancel} disabled={busy} style={{ color: K.t3 }}>
-          ← Not now, sign out
-        </Btn>
-      </div>
-    </div>
-  );
-}
-
-// ── CLAIM SCREEN ──
-// Shown after a Google/Apple sign-in when the authenticated Firebase user is
-// not yet mapped to a WBC player (no wbc_users doc). The signed-in person picks
-// their own name from the unclaimed profiles; picking writes the uid→player_id
-// claim and logs them in. No emails are collected ahead of time or matched —
-// claiming is always by choosing your name. The player_id is the permanent
-// career identity linking to 16 years of history, so this is the moment a real
-// person is bound to that identity.
-function ClaimScreen({ fbUser, candidates, onClaim, onCancel, busyId }) {
-  const email = fbUser?.email || "";
-  const displayName = fbUser?.displayName || "";
-  return (
-    <div style={{ minHeight: "var(--app-height, 100dvh)", background: `radial-gradient(ellipse at 20% 50%, #0d1f3c 0%, ${K.bg} 70%)`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", padding: 20 }}>
-      <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
-      <div style={{ width: "100%", maxWidth: 420, textAlign: "center" }}>
-        <img src={WBC_LOGO} alt="WBC" style={{ height: 64, margin: "0 auto 16px", display: "block", filter: "drop-shadow(0 4px 16px rgba(34,211,167,0.3))" }} />
-        <h1 style={{ fontSize: FS.hero, color: K.t1, margin: "0 0 6px", fontWeight: 800, letterSpacing: "-0.02em" }}>Claim your profile</h1>
-        <p style={{ color: K.t2, fontSize: FS.small, margin: "0 0 4px", lineHeight: 1.5 }}>
-          Signed in{displayName ? ` as ${displayName}` : ""}{email ? ` · ${email}` : ""}.
-        </p>
-        <p style={{ color: K.t3, fontSize: FS.small, margin: "0 0 22px", lineHeight: 1.5 }}>Tap your name to link this sign-in to your WBC history.</p>
-
-        {candidates.length === 0 ? (
-          <div style={{ background: K.card, border: `1px dashed ${K.warn}${ALPHA.line}`, borderRadius: R.lg, padding: 24 }}>
-            <p style={{ color: K.t2, fontSize: FS.small, margin: 0, lineHeight: 1.6 }}>
-              Every player profile has already been claimed. If one of them is you, ask a tournament director to free it up in Firebase, then sign in again.
-            </p>
-          </div>
-        ) : (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-            {candidates.map((p) => {
-              const busy = busyId === p.id;
-              const initials = p.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase();
-              return (
-                <button key={p.id} onClick={() => !busyId && onClaim(p)} disabled={!!busyId}
-                  style={{ display: "flex", alignItems: "center", gap: 10, background: K.card, border: `1px solid ${busy ? K.acc : K.bdr}`, borderRadius: R.lg, padding: "12px 12px", cursor: busyId ? "default" : "pointer", color: K.t1, textAlign: "left", opacity: busyId && !busy ? 0.5 : 1, transition: `all ${MOTION}` }}
-                  onMouseEnter={(e) => { if (!busyId) { e.currentTarget.style.borderColor = K.acc; e.currentTarget.style.background = K.hover; } }}
-                  onMouseLeave={(e) => { if (!busyId) { e.currentTarget.style.borderColor = K.bdr; e.currentTarget.style.background = K.card; } }}>
-                  <span style={{ width: 34, height: 34, flexShrink: 0, borderRadius: "50%", background: K.acc + ALPHA.wash, border: `1px solid ${K.acc}${ALPHA.line}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: FS.small, fontWeight: 800, color: K.acc }}>{initials}</span>
-                  <span style={{ fontSize: FS.small, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{busy ? "Linking…" : p.name}</span>
-                </button>
-              );
-            })}
-          </div>
-        )}
-
-        <button onClick={onCancel} disabled={!!busyId} style={{ marginTop: 22, background: "transparent", border: "none", color: K.t3, fontSize: FS.small, fontWeight: 600, cursor: busyId ? "default" : "pointer", opacity: busyId ? 0.5 : 1 }}>
-          ← Not now, sign out
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// Courses in round order, unassigned ones last, alpha within a tie. Pure —
-// lives out here so it is not rebuilt on every render, and so the data-load
-// effect can call it without depending on where it sits in the component.
 const sortCoursesByRound = (list, rounds) => {
   return [...list].sort((a, b) => {
     const ra = rounds.find(r => r.course_id === a.id)?.round_number ?? 99;
