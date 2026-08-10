@@ -14,11 +14,16 @@
 // the real total in their head — which is the job this panel was built to
 // take off them.
 //
-// The renders here re-mount with a NEW games array rather than clicking,
-// because that is how the change actually arrives: a tap writes to Firestore,
-// the subscription lands, and the sheet is drawn again from the new lists.
+// The second half asks the other question only a mounted sheet can answer:
+// which taps stop and ask, and — just as important — which ones do not.
+//
+// What the sheet READS is checked by re-mounting with a new games array rather
+// than by clicking, because that is how the change actually arrives: a tap
+// writes to Firestore, the subscription lands, and the sheet is drawn again
+// from the new lists. What a tap DOES is checked on the patch it hands to
+// onChange, which is the whole of what it changes.
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { render, screen, cleanup, fireEvent } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { createElement as h } from "react";
 import { BuyInTracker, BuyInPrices } from "./BuyIns";
 import { SIDE_GAME_KEYS, SIDE_GAME_LABELS } from "../constants";
@@ -80,6 +85,106 @@ describe("BuyInTracker's owed column", () => {
     mount(games({ skinsPaid: ["a", "b"], netPaid: ["a", "b"] }));
     expect(screen.getByText("$0.00")).toBeTruthy();
     expect(screen.getByText("$90.00 of $90.00")).toBeTruthy();
+  });
+});
+
+// ── The brakes on money coming back off ───────────────────────────
+//
+// A mis-tap that clears a payment leaves no trace: the row reads exactly like
+// a man who never paid, and the director finds out on Sunday by asking him
+// for money he already handed over. So those taps ask first — and only those,
+// because a confirm in front of the ordinary tick would be dismissed sixteen
+// times a morning and stop being read.
+describe("un-marking a payment asks first", () => {
+  // Aaron has paid skins; Brad has not. The cell is found by its ticks.
+  const cellsIn = (name) => Array.from(screen.getByText(name).closest("div").querySelectorAll("div"));
+  const tick = (name, ticks) => cellsIn(name).find(d => d.textContent === ticks);
+
+  it("holds the tap that would clear a paid cell", async () => {
+    const onChange = vi.fn();
+    render(h(BuyInTracker, { players: PLAYERS, games: games({ skinsPaid: ["a"] }), onChange }));
+    fireEvent.click(tick("Aaron", "✓✓"));
+    expect(await screen.findByText("Take them out?")).toBeTruthy();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("does it once the director says so, and says what it costs", async () => {
+    const onChange = vi.fn();
+    render(h(BuyInTracker, { players: PLAYERS, games: games({ skinsPaid: ["a"] }), onChange }));
+    fireEvent.click(tick("Aaron", "✓✓"));
+    expect(await screen.findByText(/Aaron has paid \$20\.00 for Skins/)).toBeTruthy();
+    fireEvent.click(screen.getByText("Take out"));
+    // Out of the game AND the payment cleared — never one without the other.
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith({ skins: { in: ["b"], paid: [] } }));
+  });
+
+  it("leaves the sheet alone when the director backs out", async () => {
+    const onChange = vi.fn();
+    render(h(BuyInTracker, { players: PLAYERS, games: games({ skinsPaid: ["a"] }), onChange }));
+    fireEvent.click(tick("Aaron", "✓✓"));
+    fireEvent.click(await screen.findByText("Leave it"));
+    await waitFor(() => expect(screen.queryByText("Leave it")).toBeNull());
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  // The other direction is the common one and must stay a single tap.
+  it("marks a man paid without asking anything", () => {
+    const onChange = vi.fn();
+    render(h(BuyInTracker, { players: PLAYERS, games: games({ skinsPaid: ["a"] }), onChange }));
+    fireEvent.click(tick("Brad", "✓"));
+    expect(onChange).toHaveBeenCalledWith({ skins: { paid: ["a", "b"] } });
+    expect(screen.queryByText("Leave it")).toBeNull();
+  });
+
+  it("holds a name tap that would drop a man who has settled up", async () => {
+    const onChange = vi.fn();
+    render(h(BuyInTracker, { players: PLAYERS, games: games({ skinsPaid: ["a"], netPaid: ["a"] }), onChange }));
+    fireEvent.click(screen.getByText("Aaron"));
+    expect(await screen.findByText(/paid \$45\.00 across 2 buy-ins/)).toBeTruthy();
+    fireEvent.click(screen.getByText("Take out"));
+    // His paid flags leave with him, or putting him back would read as settled.
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith({
+      skins: { in: ["b"], paid: [] },
+      lownet: { in: ["b"], paid: [] },
+    }));
+  });
+
+  it("drops a man who has paid nothing on one tap", () => {
+    const onChange = vi.fn();
+    render(h(BuyInTracker, { players: PLAYERS, games: games(), onChange }));
+    fireEvent.click(screen.getByText("Brad"));
+    expect(onChange).toHaveBeenCalled();
+    expect(screen.queryByText("Leave it")).toBeNull();
+  });
+
+  // The most expensive tap on the sheet: a weekend of collecting, one heading.
+  it("holds the heading tap that would clear a settled column", async () => {
+    const onChange = vi.fn();
+    render(h(BuyInTracker, { players: PLAYERS, games: games({ skinsPaid: ["a", "b"] }), onChange }));
+    fireEvent.click(screen.getByText("SKIN"));
+    expect(await screen.findByText(/down as paid \(\$40\.00\)/)).toBeTruthy();
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText("Clear column"));
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith({ skins: { in: [], paid: [] } }));
+  });
+
+  it("marks a whole column paid without asking", () => {
+    const onChange = vi.fn();
+    render(h(BuyInTracker, { players: PLAYERS, games: games(), onChange }));
+    fireEvent.click(screen.getByText("SKIN"));
+    expect(onChange).toHaveBeenCalledWith({ skins: { paid: ["a", "b"] } });
+  });
+
+  // The rebuy column cannot be tagged in or out, so its paid cell is the only
+  // thing a tap can change — and un-ticking it is the plainest form of this.
+  it("holds the derived column's paid cell too", async () => {
+    const onChange = vi.fn();
+    const rebuy = [{ key: "rebuy", ...SIDE_GAME_LABELS.rebuy, amount: 25, ids: ["a"], derived: true, paid: ["a"] }];
+    render(h(BuyInTracker, { players: PLAYERS, games: rebuy, onChange }));
+    fireEvent.click(tick("Aaron", "✓✓"));
+    expect(await screen.findByText("Mark unpaid?")).toBeTruthy();
+    fireEvent.click(screen.getByText("Mark unpaid"));
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith({ rebuy: { paid: [] } }));
   });
 });
 
