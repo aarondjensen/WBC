@@ -167,9 +167,6 @@ export function NotificationSettings({ user, notify, onPermissionChange }) {
               <div style={{ fontSize: FS.body, fontWeight: 800, color: subscribed ? K.acc : K.t1 }}>
                 {subscribed ? "Notifications on" : "Notifications off"}
               </div>
-              <div style={{ fontSize: FS.small, color: K.t2, lineHeight: 1.5, marginTop: 2 }}>
-                {subscribed ? "You'll get the alerts below." : "Turn on to get the alerts below."}
-              </div>
             </div>
             <Toggle on={subscribed} busy={busy} onChange={handleToggle} />
           </div>
