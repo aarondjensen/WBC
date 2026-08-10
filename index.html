@@ -9,7 +9,10 @@
          the in-app JS that manages the viewport, so iOS does NOT flip cover ->
          no-cover after first paint. Letting iOS own the safe areas is what keeps
          the header from being clipped or over-padded. -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
+    <!-- Pinch-to-zoom stays available: this app is read outdoors, in sun, at
+         arm's length. Focus-zoom on inputs is prevented by the 16px rule in
+         App.jsx, which removes the trigger rather than banning the gesture. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <!-- The app font, loaded from the document rather than only from whichever

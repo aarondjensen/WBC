@@ -1,18 +1,16 @@
-import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, lazy, Suspense } from "react";
 import { createPortal } from "react-dom";
 import { _app, _db, _auth, onAuthStateChanged, doGoogleSignIn, doAppleSignIn, doSignOut, consumeRedirectResult, deleteAccount, USERS_COLLECTION, NATIVE_APPLE_ENABLED, APPLE_PROVIDER_ENABLED, isNativePlatform, isAndroidNative, AUTH_PROVIDERS_ENABLED, TOURNAMENT_ID, getEditionSlug, getTournamentYear, isDefaultEdition } from "./firebase";
 import { readMembership, isDirectorAccount, resolveMember, joinWithCode, readAccessCode, setAccessCode, setDirector, subscribeMemberships, accountsUnreadable, membershipForPlayer, playerIsDirector } from "./lib/accounts";
 import { K, ON_ACC, ON_DANGER, FS, fsStep, R, ALPHA, MOTION, FONT, SHADOW, SCRIM, DIM_PLACED, getTheme, setTheme} from "./theme";
 import { SegmentedToggle, Toggle, StickyTop, SectionLabel, Card, Toast, Btn } from "./components/ui";
 import { calcCH, courseHandicapFor, buildStrokesMap, computeRoundLine, computeIndividualBoard, rankIndividualBoard, rankIndividualBoardIds, WD_SCORE } from "./lib/individualBoard";
-import { fieldFor, potFor, perUnit, computeSkins, allSkins, skinCounts, lowNetRounds, lowNetRoundField } from "./lib/sideGames";
+// Only what the SHELL still needs — the rest went to the Betting tab with it.
+import { fieldFor, computeSkins } from "./lib/sideGames";
 import { teeTimesByPlayer, roundInPlay, thruStatus } from "./lib/thruStatus";
-import {
-  MARKET_OPENING_SHARES, MARKET_MID_SHARES, marketWindows, normalizeLots, totalShares,
-  countdown, countdownTick, countdownTone, openingSharesLeft, midRoundFor,
-  sharesOn, setLotShares, lotsFor, allLots, marketBoard, marketHoldings, marketPayouts, roundComplete,
-  eligibleBets, rebuyers, marketRoster, teeOffAt,
-} from "./lib/market";
+import { normalizeLots, openingSharesLeft, marketWindows, eligibleBets, rebuyers, teeOffAt, roundComplete } from "./lib/market";
+// Which books this phone may hold, and when a director publishes the reveal.
+import { betsToHold, shouldPublish, betsSignature } from "./lib/marketSeal";
 import { BuyInPrices, BuyInTracker } from "./components/BuyIns";
 import { SyncBanner } from "./components/SyncBanner";
 import { useConfirm } from "./lib/useConfirm";
@@ -39,7 +37,9 @@ import { EditionSwitcher } from "./components/EditionSwitcher";
 import { docIds } from "./lib/editionId";
 import { isHistoryCourseId } from "./lib/historyImport";
 import { openingHole, nineComplete } from "./lib/holeAdvance";
-import { scoreWindow, nudgeUpTarget, nudgeDownTarget } from "./lib/scoreEntry";
+import { scoreWindow, nudgeUpTarget, nudgeDownTarget, scoreTerm } from "./lib/scoreEntry";
+// The small conversions every screen does — see lib/format.
+import { fmtPar, teeTimeToMinutes, minutesToTimeStr } from "./lib/format";
 import { groupTrouble, roundTrouble, describeTrouble, blocksScoring, missingTees, describeMissingTees } from "./lib/roundSetup";
 import { indexFor, matchHistoryName } from "./lib/handicap";
 import { groupKey as groupKeyOf, roundOfGroupKey, sameGroup, liveRound, roundFinalized, switchableGroups, groupProgress } from "./lib/groupSwitch";
@@ -49,16 +49,28 @@ import { GroupSwitcher } from "./components/GroupSwitcher";
 import { OffRoundBanner } from "./components/OffRoundBanner";
 import { MoreMenu } from "./components/MoreMenu";
 import { PlayersView } from "./components/PlayersView";
-import { PhotosView } from "./components/PhotosView";
+// ── The gallery, fetched only if somebody opens it ──
+// Its data subscription is already deferred until first open (see the
+// wbc_media listener), for the reason that the photo index is the one
+// collection whose size is unbounded. The CODE deserves the same treatment:
+// it is the largest view nobody looks at during a round, and a phone on a tee
+// box should not be carrying it. `lazy` puts it in its own chunk that is
+// fetched on the first tap and cached for the rest of the session.
+const PhotosView = lazy(() => import("./components/PhotosView"));
 import { photoUploadsAllowed, uploadsDisabledReason } from "./lib/media";
 import { returningPlayers, returningLine } from "./lib/returningPlayers";
-import { TROPHY_SVG_URL, WBC_LOGO, WBC_FAVICON, DEFAULT_NUM_ROUNDS, ROUND_CHOICES, clampRounds } from "./constants";
+import { TROPHY_SVG_URL, WBC_LOGO, WBC_FAVICON, DEFAULT_NUM_ROUNDS, ROUND_CHOICES, clampRounds, CTP_MAX_FT, SIDE_GAME_KEYS, SIDE_GAME_LABELS } from "./constants";
 import { collection, doc, setDoc, getDocs, query, where, writeBatch, onSnapshot, deleteDoc } from "firebase/firestore";
 import { getMessaging, onMessage, isSupported as isMessagingSupported } from "firebase/messaging";
 
 const WBC_TROPHY = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIoAAADgAgMAAAChhhbLAAAACVBMVEX///8i06f///8qYg9HAAAAAXRSTlMAQObYZgAAAAFiS0dEAIgFHUgAAAAHdElNRQfqAhwPCRGrKvWFAAACeElEQVRYw+3YW3LdIAwAUPHBDsp+9NN/dQb2v5WaxzUgJFCapNOkZvK8PmM9kO2bAAwrpNdCUFYnKhpJSpJwiS1aTVrWEs6vJu2TkU16zH9pwj8W6zGKyQdRNfVo/kqqScWknfHdxK0huD6casL1mQ3uTD5yGdgZehkwGr81aDNJNXibIJrYDJbTec1E6AZl46ibq0GiycdyMsUk2ZRHxhvMtW9Sn/1tojKptbJuZBRhMkp/jobeZtL7jSuDU3/cGffpBuuBsleaqWX5bmBvcG+wzuLOlMOelBuZ3aS7OJvxW6MMRzQbZzGxn+1kcGN8M/ROE2j4przPbMbvTJuKGlIzMJQnG2cxbUcgikNGQ+mvmLJpF3S+9WqmDXIb64OpU8ZNmeP72VyT/1MTXmW14kVDt0kGEyQz7OjdoLAaN7wtKd0UjO+hamGCCaNJ68bHOZ32i2AGUrdl2S4XR1NvaNz4yTjZ0GhgLQxba/v6YTBBMnE2eRRnc704p1OSXgyejWMGuMlPG0ZyYZ6Z5f3qlbSbjYuLobO5XmGG7QTUOZi3Kywkz/RYGJbt4cGQGRIMzcYJBub3Uu1mwg1OJkgG4mjW7tQTDQ2KYqir9F9sNoTF+iwvNqpysGOoOZhm4JzOGIwMBlXjz6F60nqonvTO+FPlRuOOKd8J0daEQ3fuhPanqQnhY76dgQ86zxczYKi9XDwfYf5iny3XsuWeYDCGe1R/yBmIhhJbeip90T6QlnhIx2Dq3++7UEIwwXzW/2mdZPAxb+nhYx7zpQ3OxHJdeMnQbIJk4jc1rHaxP6yHlr0wPS8sz6b1RARnhIKZ0/4J8jqdZBo0Jn4DUtjOuhjt96MAAAAASUVORK5CYII=";
 
-const WBC_TROPHY_SILHOUETTE = "data:image/png;base64,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";
+// The watermark behind the leaderboard. A FILE rather than a data URI: as
+// base64 it was 27,000 characters of App.jsx and ~20KB of every JS bundle,
+// re-downloaded on every deploy because it rode inside code that changes
+// constantly. As a static asset it is fetched once and cached for a year,
+// and it stops being the reason a code generator gives up on this file.
+const WBC_TROPHY_SILHOUETTE = "/wbc-trophy-silhouette.png";
 
 // Player registry — populated from Firestore on mount
 let DEMO_PLAYERS = [];
@@ -108,7 +120,7 @@ const TOURNAMENT = {
 // CTP distance wheel — whole feet, 1..CTP_MAX_FT. Ported from MNQ's hole-CTP prompt.
 // A ball outside 60 ft on a par 3 isn't winning a closest-to-pin, so the wheel caps
 // there rather than scrolling forever.
-const CTP_MAX_FT = 60;
+// CTP_MAX_FT lives in constants.js — the Betting tab needs it from its own file.
 const CTP_WHEEL_ITEM = 36;   // px per row — also the scroll-snap stride
 const CTP_WHEEL_H = 150;     // px visible wheel height
 
@@ -480,16 +492,8 @@ const rowsToMarket = (rows) =>
 // bets rather than tagged (see lib/market rebuyers). Keeping it as a fourth
 // game is what puts it on the collection sheet as a column instead of the
 // director holding "and also these six rebought" in their head.
-const SIDE_GAME_KEYS = ["skins", "ctp", "lownet", "market", "rebuy"];
-// The order and the wording the Betting tab's collection sheet uses. `short`
-// has to fit a 38px column on a phone.
-const SIDE_GAME_LABELS = {
-  skins:  { label: "Skins",           short: "SKIN" },
-  ctp:    { label: "Closest to Pin",  short: "CTP" },
-  lownet: { label: "Low Net",         short: "NET" },
-  market: { label: "Market",          short: "MKT" },
-  rebuy:  { label: "Market rebuy",    short: "RE" },
-};
+// SIDE_GAME_KEYS / SIDE_GAME_LABELS live in constants.js — Admin and the
+// Betting tab both read them, and the Betting tab is its own file now.
 const mergeSideGames = (raw) => {
   const out = {};
   SIDE_GAME_KEYS.forEach(k => {
@@ -514,7 +518,8 @@ const mergeSideGames = (raw) => {
 // calcCH now lives in lib/individualBoard.js, alongside the net-to-par math it
 // feeds, and is imported at the top of this file — one implementation for the
 // leaderboard, the scorecards and the finalize preview alike.
-const fmtPar = n => n == null ? "—" : n === 0 ? "E" : n > 0 ? `+${n}` : `${n}`;
+// fmtPar, teeTimeToMinutes and minutesToTimeStr now live in lib/format —
+// see the header there. They are imported at the top of this file.
 
 // Gap the tee sheet fills in with when the director types one group's time and
 // the rest are still blank. A director who spaces two groups differently keeps
@@ -524,25 +529,7 @@ const TEE_INTERVAL_MIN = 10;
 // ── SCORING GATE HELPERS ──
 // Minutes before tee time that scoring input unlocks for non-directors.
 const SCORING_LEAD_MIN = 30;
-// Parse a tee-time display string ("8:00 AM") → minutes since midnight; null if unparseable.
-const teeTimeToMinutes = (str) => {
-  if (!str) return null;
-  const match = String(str).match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
-  if (!match) return null;
-  let h = parseInt(match[1]); const m = parseInt(match[2]);
-  const ampm = (match[3] || "").toUpperCase();
-  if (ampm === "PM" && h < 12) h += 12;
-  if (ampm === "AM" && h === 12) h = 0;
-  return h * 60 + m;
-};
-// Minutes since midnight → display time ("7:30 AM").
-const minutesToTimeStr = (mins) => {
-  if (mins == null) return "";
-  const norm = ((mins % 1440) + 1440) % 1440;
-  let h = Math.floor(norm / 60); const m = norm % 60;
-  const ampm = h >= 12 ? "PM" : "AM"; if (h > 12) h -= 12; if (h === 0) h = 12;
-  return `${h}:${String(m).padStart(2, "0")} ${ampm}`;
-};
+
 // Local calendar date as YYYY-MM-DD — matches an <input type="date"> value.
 const localDateISO = (d = new Date()) => {
   const y = d.getFullYear(); const mo = String(d.getMonth() + 1).padStart(2, "0"); const da = String(d.getDate()).padStart(2, "0");
@@ -1316,13 +1303,20 @@ function tapBigAction() { if (typeof navigator !== "undefined" && navigator.vibr
 // Labels sit beneath the 5 par-relative buttons [par-1, par, par+1, par+2, par+3].
 const SCORE_LABELS = ["Birdie", "Par", "Bogey", "Double", "Triple"];
 
+// `scoreTerm` — what a score is CALLED — lives in lib/scoreEntry with the rest
+// of the score-entry rules, and is imported at the top of this file.
+
 // ═══════════════════════════════════════════════════════════════
 //  ScoreButtonRow — par-relative score control (ported from league)
 // ═══════════════════════════════════════════════════════════════
 // 5 par-relative buttons that recenter around par, flanked by −/+ nudge
 // buttons. Birdie/Par/Bogey/Double/Triple labels render beneath. Tapping the
 // selected score again clears it (onPick(0)). 44px touch targets per Apple HIG.
-function ScoreButtonRow({ score, par, onPick }) {
+// `forName` is the player this row belongs to, used only to name the buttons
+// for a screen reader. On screen the name is already the card's heading and
+// repeating it would be noise; announced, "5, bogey" with no idea whose card
+// it is is the difference between usable and not.
+function ScoreButtonRow({ score, par, onPick, forName = "" }) {
   // Window and ± targets live in lib/scoreEntry — see the header there for
   // why a cold + opens past the top of the row rather than on a bogey.
   const { btns, shifted } = scoreWindow(par, score);
@@ -1334,7 +1328,7 @@ function ScoreButtonRow({ score, par, onPick }) {
   const handleNudge = (val) => { tapNudge(); onPick(Math.max(1, val)); };
   return (
     <div style={{ display: "flex", gap: 4, alignItems: "flex-start" }}>
-      <button onClick={() => handleNudge(nudgeDownTarget(score, par))} style={{ width: 36, height: 44, borderRadius: R.sm, background: K.inp, border: "none", color: K.t3, fontSize: FS.body, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>−</button>
+      <button onClick={() => handleNudge(nudgeDownTarget(score, par))} aria-label={`One lower${forName ? " for " + forName : ""}`} style={{ width: 36, height: 44, borderRadius: R.sm, background: K.inp, border: "none", color: K.t3, fontSize: FS.body, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>−</button>
       {btns.map((btn, idx) => {
         const isCur = btn === score; const sd = btn - par;
         const isPar = btn === par;
@@ -1346,7 +1340,15 @@ function ScoreButtonRow({ score, par, onPick }) {
                 the number the whole screen exists to read and to hit, it sits
                 in a 44px box with room to spare, and it is read at arm's
                 length in sun. Nothing reflows: the box height is fixed. */}
-            <button onClick={() => { tapScore(); onPick(isCur ? 0 : btn); }} style={{ width: "100%", height: 44, borderRadius: R.sm, cursor: "pointer", fontSize: FS.lead, fontWeight: 800, border: "none", background: isCur ? K.acc : K.inp, color: isCur ? K.bg : K.t2, position: "relative", transition: `all ${MOTION}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <button
+              onClick={() => { tapScore(); onPick(isCur ? 0 : btn); }}
+              // The visible label under the button is dropped on a shifted
+              // window (an ace on a par 3 is not a "Birdie"), and the ± keys
+              // have no text at all — so the name is built from par here
+              // rather than read off the DOM.
+              aria-label={`${forName ? forName + ", " : ""}${btn}${scoreTerm(btn, par) ? ", " + scoreTerm(btn, par) : ""}${isCur ? " — posted, tap to clear" : ""}`}
+              aria-pressed={isCur}
+              style={{ width: "100%", height: 44, borderRadius: R.sm, cursor: "pointer", fontSize: FS.lead, fontWeight: 800, border: "none", background: isCur ? K.acc : K.inp, color: isCur ? K.bg : K.t2, position: "relative", transition: `all ${MOTION}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
               {/* Selected-state rings: circles under par, squares over par */}
               {isCur && sd !== 0 && <div style={{ position: "absolute", width: boxSize, height: boxSize, left: "50%", top: "50%", transform: "translate(-50%, -50%)" }}><div style={{ position: "absolute", inset: 0, borderRadius: sd < 0 ? "50%" : R.xs, border: `1.5px solid ${ringClr}` }} />{Math.abs(sd) >= 2 && <div style={{ position: "absolute", inset: 3, borderRadius: sd < 0 ? "50%" : R.xs, border: `1px solid ${ringClr}` }} />}</div>}
               {/* Resting-state faint outlines on non-par, non-selected buttons */}
@@ -1359,7 +1361,7 @@ function ScoreButtonRow({ score, par, onPick }) {
           </div>
         );
       })}
-      <button onClick={() => handleNudge(nudgeUpTarget(score, par))} style={{ width: 36, height: 44, borderRadius: R.sm, background: K.inp, border: "none", color: K.t3, fontSize: FS.body, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>+</button>
+      <button onClick={() => handleNudge(nudgeUpTarget(score, par))} aria-label={`One higher${forName ? " for " + forName : ""}`} style={{ width: 36, height: 44, borderRadius: R.sm, background: K.inp, border: "none", color: K.t3, fontSize: FS.body, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>+</button>
     </div>
   );
 }
@@ -2402,7 +2404,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
               {/* Score buttons — par-relative control (ported from league) */}
               {/* saveScore, not onSaveHole: on a round that isn't live the first
                   tap asks before it writes. See the note on saveScore. */}
-              <ScoreButtonRow score={score} par={par} onPick={(val) => saveScore(p, val)} />
+              <ScoreButtonRow score={score} par={par} forName={p.name} onPick={(val) => saveScore(p, val)} />
             </div>
           );
         })}
@@ -3068,1773 +3070,13 @@ function GroupSetup({ user, players, onStart, presetGroup }) {
     </div>
   );
 }
+// ── The Betting tab, fetched only if somebody opens it ──
+// It moved to components/BettingView.jsx — see the header there. Loaded on
+// demand for the same reason the gallery is: it is the largest view in the
+// app and nobody opens it walking down a fairway, so a phone on a course has
+// no business carrying it until it is asked for.
+const BettingView = lazy(() => import("./components/BettingView"));
 
-// ── BETTING ──
-//
-// The three side games that run across the whole tournament rather than
-// inside any one round. They are built on three different principles, and the
-// difference is the point:
-//
-//   SKINS ARE DERIVED, never stored. Low score on a hole takes it, a tie
-//   pushes it, and the pot divides by however many were won. There is no
-//   skins editor anywhere in the app on purpose — a stored winner is a second
-//   answer that can disagree with the card, and the card is the one the group
-//   signed. See lib/sideGames.
-//
-//   CTP IS CAPTURED, because it is the one thing here the card does not
-//   record. Groups tag their own par 3s from the Scoring tab as they walk off
-//   the green, and the director settles each hole from this screen.
-//
-//   THE MARKET IS BET. Twenty shares before the tournament starts, ten more
-//   once the halfway round is complete, spread across any golfers you like;
-//   the pot divides by the shares held on whoever wins. See lib/market.
-//
-// What all four share is the money: a director tags who bought in and what a
-// seat costs, and every pot on this screen is counted from that.
-//
-// `players` is the WHOLE roster, withdrawals included — not the active field
-// every other screen takes. A man who paid his buy-ins and walked in on
-// Saturday still owes them, still has his money in the pot, and still keeps
-// the skins and the pin he won before he went; leaving him off the collection
-// sheet loses the director money and leaving him out of the field quietly
-// shrinks every pot he paid into. Each game decides for itself what a
-// withdrawal means to it — computeSkins skips the WD sentinel hole by hole
-// (which is the rule the withdraw dialog states: completed holes count), and
-// lowNetRounds drops a withdrawn card outright.
-function BettingView({
-  players, round, tRounds, courses, holeData, ctpData, onSetCtp, user, numRounds,
-  getPlayerTee, getPlayerCH = () => null,
-  sideGames, onUpdateSideGames, marketBets, onSaveMarketBet, leaderboard,
-  finalizedRounds, pairingsData, firstTeeAt, marketNudge, teeTimesData, roundDates,
-}) {
-  const [tab, setTab] = useState("skins");
-  const [expandedPlayer, setExpandedPlayer] = useState(null);
-  const [grossMode, setGrossMode] = useState(true);
-  // Which round's full field is open in the Low Net ledger. One at a time —
-  // four open rounds is the same wall of numbers the ledger exists to avoid.
-  const [openNetRound, setOpenNetRound] = useState(null);
-  // Whose pins are itemized in the CTP leaders card.
-  const [openCtpPlayer, setOpenCtpPlayer] = useState(null);
-  // Each tab keeps its OWN round and its own open drawer. Sharing them would
-  // mean opening one tab silently rearranged the other.
-  const [skinsRound, setSkinsRound] = useState(null);
-  const [ctpRound, setCtpRound] = useState(null);
-  // ONE buy-in sheet, opened from any of the three pot cards. It used to be a
-  // drawer per game, which meant the director's real job — working out what
-  // each man owes across all four buy-ins — was four panels and a running
-  // total held in their head.
-  const [showBuyIns, setShowBuyIns] = useState(false);
-  const [editPot, setEditPot] = useState(false);
-  const [potInput, setPotInput] = useState("");
-  // Director CTP override — hole currently being edited, plus the pending winner/feet.
-  const [editCtpHole, setEditCtpHole] = useState(null);
-  const [editCtpPlayer, setEditCtpPlayer] = useState("");
-  const [editCtpFeet, setEditCtpFeet] = useState("");
-  // The market: whose book is on screen, which window is being placed, and the
-  // unsaved draft. A bet is not auto-saved the way a buy-in toggle is — moving
-  // shares between two golfers is two taps that are only correct together.
-  const [bookFor, setBookFor] = useState(null);
-  const [bookWindow, setBookWindow] = useState(null);
-  const [draft, setDraft] = useState(null);
-  const [openHolder, setOpenHolder] = useState(null);
-  // The director's shares worklist — who has handed their picks in and who
-  // has not. Its own drawer rather than a section of the book, because it is
-  // the INDEX into the book, not part of it.
-  const [showRoster, setShowRoster] = useState(false);
-  const { confirm, confirmModal } = useConfirm();
-  // The bell has to ring on a screen nobody is touching. A player sitting on
-  // this tab at 6:59 must watch the market shut at 7:00 rather than find out
-  // by navigating away and back — so the clock ticks, but only while there is
-  // something for it to close, and stops the moment it has.
-  const [now, setNow] = useState(() => Date.now());
-
-  // Gross is the default, so this never fires on arrival: reaching Net always
-  // means somebody crossed the toggle to get there, which is a deliberate act
-  // and therefore fair game. Fires every time they do it, which is the joke.
-  //
-  // It does NOT change the mode — Net stays selected behind the notice —
-  // because the point is the comment, not the veto. `alert` gives it one OK
-  // button rather than a choice, so it has to be dismissed rather than
-  // drifting past like a toast.
-  const pickMode = (gross) => {
-    setGrossMode(gross);
-    if (!gross) {
-      confirm({
-        title: "NET skins?!",
-        message: "This is for entertainment purposes only, real men don't play net skins.",
-        alert: true,
-      });
-    }
-  };
-
-  // The book lives above the holders list, so a director who taps Edit five
-  // rows down has to be taken back to it — otherwise the selector changes off
-  // screen and the tap looks like it did nothing.
-  const bookRef = useRef(null);
-
-  // ── Who is playing for what ──
-  const skinsField = fieldFor(sideGames?.skins?.in, players);
-  const ctpField = fieldFor(sideGames?.ctp?.in, players);
-  const marketField = fieldFor(sideGames?.market?.in, players);
-  const ctpInSet = new Set(ctpField.map(p => p.id));
-  const marketInSet = new Set(marketField.map(p => p.id));
-
-  const skinsCounted = (sideGames?.skins?.amount || 0) > 0;
-  const skinsPot = potFor({ amount: sideGames?.skins?.amount, count: skinsField.length, typed: sideGames?.skins?.pot });
-  const ctpPot = potFor({ amount: sideGames?.ctp?.amount, count: ctpField.length });
-  const lowNetField = fieldFor(sideGames?.lownet?.in, players);
-  const lowNetPot = potFor({ amount: sideGames?.lownet?.amount, count: lowNetField.length });
-
-  // ── Which round a tab lands on ──
-  // The most recent round anybody has actually played, which is not the same
-  // question as which round the app is ON: on the morning of Round 2 the app
-  // points at a round with nothing in it while Round 1's results sit one tap
-  // away. It follows the play on its own until somebody taps a round, and from
-  // then on that choice stands.
-  const roundList = Array.from({ length: numRounds }, (_, i) => i + 1);
-  const playedRounds = roundList.filter(r =>
-    players.some(p => Object.values(holeData[`${p.id}_${r}`] || {}).some(v => v > 0)));
-  const defaultRound = playedRounds.length ? playedRounds[playedRounds.length - 1] : (roundList.includes(round) ? round : roundList[0]);
-  const shownRound = roundList.includes(skinsRound) ? skinsRound : defaultRound;
-  const ctpShownRound = roundList.includes(ctpRound) ? ctpRound : defaultRound;
-
-  // A round's course and its two hole tables, resolved once.
-  const roundSetup = (r) => {
-    const tr = tRounds.find(t => t.round_number === r);
-    const course = tr ? courses.find(c => c.id === tr.course_id) : null;
-    return { tr, course, pars: course?.hole_pars || [], hcps: course?.hole_handicaps || [] };
-  };
-
-  // Every player's stroke allocation for a round, plus the signed course
-  // handicap it came from — a plus player gives strokes back, so the sign has
-  // to travel with the map. Gross mode needs neither.
-  const strokesFor = (r) => {
-    const { course } = roundSetup(r);
-    const maps = {}; const chs = {};
-    skinsField.forEach(p => {
-      const ch = courseHandicapFor({
-        handicapIndex: p.handicap_index,
-        course,
-        tee: course ? getPlayerTee(r, p.id, course) : null,
-        recorded: getPlayerCH(r, p.id),
-      });
-      chs[p.id] = ch;
-      maps[p.id] = buildStrokesMap(ch, course?.hole_handicaps || []);
-    });
-    return { maps, chs };
-  };
-
-  // What computeSkins needs for a round, in the mode currently selected.
-  const skinsSetup = (r) => {
-    const { pars } = roundSetup(r);
-    if (grossMode) return { pars };
-    const { maps, chs } = strokesFor(r);
-    return { pars, strokeMaps: maps, chFor: (pid) => chs[pid] || 0 };
-  };
-
-  const won = allSkins({ players: skinsField, holeData, rounds: roundList, roundSetup: skinsSetup });
-  const skinTotals = skinCounts(won);
-  const totalSkinsWon = won.length;
-  const perSkin = perUnit(skinsPot, totalSkinsWon);
-  const shownSkins = computeSkins({ players: skinsField, holeData, round: shownRound, ...skinsSetup(shownRound) });
-
-  // ── The CTP tab ──
-  // Read through each round's OWN par table rather than straight off ctpData:
-  // a record left on a hole that is no longer a par 3 — a course re-pointed
-  // after the fact — would otherwise keep counting on a hole the tab no longer
-  // shows. A tag naming somebody who is not in the CTP game does not score; it
-  // still shows on its hole, because the document is the hole's answer, but
-  // the board and the payout are for the players who bought in.
-  const par3sFor = (r) => (roundSetup(r).pars || []).map((p, i) => (p === 3 ? i + 1 : null)).filter(Boolean);
-  const ctpTags = roundList.flatMap(r =>
-    par3sFor(r).flatMap(hole => {
-      const rec = (ctpData[r] || {})[hole];
-      return rec?.playerId && ctpInSet.has(rec.playerId) ? [{ round: r, hole, ...rec }] : [];
-    }));
-  const ctpLeaders = Object.values(ctpTags.reduce((acc, t) => {
-    const e = acc[t.playerId] || (acc[t.playerId] = { pid: t.playerId, count: 0, best: null });
-    e.count += 1;
-    if (t.distanceFt != null && (e.best == null || t.distanceFt < e.best)) e.best = t.distanceFt;
-    return acc;
-  }, {}))
-    // Most pins, then the closest single shot among equals — the tiebreak the
-    // players would use themselves.
-    .sort((a, b) => b.count - a.count || (a.best ?? Infinity) - (b.best ?? Infinity));
-  const noPar3s = roundList.every(r => par3sFor(r).length === 0);
-  // Every par 3 in the tournament, which is what the pot divides by — see
-  // perUnit. It counts the holes on the courses as they are ASSIGNED, so a
-  // round with no course yet contributes nothing and the per-pin figure
-  // settles as the schedule fills in.
-  const par3Count = roundList.reduce((n, r) => n + par3sFor(r).length, 0);
-  const perPin = perUnit(ctpPot, par3Count);
-  // A pin is PROVISIONAL while its round is live — a group still out can get
-  // inside it — and FINAL the moment the round is done, which is the last
-  // group signing its card or the director finalizing from Admin. Derived
-  // rather than stamped on each tag, so un-finalizing a round correctly
-  // un-settles its pins. See lib/groupSwitch roundFinalized.
-  const roundSettled = (r) => roundFinalized(finalizedRounds, pairingsData, r);
-
-  // ── The Low Net tab ──
-  // One round line per player, resolved exactly the way the leaderboard
-  // resolves it — same tee, same course handicap, same computeRoundLine — so
-  // the low net paid here and the number on the board are the same number by
-  // construction rather than by two implementations agreeing.
-  //
-  // The course handicap used to be a bare calcCH here, which quietly made that
-  // paragraph untrue on an imported year: the board reads the RECORDED handicap
-  // those years carry and this read a derived one, so the day's low net could
-  // be paid to somebody the leaderboard did not have winning it.
-  const lineFor = (pid, r) => {
-    const { course } = roundSetup(r);
-    if (!course) return null;
-    return computeRoundLine({
-      scores: holeData[`${pid}_${r}`] || {},
-      holePars: course.hole_pars || [],
-      holeHcps: course.hole_handicaps || [],
-      ch: courseHandicapFor({
-        handicapIndex: players.find(x => x.id === pid)?.handicap_index,
-        course,
-        tee: getPlayerTee(r, pid, course),
-        recorded: getPlayerCH(r, pid),
-      }),
-    });
-  };
-  // The pot divides by the rounds the event HAS, not the rounds decided so
-  // far — same reasoning as a CTP pin. A day's share is known before anybody
-  // tees off, so winning Thursday is worth the same whatever happens Friday.
-  const lowNetPerRound = perUnit(lowNetPot, roundList.length);
-  const lowNetRows = lowNetRounds({ players: lowNetField, rounds: roundList, lineFor });
-
-  // The round's tee sheet as one line — first off to last off. A round
-  // nobody has finished has no result to print, and "nobody has finished
-  // yet" only says what the empty row already says; when it goes off is the
-  // thing somebody looking at an unplayed round actually wants.
-  const teeWindowFor = (r) => {
-    const mins = ((teeTimesData || {})[r] || []).map(teeTimeToMinutes).filter(m => Number.isFinite(m));
-    if (mins.length === 0) return null;
-    const lo = Math.min(...mins), hi = Math.max(...mins);
-    return lo === hi ? minutesToTimeStr(lo) : `${minutesToTimeStr(lo)} – ${minutesToTimeStr(hi)}`;
-  };
-
-  // ── The market tab ──
-  // ── The opening bell ──
-  // `firstTeeAt` — round one's earliest tee time — is when the market shuts.
-  // See lib/market teeOffAt for why a clock rather than the first score. It
-  // arrives as a prop rather than being derived here because the header
-  // counts down to the same instant, and two derivations of one moment is one
-  // more than the number that can be right.
-  // Round 3's earliest tee time — the halfway window's own bell, derived the
-  // same way the opening one is. Both windows close on a clock now, which is
-  // what lets both of them be counted down to.
-  const midTeeAt = (() => {
-    const mr = midRoundFor(numRounds);
-    if (mr == null) return null;
-    const mins = ((teeTimesData || {})[mr + 1] || []).map(teeTimeToMinutes).filter(m => Number.isFinite(m));
-    return mins.length === 0 ? null : teeOffAt((roundDates || {})[mr + 1], mins);
-  })();
-  const windows = marketWindows({ holeData, players, numRounds, firstTeeAt, midTeeAt, now });
-  // Each window's own clock, and the tone it prints in. Null when there is
-  // nothing left to count — a bell already rung, a window not yet open, or a
-  // round with no tee sheet to ring one from.
-  const clockFor = (w) => (w.open && w.at != null && w.at > now ? countdown(w.at - now) : null);
-  const TONE_INK = { far: K.acc, today: K.warn, urgent: K.danger, closed: K.t3 };
-  const toneFor = (w) => TONE_INK[countdownTone(w.at == null ? 0 : w.at - now, w.at, now)];
-  const openingClock = clockFor(windows.opening);
-  const midClock = clockFor(windows.mid);
-  const anyClock = openingClock || midClock;
-  // Both windows run. There is nothing left to place and nothing left to
-  // choose between, so the book stops being an editor and becomes a receipt:
-  // one sheet, every golfer the player actually backed, opening and halfway
-  // added together. A two-tab switch over two shut windows is asking a
-  // question with no answers behind it.
-  //
-  // Directors keep the editor. The override is the only way to enter a book
-  // for a phone that died before the bell, and it has to work after the bell
-  // by definition.
-  const allShut = windows.opening.closed && (windows.mid.exists === false || windows.mid.closed);
-  const finalSheet = allShut && !user?.isDirector;
-  const bellPending = anyClock != null;
-  // The clock runs for as long as there is a bell left to ring, so `now` can
-  // never go stale enough to leave the market taking shares after the field
-  // has teed off. What the market tab decides is only the RATE: seconds tick
-  // in the last hour while somebody is watching them, and everything else
-  // settles for thirty, which is already twice as often as the label above an
-  // hour can change. A per-second re-render of the whole Betting view behind
-  // a tab nobody is on is battery spent on nothing.
-  //
-  // Depending on `bellFast` rather than on the remaining milliseconds is what
-  // stops the effect tearing down and rebuilding the interval every tick.
-  const bellFast = anyClock != null && anyClock.urgent && tab === "market";
-  useEffect(() => {
-    if (!bellPending) return;
-    const t = setInterval(() => setNow(Date.now()), countdownTick(bellFast ? 0 : Infinity));
-    return () => clearInterval(t);
-  }, [bellPending, bellFast]);
-  const eventComplete = roundList.length > 0 && roundList.every(r => roundComplete(holeData, players, r));
-  // ── The market is SEALED until the tournament is over ──
-  // Everything a player could read another player's hand off — the board, the
-  // holders, the standing payout — is held back until every round is in.
-  //
-  // This is not modesty. The second window exists to let somebody buy a
-  // correction with two rounds of evidence, and being able to see the field's
-  // book before placing turns that into copying the consensus, or worse, into
-  // a coordinated block on the leader. A blind market is the game.
-  //
-  // The DIRECTOR sees it throughout, because somebody has to be able to fix a
-  // fat-fingered allocation and settle the thing at the end. What they see is
-  // marked as sealed so they know it is not what the field is looking at.
-  const sealed = !eventComplete && !user?.isDirector;
-  // The leader, and whether that is a RESULT or a snapshot. Only a finished
-  // event pays out; until then the same board is a projection and says so.
-  const leader = (leaderboard || []).find(p => !p.isWD && !p.withdrew && p.roundsPlayed > 0) || null;
-  const winnerId = leader?.id || null;
-  const bets = eligibleBets({ bets: marketBets, inMarket: pid => marketInSet.has(pid) });
-  // ── Who owes the halfway rebuy ──
-  // Nobody tags this. The second window is open to everybody in the market
-  // game and the rebuy is INCURRED by placing into it, so this list is read
-  // off the bets — see lib/market rebuyers. It is what the buy-in sheet's RE
-  // column shows and what the second half of the market pot is counted from,
-  // which is the same thing said twice on purpose: what a man owes and what
-  // is in the pot are one number, and they cannot drift if only one of them
-  // exists.
-  const rebuyPids = new Set(rebuyers(bets));
-  const rebuyField = marketField.filter(p => rebuyPids.has(p.id));
-  const rebuyAmount = sideGames?.rebuy?.amount || 0;
-  // Both buy-ins land in ONE pot. The rebuy is more money on the same game,
-  // not a second game — which is exactly why the ten shares it buys dilute
-  // the twenty everybody already holds. The pot therefore GROWS during the
-  // second window as people place, which is correct: it is a live tally of
-  // what is owed, not a figure fixed at the turn.
-  const marketPot = potFor({ amount: sideGames?.market?.amount, count: marketField.length })
-    + potFor({ amount: rebuyAmount, count: rebuyField.length });
-  const board = marketBoard({ bets, players, pot: marketPot });
-  const holders = marketHoldings({ bets, players });
-  const payouts = marketPayouts({ bets, winnerId, pot: marketPot });
-
-  // Whose book the editor is pointed at. A player only ever edits their own;
-  // the director can point it anywhere, which is the path for the phone that
-  // died before the bell.
-  const myPid = user?.id || null;
-  const bookPid = (user?.isDirector && bookFor) ? bookFor : myPid;
-  const bookBet = bets.find(b => b.pid === bookPid) || marketBets.find(b => b.pid === bookPid) || { pid: bookPid, opening: [], mid: [] };
-  // Which window the editor is placing into: the open one, unless the person
-  // has picked. Both closed → the opening window, read-only.
-  const activeWindow = bookWindow
-    || (windows.opening.open ? "opening" : windows.mid.open ? "mid" : "opening");
-  const win = activeWindow === "mid" ? windows.mid : windows.opening;
-  // The halfway ten belong to whoever paid for them. Somebody who did not
-  // rebuy sees the window and what it would have cost them, and cannot place
-  // into it — including the director, whose override is over the CLOCK, not
-  // over who has handed money across.
-  // The director can place into a shut window; nobody else can.
-  const canPlace = !!bookPid && marketInSet.has(bookPid) && (win.open || !!user?.isDirector);
-  // Placing anything into the second window is what takes on the rebuy, so
-  // the book has to say what that costs BEFORE the first tap, not after.
-  const owesRebuy = !!bookPid && rebuyPids.has(bookPid);
-  const draftLots = draft && draft.pid === bookPid && draft.window === activeWindow
-    ? draft.lots
-    : lotsFor(bookBet, activeWindow);
-  const placed = totalShares(draftLots);
-  const remaining = win.shares - placed;
-  const dirty = !!draft && draft.pid === bookPid && draft.window === activeWindow
-    && JSON.stringify(draft.lots) !== JSON.stringify(lotsFor(bookBet, activeWindow));
-
-  const roster = marketRoster({ players: marketField, bets });
-
-  // Point the book at somebody and bring it into view. The one action every
-  // route into the editor shares — the roster row, the holders row, and the
-  // dropdown all end here — so a director cannot end up editing one player
-  // while looking at another's numbers.
-  const openBook = (pid, windowKey = null) => {
-    setBookFor(pid);
-    setBookWindow(windowKey);
-    setDraft(null);
-    setShowRoster(false);
-    // After the drawer closes, so the book is where it will finally sit.
-    requestAnimationFrame(() => bookRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
-  };
-
-  const bump = (pid, delta) => {
-    const next = setLotShares(draftLots, pid, sharesOn(draftLots, pid) + delta, win.shares);
-    setDraft({ pid: bookPid, window: activeWindow, lots: next });
-  };
-  // Typed entry, capped the same way the steppers are. Twenty shares is
-  // twenty taps on a stepper, and a director entering the field's picks off a
-  // sheet of paper is doing that sixteen times.
-  const setShares = (pid, value) => {
-    const next = setLotShares(draftLots, pid, value, win.shares);
-    setDraft({ pid: bookPid, window: activeWindow, lots: next });
-  };
-  const clearWindow = () => setDraft({ pid: bookPid, window: activeWindow, lots: [] });
-  const commitBook = async () => {
-    const lots = activeWindow === "mid"
-      ? { opening: bookBet.opening, mid: draftLots }
-      : { opening: draftLots, mid: bookBet.mid };
-    await onSaveMarketBet(bookPid, lots);
-    setDraft(null);
-  };
-
-  // One commit path for the typed pot, reached by blur — Enter just blurs the
-  // field. Committing on both fired two Firestore writes for one edit.
-  const commitPot = () => {
-    setEditPot(false);
-    const amt = parseFloat(potInput);
-    onUpdateSideGames("skins", { pot: Number.isFinite(amt) && amt > 0 ? amt : 0 });
-  };
-
-  const money = (n) => `$${(n || 0).toFixed(2)}`;
-
-  const empty = (icon, title, sub) => (
-    <Card style={{ padding: "48px 20px", textAlign: "center" }}>
-      <div style={{ fontSize: FS.jumbo, marginBottom: 12, opacity: 0.4 }}>{icon}</div>
-      <div style={{ fontSize: FS.lead, fontWeight: 700, color: K.t1, marginBottom: 6 }}>{title}</div>
-      <div style={{ fontSize: FS.small, color: K.t3, maxWidth: 280, lineHeight: 1.5, margin: "0 auto" }}>{sub}</div>
-    </Card>
-  );
-
-  // ── The pot card ──
-  // The same card for all three games: what is in the pot on the left, what a
-  // unit of it is worth on the right, and the way into the buy-in sheet under
-  // it. `typed` opts skins into its inline pot editor — it is the only game
-  // with a hand-entered pot to preserve, because it is the one WBC was already
-  // playing before any of this existed.
-  //
-  // All three cards open the SAME sheet. The buy-ins were never really three
-  // lists; they were one table the director was being made to read a column
-  // at a time.
-  const potCard = ({ label, pot, rightTop, rightBottom, summary, typed = false }) => (
-    <>
-      <div style={{ background: K.card, borderRadius: R.lg, marginBottom: showBuyIns ? 0 : 10, border: `1px solid ${K.bdr}`, overflow: "hidden" }}>
-        <div style={{ padding: "12px 14px", display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: FS.label, color: K.t3, fontWeight: 700, letterSpacing: 1 }}>{label}</div>
-            {/* Once a buy-in price is set the pot is COUNTED, not typed, so the
-                inline editor gives way — the way to change it is to change who
-                is in. */}
-            {(!typed || skinsCounted) ? (
-              <div style={{ fontSize: FS.title, fontWeight: 800, color: K.gold }}>{money(pot)}</div>
-            ) : editPot ? (
-              <input autoFocus type="number" inputMode="decimal" value={potInput}
-                onChange={e => setPotInput(e.target.value)}
-                onBlur={commitPot}
-                onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); }}
-                style={{ fontSize: FS.title, fontWeight: 800, color: K.gold, background: "transparent", border: "none", borderBottom: `1px solid ${K.acc}`, outline: "none", width: 110, fontFamily: FONT }} />
-            ) : (
-              // Seed the field from the LIVE pot at the moment editing opens,
-              // not at mount: the value arrives from Firestore after the first
-              // render, and another director can change it while this screen is
-              // open. Seeding at mount meant a director who tapped in and
-              // straight back out saved a stale pot over the real one.
-              <div onClick={() => { if (user?.isDirector) { setPotInput(String(sideGames?.skins?.pot || 0)); setEditPot(true); } }}
-                style={{ fontSize: FS.title, fontWeight: 800, color: K.gold, cursor: user?.isDirector ? "pointer" : "default" }}>
-                {money(pot)}
-              </div>
-            )}
-          </div>
-          <div style={{ textAlign: "right", flexShrink: 0 }}>
-            <div style={{ fontSize: FS.label, color: K.t3 }}>{rightTop}</div>
-            <div style={{ fontSize: FS.body, fontWeight: 700, color: K.acc }}>{rightBottom}</div>
-          </div>
-        </div>
-        {user?.isDirector && (
-          <div
-            onClick={() => setShowBuyIns(v => !v)}
-            style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "8px 14px", borderTop: `1px solid ${K.bdr}` }}
-          >
-            <span style={{ flex: 1, fontSize: FS.label, fontWeight: 700, color: K.t3, letterSpacing: 0.6 }}>
-              {summary}
-            </span>
-            <span style={{ fontSize: FS.label, fontWeight: 700, color: K.acc, letterSpacing: 0.6 }}>
-              BUY-INS {showBuyIns ? "▾" : "▸"}
-            </span>
-          </div>
-        )}
-      </div>
-      {user?.isDirector && showBuyIns && (
-        <BuyInTracker
-          players={players}
-          games={SIDE_GAME_KEYS.map(k => ({
-            key: k, ...SIDE_GAME_LABELS[k],
-            amount: sideGames?.[k]?.amount || 0,
-            // The rebuy column is a readout of who has placed halfway shares,
-            // not a list anybody keeps. Everything else is the director's.
-            paid: sideGames?.[k]?.paid ?? [],
-            // The rebuy column is a readout of who has placed halfway shares,
-            // not a list anybody keeps, so its membership cannot be tagged —
-            // only its payment.
-            ...(k === "rebuy"
-              ? { ids: rebuyField.map(p => p.id), derived: true }
-              : { ids: sideGames?.[k]?.in ?? null }),
-          }))}
-          onChange={onUpdateSideGames}
-        />
-      )}
-    </>
-  );
-
-  // ── Scorecards ──
-  // Both renderers highlight the holes the SELECTED mode won, so a gold circle
-  // on a card is always the skin the tab is currently paying for.
-  const skinHolesFor = (pid) => new Set(won.filter(s => s.winner.pid === pid).map(s => `${s.round}_${s.hole}`));
-
-  // Add up a nine — or a whole card — over the holes ACTUALLY PLAYED. Par is
-  // accumulated alongside rather than taken from the course total, so a man
-  // walking in after thirteen gets a to-par measured against thirteen holes
-  // instead of being handed five phantom pars.
-  const tallyHoles = (scores, pars, holes) => {
-    let gross = 0, par = 0, played = 0;
-    holes.forEach(i => {
-      const raw = scores[i];
-      if (raw > 0 && raw < WD_SCORE) { gross += raw; par += pars[i] || 0; played += 1; }
-    });
-    return { gross, par, played, toPar: gross - par };
-  };
-  const toParStr = (n) => (n === 0 ? "E" : n > 0 ? `+${n}` : `${n}`);
-
-  // ── One player's week, round by round ──────────────────────────────
-  // What this card is FOR is answering "where did his six skins come from",
-  // and the old one made that nearly impossible: eight anonymous blocks of
-  // nine, no round headings, no course names, no totals, and nothing but
-  // whitespace between one round and the next. A gold circle told you a skin
-  // landed but not which day it landed on.
-  //
-  // So each round is now its own bordered card with a heading — round, course,
-  // skins taken that day, and the score — and the nines carry a ruled grid
-  // with OUT and IN totals, which is the shape every golfer already knows how
-  // to read.
-  const renderInlineScorecard = (playerId) => {
-    const p = players.find(pl => pl.id === playerId);
-    if (!p) return null;
-    const skinSet = skinHolesFor(playerId);
-    const rows = [];
-    for (const r of roundList) {
-      const { course } = roundSetup(r);
-      if (!course) continue;
-      const scores = holeData[`${p.id}_${r}`] || {};
-      if (!Object.values(scores).some(v => v > 0)) continue;
-      // Strokes are only drawn in NET mode, where they are the whole
-      // explanation for a gold circle sitting on an ordinary-looking number:
-      // the card prints gross all week, so a skin won with a stroke is
-      // otherwise a 5 that beat a field of 4s for no visible reason.
-      const strokes = grossMode ? null : (strokesFor(r).maps[p.id] || {});
-      rows.push({ r, scores, pars: course.hole_pars || [], courseName: course.name || "", strokes });
-    }
-    if (rows.length === 0) return null;
-
-    // Two weights. `hair` rules the cells apart inside a nine — it has to be
-    // visible enough to follow a column down three rows on a phone, which is
-    // what the old borderless grid never let anybody do. `edge` frames the
-    // round and fences off the totals.
-    const hair = `1px solid ${K.bdr}${ALPHA.hair}`;
-    const edge = `1px solid ${K.bdr}`;
-
-    // Circles for under par; gold for a skin. A double circle is an eagle or
-    // better, which is the convention the round card and the paper scorecard
-    // both use.
-    const ScoreCell = ({ score: raw, par, isSkin, strokes }) => {
-      // Same rule as the field card: a WD hole is a dash, not a 99.
-      const score = raw > 0 && raw < WD_SCORE ? raw : 0;
-      if (!score) return <span style={{ fontSize: FS.micro, color: K.t3 }}>–</span>;
-      const d = score - par;
-      const isUnder = d < 0;
-      const isDouble = d <= -2;
-      const circleClr = isSkin ? K.gold : K.t2;
-      return (
-        <span style={{ position: "relative", display: "inline-flex", alignItems: "center", justifyContent: "center", width: 19, height: 19 }}>
-          {(isUnder || isSkin) && <span style={{ position: "absolute", inset: 0, borderRadius: "50%", border: `1.5px solid ${circleClr}` }} />}
-          {isDouble && <span style={{ position: "absolute", inset: 3, borderRadius: "50%", border: `1px solid ${circleClr}` }} />}
-          {/* Strokes received, as the dots they are on a paper card. */}
-          {strokes > 0 && (
-            <span style={{ position: "absolute", top: -2, right: -4, display: "flex", gap: 1 }}>
-              {Array.from({ length: Math.min(strokes, 3) }, (_, k) => (
-                <span key={k} style={{ width: 2.5, height: 2.5, borderRadius: "50%", background: K.t3 }} />
-              ))}
-            </span>
-          )}
-          <span style={{ fontSize: FS.label, fontWeight: 700, color: isSkin ? K.gold : K.t2, position: "relative", zIndex: 1 }}>{score}</span>
-        </span>
-      );
-    };
-
-    return (
-      <div style={{ padding: "8px 10px 10px", borderTop: hair }}>
-        {rows.map(({ r, scores, pars, courseName, strokes }) => {
-          const all = Array.from({ length: 18 }, (_, i) => i);
-          const round = tallyHoles(scores, pars, all);
-          const roundSkins = won.filter(s => s.winner.pid === p.id && s.round === r).length;
-
-          const Nine = ({ holes, label }) => {
-            const t = tallyHoles(scores, pars, holes);
-            // The totals column is held at a fixed width rather than a share
-            // of the table, so OUT and IN line up under one another whatever
-            // the hole numbers do.
-            const totCell = { textAlign: "center", padding: "3px 2px", borderLeft: edge, background: `${K.bdr}${ALPHA.wash}` };
-            return (
-              <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
-                <colgroup>
-                  {holes.map((_, i) => <col key={i} />)}
-                  <col style={{ width: 34 }} />
-                </colgroup>
-                <tbody>
-                  <tr style={{ background: `${K.bdr}${ALPHA.wash}` }}>
-                    {holes.map(i => {
-                      const isSkin = skinSet.has(`${r}_${i}`);
-                      return (
-                        <td key={i} style={{
-                          textAlign: "center", fontSize: FS.micro, fontWeight: isSkin ? 800 : 700,
-                          color: isSkin ? K.gold : K.t2, padding: "3px 1px",
-                          borderLeft: i === holes[0] ? "none" : hair,
-                          borderBottom: hair,
-                          // A gold TICK under the number, not a gold cell and
-                          // not a full-width rule. Filling the cell makes
-                          // three skins on 7-8-9 run together into one block,
-                          // and an edge-to-edge underline does the same thing
-                          // one step later — the column definition this
-                          // rebuild exists for disappears exactly where the
-                          // card matters most. Inset to 55% and it reads as
-                          // three marks on three holes.
-                          ...(isSkin ? {
-                            backgroundImage: `linear-gradient(${K.gold}, ${K.gold})`,
-                            backgroundSize: "55% 2px",
-                            backgroundPosition: "center bottom",
-                            backgroundRepeat: "no-repeat",
-                          } : null),
-                        }}>{i + 1}</td>
-                      );
-                    })}
-                    <td style={{ ...totCell, fontSize: FS.micro, fontWeight: 800, color: K.t3, letterSpacing: 0.5, borderBottom: hair }}>{label}</td>
-                  </tr>
-                  <tr>
-                    {holes.map(i => (
-                      <td key={i} style={{
-                        textAlign: "center", fontSize: FS.micro, color: K.t3, padding: "2px 1px",
-                        borderLeft: i === holes[0] ? "none" : hair, borderBottom: hair,
-                      }}>{pars[i] || ""}</td>
-                    ))}
-                    <td style={{ ...totCell, fontSize: FS.micro, color: K.t3, borderBottom: hair }}>{t.par || ""}</td>
-                  </tr>
-                  <tr>
-                    {holes.map(i => (
-                      <td key={i} style={{ textAlign: "center", padding: "2px 1px", borderLeft: i === holes[0] ? "none" : hair }}>
-                        <ScoreCell score={scores[i]} par={pars[i] || 0} isSkin={skinSet.has(`${r}_${i}`)} strokes={strokes ? strokes[i] || 0 : 0} />
-                      </td>
-                    ))}
-                    <td style={{ ...totCell, fontSize: FS.label, fontWeight: 800, color: K.t1 }}>{t.gross || "–"}</td>
-                  </tr>
-                </tbody>
-              </table>
-            );
-          };
-
-          return (
-            <div key={r} style={{ border: edge, borderRadius: R.sm, overflow: "hidden", marginBottom: 8 }}>
-              {/* Which round, which course, what it was worth. The heading is
-                  the entire point of the rebuild — without it the grids below
-                  are eight interchangeable blocks of nine numbers. */}
-              <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 7px", background: `${K.bdr}${ALPHA.wash}`, borderBottom: edge }}>
-                <span style={{ fontSize: FS.micro, fontWeight: 800, color: K.acc, letterSpacing: 0.5, flexShrink: 0 }}>RD {r}</span>
-                <span style={{ fontSize: FS.micro, color: K.t3, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{courseName}</span>
-                {roundSkins > 0 && (
-                  <span style={{ fontSize: FS.micro, fontWeight: 800, color: K.gold, flexShrink: 0 }}>
-                    {roundSkins} SKIN{roundSkins !== 1 ? "S" : ""}
-                  </span>
-                )}
-                {/* A card still out on the course says so, rather than showing
-                    a total that looks like a finished round eight shots low. */}
-                {round.played < 18 && (
-                  <span style={{ fontSize: FS.micro, fontWeight: 700, color: K.t3, flexShrink: 0 }}>THRU {round.played}</span>
-                )}
-                <span style={{ fontSize: FS.label, fontWeight: 800, color: K.t1, flexShrink: 0 }}>{round.gross}</span>
-                {/* Under par is RED, the same rule the leaderboard total
-                    follows. A negative number in golf is red — teal here
-                    was the app saying "accent" where the game says "under
-                    par", and the two are not the same thing. */}
-                <span style={{ fontSize: FS.micro, fontWeight: 800, color: round.toPar < 0 ? K.under : K.t3, flexShrink: 0, minWidth: 18, textAlign: "right" }}>
-                  {toParStr(round.toPar)}
-                </span>
-              </div>
-              <Nine holes={Array.from({ length: 9 }, (_, i) => i)} label="OUT" />
-              <div style={{ height: 1, background: `${K.bdr}${ALPHA.line}` }} />
-              <Nine holes={Array.from({ length: 9 }, (_, i) => i + 9)} label="IN" />
-            </div>
-          );
-        })}
-        {/* One line, once, at the foot of the whole card — the two circles are
-            not self-explanatory and a player asked to take them on trust will
-            read a birdie as a skin. */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, fontSize: FS.micro, color: K.t3, paddingTop: 2 }}>
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-            <span style={{ width: 11, height: 11, borderRadius: "50%", border: `1.5px solid ${K.gold}`, display: "inline-block" }} /> SKIN
-          </span>
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-            <span style={{ width: 11, height: 11, borderRadius: "50%", border: `1.5px solid ${K.t2}`, display: "inline-block" }} /> UNDER PAR
-          </span>
-          {!grossMode && (
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-              <span style={{ width: 3, height: 3, borderRadius: "50%", background: K.t3, display: "inline-block" }} /> STROKE
-            </span>
-          )}
-        </div>
-      </div>
-    );
-  };
-
-  // Full round scorecard grid — everybody in the skins game, skins highlighted.
-  const renderRoundScorecard = () => {
-    const { course } = roundSetup(shownRound);
-    if (!course) return (
-      <Card style={{ padding: 20, textAlign: "center", color: K.t3, fontSize: FS.small }}>No course set for Round {shownRound}</Card>
-    );
-    const pars = course.hole_pars || [];
-    const skinByHole = {};
-    shownSkins.filter(s => s.winner).forEach(s => { skinByHole[s.hole] = s; });
-    const allHoles = Array.from({length: 18}, (_, i) => i);
-    const front9 = allHoles.slice(0, 9);
-    const back9  = allHoles.slice(9);
-    const posted = skinsField.filter(p => Object.values(holeData[`${p.id}_${shownRound}`] || {}).some(v => v > 0));
-    if (posted.length === 0) return (
-      <Card style={{ padding: 20, textAlign: "center", color: K.t3, fontSize: FS.small }}>No scores yet this round</Card>
-    );
-    const cellBdr = `1px solid ${K.bdr}${ALPHA.tint}`;
-    const HalfTable = ({ holes }) => (
-      <div style={{ paddingBottom: holes[0] === 0 ? 8 : 0, borderBottom: holes[0] === 0 ? `1px solid ${K.bdr}` : "none" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
-          <colgroup>
-            <col style={{ width: "20%" }} />
-            {holes.map((_, i) => <col key={i} style={{ width: `${80 / holes.length}%` }} />)}
-          </colgroup>
-          <thead style={{ background: `${K.bdr}${ALPHA.wash}` }}>
-            <tr style={{ borderBottom: cellBdr }}>
-              <td style={{ fontSize: FS.micro, fontWeight: 700, color: K.t2, padding: "4px 6px", borderBottom: cellBdr }}>Hole</td>
-              {holes.map(i => (
-                <td key={i} style={{ textAlign: "center", fontSize: skinByHole[i] ? FS.label : FS.micro, fontWeight: skinByHole[i] ? 800 : 700, color: skinByHole[i] ? K.gold : K.t1, padding: "4px 1px", borderLeft: cellBdr }}>
-                  {i + 1}
-                </td>
-              ))}
-            </tr>
-            <tr style={{ borderBottom: `1px solid ${K.bdr}${ALPHA.line}` }}>
-              <td style={{ fontSize: FS.micro, fontWeight: 600, color: K.t3, padding: "3px 6px", letterSpacing: "0.03em" }}>Par</td>
-              {holes.map(i => <td key={i} style={{ textAlign: "center", fontSize: FS.micro, fontWeight: 600, color: K.t3, padding: "3px 1px", borderLeft: cellBdr }}>{pars[i] || ""}</td>)}
-            </tr>
-          </thead>
-          <tbody>
-            {posted.map((p, pi) => {
-              const scores = holeData[`${p.id}_${shownRound}`] || {};
-              return (
-                <tr key={p.id} style={{ borderTop: cellBdr, background: pi % 2 === 1 ? `${K.bdr}${ALPHA.wash}` : "transparent" }}>
-                  <td style={{ fontSize: FS.label, fontWeight: 600, color: K.t1, padding: "3px 4px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {p.name.split(" ")[0]}
-                  </td>
-                  {holes.map(i => {
-                    // The WD sentinel is a marker, not a score. Withdrawals
-                    // are on this card because their money is in the pot and
-                    // the holes they DID play still won skins — but the holes
-                    // they did not are a dash, the way the scoring screen
-                    // draws them, not a row of 99s.
-                    const raw = scores[i];
-                    const s = raw > 0 && raw < WD_SCORE ? raw : 0;
-                    const par = pars[i] || 0;
-                    const isSkinWinner = skinByHole[i]?.winner?.pid === p.id;
-                    const d = s ? s - par : null;
-                    const isUnder = d !== null && d < 0;
-                    const isDouble = d !== null && d <= -2;
-                    const circleClr = isSkinWinner ? K.gold : K.t2;
-                    return (
-                      <td key={i} style={{ textAlign: "center", padding: "2px 1px", borderLeft: cellBdr }}>
-                        <div style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 18, height: 18, position: "relative" }}>
-                          {s && (isUnder || isSkinWinner) && <div style={{ position: "absolute", inset: 0, borderRadius: "50%", border: `1.5px solid ${circleClr}` }} />}
-                          {s && isDouble && <div style={{ position: "absolute", inset: 3, borderRadius: "50%", border: `1px solid ${circleClr}` }} />}
-                          <span style={{ fontSize: FS.label, fontWeight: 600, color: s ? (isSkinWinner ? K.gold : K.t2) : K.t3, position: "relative", zIndex: 1 }}>{s || "–"}</span>
-                        </div>
-                      </td>
-                    );
-                  })}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    );
-    return (
-      <Card pad={10}>
-        <HalfTable holes={front9} />
-        <HalfTable holes={back9} />
-      </Card>
-    );
-  };
-
-  // The round pills. The card below is always open, so these pick which round
-  // it shows rather than whether there is one — and the selected pill doubles
-  // as the label saying which round is on screen.
-  const roundPills = (value, onChange) => (
-    <SegmentedToggle
-      variant="pills"
-      style={{ marginBottom: 8 }}
-      options={roundList.map(r => [r, `Rd ${r}`])}
-      value={value}
-      onChange={onChange}
-    />
-  );
-
-  return (
-    <div>
-      {/* Pinned so this tab's lead control sits exactly where every other
-          tab's does, and so the lists scroll under it rather than taking it
-          away. */}
-      <StickyTop>
-        <SegmentedToggle
-          /* The same red dot the nav tab carries, on the sub-tab that can
-             actually do something about it. Getting a player as far as the
-             Betting tab and then leaving them to guess which of four games
-             wanted them is most of the way to not telling them at all. */
-          options={[["skins", "Skins"], ["ctp", "CTP"], ["lownet", "Low Net"],
-                    ["market", "Market", marketNudge ? K.danger : undefined]]}
-          value={tab} onChange={setTab}
-        />
-      </StickyTop>
-
-      {tab === "skins" && (
-        <div>
-          {potCard({
-            label: "SKINS POT", pot: skinsPot, typed: true,
-            summary: `${skinsField.length} IN${skinsCounted ? ` · $${sideGames.skins.amount} EACH` : ""}`,
-            rightTop: `${totalSkinsWon} skin${totalSkinsWon !== 1 ? "s" : ""} won`,
-            rightBottom: `${money(perSkin)} / skin`,
-          })}
-
-          {/* Net or gross. Gross is the default because it is the game WBC has
-              always played here; net is what the leaderboard ranks on, and a
-              field with a 20-shot spread wants to see both. */}
-          <SegmentedToggle
-            options={[[true, "Gross"], [false, "Net"]]}
-            value={grossMode}
-            onChange={pickMode}
-            style={{ marginBottom: 10, width: 160, marginLeft: "auto", marginRight: "auto" }}
-          />
-
-          {/* SKINS LEADERS, with each row opening that player's own cards.
-              One list rather than two: the money and the holes it was won on
-              are the same question, and a second card repeating the same six
-              names underneath was just a longer way to ask it. */}
-          {Object.keys(skinTotals).length > 0 && (
-            <div style={{ background: K.card, borderRadius: R.lg, border: `1px solid ${K.bdr}`, marginBottom: 10, overflow: "hidden" }}>
-              {/* The two trailing numbers get COLUMN HEADINGS rather than
-                  each row re-labelling itself. "4 skins / 3 skins / 1 skin"
-                  down a column is the same word printed six times to say
-                  something the heading says once — and the word was doing the
-                  work of telling you which number was which, so the heading
-                  frees the row to be a number. Widths match the cells below
-                  so the three line up. */}
-              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", borderBottom: `1px solid ${K.bdr}`, fontSize: FS.label, fontWeight: 700, color: K.gold, letterSpacing: 1 }}>
-                <span style={{ flex: 1, minWidth: 0 }}>SKINS LEADERS</span>
-                <span style={{ fontSize: FS.micro, color: K.t3, letterSpacing: 0.5, flexShrink: 0, width: 48, textAlign: "center" }}>COUNT</span>
-                <span style={{ fontSize: FS.micro, color: K.t3, letterSpacing: 0.5, flexShrink: 0, width: 66, textAlign: "center" }}>$</span>
-              </div>
-              {Object.entries(skinTotals).sort((a, b) => b[1] - a[1]).map(([pid, count]) => {
-                const isExpanded = expandedPlayer === pid;
-                return (
-                  <div key={pid} style={{ borderBottom: `1px solid ${K.bdr}${ALPHA.hair}` }}>
-                    <div onClick={() => setExpandedPlayer(isExpanded ? null : pid)}
-                      style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", cursor: "pointer" }}>
-                      {/* The leaderboard's chevron — a ▼ that turns over
-                          rather than a ▶ that swings, scaled below the type
-                          scale's floor because this is an affordance and not
-                          data — but LEADING the row rather than trailing the
-                          name. On the board it sits after the name because
-                          the name is the row; here the row is a name and two
-                          numbers, and the mark belongs where the eye starts. */}
-                      <span style={{ fontSize: FS.micro, flexShrink: 0, color: isExpanded ? K.acc : K.t2, transition: `transform ${MOTION}`, display: "inline-block", transform: `${isExpanded ? "rotate(180deg)" : "rotate(0)"} scale(0.75)` }}>▼</span>
-                      <span style={{ flex: 1, minWidth: 0, fontSize: FS.small, fontWeight: 700, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {players.find(p => p.id === pid)?.name || pid}
-                      </span>
-                      <span style={{ fontSize: FS.body, fontWeight: 700, color: K.acc, flexShrink: 0, width: 48, textAlign: "center" }}>{count}</span>
-                      <span style={{ fontSize: FS.small, color: K.t3, flexShrink: 0, width: 66, textAlign: "center" }}>{money(count * perSkin)}</span>
-                    </div>
-                    {isExpanded && renderInlineScorecard(pid)}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {roundPills(shownRound, setSkinsRound)}
-          {renderRoundScorecard()}
-        </div>
-      )}
-
-      {tab === "ctp" && (
-        <div>
-          {noPar3s
-            ? empty("🎯", "No par 3s yet", "Closest-to-the-pin holes come from the course. They appear here once a round has a course with a par 3 on it.")
-            : (
-              <>
-                {/* CTP never had a hand-entered pot to preserve, so it is
-                    counted from the buy-ins or it is nothing. Hidden from
-                    players until there IS one — "$0.00" is not worth a row on
-                    a tournament whose director has not set a CTP buy-in. The
-                    director keeps it either way; it is where they set one. */}
-                {(ctpPot > 0 || user?.isDirector) && potCard({
-                  label: "CTP POT", pot: ctpPot,
-                  summary: `${ctpField.length} IN${(sideGames?.ctp?.amount || 0) > 0 ? ` · $${sideGames.ctp.amount} EACH` : ""}`,
-                  // Just the count of pins the tournament HAS, which is what
-                  // the pot divides by. How many are taken and how many are
-                  // final are both said better further down — on the pin
-                  // itself, where a taken hole carries a name and a FINAL
-                  // marker — and a running "2 of 7 taken" up here was a
-                  // progress bar for something nobody is waiting on.
-                  rightTop: `${par3Count} total`,
-                  rightBottom: `${money(perPin)} / pin`,
-                })}
-
-                {/* CTP LEADERS, with each row opening that player's own pins.
-                    NO DISTANCE ON THE ROW. It used to carry the closest shot
-                    of the week beside the count, which is one number standing
-                    for several — a man with four pins has four distances and
-                    the row printed his best as though it described all of
-                    them. The count and the money are what the row is for;
-                    every distance lives one tap down, on the pin it belongs
-                    to. */}
-                {ctpLeaders.length > 0 && (
-                  <div style={{ background: K.card, borderRadius: R.lg, border: `1px solid ${K.bdr}`, marginBottom: 10, overflow: "hidden" }}>
-                    {/* The same two headings the skins card carries, at the
-                        same widths, so the two leader boards in this tab read
-                        as one idea rather than two layouts. */}
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", borderBottom: `1px solid ${K.bdr}`, fontSize: FS.label, fontWeight: 700, color: K.gold, letterSpacing: 1 }}>
-                      <span style={{ flex: 1, minWidth: 0 }}>CTP LEADERS</span>
-                      <span style={{ fontSize: FS.micro, color: K.t3, letterSpacing: 0.5, flexShrink: 0, width: 48, textAlign: "center" }}>COUNT</span>
-                      <span style={{ fontSize: FS.micro, color: K.t3, letterSpacing: 0.5, flexShrink: 0, width: 66, textAlign: "center" }}>$</span>
-                    </div>
-                    {ctpLeaders.map(({ pid, count }) => {
-                      const isOpen = openCtpPlayer === pid;
-                      const mine = ctpTags
-                        .filter(t => t.playerId === pid)
-                        .sort((a, b) => a.round - b.round || a.hole - b.hole);
-                      return (
-                        <div key={pid} style={{ borderBottom: `1px solid ${K.bdr}${ALPHA.hair}` }}>
-                          <div onClick={() => setOpenCtpPlayer(isOpen ? null : pid)}
-                            style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", cursor: "pointer" }}>
-                            {/* Chevron first, then the name — the affordance
-                                sits where the eye starts the row rather than
-                                at the far end of a name it has to read past. */}
-                            <span style={{ fontSize: FS.micro, flexShrink: 0, color: isOpen ? K.acc : K.t2, transition: `transform ${MOTION}`, display: "inline-block", transform: `${isOpen ? "rotate(180deg)" : "rotate(0)"} scale(0.75)` }}>▼</span>
-                            <span style={{ flex: 1, minWidth: 0, fontSize: FS.small, fontWeight: 700, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                              {players.find(p => p.id === pid)?.name || pid}
-                            </span>
-                            {/* The count alone. The heading says what it is,
-                                so the row does not have to say "CTPs" once
-                                per line down the column. */}
-                            <span style={{ fontSize: FS.body, fontWeight: 700, color: K.acc, flexShrink: 0, width: 48, textAlign: "center" }}>{count}</span>
-                            <span style={{ fontSize: FS.small, color: K.t3, flexShrink: 0, width: 66, textAlign: "center" }}>{money(count * perPin)}</span>
-                          </div>
-                          {isOpen && (
-                            <div style={{ padding: "2px 14px 8px", borderTop: `1px solid ${K.bdr}${ALPHA.tint}` }}>
-                              {mine.map(t => (
-                                <div key={`${t.round}_${t.hole}`} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0" }}>
-                                  <span style={{ fontSize: FS.label, fontWeight: 700, color: K.t3, flexShrink: 0, minWidth: 34 }}>Rd {t.round}</span>
-                                  <span style={{ fontSize: FS.label, color: K.t2, flex: 1, minWidth: 0 }}>Hole {t.hole}</span>
-                                  {/* The distance, here and nowhere else. A pin
-                                      tagged without one prints a dash rather
-                                      than a zero — nobody paced it, which is
-                                      not the same as it being on the lip. */}
-                                  <span style={{ fontSize: FS.small, fontWeight: 800, color: t.distanceFt != null ? K.warn : K.t3, flexShrink: 0, minWidth: 44, textAlign: "right" }}>
-                                    {t.distanceFt != null ? `${t.distanceFt} ft` : "–"}
-                                  </span>
-                                  {/* A pin in a round still being played can
-                                      still be taken off him. */}
-                                  <span style={{ fontSize: FS.micro, fontWeight: 800, letterSpacing: 0.4, flexShrink: 0, minWidth: 46, textAlign: "right", color: roundSettled(t.round) ? K.acc : K.t3 }}>
-                                    {roundSettled(t.round) ? "FINAL" : "PENDING"}
-                                  </span>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {roundPills(ctpShownRound, setCtpRound)}
-
-                {(() => {
-                  const { course } = roundSetup(ctpShownRound);
-                  const par3s = par3sFor(ctpShownRound);
-                  if (par3s.length === 0) return (
-                    <Card style={{ padding: 14, textAlign: "center", color: K.t3, fontSize: FS.small }}>
-                      No par 3s on {course?.name || "this course"}.
-                    </Card>
-                  );
-                  return (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 4 }}>
-                        <SectionLabel style={{ marginBottom: 0, flex: 1 }}>{course?.name || "TBD"}</SectionLabel>
-                        {/* Whether this round's pins are the answer or still
-                            up for grabs. It is the same sentence the scoring
-                            tab's par-3 chip prints, off the same derivation. */}
-                        <span style={{ fontSize: FS.label, fontWeight: 800, letterSpacing: 0.5, color: roundSettled(ctpShownRound) ? K.acc : K.t3 }}>
-                          {roundSettled(ctpShownRound) ? "ROUND FINAL" : "STILL OUT"}
-                        </span>
-                      </div>
-                      {par3s.map(hole => {
-                        const rec = (ctpData[ctpShownRound] || {})[hole];
-                        const winner = rec ? players.find(p => p.id === rec.playerId) : null;
-                        const dist = rec ? (rec.distanceFt ? `${rec.distanceFt} ft` : (rec.distance || "")) : "";
-                        const isEd = editCtpHole === hole;
-                        const settled = roundSettled(ctpShownRound);
-                        const confirmers = (rec?.confirmedBy || [])
-                          .map(pid => players.find(p => p.id === pid)?.name)
-                          .filter(Boolean);
-                        return (
-                          <Card key={hole} style={{ border: `1px solid ${winner ? K.acc + ALPHA.line : K.bdr}` }}>
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-                              <div>
-                                <span style={{ fontSize: FS.body, fontWeight: 700 }}>Hole {hole}</span>
-                                <span style={{ fontSize: FS.small, color: K.t3, marginLeft: 8 }}>Par 3</span>
-                              </div>
-                              {winner ? (
-                                <span style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
-                                  <span style={{ fontSize: FS.body, fontWeight: 700, color: K.acc, whiteSpace: "nowrap" }}>🎯 {winner.name}</span>
-                                  {dist && <span style={{ fontSize: FS.small, fontWeight: 800, color: K.warn }}>{dist}</span>}
-                                </span>
-                              ) : <span style={{ fontSize: FS.small, color: K.t3 }}>No winner yet</span>}
-                            </div>
-
-                            {/* The pin's standing. A tagged hole in a live
-                                round is what the field has SO FAR — a group
-                                still out can get inside it — so saying FINAL
-                                only once the round is done is the difference
-                                between a result and a running total. */}
-                            {winner && (
-                              <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
-                                <span style={{
-                                  fontSize: FS.micro, fontWeight: 800, letterSpacing: 0.5,
-                                  padding: "2px 6px", borderRadius: R.xs,
-                                  color: settled ? K.acc : K.t3,
-                                  border: `1px solid ${settled ? K.acc + ALPHA.line : K.bdr}`,
-                                }}>{settled ? "FINAL" : "PENDING"}</span>
-                                {/* Groups that walked off, saw this tag and let
-                                    it stand — the on-course prompt's other
-                                    answer. It is how a director tells a pin
-                                    nobody has been asked about apart from one
-                                    the field has agreed on. */}
-                                {confirmers.length > 0 && (
-                                  <span style={{ fontSize: FS.label, color: K.t3, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                    Confirmed by {confirmers.join(", ")}
-                                  </span>
-                                )}
-                              </div>
-                            )}
-
-                            {/* A tag naming somebody who is not in the CTP game
-                                still shows — the document is the hole's answer —
-                                but it wins no money, and saying so here is
-                                cheaper than a director wondering why the board
-                                disagrees with the hole. */}
-                            {rec?.playerId && !ctpInSet.has(rec.playerId) && (
-                              <div style={{ fontSize: FS.label, color: K.warn, marginTop: 4 }}>Not in the CTP game — this pin pays nothing</div>
-                            )}
-
-                            {/* Tagged-by line — CTP is claimed on-course by whichever group was closest,
-                                so it's worth showing who recorded it when a director is reconciling. */}
-                            {rec?.taggedByName && !isEd && (
-                              <div style={{ fontSize: FS.label, color: K.t3, marginTop: 4 }}>Tagged by {rec.taggedByName}</div>
-                            )}
-
-                            {/* Director override — available whether or not a tag exists. This is the
-                                correction path for a mis-tagged winner or a mis-scrolled distance. */}
-                            {user.isDirector && !isEd && (
-                              <Btn variant="secondary" size="sm" block style={{ marginTop: 10 }}
-                                onClick={() => { setEditCtpHole(hole); setEditCtpPlayer(rec?.playerId || ""); setEditCtpFeet(rec?.distanceFt ? String(rec.distanceFt) : ""); }}
-                              >{winner ? "Edit CTP" : "Set CTP winner"}</Btn>
-                            )}
-                            {user.isDirector && isEd && settled && (
-                              <div style={{ fontSize: FS.label, color: K.warn, marginTop: 8, lineHeight: 1.5 }}>
-                                Round {ctpShownRound} is finalized — this pin is settled. Changing it moves money that has already been called.
-                              </div>
-                            )}
-                            {user.isDirector && isEd && (
-                              <div style={{ marginTop: 10 }}>
-                                {/* Only players who bought into CTP are offered. A hole
-                                    already tagged to somebody since taken out still shows
-                                    their name above — that is what the document says — but
-                                    they cannot be picked again. */}
-                                <select value={editCtpPlayer} onChange={e => setEditCtpPlayer(e.target.value)} style={{ width: "100%", padding: "8px 12px", background: K.inp, border: `1px solid ${K.bdr}`, borderRadius: R.sm, color: K.t1, fontSize: FS.small, marginBottom: 6 }}>
-                                  <option value="">Select CTP winner...</option>
-                                  {ctpField.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                                </select>
-                                <input
-                                  type="number" inputMode="numeric" min="1" max={CTP_MAX_FT}
-                                  placeholder="Distance (ft)"
-                                  value={editCtpFeet}
-                                  onChange={e => setEditCtpFeet(e.target.value)}
-                                  style={{ width: "100%", padding: "8px 12px", background: K.inp, border: `1px solid ${K.bdr}`, borderRadius: R.sm, color: K.t1, fontSize: FS.small, marginBottom: 8, boxSizing: "border-box" }}
-                                />
-                                <div style={{ display: "flex", gap: 6 }}>
-                                  <Btn size="sm" block disabled={!editCtpPlayer}
-                                    onClick={async () => {
-                                      if (!editCtpPlayer) return;
-                                      const ft = editCtpFeet === "" ? null : Math.max(1, Math.min(CTP_MAX_FT, parseInt(editCtpFeet, 10) || 0)) || null;
-                                      await onSetCtp(ctpShownRound, hole, editCtpPlayer, ft);
-                                      setEditCtpHole(null);
-                                    }}
-                                  >Save</Btn>
-                                  <Btn variant="secondary" size="sm" block onClick={() => setEditCtpHole(null)}>Cancel</Btn>
-                                </div>
-                              </div>
-                            )}
-                          </Card>
-                        );
-                      })}
-                    </div>
-                  );
-                })()}
-              </>
-            )}
-        </div>
-      )}
-
-      {tab === "lownet" && (
-        <div>
-          {potCard({
-            label: "LOW NET POT", pot: lowNetPot,
-            summary: `${lowNetField.length} IN${(sideGames?.lownet?.amount || 0) > 0 ? ` · $${sideGames.lownet.amount} EACH` : ""}`,
-            rightTop: `${roundList.length} round${roundList.length !== 1 ? "s" : ""}`,
-            rightBottom: `${money(lowNetPerRound)} / round`,
-          })}
-
-          {/* Every round on one screen rather than behind pills: there are
-              four of them, each is one line, and the question this tab
-              answers — who took which day — is a comparison across them.
-
-              A LEDGER, not a list. Gross, strokes and net each get a column
-              and line up down the page, which is what turns "who won Rd 2"
-              into "Rd 2 was tied off a 78 and an 85" without anybody doing
-              arithmetic. The old row stacked those three numbers into a grey
-              sub-line under the name, where they could not be compared with
-              the round above.
-
-              A tie is simply a second row under the same round number,
-              carrying that man's OWN gross and strokes — two players tie on
-              the net off different cards, so the single "2 tied on 71 net"
-              the old row printed was true of the pair and a lie about each
-              of them. */}
-          <div style={{ background: K.card, borderRadius: R.lg, border: `1px solid ${K.bdr}`, overflow: "hidden" }}>
-            <div style={{ display: "flex", padding: "8px 14px", borderBottom: `1px solid ${K.bdr}`, fontSize: FS.label, fontWeight: 700, color: K.gold, letterSpacing: 1 }}>
-              <span style={{ flex: 1 }}>BY ROUND</span>
-              <span style={{ color: K.t3 }}>{lowNetRows.filter(r => r.decided).length} OF {roundList.length}</span>
-            </div>
-            <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
-              <colgroup>
-                {/* The four score columns are held at near-equal widths so
-                    the block of numbers reads as a block. WINNER takes the
-                    slack; PAYS is the widest because "$15.63" is the longest
-                    string on the row. */}
-                <col style={{ width: 34 }} />
-                <col />
-                <col style={{ width: 36 }} />
-                <col style={{ width: 32 }} />
-                <col style={{ width: 34 }} />
-                <col style={{ width: 32 }} />
-                <col style={{ width: 54 }} />
-              </colgroup>
-              <thead>
-                <tr style={{ background: `${K.bdr}${ALPHA.wash}` }}>
-                  {[["RD", "left"], ["WINNER", "left"], ["Gross", "right"], ["CH", "right"], ["NET", "right"], ["±", "right"], ["PAYS", "right"]].map(([label, align], i, all) => (
-                    <th key={label} style={{
-                      textAlign: align, fontSize: FS.micro, fontWeight: 700, letterSpacing: 0.5, color: K.t3,
-                      padding: "5px 4px", borderBottom: `1px solid ${K.bdr}${ALPHA.line}`,
-                      paddingLeft: i === 0 ? 10 : 4, paddingRight: i === all.length - 1 ? 12 : 4,
-                    }}>{label}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {lowNetRows.map((r, ri) => {
-                  const settled = roundSettled(r.round);
-                  const share = r.winners.length > 0 ? lowNetPerRound / r.winners.length : 0;
-                  const courseName = roundSetup(r.round).course?.name || "";
-                  const open = openNetRound === r.round;
-                  const toggle = () => setOpenNetRound(open ? null : r.round);
-                  // Banded by ROUND rather than by row, so a tie's two lines
-                  // read as one day rather than as two separate results.
-                  const band = ri % 2 === 1 ? `${K.bdr}${ALPHA.wash}` : "transparent";
-                  const cell = (extra = {}) => ({
-                    padding: "7px 4px", textAlign: "right", fontSize: FS.small, fontWeight: 600,
-                    color: K.t2, borderTop: `1px solid ${K.bdr}${ALPHA.hair}`, ...extra,
-                  });
-                  // ── The round's own header strip ──
-                  // Round, chevron and COURSE, on a line of their own above
-                  // the winner. The course used to sit under the winner's
-                  // name, which read as though it belonged to him rather than
-                  // to the day — and on a tie it could only be printed under
-                  // one of the two men who played it.
-                  const headerRow = (
-                    <tr key={`${r.round}_h`} onClick={toggle} style={{ background: `${K.bdr}${ALPHA.wash}`, cursor: "pointer" }}>
-                      <td style={cell({ textAlign: "left", paddingLeft: 10, padding: "5px 4px 5px 10px" })}>
-                        <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
-                          <span style={{ fontSize: FS.label, fontWeight: 800, color: open ? K.acc : K.t3 }}>{r.round}</span>
-                          {/* The leaderboard's chevron, same as everywhere. */}
-                          <span style={{ fontSize: FS.micro, flexShrink: 0, color: open ? K.acc : K.t2, transition: `transform ${MOTION}`, display: "inline-block", transform: `${open ? "rotate(180deg)" : "rotate(0)"} scale(0.75)` }}>▼</span>
-                        </span>
-                      </td>
-                      <td colSpan={6} style={cell({ textAlign: "left", padding: "5px 12px 5px 4px", fontSize: FS.micro, fontWeight: 700, letterSpacing: 0.4, color: K.t3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })}>
-                        {courseName || "No course set"}
-                      </td>
-                    </tr>
-                  );
-                  // The whole field for the day, lowest net first. It answers
-                  // the question the winner's name provokes — by how much —
-                  // and on a round still being played it is the only thing
-                  // this tab can say at all.
-                  // The rest of the field, starting at second. The winners
-                  // are already printed above in full, so repeating them at
-                  // the head of the list was the same two lines twice — the
-                  // question this opens is who ELSE was out there.
-                  const fieldRows = !open ? [] : lowNetRoundField({ players: lowNetField, round: r.round, lineFor })
-                    .filter(f => !r.winners.some(w => w.pid === f.pid))
-                    .map(f => {
-                    const sub = (extra = {}) => cell({
-                      fontSize: FS.label, borderTop: "none", color: K.t3,
-                      background: `${K.bdr}${ALPHA.wash}`, padding: "5px 4px", ...extra,
-                    });
-                    return (
-                      <tr key={`${r.round}_f_${f.pid}`}>
-                        <td style={sub({ paddingLeft: 10 })} />
-                        <td style={sub({ textAlign: "left", color: K.t2, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })}>
-                          {f.name}
-                        </td>
-                        <td style={sub()}>{f.gross}</td>
-                        <td style={sub()}>{f.strokes}</td>
-                        {/* A card still out has a gross and no round. Printing
-                            its net would rank a man on the 14th against men
-                            who have signed — the same thing lowNetRounds
-                            refuses to do. */}
-                        <td style={sub({ color: f.complete ? (f.net < 0 ? K.under : K.t2) : K.t3, fontWeight: 700 })}>
-                          {f.complete ? f.netScore : "–"}
-                        </td>
-                        {/* A card still out takes BOTH trailing cells for its
-                            standing. "THRU 16" does not fit the PAYS column
-                            alone and wrapped onto two lines; the ± beside it
-                            is empty on these rows anyway. */}
-                        {f.complete ? (
-                          <>
-                            <td style={sub({ color: f.net < 0 ? K.under : K.t3, fontWeight: 700 })}>{fmtPar(f.net)}</td>
-                            <td style={sub({ paddingRight: 12 })} />
-                          </>
-                        ) : (
-                          <td colSpan={2} style={sub({ paddingRight: 12, fontSize: FS.micro, fontWeight: 700, letterSpacing: 0.3, whiteSpace: "nowrap" })}>
-                            {f.wd ? "WD" : `THRU ${f.thru}`}
-                          </td>
-                        )}
-                      </tr>
-                    );
-                  });
-                  // A day the whole field tied, or one only the winner
-                  // finished, opens onto nothing — which looks broken rather
-                  // than empty unless it says so.
-                  if (open && fieldRows.length === 0) fieldRows.push(
-                    <tr key={`${r.round}_f_none`}>
-                      <td style={cell({ paddingLeft: 10, borderTop: "none", background: `${K.bdr}${ALPHA.wash}`, padding: "5px 4px 5px 10px" })} />
-                      <td colSpan={6} style={cell({ textAlign: "left", borderTop: "none", background: `${K.bdr}${ALPHA.wash}`, padding: "5px 12px 5px 4px", fontSize: FS.label, color: K.t3 })}>
-                        Nobody else has posted
-                      </td>
-                    </tr>,
-                  );
-
-                  if (!r.decided) return [
-                    headerRow,
-                    <tr key={r.round} style={{ background: band }}>
-                      <td style={cell({ paddingLeft: 10 })} />
-                      <td colSpan={6} onClick={toggle} style={cell({ textAlign: "left", color: K.t3, paddingRight: 12, cursor: "pointer" })}>
-                        {(() => {
-                          const tee = teeWindowFor(r.round);
-                          if (tee) return (
-                            <>
-                              <span style={{ fontSize: FS.micro, fontWeight: 800, letterSpacing: 0.5, color: K.t3 }}>TEE </span>
-                              <span style={{ color: K.t2, fontWeight: 700 }}>{tee}</span>
-                            </>
-                          );
-                          // No sheet drawn yet, so there is nothing to say
-                          // except that the day is still empty.
-                          return roundSetup(r.round).course ? "Nobody has finished yet" : "No scores yet";
-                        })()}
-                      </td>
-                    </tr>,
-                    ...fieldRows,
-                  ];
-
-                  return [
-                    headerRow,
-                    ...r.winners.map((w, wi) => (
-                      <tr key={`${r.round}_${w.pid}`} style={{ background: band }}>
-                        {/* The round number lives on the header strip above,
-                            so the winner rows start at the name — and a tie's
-                            two lines are simply two names under one day. */}
-                        <td style={cell({ paddingLeft: 10, borderTop: wi > 0 ? "none" : undefined })} />
-                        <td onClick={toggle} style={cell({ textAlign: "left", fontSize: FS.small, fontWeight: 700, color: K.t1, borderTop: wi > 0 ? "none" : undefined, cursor: "pointer", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })}>
-                          {w.name}
-                        </td>
-                        <td style={cell({ borderTop: wi > 0 ? "none" : undefined })}>{w.gross}</td>
-                        <td style={cell({ borderTop: wi > 0 ? "none" : undefined })}>{w.strokes}</td>
-                        {/* The net as a SCORE — how a low net gets read out in
-                            a car park — and the to-par beside it. BOTH take the
-                            under-par red: a 67 on a par 72 is a number under
-                            par whether it is written as 67 or as −5, and
-                            colouring only one of them made the pair look like
-                            two different facts. */}
-                        <td style={cell({ fontSize: FS.body, fontWeight: 800, color: w.net < 0 ? K.under : K.t1, borderTop: wi > 0 ? "none" : undefined })}>{w.netScore}</td>
-                        <td style={cell({ fontWeight: 800, color: w.net < 0 ? K.under : K.t1, borderTop: wi > 0 ? "none" : undefined })}>{fmtPar(w.net)}</td>
-                        {/* A day still being played can change hands as the
-                            last group comes in, so the money is held rather
-                            than printed as though it had been paid. */}
-                        <td style={cell({ paddingRight: 12, borderTop: wi > 0 ? "none" : undefined })}>
-                          {settled
-                            ? money(share)
-                            : <span style={{ fontSize: FS.micro, fontWeight: 800, letterSpacing: 0.5, color: K.warn }}>OUT</span>}
-                        </td>
-                      </tr>
-                    )),
-                    ...fieldRows,
-                  ];
-                })}
-              </tbody>
-            </table>
-          </div>
-
-        </div>
-      )}
-
-      {tab === "market" && (
-        <div>
-          {potCard({
-            label: "MARKET POT", pot: marketPot,
-            // Two buy-ins in one pot, but the second count only appears once
-            // it is FINAL. While the halfway window is open "3 rebuying" is a
-            // running total that moves every time somebody taps, and a player
-            // reading it as the field's verdict is reading a number that is
-            // still being written. Shut, it is a fact: this many rebought.
-            summary: `${marketField.length} IN${windows.mid.closed ? ` · ${rebuyField.length} REBUYS` : ""}`,
-            rightTop: `${board.reduce((a, b) => a + b.shares, 0)} share${board.reduce((a, b) => a + b.shares, 0) !== 1 ? "s" : ""} placed`,
-            rightBottom: `${holders.length} holder${holders.length !== 1 ? "s" : ""}`,
-          })}
-
-          {/* ── The director's shares worklist ── */}
-          {/* Its own drawer, and the only place that lists a player who has
-              placed NOTHING. The holders list below only knows about people
-              who have already bet, which made the man who handed his picks
-              over on paper invisible on the screen meant to chase him. */}
-          {user?.isDirector && (
-            <>
-              <div
-                onClick={() => setShowRoster(v => !v)}
-                style={{
-                  display: "flex", alignItems: "center", gap: 8, cursor: "pointer",
-                  background: K.card, borderRadius: R.lg, border: `1px solid ${K.bdr}`,
-                  padding: "10px 14px", marginBottom: showRoster ? 0 : 10,
-                }}
-              >
-                <span style={{ flex: 1, fontSize: FS.label, fontWeight: 700, color: K.t3, letterSpacing: 0.6 }}>
-                  {roster.rows.length - roster.outstanding} OF {roster.rows.length} HAVE WAGERED
-                  {roster.outstanding > 0 ? ` · ${roster.outstanding} PENDING` : ""}
-                </span>
-                <span style={{ fontSize: FS.label, fontWeight: 700, color: K.acc, letterSpacing: 0.6 }}>
-                  SHARES {showRoster ? "▾" : "▸"}
-                </span>
-              </div>
-
-              {showRoster && (
-                <div style={{ background: K.card, border: `1px solid ${K.acc}${ALPHA.line}`, borderRadius: R.sm, marginBottom: 10, overflow: "hidden" }}>
-                  <div style={{ padding: "8px 12px", fontSize: FS.label, color: K.t3, lineHeight: 1.4, borderBottom: `1px solid ${K.bdr}` }}>
-                    Tap a name to enter or change their shares. Counts only — what they
-                    are holding stays in their book.
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 56px 56px", gap: 2, padding: "6px 12px", borderBottom: `1px solid ${K.bdr}` }}>
-                    <span style={{ fontSize: FS.label, fontWeight: 700, color: K.t3, letterSpacing: 0.5 }}>PLAYER</span>
-                    <span style={{ fontSize: FS.micro, fontWeight: 800, color: K.t2, textAlign: "center" }}>OPEN</span>
-                    <span style={{ fontSize: FS.micro, fontWeight: 800, color: K.t2, textAlign: "center" }}>HALF</span>
-                  </div>
-                  {roster.rows.map(r => {
-                    const openFull = r.opening >= MARKET_OPENING_SHARES;
-                    const midAny = r.mid > 0;
-                    const cell = (n, full, tone) => (
-                      <span style={{ textAlign: "center", fontSize: FS.small, fontWeight: 800, color: tone ? (full ? K.acc : K.warn) : K.t3 }}>
-                        {n > 0 ? n : "–"}
-                      </span>
-                    );
-                    return (
-                      <div key={r.pid}
-                        onClick={() => openBook(r.pid)}
-                        style={{
-                          display: "grid", gridTemplateColumns: "minmax(0,1fr) 56px 56px", gap: 2,
-                          alignItems: "center", padding: "8px 12px", cursor: "pointer",
-                          borderBottom: `1px solid ${K.bdr}${ALPHA.hair}`,
-                          background: r.placed === 0 ? K.warn + ALPHA.wash : "transparent",
-                        }}>
-                        <span style={{ minWidth: 0, fontSize: FS.small, fontWeight: 600, color: r.placed > 0 ? K.t1 : K.t2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {r.name}
-                        </span>
-                        {cell(r.opening, openFull, r.opening > 0)}
-                        {cell(r.mid, r.mid >= MARKET_MID_SHARES, midAny)}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </>
-          )}
-          {/* ── Your book ── */}
-          {!bookPid ? null : !marketInSet.has(bookPid) ? (
-            <Card style={{ marginBottom: 10, color: K.t3, fontSize: FS.small }}>
-              {bookPid === myPid ? "You are not in the market game." : "That player is not in the market game."}
-            </Card>
-          ) : (
-            <Card style={{ marginBottom: 10 }} ref={bookRef}>
-              {/* NO TITLE ROW. A player has exactly one book and cannot look
-                  at anybody else's, so "Your book" named the only thing it
-                  could have been — and "4 of 20 left" is "16/20" on the
-                  window tab said from the other end. The card starts on the
-                  shares. A director gets a heading back below, because they
-                  really can be looking at somebody else's. */}
-              {/* The director places for somebody else — the path for the phone
-                  that died before the bell, and the only way a shut window can
-                  still be written to. */}
-              {user?.isDirector && (
-                <>
-                  <select
-                    value={bookPid}
-                    onChange={e => openBook(e.target.value, bookWindow)}
-                    style={{ width: "100%", padding: "8px 12px", background: K.inp, border: `1px solid ${K.bdr}`, borderRadius: R.sm, color: K.t1, fontSize: FS.small, marginBottom: 8 }}
-                  >
-                    {marketField.map(p => <option key={p.id} value={p.id}>{p.name}{p.id === myPid ? " (you)" : ""}</option>)}
-                  </select>
-                  {/* A director editing somebody else's bet is a real act with
-                      real money behind it, so the screen says whose book is
-                      open rather than letting a changed dropdown be the only
-                      sign of it. */}
-                  {bookPid !== myPid && (
-                    <div style={{ fontSize: FS.label, color: K.warn, marginBottom: 8, lineHeight: 1.5 }}>
-                      Editing {players.find(p => p.id === bookPid)?.name || bookPid}&apos;s shares as director.
-                    </div>
-                  )}
-                  {/* And placing into a window the field can no longer touch is
-                      a second thing again — worth saying out loud, because it
-                      is the one edit nobody else could have made. */}
-                  {!win.open && (
-                    <div style={{ fontSize: FS.label, color: K.warn, marginBottom: 8, lineHeight: 1.5 }}>
-                      This window is shut to the field. You are placing on the director&apos;s override.
-                    </div>
-                  )}
-                </>
-              )}
-
-              {/* Both windows close on a tee time now, so both can be counted
-                  down to — a player looking at the halfway tab in the car park
-                  after round two needs the same answer the opening tab gave
-                  him on Friday. */}
-              {finalSheet ? (
-                <>
-                  <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 6 }}>
-                    <SectionLabel style={{ marginBottom: 0, flex: 1 }}>Your wagers</SectionLabel>
-                    <span style={{ fontSize: FS.label, fontWeight: 700, color: K.t3 }}>
-                      {totalShares(allLots(bookBet))} share{totalShares(allLots(bookBet)) !== 1 ? "s" : ""}
-                    </span>
-                  </div>
-                  {allLots(bookBet).length === 0 ? (
-                    <div style={{ fontSize: FS.small, color: K.t3, lineHeight: 1.5 }}>
-                      You did not place any shares. Both windows are closed.
-                    </div>
-                  ) : allLots(bookBet).map(l => {
-                    const openN = sharesOn(lotsFor(bookBet, "opening"), l.pid);
-                    const midN = sharesOn(lotsFor(bookBet, "mid"), l.pid);
-                    return (
-                      <div key={l.pid} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 0", borderBottom: `1px solid ${K.bdr}${ALPHA.hair}` }}>
-                        <span style={{ flex: 1, minWidth: 0, fontSize: FS.small, fontWeight: 700, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {players.find(p => p.id === l.pid)?.name || l.pid}
-                        </span>
-                        {/* The split, quietly, for anybody working out which
-                            of the two calls this holding came from. It only
-                            appears when the halfway ten actually went in. */}
-                        {midN > 0 && (
-                          <span style={{ flexShrink: 0, fontSize: FS.micro, fontWeight: 700, color: K.t3, letterSpacing: 0.3 }}>
-                            {openN} + {midN}
-                          </span>
-                        )}
-                        <span style={{ flexShrink: 0, width: 42, textAlign: "right", fontSize: FS.lead, fontWeight: 800, color: K.acc }}>{l.shares}</span>
-                      </div>
-                    );
-                  })}
-                </>
-              ) : (<>
-              {windows.mid.exists !== false && (
-                <SegmentedToggle
-                  compact
-                  style={{ marginBottom: 4 }}
-                  options={[["opening", `${windows.opening.label} · ${totalShares(lotsFor(bookBet, "opening"))}/${MARKET_OPENING_SHARES}`],
-                            ["mid", `${windows.mid.label} · ${totalShares(lotsFor(bookBet, "mid"))}/${MARKET_MID_SHARES}`]]}
-                  value={activeWindow}
-                  onChange={k => { setBookWindow(k); setDraft(null); }}
-                />
-              )}
-
-              {/* The two clocks sit UNDER the switch rather than inside it —
-                  a tab is a control and a countdown is a readout, and packing
-                  one into the other made the pill two lines tall for the sake
-                  of a number that changes on its own. Each cell is half the
-                  width so it lands under the tab it belongs to.
-                  The tone escalates green → amber on the day of the tee time
-                  → red inside the last hour; see lib/market countdownTone.
-                  A window that has not opened yet prints NOTHING. "Not yet"
-                  is the tab's own share count saying 0/10 already. */}
-              {windows.mid.exists !== false && (openingClock || midClock || windows.opening.closed) && (
-                <div style={{ display: "flex", marginBottom: 6 }}>
-                  {[[windows.opening, openingClock], [windows.mid, midClock]].map(([w, clock]) => (
-                    <span key={w.key} style={{
-                      flex: 1, textAlign: "center",
-                      fontSize: FS.label, fontWeight: 800, letterSpacing: 0.4,
-                      fontVariantNumeric: "tabular-nums",
-                      color: clock ? toneFor(w) : K.t3,
-                    }}>{clock ? clock.label : w.closed ? "CLOSED" : ""}</span>
-                  ))}
-                </div>
-              )}
-
-              {/* What the second window costs, said before the first tap
-                  rather than after. Nothing is prepaid here: placing a share
-                  IS taking on the rebuy, so a player who has placed none is
-                  being warned and a player who has placed some is being told
-                  what they already owe. */}
-              {activeWindow === "mid" && canPlace && rebuyAmount > 0 && (
-                <div style={{
-                  fontSize: FS.label, marginBottom: 8, lineHeight: 1.5, padding: "6px 10px",
-                  borderRadius: R.sm, border: `1px solid ${owesRebuy ? K.acc : K.warn}${ALPHA.line}`,
-                  color: owesRebuy ? K.acc : K.warn,
-                }}>
-                  {owesRebuy
-                    ? `In for the $${rebuyAmount} rebuy — settle up with the director. Taking every share back off drops it.`
-                    : `Placing any of these ${MARKET_MID_SHARES} puts ${bookPid === myPid ? "you" : "them"} in for the $${rebuyAmount} rebuy. Pay the director after.`}
-                </div>
-              )}
-
-              {/* ── Who is on the sheet ──
-                  An OPEN window lists the whole field, because any of them
-                  can still be backed. A SHUT one lists only the golfers you
-                  actually wagered on — the book as it stands, with the
-                  fourteen names you passed over taken out of the way.
-                  That is the sheet a player wants in front of him at the turn
-                  while he decides where the halfway ten should go, and it is
-                  the whole of what he owns once both windows have run.
-                  Directors keep the full list on the override, because
-                  entering a phone that died before the bell means entering a
-                  name that is not on the sheet yet. */}
-              <div style={{ display: "flex", flexDirection: "column" }}>
-                {!canPlace && players.every(p => sharesOn(draftLots, p.id) === 0) && (
-                  /* A shut window with nothing in it has no rows and, since
-                     the note line came out, nothing else either — so it says
-                     what happened rather than rendering an empty card. */
-                  <div style={{ fontSize: FS.label, color: K.t3, padding: "4px 0 2px", lineHeight: 1.5 }}>
-                    {win.closed ? "Nothing wagered in this window." : win.note}
-                  </div>
-                )}
-                {(canPlace ? players : players.filter(p => sharesOn(draftLots, p.id) > 0)).map(p => {
-                  const n = sharesOn(draftLots, p.id);
-                  return (
-                    <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: `1px solid ${K.bdr}${ALPHA.hair}` }}>
-                      {/* The name alone. It used to carry a "· 4 held" tail
-                          repeating what the accent number beside it already
-                          says, and the name brightening from t3 to t1 is the
-                          same fact a third time. */}
-                      <span style={{ flex: 1, minWidth: 0, fontSize: FS.small, fontWeight: 600, color: n > 0 ? K.t1 : K.t3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {p.name}
-                      </span>
-                      {/* A SHUT window is a receipt, not a control. The
-                          steppers were rendered disabled, which is four grey
-                          boxes per row saying "you cannot" to somebody who is
-                          only reading. */}
-                      {canPlace ? (
-                        <>
-                          <Btn variant="secondary" size="sm" disabled={n <= 0}
-                            style={{ padding: "3px 10px", minWidth: 32 }}
-                            onClick={() => bump(p.id, -1)}>−</Btn>
-                          {/* The number is a FIELD, not a readout. Twenty shares
-                              is twenty taps on a stepper, and a director entering
-                              the field's picks off a sheet of paper does that
-                              sixteen times over. Typing 12 is one action.
-                              Capped through the same setLotShares the steppers
-                              use, so a window still cannot be overspent however
-                              the number got there. FS.lead because this is a real
-                              input and anything under 16px makes iOS zoom the
-                              page on focus and never zoom back. */}
-                          <input
-                            type="number" inputMode="numeric" min="0" max={win.shares}
-                            value={n === 0 ? "" : String(n)} placeholder="0"
-                            onChange={e => setShares(p.id, e.target.value === "" ? 0 : parseInt(e.target.value, 10) || 0)}
-                            onFocus={e => e.currentTarget.select()}
-                            style={{
-                              width: 38, textAlign: "center", fontSize: FS.lead, fontWeight: 800,
-                              color: n > 0 ? K.acc : K.t3, background: "transparent",
-                              border: "none", borderBottom: `1px solid ${K.bdr}`,
-                              outline: "none", fontFamily: FONT, padding: 0,
-                            }}
-                          />
-                          <Btn variant="secondary" size="sm" disabled={remaining <= 0}
-                            style={{ padding: "3px 10px", minWidth: 32 }}
-                            onClick={() => bump(p.id, 1)}>+</Btn>
-                          {/* Five at a time. Twenty shares in fives is four taps
-                              where the single stepper wanted twenty, and 5/10/15/20
-                              is how the field actually talks about a book. It
-                              clamps through the same setLotShares as everything
-                              else, so tapping it with three left adds three. */}
-                          <Btn variant="secondary" size="sm" disabled={remaining <= 0}
-                            style={{ padding: "3px 8px", minWidth: 32 }}
-                            onClick={() => bump(p.id, 5)}>+5</Btn>
-                        </>
-                      ) : (
-                        <span style={{ flexShrink: 0, width: 42, textAlign: "right", fontSize: FS.lead, fontWeight: 800, color: K.acc }}>{n}</span>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-
-              {canPlace && (
-                <div style={{ marginTop: 10 }}>
-                  <Btn block disabled={!dirty} onClick={commitBook}>{dirty ? "Wager shares" : "Wagered"}</Btn>
-                  {/* The two ways back, under the commit rather than beside
-                      it: three block buttons do not fit a phone, and these
-                      are the undo pair, not alternatives to saving.
-                      Clear beats taking twenty shares off one at a time,
-                      which is what re-entering a misheard book meant. */}
-                  <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                    <Btn variant="secondary" size="sm" block disabled={!dirty} onClick={() => setDraft(null)}>Reset</Btn>
-                    <Btn variant="secondary" size="sm" block disabled={placed === 0} onClick={clearWindow}>Clear window</Btn>
-                  </div>
-                </div>
-              )}
-              </>)}
-            </Card>
-          )}
-
-          {/* ── The market ── */}
-          {board.length === 0
-            ? empty("📈", "Nothing placed yet", `Everybody in gets ${MARKET_OPENING_SHARES} shares before the tournament starts, and ${MARKET_MID_SHARES} more once the halfway round is in. The pot splits between whoever is holding the winner.`)
-            : sealed ? (
-              // What is safe to show through the seal: how big the market is,
-              // never how it is positioned. A player can see that the field
-              // has bet, and their own book above it, and nothing else.
-              <Card style={{ marginBottom: 10, textAlign: "center", padding: "28px 20px" }}>
-                <div style={{ fontSize: FS.display, marginBottom: 10, opacity: 0.5 }}>🔒</div>
-                <div style={{ fontSize: FS.lead, fontWeight: 700, color: K.t1, marginBottom: 6 }}>The book is sealed</div>
-                <div style={{ fontSize: FS.small, color: K.t3, maxWidth: 300, lineHeight: 1.5, margin: "0 auto" }}>
-                  {board.reduce((a, b) => a + b.shares, 0)} shares are placed across {holders.length} {holders.length === 1 ? "player" : "players"}.
-                  Who is holding whom opens when the tournament is over — betting blind is the game.
-                </div>
-              </Card>
-            ) : (
-              <div style={{ background: K.card, borderRadius: R.lg, border: `1px solid ${K.bdr}`, marginBottom: 10, overflow: "hidden" }}>
-                <div style={{ display: "flex", padding: "8px 14px", borderBottom: `1px solid ${K.bdr}`, fontSize: FS.label, fontWeight: 700, color: K.gold, letterSpacing: 1 }}>
-                  <span style={{ flex: 1 }}>THE MARKET</span>
-                  {!eventComplete && <span style={{ color: K.warn, marginRight: 8 }}>🔒 SEALED</span>}
-                  <span style={{ color: K.t3 }}>SHARES · IF THEY WIN</span>
-                </div>
-                {board.map(r => {
-                  const isLeader = r.pid === winnerId;
-                  return (
-                    <div key={r.pid} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", borderBottom: `1px solid ${K.bdr}${ALPHA.hair}`, background: isLeader ? K.accGlow : "transparent" }}>
-                      <span style={{ flex: 1, minWidth: 0, fontSize: FS.body, fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {isLeader && <span style={{ color: K.gold }}>🏆 </span>}{r.name}
-                      </span>
-                      {/* The share of the market, as a bar rather than a second
-                          number — this is the one thing on the screen that is
-                          easier to read as a length than as a percentage. */}
-                      <span style={{ width: 44, height: 4, borderRadius: R.xs, background: `${K.bdr}`, overflow: "hidden", flexShrink: 0 }}>
-                        <span style={{ display: "block", width: `${Math.round(r.pct)}%`, height: "100%", background: K.acc }} />
-                      </span>
-                      <span style={{ fontSize: FS.body, fontWeight: 800, color: K.acc, width: 28, textAlign: "right", flexShrink: 0 }}>{r.shares}</span>
-                      <span style={{ fontSize: FS.small, color: K.t3, width: 56, textAlign: "right", flexShrink: 0 }}>{money(r.perShare)}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-          {/* ── The payout ── */}
-          {/* Names and share counts, so it is sealed on the same terms as the
-              board — a standing payout is the board read backwards. */}
-          {winnerId && board.length > 0 && !sealed && (
-            <div style={{ background: K.card, borderRadius: R.lg, border: `1px solid ${eventComplete ? K.gold + ALPHA.line : K.bdr}`, marginBottom: 10, overflow: "hidden" }}>
-              <div style={{ padding: "8px 14px", borderBottom: `1px solid ${K.bdr}`, fontSize: FS.label, fontWeight: 700, color: K.gold, letterSpacing: 1 }}>
-                {eventComplete ? "PAYOUT" : "IF IT ENDED NOW"}
-              </div>
-              <div style={{ padding: "8px 14px", fontSize: FS.small, color: K.t3, borderBottom: `1px solid ${K.bdr}${ALPHA.hair}` }}>
-                {leader?.name} · {payouts.totalShares} share{payouts.totalShares !== 1 ? "s" : ""} held
-                {payouts.totalShares > 0 ? ` · ${money(payouts.perShare)} each` : ""}
-              </div>
-              {payouts.unclaimed ? (
-                <div style={{ padding: "12px 14px", fontSize: FS.small, color: K.warn, lineHeight: 1.5 }}>
-                  Nobody is holding {leader?.name}. The {money(marketPot)} pot has no claimant — that is a conversation for the room, not something the app should decide.
-                </div>
-              ) : payouts.rows.map(r => (
-                <div key={r.pid} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", borderBottom: `1px solid ${K.bdr}${ALPHA.hair}` }}>
-                  <span style={{ flex: 1, minWidth: 0, fontSize: FS.body, fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {players.find(p => p.id === r.pid)?.name || r.pid}
-                  </span>
-                  <span style={{ fontSize: FS.body, fontWeight: 700, color: K.acc, flexShrink: 0 }}>{r.shares} sh</span>
-                  <span style={{ fontSize: FS.small, fontWeight: 700, color: K.gold, width: 64, textAlign: "right", flexShrink: 0 }}>{money(r.payout)}</span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* ── Who is holding what ── */}
-          {holders.length > 0 && !sealed && (
-            <Card style={{ marginBottom: 10 }}>
-              <SectionLabel style={{ marginBottom: 8 }}>Holders</SectionLabel>
-              {holders.map(h => {
-                const isOpen = openHolder === h.pid;
-                return (
-                  <div key={h.pid} style={{ borderBottom: `1px solid ${K.bdr}${ALPHA.wash}` }}>
-                    <div onClick={() => setOpenHolder(isOpen ? null : h.pid)}
-                      style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 4px", cursor: "pointer" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-                        <span style={{ fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.name}</span>
-                        <span style={{ fontSize: FS.micro, flexShrink: 0, color: isOpen ? K.acc : K.t2, transition: `transform ${MOTION}`, display: "inline-block", transform: `${isOpen ? "rotate(180deg)" : "rotate(0)"} scale(0.75)` }}>▼</span>
-                      </div>
-                      <span style={{ color: K.acc, fontWeight: 800, flexShrink: 0 }}>{h.shares} sh</span>
-                    </div>
-                    {isOpen && (
-                      <div style={{ padding: "0 4px 8px 20px" }}>
-                        {h.lots.map(l => (
-                          <div key={l.pid} style={{ display: "flex", justifyContent: "space-between", fontSize: FS.small, color: K.t2, padding: "3px 0" }}>
-                            <span>{players.find(p => p.id === l.pid)?.name || l.pid}</span>
-                            <span style={{ fontWeight: 700, color: K.t1 }}>{l.shares}</span>
-                          </div>
-                        ))}
-                        {/* The correction path, at the point the mistake is
-                            spotted. Reading a wrong allocation and then having
-                            to scroll back up and find the name in a dropdown
-                            is how the wrong man gets edited. */}
-                        {user?.isDirector && (
-                          <Btn variant="secondary" size="sm" style={{ marginTop: 6 }}
-                            onClick={() => openBook(h.pid)}
-                          >Edit these shares</Btn>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </Card>
-          )}
-        </div>
-      )}
-
-      <ConfirmModal modal={confirmModal} />
-    </div>
-  );
-}
-
-// ── GROUPS ──
 function GroupsView({ players, round, tRounds, courses, pairingsData, teeTimesData, getPlayerTee, user }) {
   const tr = tRounds.find(t => t.round_number === round);
   const course = tr ? courses.find(c => c.id === tr.course_id) : null;
@@ -8687,7 +6929,24 @@ export default function WBCApp() {
     document.head.appendChild(apple);
   }, []);
 
-  // Set viewport meta to prevent zoom on mobile
+  // ── Viewport: no AUTO-zoom, but pinch stays ──
+  //
+  // This used to carry `maximum-scale=1, user-scalable=no`, which does two
+  // very different things under one setting. The problem it was aimed at is
+  // real: iOS zooms the whole page when a text input smaller than 16px takes
+  // focus, and then does not zoom back, which on the scoring screen leaves a
+  // scorer looking at a magnified corner of their own card.
+  //
+  // But the fix for that is the 16px rule below — that is what removes the
+  // trigger. Blocking `user-scalable` on top of it takes away PINCH, which is
+  // a different thing entirely and the one accessibility affordance this app
+  // can least afford to lose: it is read outdoors, in sun, at arm's length, by
+  // people who are mostly over forty. Somebody who wants a closer look at a
+  // scorecard should be able to have one.
+  //
+  // iOS Safari has ignored user-scalable=no since iOS 10 anyway, so on the
+  // platform this was written for it was never doing the job — it was only
+  // taking pinch away from Android and desktop.
   useEffect(() => {
     let meta = document.querySelector('meta[name="viewport"]');
     if (!meta) {
@@ -8695,9 +6954,12 @@ export default function WBCApp() {
       meta.name = 'viewport';
       document.head.appendChild(meta);
     }
-    meta.content = 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no';
+    meta.content = 'width=device-width, initial-scale=1, viewport-fit=cover';
 
-    // Inject global style to prevent iOS zoom on inputs
+    // The actual fix for focus-zoom: a font size iOS will not zoom to reach.
+    // `touch-action: manipulation` still suppresses the double-tap-to-zoom
+    // delay, which is about tap latency on score buttons rather than about
+    // whether zooming is allowed at all.
     const style = document.createElement('style');
     style.textContent = `
       body { touch-action: manipulation; -ms-touch-action: manipulation; }
@@ -8724,8 +6986,18 @@ export default function WBCApp() {
   const [registry, setRegistry] = useState([]);
   const [holeData, setHoleData] = useState({});
   const [ctpData, setCtpData] = useState({});
-  // Every player's market portfolio, one entry per bettor. See rowsToMarket.
-  const [marketBets, setMarketBets] = useState([]);
+  // ── The market's books, and which of them this phone may hold ──
+  // Sealed on the SERVER now (see firestore.rules), so there is no single
+  // subscription that returns "the bets" any more — what arrives depends on
+  // who is holding the phone. See lib/marketSeal.
+  //
+  //   ownBets        this player's book. Every phone gets this.
+  //   allBets        every book. Directors only; null on a player's phone.
+  //   publishedBets  the reveal, posted by a director once the event is over.
+  //                  Null until then; world-readable when it exists.
+  const [ownBets, setOwnBets] = useState([]);
+  const [allBets, setAllBets] = useState(null);
+  const [publishedBets, setPublishedBets] = useState(null);
   // The three side games' money, from tournament_state.side_games. Each `in`
   // is an ARRAY of player ids, or NULL when no director has ever touched it —
   // and null means everybody, which is what every tournament played before
@@ -9011,9 +7283,17 @@ export default function WBCApp() {
     // CTP is tournament-wide, so a tag from Group 1's phone has to reach Group 4's phone
     // before they hit that par 3 — otherwise the leader bar shows nothing to beat and
     // the last group in wins by default. Live subscription, same as scores.
-    unsubs.push(db.subscribe("skins", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
+    // CTP only. The market's bets used to ride along on this same
+    // subscription, and they cannot any more: firestore.rules refuses a read
+    // of somebody else's book, and Firestore fails the WHOLE query if one
+    // document in it is refused. Asking for the tags by name is what keeps
+    // this query answerable on every phone. The books arrive on their own
+    // subscription below, narrowed to what the holder may see.
+    unsubs.push(db.subscribe("skins", [
+      { field: "tournament_id", op: "==", value: TOURNAMENT_ID },
+      { field: "skin_type", op: "==", value: "ctp" },
+    ], (docs) => {
       setCtpData(rowsToCtp(docs));
-      setMarketBets(rowsToMarket(docs));
     }));
 
     unsubs.push(db.subscribe("tournament_state", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
@@ -9128,6 +7408,56 @@ export default function WBCApp() {
   // `photosOpened` latches: once opened, the subscription stays for the rest
   // of the session, so coming back to the gallery is instant and posting a
   // photo still shows up live on every phone that has it open.
+  // ── The market's books, subscribed to what this phone may read ──
+  //
+  // Separate from the mount effect above because it depends on WHO is signed
+  // in, and that resolves later — a subscription started at mount would ask
+  // as nobody and be refused.
+  //
+  // A director asks for every book; everybody else asks for their own by name.
+  // The narrowing is not decoration: rules refuse a read of somebody else's
+  // book, and a query that matched one would fail entirely rather than
+  // returning the rest.
+  // The two facts this depends on, read out as plain values. Naming `user` in
+  // the dependency list would re-subscribe on every unrelated change to it;
+  // naming only its fields while reading the whole object is the shape that
+  // emptied a tournament earlier — so the effect reads exactly what it lists.
+  const meId = user && !user.isGuest ? (user.id || null) : null;
+  const meIsDirector = !!user?.isDirector;
+  useEffect(() => {
+    if (!meId) { setOwnBets([]); setAllBets(null); return; }
+    const base = [
+      { field: "tournament_id", op: "==", value: TOURNAMENT_ID },
+      { field: "skin_type", op: "==", value: "market" },
+    ];
+    if (meIsDirector) {
+      return db.subscribe("skins", base, (docs) => {
+        const bets = rowsToMarket(docs);
+        setAllBets(bets);
+        setOwnBets(bets.filter(b => b.pid === meId));
+      });
+    }
+    setAllBets(null);
+    return db.subscribe("skins", [...base, { field: "player_id", op: "==", value: meId }], (docs) => {
+      setOwnBets(rowsToMarket(docs));
+    });
+  }, [meId, meIsDirector]);
+
+  // ── The reveal ──
+  // One world-readable document per edition, holding every book once the
+  // tournament is over. Read by everybody, written by a director — see the
+  // note in firestore.rules for why a director's device rather than a Cloud
+  // Function.
+  useEffect(() => {
+    if (!storageLoaded) return;
+    return db.subscribe("wbc_market_result", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
+      const row = docs && docs[0];
+      setPublishedBets(Array.isArray(row?.bets) ? row.bets.map(b => ({
+        pid: b.pid, opening: normalizeLots(b.opening), mid: normalizeLots(b.mid),
+      })) : null);
+    });
+  }, [storageLoaded]);
+
   const [photosOpened, setPhotosOpened] = useState(false);
   useEffect(() => { if (view === "photos") setPhotosOpened(true); }, [view]);
   useEffect(() => {
@@ -9232,6 +7562,8 @@ export default function WBCApp() {
       await db.delete("skins", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
       await db.delete("wbc_scorecard_sigs", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
       await db.delete("wbc_rounds_state", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
+      // The reveal goes with the bets it was published from.
+      await db.delete("wbc_market_result", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
     } catch(e) { console.error("Start fresh clear failed:", e); }
     // Keep tPlayers (roster + HIs) intact — clear everything else
     setTRounds([]);
@@ -9242,7 +7574,7 @@ export default function WBCApp() {
     // CTP tags AND every market portfolio, and the tournament_state delete took
     // the buy-in lists. Resetting them here keeps the screen agreeing with what
     // is left in Firestore instead of showing a pot nobody has bought into.
-    setMarketBets([]);
+    setOwnBets([]); setAllBets(null); setPublishedBets(null);
     setSideGames(mergeSideGames(null));
     setPairingsData({});
     setTeeData({});
@@ -9375,6 +7707,44 @@ export default function WBCApp() {
   // still see their edit. The difference is that React now knows when it
   // changed.
   const { allPlayers, activePlayers } = useRoster(tPlayers, registry);
+
+  // ── Publishing the reveal ──
+  // A director's device is the only client that can read every book, so it is
+  // the one that posts them when the tournament is over. Everybody else's
+  // Betting tab reads that document and gets its final board from it.
+  //
+  // Guarded three ways in lib/marketSeal — director, event actually finished,
+  // and the books changed since whatever is already up there. The third is
+  // what stops this writing on every snapshot; the second is what stops it
+  // being the leak it exists to prevent.
+  const publishedSigRef = useRef(null);
+  useEffect(() => {
+    const eventComplete = numRounds > 0 && allPlayers.length > 0
+      && Array.from({ length: numRounds }, (_, i) => i + 1)
+        .every(r => roundComplete(holeData, allPlayers, r));
+    if (!shouldPublish({
+      isDirector: meIsDirector,
+      eventComplete,
+      bets: allBets,
+      publishedSignature: publishedSigRef.current,
+    })) return;
+    const sig = betsSignature(allBets);
+    publishedSigRef.current = sig;
+    db.upsert("wbc_market_result", {
+      id: `mr_${TOURNAMENT_ID}`,
+      tournament_id: TOURNAMENT_ID,
+      bets: allBets.map(b => ({ pid: b.pid, opening: b.opening, mid: b.mid })),
+      signature: sig,
+      publishedAt: new Date().toISOString(),
+    });
+  }, [meIsDirector, allBets, holeData, allPlayers, numRounds]);
+
+  // What the Betting tab actually computes from. See lib/marketSeal.
+  const marketBets = useMemo(
+    () => betsToHold({ own: ownBets, all: allBets, published: publishedBets, isDirector: meIsDirector }),
+    [ownBets, allBets, publishedBets, meIsDirector],
+  );
+
 
   // ── Claim flow ──
   // Set of player_ids already bound to a Firebase uid (single source of truth
@@ -9944,10 +8314,15 @@ export default function WBCApp() {
     if (!pid) return;
     const opening = normalizeLots(lots.opening);
     const mid = normalizeLots(lots.mid);
-    setMarketBets(prev => {
-      const rest = prev.filter(b => b.pid !== pid);
+    // Optimistic, into whichever mirrors this phone actually holds: its own
+    // book always, and the wide list too if a director is correcting somebody
+    // else's. The subscriptions echo the same thing a moment later.
+    const merge = (prev) => {
+      const rest = (prev || []).filter(b => b.pid !== pid);
       return [...rest, { pid, opening, mid }].sort((a, b) => String(a.pid).localeCompare(String(b.pid)));
-    });
+    };
+    if (pid === user?.id) setOwnBets(merge);
+    setAllBets(prev => (prev ? merge(prev) : prev));
     await db.upsert("skins", {
       id: docIds.marketBet(_e(), pid),
       tournament_id: TOURNAMENT_ID,
@@ -10668,8 +9043,8 @@ export default function WBCApp() {
         {/* Posting requires a real account: firestore.rules pins uploadedBy to
             the caller's uid, so a guest — who has no uid at all — can browse
             the library but cannot add to it. */}
-        {view === "photos" && <PhotosView items={media} year={getTournamentYear()} uid={fbUser?.uid || null} isDirector={!!user.isDirector} isGuest={!!user.isGuest} canPost={!user.isGuest && !!fbUser?.uid && photoUploadsAllowed(photoConfig)} uploadsBlockedReason={photoUploadsAllowed(photoConfig) ? "" : uploadsDisabledReason(photoConfig)} onUpload={onUploadPhoto} onDelete={onDeletePhoto} notify={notify} />}
-        {view === "skins" && <BettingView players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} numRounds={numRounds} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} marketBets={marketBets} onSaveMarketBet={onSaveMarketBet} leaderboard={getLeaderboard} finalizedRounds={finalizedRounds} pairingsData={pairingsData} firstTeeAt={firstTeeAt} marketNudge={marketNudge} teeTimesData={teeTimesData} roundDates={roundDates} />}
+        {view === "photos" && <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading photos…</div>}><PhotosView items={media} year={getTournamentYear()} uid={fbUser?.uid || null} isDirector={!!user.isDirector} isGuest={!!user.isGuest} canPost={!user.isGuest && !!fbUser?.uid && photoUploadsAllowed(photoConfig)} uploadsBlockedReason={photoUploadsAllowed(photoConfig) ? "" : uploadsDisabledReason(photoConfig)} onUpload={onUploadPhoto} onDelete={onDeletePhoto} notify={notify} /></Suspense>}
+        {view === "skins" && <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading betting…</div>}><BettingView players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} numRounds={numRounds} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} marketBets={marketBets} onSaveMarketBet={onSaveMarketBet} leaderboard={getLeaderboard} finalizedRounds={finalizedRounds} pairingsData={pairingsData} firstTeeAt={firstTeeAt} marketNudge={marketNudge} teeTimesData={teeTimesData} roundDates={roundDates} /></Suspense>}
         {view === "groups" && <GroupsView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} pairingsData={pairingsData} teeTimesData={teeTimesData} getPlayerTee={getPlayerTee} user={user} />}
         {view === "admin" && (user.isDirector ? <AdminView activePlayers={activePlayers} rosterPlayers={allPlayers} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} rebuyIds={rebuyIds} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
               setTeeTimesData(prev => {
@@ -10715,11 +9090,11 @@ export default function WBCApp() {
           const clr = active ? K.acc : K.t3;
           const iconSz = 18;
           const navIcon = () => {
-            if (item.icon === "trophy") return <img src="/wbc-trophy.png" alt="Board" style={{ width: 54, height: 54, objectFit: "contain", filter: active ? "none" : "brightness(0) saturate(100%) invert(40%) sepia(20%) saturate(600%) hue-rotate(185deg) brightness(90%)", marginTop: "-20px" }} />;
-            if (item.icon === "pairings") return <svg width={iconSz} height={iconSz} viewBox="0 0 24 24" fill="none" stroke={clr} strokeWidth="2" strokeLinecap="round"><circle cx="9" cy="7" r="3"/><circle cx="17" cy="7" r="3"/><path d="M3 21v-2a4 4 0 014-4h4a4 4 0 014 4v2"/><path d="M21 21v-2a3 3 0 00-2-2.83"/></svg>;
-            if (item.icon === "score") return <svg width={iconSz} height={iconSz} viewBox="0 0 24 24" fill="none" stroke={clr} strokeWidth="2" strokeLinecap="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4z"/></svg>;
-            if (item.icon === "betting") return <svg width={iconSz} height={iconSz} viewBox="0 0 24 24" fill="none" stroke={clr} strokeWidth="2" strokeLinecap="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>;
-            if (item.icon === "more") return <svg width={iconSz} height={iconSz} viewBox="0 0 24 24" fill="none" stroke={clr} strokeWidth="2" strokeLinecap="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>;
+            if (item.icon === "trophy") return <img src="/wbc-trophy.png" alt="" style={{ width: 54, height: 54, objectFit: "contain", filter: active ? "none" : "brightness(0) saturate(100%) invert(40%) sepia(20%) saturate(600%) hue-rotate(185deg) brightness(90%)", marginTop: "-20px" }} />;
+            if (item.icon === "pairings") return <svg aria-hidden="true" width={iconSz} height={iconSz} viewBox="0 0 24 24" fill="none" stroke={clr} strokeWidth="2" strokeLinecap="round"><circle cx="9" cy="7" r="3"/><circle cx="17" cy="7" r="3"/><path d="M3 21v-2a4 4 0 014-4h4a4 4 0 014 4v2"/><path d="M21 21v-2a3 3 0 00-2-2.83"/></svg>;
+            if (item.icon === "score") return <svg aria-hidden="true" width={iconSz} height={iconSz} viewBox="0 0 24 24" fill="none" stroke={clr} strokeWidth="2" strokeLinecap="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4z"/></svg>;
+            if (item.icon === "betting") return <svg aria-hidden="true" width={iconSz} height={iconSz} viewBox="0 0 24 24" fill="none" stroke={clr} strokeWidth="2" strokeLinecap="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>;
+            if (item.icon === "more") return <svg aria-hidden="true" width={iconSz} height={iconSz} viewBox="0 0 24 24" fill="none" stroke={clr} strokeWidth="2" strokeLinecap="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>;
             return null;
           };
           const isTrophy = item.key === "leaderboard";
@@ -10739,7 +9114,16 @@ export default function WBCApp() {
                 setRound(prev => prev === activeRound ? prev : activeRound);
               }
               setView(item.key);
-            }} style={{
+            }}
+            // The trophy tab draws no text label, so without this it is a
+            // button with nothing in it but an image — "button" is all a
+            // screen reader could announce. The others carry a visible label
+            // and naming them again would say it twice.
+            aria-label={isTrophy ? item.label : undefined}
+            // `page` rather than `true`: these are destinations within the app,
+            // which is what aria-current's page value is for.
+            aria-current={active ? "page" : undefined}
+            style={{
               flex: 1, padding: "10px 4px 14px", display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
               background: "transparent", border: "none", cursor: "pointer", color: clr, position: "relative",
               marginTop: 0,
@@ -10771,7 +9155,7 @@ export default function WBCApp() {
               {(item.key === "more"
                   ? ((adminActionNeeded && user.isDirector) || (notifPerm !== "granted" && !user.isGuest))
                   : item.key === "skins" && marketNudge) && (
-                <span style={{
+                <span aria-hidden="true" style={{
                   position: "absolute", top: 6, right: "50%", marginRight: -14,
                   width: 8, height: 8, borderRadius: "50%", background: K.danger,
                   border: `2px solid ${K.nav}`,

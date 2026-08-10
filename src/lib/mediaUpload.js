@@ -236,8 +236,24 @@ export const uploadPhoto = async ({ file, slug, uid, uploaderName, round = null,
   const total = display.blob.size + thumb.blob.size;
   let sent = 0;
   onProgress?.(0, "uploading");
+  // ── Who uploaded this object, stamped ON the object ──
+  // storage.rules cannot read Firestore, so the wbc_media document that knows
+  // the poster is invisible to it. Nor does the path say: a photo id is a
+  // timestamp and a random suffix, deliberately, so there is nothing in
+  // `editions/2026/{id}.webp` to compare a caller against.
+  //
+  // Custom metadata is the one fact about an object a rule CAN read, so the
+  // uid rides here and the delete rule matches on it. Without it the bucket's
+  // rule had to allow any signed-in caller to delete any object — which meant
+  // anybody with a Google account could destroy somebody's photo and leave a
+  // permanently broken tile in the gallery, since the index document naming it
+  // would survive.
   const send = (target, blob, type) => new Promise((resolve, reject) => {
-    const task = uploadBytesResumable(target, blob, { contentType: type, cacheControl: IMMUTABLE_YEAR });
+    const task = uploadBytesResumable(target, blob, {
+      contentType: type,
+      cacheControl: IMMUTABLE_YEAR,
+      customMetadata: { uid: String(uid || "") },
+    });
     let counted = 0;
     task.on(
       "state_changed",

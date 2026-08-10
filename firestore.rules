@@ -184,6 +184,22 @@ service cloud.firestore {
       return !enforcing() || isDirector();
     }
 
+    // ── Which PLAYER is holding this phone ────────────────────────
+    // The uid identifies an account; the tournament is played by a player_id,
+    // and wbc_users/{uid} is the map between them (written at the claim
+    // screen). This is what lets a rule say "your own book and nobody else's"
+    // about a document keyed by player rather than by uid.
+    //
+    // Null for an account that has not claimed a profile, which correctly
+    // matches nothing rather than matching everything.
+    function myPlayerId() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/wbc_users/$(request.auth.uid))
+        ? get(/databases/$(database)/documents/wbc_users/$(request.auth.uid))
+            .data.get('player_id', null)
+        : null;
+    }
+
     // The password, and the deliberate hole in it. `accessCode()` reads a
     // document no ordinary client may read — rules `get()` is not subject to
     // read rules, which is the whole trick: the secret can be compared
@@ -334,8 +350,64 @@ service cloud.firestore {
                                       allow write: if canWrite(); }
     match /hole_scores/{doc}        { allow read: if isOpen();
                                       allow write: if canWrite(); }
-    match /skins/{doc}              { allow read: if isOpen();
-                                      allow write: if canWrite(); }
+    // ── skins: three kinds of document, one of which is money ──────
+    // This collection holds the CTP tags and the market's bets (skins
+    // themselves are derived from the cards and never stored — see
+    // lib/sideGames). The two are filed together deliberately; see the note
+    // above rowsToMarket in App.jsx.
+    //
+    // CTP is communal, like scoring: any member may tag a pin, and a later
+    // group beating it is the game working. A MARKET BET is not communal. It
+    // is one player's book, it is real money, and under a flat `canWrite()`
+    // any member could rewrite anybody's — not by any path the app offers,
+    // but the app is not what enforces this.
+    //
+    // So a market document may only be written by the player it belongs to,
+    // and by a director. The director exemption is load-bearing rather than
+    // administrative: entering a book for somebody whose phone died before the
+    // bell is the one correction this game has, and the Betting tab already
+    // offers it.
+    //
+    // The write is checked against `request.resource.data`, which for a merge
+    // write is the document as it WILL be — so a CTP confirmation that carries
+    // only `confirmed_by` still reads as the ctp document it is merging into,
+    // and is judged as one.
+    function isMarketBet(data) {
+      return data.get('skin_type', '') == 'market';
+    }
+
+    // ── Reading: the market is SEALED, and not only on screen ─────
+    // The Betting tab hides every other player's book until the last card is
+    // in, and the reason is the game rather than modesty: the halfway window
+    // exists to let somebody buy a correction with two rounds of evidence, and
+    // seeing the field's book first turns that into copying the consensus, or
+    // into a coordinated block on the leader. That was enforced by the SCREEN,
+    // which means it was not enforced — the app's config ships in the bundle
+    // and anybody could read the collection directly.
+    //
+    // So a market document is readable by the player it belongs to, and by a
+    // director. Everything else in here — the CTP tags — stays world-readable,
+    // because a standing pin is exactly the number the next group needs.
+    //
+    // ── What this asks of the client ──
+    // Firestore evaluates a read rule per document and fails the WHOLE query
+    // if any matched document is refused. So the app can no longer subscribe
+    // to `skins` in one go: it asks for the CTP tags in one query and its own
+    // book in another (a director asks for all of them). See App.jsx.
+    //
+    // The final board comes from wbc_market_result below, not from here.
+    match /skins/{doc} {
+      allow read: if !isMarketBet(resource.data)
+                  || isDirector()
+                  || resource.data.get('player_id', '') == myPlayerId();
+      allow create, update: if canWrite()
+                            && (!isMarketBet(request.resource.data)
+                                || isDirector()
+                                || request.resource.data.get('player_id', '') == myPlayerId());
+      // Bets and tags are only ever removed in bulk — Start Fresh, or deleting
+      // an edition — both of which are director-only screens.
+      allow delete: if canAdmin();
+    }
     match /wbc_scorecard_sigs/{doc} { allow read: if isOpen();
                                       allow write: if canWrite(); }
 
@@ -407,6 +479,24 @@ service cloud.firestore {
                         && resource.data.uploadedBy == request.auth.uid
                         && resource.data.host != 'pages');
     }
+
+    // ── The market, revealed ──────────────────────────────────────
+    // One document per edition, holding every book once the tournament is
+    // over. It exists because sealing the bets above also seals the FINAL
+    // board, and the final board is the whole point of playing: everybody has
+    // to be able to see who backed the winner and what a share paid.
+    //
+    // Written by a director's device, which is the one client that can read
+    // every book. Deliberately not a Cloud Function: a function would have to
+    // re-implement the market's arithmetic in a second language, and the one
+    // thing this codebase has been most consistent about is refusing to have
+    // two implementations of the same money.
+    //
+    // Read is open, like the leaderboard — a finished tournament's result is
+    // not a secret, and the spouse on the couch should be able to see who won
+    // the market too.
+    match /wbc_market_result/{doc} { allow read: if isOpen();
+                                     allow write: if canAdmin(); }
 
     // ── Runtime switches ──────────────────────────────────────────
     // Today this holds exactly one document: wbc_config/photos, the photo

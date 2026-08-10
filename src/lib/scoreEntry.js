@@ -58,3 +58,33 @@ export function nudgeDownTarget(score, par) {
   const { btns } = scoreWindow(par, score);
   return Math.max(1, btns[0] - 1);
 }
+
+// ── What a score is CALLED ─────────────────────────────────────────
+// For any number of strokes, not only the five the unshifted window shows.
+//
+// This exists for the screen reader. The row prints Birdie/Par/Bogey under its
+// buttons, but drops those labels the moment the window shifts — an ace on a
+// par 3 is not a "Birdie", and a wrong label is worse than none. A screen
+// reader still has to say something, and what it should say is what a golfer
+// would say out loud: "one, hole in one".
+//
+// Empty for anything with no ordinary name. Past a triple, golf stops naming
+// them and so does this — the number on its own is the honest answer, and
+// "quadruple bogey" is a thing nobody says to somebody who has just made one.
+const TERM_BY_DIFF = {
+  "-3": "albatross",
+  "-2": "eagle",
+  "-1": "birdie",
+  "0": "par",
+  "1": "bogey",
+  "2": "double bogey",
+  "3": "triple bogey",
+};
+
+export function scoreTerm(strokes, par) {
+  if (!(strokes > 0) || !(par > 0)) return "";
+  // An ace outranks its par-relative name: on a par 3 it is a birdie by
+  // arithmetic and a hole in one by every other measure.
+  if (strokes === 1) return "hole in one";
+  return TERM_BY_DIFF[String(strokes - par)] || "";
+}

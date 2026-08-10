@@ -50,3 +50,30 @@ export const TROPHY_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 
 </svg>`;
 
 export const TROPHY_SVG_URL = `data:image/svg+xml;utf8,${encodeURIComponent(TROPHY_SVG)}`;
+
+// ── How far a closest-to-the-pin can be ─────────────────────────────
+// The top of the distance wheel. 60 feet is past the point where anybody is
+// claiming a pin, and a wheel that runs to 200 is a wheel nobody can reach the
+// useful end of. Shared because the on-course prompt and the director's
+// override in the Betting tab are separate files that must offer the same
+// range — an override that could not reproduce a tagged distance would be a
+// correction tool that cannot correct.
+export const CTP_MAX_FT = 60;
+
+// ── The side games, named once ──────────────────────────────────────
+// Which games exist and what they are called. Here rather than in App.jsx
+// because the two screens that need them are now different FILES: Admin's
+// price sheet and the Betting tab's collection sheet, which have to list the
+// same games in the same order or the director is reading two sheets that
+// disagree about what is owed.
+
+export const SIDE_GAME_KEYS = ["skins", "ctp", "lownet", "market", "rebuy"];
+// The order and the wording the Betting tab's collection sheet uses. `short`
+// has to fit a 38px column on a phone.
+export const SIDE_GAME_LABELS = {
+  skins:  { label: "Skins",           short: "SKIN" },
+  ctp:    { label: "Closest to Pin",  short: "CTP" },
+  lownet: { label: "Low Net",         short: "NET" },
+  market: { label: "Market",          short: "MKT" },
+  rebuy:  { label: "Market rebuy",    short: "RE" },
+};

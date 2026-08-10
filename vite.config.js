@@ -4,6 +4,36 @@ import react from '@vitejs/plugin-react'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  build: {
+    rollupOptions: {
+      output: {
+        // ── Splitting the vendor code out of the app's ──
+        //
+        // Everything used to ship as one 1.1MB file, which meant every deploy
+        // — a copy change, a colour, a one-line fix — invalidated the whole
+        // thing. A phone on a course with one bar re-downloaded React and the
+        // entire Firebase SDK to pick up a reworded button.
+        //
+        // These three change on completely different clocks. Firebase moves
+        // when its version does, React likewise, and the app moves constantly.
+        // Split apart, a routine deploy re-downloads only the app chunk and
+        // the other two come off disk — which is the difference between a
+        // pull-to-refresh finishing in the car park and finishing on the 1st
+        // tee.
+        //
+        // Split by SOURCE PATH rather than by named package: `firebase/app`,
+        // `firebase/firestore` and `@firebase/*` all resolve into the same
+        // node_modules tree, and listing package names by hand misses the
+        // transitive half — which is most of it.
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return;
+          if (/[\\/]node_modules[\\/](@firebase|firebase|idb)[\\/]/.test(id)) return "firebase";
+          if (/[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/.test(id)) return "react";
+          return "vendor";
+        },
+      },
+    },
+  },
   test: {
     // Unit tests only. firestore.rules.test.mjs is an INTEGRATION test — it
     // needs the Firestore emulator listening on 127.0.0.1:8080 and fails with
