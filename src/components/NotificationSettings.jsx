@@ -10,7 +10,7 @@
 //   0b. iOS in a Safari tab → push only works from a home-screen install.
 //       Walk through Add to Home Screen rather than showing a toggle that
 //       cannot work.
-//   1.  Supported → the toggle, what will be sent, and a test.
+//   1.  Supported → the toggle and a test.
 //   2.  Denied → no toggle. The browser will not re-prompt after a denial;
 //       the only way back is device settings, so explain that instead of
 //       offering a button that silently does nothing.
@@ -34,15 +34,6 @@ import {
   isStandalonePWA, isIOSPushCapable, checkSubscriptionStatus,
   getCachedSubscriptionStatus, sendTestPush,
 } from "../lib/notifications";
-
-// What actually gets sent, kept in step with functions/index.js
-// (onScorecardSigned, onRoundFinalized). A user deciding whether to allow
-// notifications is entitled to know what they are agreeing to receive, and
-// "WBC would like to send you notifications" does not tell them.
-const TYPES = [
-  { title: "Time to attest your card", sub: "Someone in your group signed it" },
-  { title: "A round is final", sub: "Results are in — check the leaderboard" },
-];
 
 
 export function NotificationSettings({ user, notify, onPermissionChange }) {
@@ -167,23 +158,11 @@ export function NotificationSettings({ user, notify, onPermissionChange }) {
               <div style={{ fontSize: FS.body, fontWeight: 800, color: subscribed ? K.acc : K.t1 }}>
                 {subscribed ? "Notifications on" : "Notifications off"}
               </div>
-              <div style={{ fontSize: FS.small, color: K.t2, lineHeight: 1.5, marginTop: 2 }}>
-                {subscribed ? "You'll get the alerts below." : "Turn on to get the alerts below."}
-              </div>
             </div>
             <Toggle on={subscribed} busy={busy} onChange={handleToggle} />
           </div>
         )}
       </Card>
-
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {TYPES.map((t, i) => (
-          <Card key={i} pad="10px 14px">
-            <div style={{ fontSize: FS.small, fontWeight: 700, color: K.t1 }}>{t.title}</div>
-            <div style={{ fontSize: FS.label, color: K.t3, marginTop: 1 }}>{t.sub}</div>
-          </Card>
-        ))}
-      </div>
 
       {subscribed && (
         <button onClick={runTest} disabled={testing} style={{
