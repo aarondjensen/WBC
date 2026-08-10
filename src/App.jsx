@@ -6499,20 +6499,17 @@ export default function WBCApp() {
                 {/* ── Appearance ── */}
                 {/* The same row as the notifications switch directly below it,
                     down to the labelled card it sits on — the title changing
-                    colour when it is on, the sentence under it, and the same
-                    Toggle. Two switches in one sheet drawn two different ways
-                    read as two different KINDS of setting, and a switch sitting
-                    loose on the sheet while the one under it sits on a bordered
-                    card reads as the loose one being part of the header. */}
+                    colour when it is on and the same Toggle. Two switches in
+                    one sheet drawn two different ways read as two different
+                    KINDS of setting, and a switch sitting loose on the sheet
+                    while the one under it sits on a bordered card reads as the
+                    loose one being part of the header. */}
                 <SectionLabel>Appearance</SectionLabel>
                 <Card>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontSize: FS.body, fontWeight: 800, color: theme === "light" ? K.acc : K.t1 }}>
                         {theme === "light" ? "Light mode" : "Dark mode"}
-                      </div>
-                      <div style={{ fontSize: FS.small, color: K.t2, lineHeight: 1.5, marginTop: 2 }}>
-                        {theme === "light" ? "Easier to read in sunlight." : "Turn on for a light background."}
                       </div>
                     </div>
                     <Toggle on={theme === "light"} label="Light mode"
