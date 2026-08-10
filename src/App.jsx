@@ -40,6 +40,8 @@ import { NotificationSettings } from "./components/NotificationSettings";
 import { registerForPush, getCachedSubscriptionStatus } from "./lib/notifications";
 import { pairingScoreImpact, orphanedScores, describeScored, totalHoles } from "./lib/scoreGuard";
 import { groupsForRound, assignToGroup, removeFromGroup as removeFromGroupPure, clearGroup, swapIntoGroup, rowsToPairings } from "./lib/pairings";
+import { PAIRING_MODES, PAIRING_MODE_LABEL, resolvePairingCfg, buildPriorPartners, optimizeAvoidRepeats, groupByLeaderboard } from "./lib/pairingDraw";
+import { stateMatches, hasRealSlope, parseRapidAPI, parseGolfCourseAPI, fetchCourseTees } from "./lib/courseSearch";
 import { Popup, ConfirmModal } from "./components/Popup";
 import { EditionSwitcher } from "./components/EditionSwitcher";
 import { docIds } from "./lib/editionId";
@@ -292,111 +294,9 @@ const holeDataToRow = (pid, rnd, holeIdx, score, courseId) => ({
   score: score,
 });
 
-// ── PAIRING STRATEGY ──
-// Each round can be paired by one of three methods, configurable per-round in the
-// director console (see PairingsEditor). Defaults mirror the classic WBC format:
-//   R1  → manual        (director sets the opening foursomes by hand)
-//   R2  → avoid_repeats (auto: minimize players sharing a group with a prior partner)
-//   R3+ → leaderboard   (auto: group by current standings)
-const PAIRING_MODES = ["manual", "avoid_repeats", "leaderboard"];
-const PAIRING_MODE_LABEL = { manual: "Manual", avoid_repeats: "Optimal", leaderboard: "Leaderboard" };
-const defaultPairingMode = (rnd) => rnd === 1 ? "manual" : rnd === 2 ? "avoid_repeats" : "leaderboard";
-// Resolve the effective per-round strategy config from stored state, applying defaults.
-const resolvePairingCfg = (pairingStrategy, rnd) => {
-  const stored = (pairingStrategy || {})[rnd];
-  return {
-    mode: stored?.mode || defaultPairingMode(rnd),
-    // leadersLast: for leaderboard mode, put the leaders in the LAST group (latest
-    // tee time) — the standard "final pairings go off last" convention. Default true.
-    leadersLast: stored?.leadersLast != null ? stored.leadersLast : true,
-  };
-};
-
-// Balanced group sizes: `numGroups` groups whose sizes differ by at most 1 (max 4
-// each for a full field). e.g. 12/3 → [4,4,4]; 10/3 → [4,3,3]; 13/4 → [4,3,3,3].
-const balancedGroupSizes = (n, numGroups) => {
-  if (numGroups <= 0) return [];
-  const base = Math.floor(n / numGroups);
-  const extra = n % numGroups;
-  return Array.from({ length: numGroups }, (_, i) => base + (i < extra ? 1 : 0));
-};
-
-// Build a map pid → Set(prior partners) from every round strictly BEFORE `beforeRound`.
-// For round 2 this yields exactly each player's round-1 foursome, which is what the
-// "no repeats" method separates.
-const buildPriorPartners = (pairingsData, beforeRound) => {
-  const partners = {};
-  const add = (a, b) => { (partners[a] = partners[a] || new Set()).add(b); };
-  Object.entries(pairingsData || {}).forEach(([rnd, groups]) => {
-    if (parseInt(rnd) >= beforeRound) return;
-    (groups || []).forEach(grp => grp.forEach(a => grp.forEach(b => { if (a !== b) add(a, b); })));
-  });
-  return partners;
-};
-
-// Count intra-group pairs that were also partners in a prior round.
-const countRepeatPairs = (groups, partners) => {
-  let c = 0;
-  groups.forEach(grp => {
-    for (let i = 0; i < grp.length; i++)
-      for (let j = i + 1; j < grp.length; j++)
-        if (partners[grp[i]] && partners[grp[i]].has(grp[j])) c++;
-  });
-  return c;
-};
-
-const shuffleArr = (arr) => {
-  const a = arr.slice();
-  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
-  return a;
-};
-
-const chunkBySizes = (order, sizes) => {
-  const g = []; let k = 0;
-  for (const s of sizes) { g.push(order.slice(k, k + s)); k += s; }
-  return g;
-};
-
-// Partition playerIds into `numGroups` balanced groups minimizing the number of
-// repeat-partner pairs. Randomized multi-start + swap hill-climb — fast and reliable
-// for club-sized fields. NOTE: zero repeats is only achievable when the number of
-// groups is >= the group size (e.g. threesomes with 4+ groups). With 12 players in
-// foursomes the mathematical minimum is 3 forced repeat pairs (one per group), which
-// this consistently finds. Returns { groups, repeats }.
-const optimizeAvoidRepeats = (playerIds, numGroups, partners, restarts = 80) => {
-  const sizes = balancedGroupSizes(playerIds.length, numGroups);
-  let best = null, bestCost = Infinity;
-  for (let r = 0; r < restarts; r++) {
-    let groups = chunkBySizes(shuffleArr(playerIds), sizes);
-    let cost = countRepeatPairs(groups, partners);
-    let improved = true, guard = 0;
-    while (improved && cost > 0 && guard++ < 500) {
-      improved = false;
-      outer:
-      for (let gi = 0; gi < groups.length; gi++)
-        for (let gj = gi + 1; gj < groups.length; gj++)
-          for (let ai = 0; ai < groups[gi].length; ai++)
-            for (let bj = 0; bj < groups[gj].length; bj++) {
-              const A = groups[gi][ai], B = groups[gj][bj];
-              groups[gi][ai] = B; groups[gj][bj] = A;
-              const nc = countRepeatPairs(groups, partners);
-              if (nc < cost) { cost = nc; improved = true; }
-              else { groups[gi][ai] = A; groups[gj][bj] = B; }
-              if (cost === 0) break outer;
-            }
-    }
-    if (cost < bestCost) { bestCost = cost; best = groups.map(g => g.slice()); if (bestCost === 0) break; }
-  }
-  return { groups: best || chunkBySizes(playerIds.slice(), sizes), repeats: bestCost === Infinity ? 0 : bestCost };
-};
-
-// Group by leaderboard standings. `orderedPids` is best-first. leadersLast → the
-// leaders land in the LAST group (latest tee time); otherwise they lead off first.
-const groupByLeaderboard = (orderedPids, numGroups, leadersLast) => {
-  const sizes = balancedGroupSizes(orderedPids.length, numGroups);
-  const order = leadersLast ? orderedPids.slice().reverse() : orderedPids.slice();
-  return chunkBySizes(order, sizes);
-};
+// The draw — how a round's groups get decided — is in lib/pairingDraw with
+// a test. See the header there; the search it runs is the most algorithmic
+// thing in this app and had nothing checking it.
 
 // Convert tee assignment rows → teeData format { round: { pid: teeName } }
 const rowsToTeeData = (rows) => {
@@ -1060,134 +960,10 @@ function PairingsEditor({ activePlayers, pairingsData, setPairings, tRounds, cou
   );
 }
 
-// ── Course-API parsing ─────────────────────────────────────────────────────
-// Hoisted out of doCourseSearch so the course EDITOR can reach the same two
-// APIs with the same parsing. Refetching a course's tees and searching for a
-// new course have to agree about what a tee box is, and the only way to be
-// sure of that is for them to run the same code.
-const STATE_NAMES = { AL:"Alabama",AK:"Alaska",AZ:"Arizona",AR:"Arkansas",CA:"California",CO:"Colorado",CT:"Connecticut",DE:"Delaware",FL:"Florida",GA:"Georgia",HI:"Hawaii",ID:"Idaho",IL:"Illinois",IN:"Indiana",IA:"Iowa",KS:"Kansas",KY:"Kentucky",LA:"Louisiana",ME:"Maine",MD:"Maryland",MA:"Massachusetts",MI:"Michigan",MN:"Minnesota",MS:"Mississippi",MO:"Missouri",MT:"Montana",NE:"Nebraska",NV:"Nevada",NH:"New Hampshire",NJ:"New Jersey",NM:"New Mexico",NY:"New York",NC:"North Carolina",ND:"North Dakota",OH:"Ohio",OK:"Oklahoma",OR:"Oregon",PA:"Pennsylvania",RI:"Rhode Island",SC:"South Carolina",SD:"South Dakota",TN:"Tennessee",TX:"Texas",UT:"Utah",VT:"Vermont",VA:"Virginia",WA:"Washington",WV:"West Virginia",WI:"Wisconsin",WY:"Wyoming" };
-const STATE_ABBREVS = Object.fromEntries(Object.entries(STATE_NAMES).map(([k,v]) => [v.toUpperCase(), k]));
-const stateMatches = (courseState, filter) => {
-  if (!filter || !courseState) return true;
-  const cs = courseState.trim().toUpperCase();
-  const f = filter.trim().toUpperCase();
-  if (cs === f) return true; // exact match (MI === MI)
-  if (STATE_NAMES[f] && cs === STATE_NAMES[f].toUpperCase()) return true; // MI → Michigan
-  if (STATE_ABBREVS[cs] && STATE_ABBREVS[cs] === f) return true; // Michigan → MI
-  return false;
-};
+// Reading a golf course out of the two public APIs — the parsing, the state
+// matching and the 113-means-we-do-not-know rule — is in lib/courseSearch,
+// with a test. Imported at the top of this file.
 
-const decodeHtml = (str) => str ? str.replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"').replace(/&#39;/g,"'") : str;
-const hasRealSlope = (c) => (c.tee_boxes || []).some(tb => parseInt(tb.slope) !== 113) || (parseInt(c.slope) !== 113 && !!c.slope);
-
-const parseRapidAPI = (rawCourses, stateFilter) => rawCourses
-  .filter(c => stateMatches(c.state, stateFilter))
-  .map((c, ci) => {
-    // This API: top-level courseRating/slopeRating, scorecard[].tees.teeBox1/teeBox2...
-    const sc = Array.isArray(c.scorecard) ? c.scorecard : [];
-    const hole_pars = sc.map(h => parseInt(h.Par) || 4);
-    const hole_handicaps = sc.map(h => parseInt(h.Handicap) || 0);
-    const par = hole_pars.reduce((a, b) => a + b, 0) || 72;
-    // Collect all tee box keys across all holes
-    const teeKeys = [...new Set(sc.flatMap(h => h.tees ? Object.keys(h.tees) : []))];
-    const tees = teeKeys.length ? teeKeys.map((key, ti) => {
-      const sample = sc.find(h => h.tees?.[key]);
-      const color = sample?.tees?.[key]?.color || key;
-      const yardage = sc.reduce((a, h) => a + (parseInt(h.tees?.[key]?.yards) || 0), 0);
-      const hole_yards = sc.map(h => parseInt(h.tees?.[key]?.yards) || 0);
-      return {
-        name: color || key,
-        color: resolveTeeColor({ name: color || key, color: color || "" }, ti),
-        slope: parseInt(c.slopeRating) || 113,
-        rating: parseFloat(c.courseRating) || 72.0,
-        par, yardage, hole_yards,
-      };
-    }) : [{
-      name: "Default",
-      color: resolveTeeColor({ name: "Default", color: "" }, 0),
-      slope: parseInt(c.slopeRating) || 113,
-      rating: parseFloat(c.courseRating) || 72.0,
-      par, yardage: 0, hole_yards: [],
-    }];
-    return {
-      id: `rapid_${c._id || ci}`,
-      name: decodeHtml(c.name) || "Unknown",
-      city: c.city || "", state: c.state || "",
-      par, slope: parseInt(c.slopeRating) || 113,
-      rating: parseFloat(c.courseRating) || 72.0,
-      hole_pars, hole_handicaps, tee_boxes: tees,
-      _source: "RapidAPI",
-    };
-  });
-
-const parseGolfCourseAPI = (rawCourses) => {
-  const arr = Array.isArray(rawCourses) ? rawCourses : (rawCourses.courses || []);
-  return arr.map((c, ci) => {
-    const teesObj = c.tees || {};
-    const allTees = Array.isArray(teesObj.male) && teesObj.male.length ? teesObj.male : (teesObj.female || []);
-    const tees = allTees.map((t, ti) => ({
-      name: t.tee_name || "Default",
-      color: resolveTeeColor({ name: t.tee_name || "", color: "" }, ti),
-      rating: parseFloat(t.course_rating) || 72.0,
-      slope: parseInt(t.slope_rating) || 113,
-      par: parseInt(t.par_total) || 72,
-      yardage: parseInt(t.total_yards) || 0,
-      hole_yards: (t.holes || []).map(h => parseInt(h.yardage) || 0),
-    }));
-    const firstTee = allTees[0]; const holes = firstTee?.holes || [];
-    return {
-      id: `gc_${c.id || ci}`,
-      name: decodeHtml([c.club_name, c.course_name].filter(Boolean).join(" – ") || c.name || "Unknown"),
-      city: c.location?.city || c.city || "", state: c.location?.state || c.state || "",
-      par: parseInt(firstTee?.par_total) || 72,
-      slope: parseInt(firstTee?.slope_rating) || 113,
-      rating: parseFloat(firstTee?.course_rating) || 72.0,
-      hole_pars: holes.map(h => parseInt(h.par) || 4),
-      hole_handicaps: holes.map(h => parseInt(h.handicap) || 0),
-      tee_boxes: tees,
-      _source: "GolfCourseAPI",
-    };
-  });
-};
-
-// ── fetchCourseTees ────────────────────────────────────────────────────────
-// Ask the course APIs again for ONE course's tee boxes. Both endpoints, same
-// parsing as the search, best name match wins.
-//
-// Why the editor needs this: a course arrives with whatever tees the API had
-// that day, and the editor can delete them. Delete the wrong one — or find the
-// course was imported with a single "Default" tee when it really has five —
-// and the only way back used to be removing the course and searching for it
-// again, which loses every hand edit and every round already assigned to it.
-const fetchCourseTees = async (name, state) => {
-  const q = (name || "").trim();
-  if (q.length < 2) return [];
-  const stateParam = state ? `&state=${encodeURIComponent(state)}` : "";
-  const found = [];
-  try {
-    const r = await fetch(`/api/courses2?search=${encodeURIComponent(q)}${stateParam}`);
-    if (r.ok) {
-      const raw = await r.json();
-      found.push(...parseRapidAPI(Array.isArray(raw) ? raw : (raw.courses || []), state));
-    }
-  } catch (e) { console.log("[refetch/RapidAPI] failed:", e); }
-  try {
-    const r2 = await fetch(`/api/courses?search=${encodeURIComponent(q)}${stateParam}`);
-    if (r2.ok) found.push(...parseGolfCourseAPI(await r2.json()));
-  } catch (e) { console.log("[refetch/GolfCourseAPI] failed:", e); }
-  if (!found.length) return [];
-  // Exact name first, then anything containing it, then whatever came back —
-  // and among equals prefer the one carrying real ratings over a row of 113s.
-  const lc = q.toLowerCase();
-  const rank = (c) => {
-    const n = (c.name || "").toLowerCase();
-    return (n === lc ? 0 : n.includes(lc) || lc.includes(n) ? 1 : 2) * 2 + (hasRealSlope(c) ? 0 : 1);
-  };
-  const best = [...found].sort((a, b) => rank(a) - rank(b))[0];
-  return best?.tee_boxes || [];
-};
-
-// ── TEE ASSIGNER ──
 function TeeAssigner({ activePlayers, tRounds, courses, teeData, setTeeBulk, finalizedRounds, editRound, teesSaved, onTeesModify }) {
 
   const tr = tRounds.find(t => t.round_number === editRound);
