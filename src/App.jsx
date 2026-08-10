@@ -13,6 +13,9 @@ import { normalizeLots, openingSharesLeft, marketWindows, eligibleBets, rebuyers
 import { betsToHold, shouldPublish, betsSignature } from "./lib/marketSeal";
 import { BuyInPrices, BuyInTracker } from "./components/BuyIns";
 import { SyncBanner } from "./components/SyncBanner";
+import { TeeColorSwatch } from "./components/TeeColorSwatch";
+// What colour a set of tees is — see lib/teeColors.
+import { resolveTeeColor, isLightTee, isDarkTee, TEE_COLOR_MAP } from "./lib/teeColors";
 import { useConfirm } from "./lib/useConfirm";
 // Tee times survive a re-group because of these two — see lib/teeSheet.js.
 import { rowsToTeeTimes, mergeTeeTimes } from "./lib/teeSheet";
@@ -551,83 +554,16 @@ const tournamentDays = (start, end) => {
   }
   return out;
 };
-// Resolve tee color from name — handles standard colors, non-standard colors, and word names
-const TEE_COLOR_MAP = {
-  black: "#2c2c2c", blue: "#2d8fd4", white: "#e8e8e8", gold: "#d4a843", red: "#9b2335",
-  green: "#2d8a4e", silver: "#a8b2bd", yellow: "#e6c619", orange: "#e67e22", purple: "#7b2d8b",
-  maroon: "#6b1c2a", navy: "#1b2a4a", teal: "#1a8a7a", tan: "#c4a86b", copper: "#b87333",
-  bronze: "#cd7f32", champagne: "#f7e7ce", crimson: "#b22234", burgundy: "#800020",
-  platinum: "#c0c0c0", pewter: "#8e8e8e", sand: "#c2b280", coral: "#ff7f50",
-  tournament: "#1a1a2e", championship: "#1a1a2e", tips: "#1a1a2e", pro: "#2d8fd4", member: "#e8e8e8",
-  ladies: "#c0392b", senior: "#d4a843", forward: "#d4a843", back: "#1a1a2e", middle: "#e8e8e8",
-};
-// Palette for unknown tee names (cycled by index)
-const TEE_FALLBACK_COLORS = ["#5b8fb9", "#8b5e3c", "#6b7b3a", "#8e44ad", "#2e86ab", "#a84632"];
-const resolveTeeColor = (tee, index) => {
-  // Always check name first so known color names are normalized consistently
-  const key = (tee.name || "").toLowerCase().trim();
-  if (TEE_COLOR_MAP[key]) return TEE_COLOR_MAP[key];
-  for (const [word, clr] of Object.entries(TEE_COLOR_MAP)) {
-    if (key.includes(word)) return clr;
-  }
-  // Fall back to stored color only for unknown tee names
-  if (tee.color && tee.color !== "#000" && tee.color !== "#000000") return tee.color;
-  return TEE_FALLBACK_COLORS[index % TEE_FALLBACK_COLORS.length];
-};
-// Combo tee detection — splits "BLACK/BLUE" into ["#2c2c2c", "#2d8fd4"]
-const getComboColors = (name) => {
-  if (!name) return null;
-  const separators = ["/", "-", "+", "&", " and "];
-  for (const sep of separators) {
-    const parts = name.split(new RegExp(`\\s*${sep.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")}\\s*`, "i")).map(p => p.trim().toLowerCase());
-    if (parts.length === 2 && parts[0] !== parts[1]) {
-      const c1 = TEE_COLOR_MAP[parts[0]] || (parts[0].includes("black") ? "#2c2c2c" : null);
-      const c2 = TEE_COLOR_MAP[parts[1]] || (parts[1].includes("white") ? "#e8e8e8" : null);
-      if (c1 && c2) return [c1, c2];
-    }
-  }
-  return null;
-};
-
-const isLightTee = (clr) => {
-  if (!clr) return false;
-  const light = ["#e8e8e8","#a8b2bd","#c0c0c0","#f7e7ce","#c2b280","#c4a86b","#8e8e8e"];
-  return light.includes(clr.toLowerCase());
-};
-const isDarkTee = (clr) => {
-  if (!clr) return false;
-  const dark = ["#1a1a2e","#000000","#111111","#0a0a0a","#1a1a1a","#222222","#2c2c2c","#2d2d2d","#0d0d0d","black"];
-  return dark.includes(clr.toLowerCase());
-};
-const isBlackTee = (clr) => isDarkTee(clr);
-
+// The tee-colour logic — TEE_COLOR_MAP, resolveTeeColor, getComboColors and
+// the light/dark tests — is in lib/teeColors with a test. Imported below.
 // Portal component — renders modal directly into document.body to escape all stacking contexts
 const CoursePreviewPortal = ({ children }) => {
   if (typeof document === "undefined") return null;
   return createPortal(children, document.body);
 };
 // TeeColorSwatch — handles solid, combo (diagonal split), and black (gray+dot) tees
-const TeeColorSwatch = ({ color, name, size = 12, style = {} }) => {
-  const combo = getComboColors(name || "");
-  if (combo) {
-    const [c1, c2] = combo;
-    const s = size;
-    return (
-      <span style={{ display: "inline-block", width: s, height: s, borderRadius: R.xs, overflow: "hidden", flexShrink: 0, border: "1px solid #ffffff20", ...style }}>
-        <svg width={s} height={s} viewBox={`0 0 ${s} ${s}`}>
-          <polygon points={`0,0 ${s},0 0,${s}`} fill={c1} />
-          <polygon points={`${s},0 ${s},${s} 0,${s}`} fill={c2} />
-        </svg>
-      </span>
-    );
-  }
-  if (isBlackTee(color)) {
-    return <span style={{ display: "inline-block", width: size, height: size, borderRadius: R.xs, background: "#1a1a1a", border: "1px solid #666666", flexShrink: 0, ...style }} />;
-  }
-  const border = isLightTee(color) ? "1px solid #99999960" : "1px solid #ffffff15";
-  return <span style={{ display: "inline-block", width: size, height: size, borderRadius: R.xs, background: color || "#888", border, flexShrink: 0, ...style }} />;
-};
-
+// TeeColorSwatch is components/TeeColorSwatch.jsx — it is drawn on five
+// screens and they are becoming five files.
 
 // Pick default tee: closest to slope 128 and 6400 yards (weighted combo)
 const getDefaultTee = (tees) => {
