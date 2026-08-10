@@ -10,8 +10,15 @@
 //  closing it, opening the next — sixteen names times five games, with the
 //  running total living nowhere but the director's head. This is the same
 //  information as a table: a row per player, a column per buy-in, and the two
-//  numbers that actually matter — what this man owes, and what should be in
-//  the envelope when everybody has paid.
+//  numbers that actually matter — what this man STILL owes, and what is left
+//  to collect from the room.
+//
+//  OWES IS WHAT IS LEFT TO COLLECT, not what he was billed. Marking a cell
+//  paid takes that buy-in off his line and off the room's, so the column
+//  counts down to nothing as the money comes in — which is the only reading
+//  that matches what the director is doing while they tap. Billing him and
+//  collecting from him are the same tap on the sheet only when the sheet
+//  never moves; here it moves twice, and OWES answers the second tap.
 //
 //  The card carries no instructions. Every affordance in it is a tap on the
 //  thing it changes — a heading, a name, a cell — and a director who has used
@@ -106,13 +113,14 @@ export function BuyInPrices({ players, games, onChange }) {
           </span>
         </div>
       ))}
+      {/* What every seat sold adds up to — the pot side of the sheet, which is
+          the question a price screen is answering. What is still to come in
+          belongs to the Betting tab's tracker and is repeated here only
+          because a director setting prices asks it in the same breath. */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 12 }}>
-        <span style={{ flex: 1, fontSize: FS.label, fontWeight: 800, color: K.t3, letterSpacing: 0.8 }}>TOTAL OWED</span>
+        <span style={{ flex: 1, fontSize: FS.label, fontWeight: 800, color: K.t3, letterSpacing: 0.8 }}>TOTAL BUY-INS</span>
         <span style={{ fontSize: FS.lead, fontWeight: 800, color: K.gold }}>{money(sheet.grand)}</span>
       </div>
-      {/* Owed and collected are the same number until somebody enters the
-          halfway market, which is the one buy-in a man takes on hours before
-          he can hand anybody cash. */}
       {sheet.outstanding > 0 && (
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
           <span style={{ flex: 1, fontSize: FS.label, fontWeight: 800, color: K.warn, letterSpacing: 0.8 }}>STILL TO COLLECT</span>
@@ -275,27 +283,35 @@ export function BuyInTracker({ players, games, onChange }) {
               </div>
             );
           })}
-          <span style={{ textAlign: "right", fontSize: FS.small, fontWeight: 700, color: row.unpaid > 0 ? K.warn : row.owes > 0 ? K.gold : K.t3 }}>
-            {row.owes > 0 ? `$${row.owes}` : "—"}
+          {/* What is LEFT to collect from this man. A tick that fills in is
+              money in the director's hand, so it comes off here on the same
+              tap — a row that still read $80 after he had settled up was the
+              sheet disagreeing with the cells beside it.
+
+              Settled reads ✓, not a dash: he was in and he has paid, which is
+              a different answer from the man who was never in anything. */}
+          <span style={{ textAlign: "right", fontSize: FS.small, fontWeight: 700, color: row.unpaid > 0 ? K.warn : row.owes > 0 ? K.acc : K.t3 }}>
+            {row.unpaid > 0 ? `$${row.unpaid}` : row.owes > 0 ? "✓" : "—"}
           </span>
         </div>
       ))}
 
       {/* ── The envelope ── */}
-      {/* The one number the director is actually counting cash against. */}
+      {/* The headline is the sum of the OWES column, for the same reason the
+          column changed: the director is counting cash they have not been
+          handed yet. What is already in the envelope goes underneath, against
+          the full sheet, so the pot is still readable at a glance. */}
       <div style={{ padding: "10px 12px", background: `${K.acc}${ALPHA.wash}` }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ flex: 1, fontSize: FS.label, fontWeight: 800, color: K.t3, letterSpacing: 0.8 }}>TOTAL OWED</span>
-          <span style={{ fontSize: FS.lead, fontWeight: 800, color: K.gold }}>{money(sheet.grand)}</span>
+          <span style={{ flex: 1, fontSize: FS.label, fontWeight: 800, color: K.t3, letterSpacing: 0.8 }}>STILL TO COLLECT</span>
+          <span style={{ fontSize: FS.lead, fontWeight: 800, color: sheet.outstanding > 0 ? K.warn : K.acc }}>{money(sheet.outstanding)}</span>
         </div>
-        {/* Only once something is actually outstanding — which is only ever
-            the halfway rebuy, and only until the director has been round. */}
-        {sheet.outstanding > 0 && (
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
-            <span style={{ flex: 1, fontSize: FS.label, fontWeight: 800, color: K.warn, letterSpacing: 0.8 }}>STILL TO COLLECT</span>
-            <span style={{ fontSize: FS.body, fontWeight: 800, color: K.warn }}>{money(sheet.outstanding)}</span>
-          </div>
-        )}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
+          <span style={{ flex: 1, fontSize: FS.label, fontWeight: 800, color: K.t3, letterSpacing: 0.8 }}>COLLECTED</span>
+          <span style={{ fontSize: FS.body, fontWeight: 800, color: K.t3 }}>
+            {money(sheet.grand - sheet.outstanding)} of {money(sheet.grand)}
+          </span>
+        </div>
       </div>
     </div>
   );
