@@ -75,11 +75,37 @@ service firebase.storage {
       // rewritten in place, which is also what makes the year-long immutable
       // Cache-Control header on them safe.
       allow update: if false;
-      // Deleting bytes is paired with deleting the wbc_media document, and
-      // that document is what firestore.rules actually guards. A signed-in
-      // caller can only delete here; they cannot make the photo disappear
-      // from the app without also passing the membership check over there.
-      allow delete: if isSignedIn();
+      // ── Deleting: the poster's own, and nobody else's ──
+      // This used to allow any signed-in caller, on the reasoning that they
+      // could not make the photo disappear from the APP without also passing
+      // firestore.rules. That had it backwards. Destroying the bytes is the
+      // irreversible half: the index document naming them survives, so the
+      // gallery keeps a tile that can never load again, and the photo is gone
+      // for good. The Firestore side carefully restricts deletes to the poster
+      // or a director; leaving this open meant anybody with a Google account
+      // could do the damage that actually matters.
+      //
+      // The check is on the object's own metadata because it is the only fact
+      // about ownership a Storage rule can reach — these rules cannot read
+      // Firestore, and the path deliberately carries nothing but a random id.
+      // mediaUpload.js stamps `uid` on every object it sends.
+      //
+      // TWO CONSEQUENCES, both deliberate, both the safe direction:
+      //
+      //   • Objects uploaded BEFORE this carry no metadata, so nothing matches
+      //     and no client can delete them. Removing such a photo still removes
+      //     it from the app — the document goes — and leaves ~250KB of orphan
+      //     behind. An orphan is cheap; somebody else's deleted photo is not.
+      //
+      //   • A DIRECTOR removing another person's photo hits the same wall,
+      //     because director-ness lives in Firestore where this file cannot
+      //     look. It disappears from the app and orphans its bytes, which is
+      //     the failure mediaUpload.js already documents as the acceptable one.
+      //     Emptying the bucket at the end of an edition is an admin-SDK job
+      //     and bypasses these rules entirely.
+      allow delete: if isSignedIn()
+                    && resource.metadata.uid is string
+                    && resource.metadata.uid == request.auth.uid;
     }
 
     // ── Everything else ───────────────────────────────────────────
