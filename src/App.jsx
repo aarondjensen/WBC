@@ -28,7 +28,6 @@ import { rowsToTeeTimes, mergeTeeTimes } from "./lib/teeSheet";
 // Score documents → the holeData map, deletions included — see lib/holeScores.
 import { applyScoreChanges, roundOf } from "./lib/holeScores";
 // Whether this phone is actually reaching the server — see lib/connection.
-import { createWriteTracker } from "./lib/connection";
 import { useSyncStatus } from "./lib/useSyncStatus";
 // Edition rows + career names → the roster every screen renders. The join and
 // the rule for when to redo it live together — see lib/roster.
@@ -38,7 +37,7 @@ import { useSheetDrag } from "./lib/useSheetDrag";
 import { usePullToRefresh, hasNewBundle } from "./lib/usePullToRefresh";
 import { NotificationSettings } from "./components/NotificationSettings";
 import { registerForPush, getCachedSubscriptionStatus } from "./lib/notifications";
-import { pairingScoreImpact, orphanedScores, describeScored, totalHoles } from "./lib/scoreGuard";
+import { pairingScoreImpact, orphanedScores, describeScored, totalHoles, holesEntered } from "./lib/scoreGuard";
 import { groupsForRound, assignToGroup, removeFromGroup as removeFromGroupPure, clearGroup, swapIntoGroup, rowsToPairings } from "./lib/pairings";
 import { PAIRING_MODES, PAIRING_MODE_LABEL, resolvePairingCfg, buildPriorPartners, optimizeAvoidRepeats, groupByLeaderboard } from "./lib/pairingDraw";
 import { stateMatches, hasRealSlope, parseRapidAPI, parseGolfCourseAPI, fetchCourseTees } from "./lib/courseSearch";
@@ -52,6 +51,8 @@ import { teeTimeToMinutes, localDateISO, fmtRoundDate } from "./lib/format";
 import { SCORING_LEAD_MIN } from "./lib/scoringGate";
 // How many rounds this event plays — a live binding. See lib/rounds.
 import { NUM_ROUNDS, setRoundCount } from "./lib/rounds";
+import { db, writes } from "./lib/db";
+import { toDisplayName, fullName, splitName } from "./lib/playerNames";
 import { missingTees, describeMissingTees } from "./lib/roundSetup";
 import { indexFor, matchHistoryName } from "./lib/handicap";
 import { groupKey as groupKeyOf, roundOfGroupKey, liveRound, roundFinalized, switchableGroups, groupProgress } from "./lib/groupSwitch";
@@ -71,7 +72,6 @@ const PhotosView = lazy(() => import("./components/PhotosView"));
 import { photoUploadsAllowed, uploadsDisabledReason } from "./lib/media";
 import { returningPlayers, returningLine } from "./lib/returningPlayers";
 import { TROPHY_SVG_URL, WBC_LOGO, WBC_FAVICON, ROUND_CHOICES, clampRounds, CTP_MAX_FT, CTP_WHEEL_ITEM, CTP_WHEEL_H, SIDE_GAME_KEYS, SIDE_GAME_LABELS } from "./constants";
-import { collection, doc, setDoc, getDocs, query, where, writeBatch, onSnapshot, deleteDoc } from "firebase/firestore";
 import { getMessaging, onMessage, isSupported as isMessagingSupported } from "firebase/messaging";
 
 
@@ -145,120 +145,9 @@ const CLAIM_REQUIRES_APPROVAL = false;
 // Firebase Console → Project Settings → Cloud Messaging → Web Push certificates.
 const VAPID_KEY = "BF3PLSs3kpCVHbhnbuBo1gSYeLKhYYwEgICUo07xRpuQP8LyxqkLkSV969ZcIptb1ZSY81h8738lblo9N2goNGo";
 
-// ── Writes handed over but not yet acknowledged ──
-// Every write below is registered here on its way out. See lib/connection for
-// why this is the only honest way to know whether a phone is really talking to
-// the server: a Firestore write with no signal does not fail, it simply never
-// resolves, so a queue that is not draining is the symptom and there is no
-// error anywhere to catch.
-const writes = createWriteTracker();
-
-// ── db: Firestore data layer ──
-const db = {
-  _q: (col, filters = []) => {
-    const ref = collection(_db, col);
-    return filters.length ? query(ref, ...filters.map(f => where(f.field, f.op, f.value))) : ref;
-  },
-  get: async (col, filters = []) => {
-    try {
-      const snap = await getDocs(db._q(col, filters));
-      return snap.docs.map(d => d.data());
-    } catch(e) { console.error("db.get error:", col, e); return null; }
-  },
-  upsert: async (col, data) => {
-    if (!data.id) { console.error("db.upsert: missing id", col, data); return null; }
-    try {
-      await writes.track(setDoc(doc(_db, col, String(data.id)), data, { merge: true }), col);
-      return data;
-    } catch(e) { console.error("db.upsert error:", col, e); return null; }
-  },
-  // Write many rows as ONE commit. A `for (const r of rows) await upsert(r)`
-  // loop is not just N round trips — every commit fires the collection's
-  // onSnapshot, and those handlers rebuild their state from the SERVER copy.
-  // So a bulk change lands as N repaints, each showing the rows written so
-  // far and the rest still on their old values: the change appears to crawl
-  // down the list. One batch is one snapshot, so the whole set flips at once.
-  upsertMany: async (col, rows) => {
-    const valid = (rows || []).filter(r => r && r.id);
-    if (!valid.length) return true;
-    try {
-      // 500 is Firestore's hard cap on writes per batch; 490 leaves room.
-      for (let i = 0; i < valid.length; i += 490) {
-        const batch = writeBatch(_db);
-        valid.slice(i, i + 490).forEach(r => batch.set(doc(_db, col, String(r.id)), r, { merge: true }));
-        await writes.track(batch.commit(), col);
-      }
-      return true;
-    } catch(e) { console.error("db.upsertMany error:", col, e); return null; }
-  },
-  // Write a set of rows and delete another set in the SAME commit. Doing it as
-  // a delete followed by writes means the collection is briefly missing
-  // everything the delete took, and every listener sees that gap and rebuilds
-  // its state from it.
-  replaceMany: async (col, rows, deleteIds = []) => {
-    const valid = (rows || []).filter(r => r && r.id);
-    const gone = (deleteIds || []).filter(Boolean);
-    if (!valid.length && !gone.length) return true;
-    try {
-      // 500 writes per batch is Firestore's cap; 490 leaves room. Deletes ride
-      // in the first batch so the replacement lands with them.
-      const ops = [
-        ...gone.map(id => ({ kind: "del", id })),
-        ...valid.map(r => ({ kind: "set", row: r })),
-      ];
-      for (let i = 0; i < ops.length; i += 490) {
-        const batch = writeBatch(_db);
-        ops.slice(i, i + 490).forEach(op => {
-          if (op.kind === "del") batch.delete(doc(_db, col, String(op.id)));
-          else batch.set(doc(_db, col, String(op.row.id)), op.row, { merge: true });
-        });
-        await writes.track(batch.commit(), col);
-      }
-      return true;
-    } catch(e) { console.error("db.replaceMany error:", col, e); return null; }
-  },
-  delete: async (col, filters = []) => {
-    try {
-      const snap = await getDocs(db._q(col, filters));
-      if (snap.empty) return true;
-      const docs = snap.docs;
-      for (let i = 0; i < docs.length; i += 490) {
-        const batch = writeBatch(_db);
-        docs.slice(i, i + 490).forEach(d => batch.delete(d.ref));
-        await writes.track(batch.commit(), col);
-      }
-      return true;
-    } catch(e) { console.error("db.delete error:", col, e); return null; }
-  },
-  deleteDoc: async (col, id) => {
-    try { await writes.track(deleteDoc(doc(_db, col, String(id))), col); return true; }
-    catch(e) { console.error("db.deleteDoc error:", col, e); return null; }
-  },
-  // `onError` is optional and exists for the one caller that has to know the
-  // difference between "not answered yet" and "answered no": the roster
-  // listener, which owns `storageLoaded`. Without it a refused read would
-  // leave the leaderboard in its pre-load blank state forever, waiting for a
-  // snapshot that is never coming.
-  // The third callback argument is the snapshot's METADATA, and `fromCache` on
-  // it is load-bearing for exactly one caller. A listener answers from the
-  // on-disk cache first and the server a moment later, so an EMPTY first
-  // snapshot means "this phone has not been told yet", not "there is nothing".
-  // Anything that would act on emptiness has to be able to tell those apart —
-  // see the roster bootstrap, which writes a whole roster on that decision.
-  subscribe: (col, filters = [], callback, onError) => {
-    try {
-      return onSnapshot(
-        db._q(col, filters),
-        snap => callback(snap.docs.map(d => d.data()), snap.docChanges(), snap.metadata),
-        err => { console.error("db.subscribe error:", col, err); if (onError) onError(err); }
-      );
-    } catch(e) {
-      console.error("db.subscribe setup error:", col, e);
-      if (onError) onError(e);
-      return () => {};
-    }
-  },
-};
+// The Firestore data layer — `db`, and the `writes` tracker the sync banner
+// reads — is in lib/db. Every screen is its own file now and each of them
+// needs it; see the header there for the three things worth knowing.
 
 // Push registration moved to src/lib/notifications.js, alongside the
 // unsubscribe / status / test-send half it never had. registerForPush is
@@ -1146,35 +1035,11 @@ function TeeAssigner({ activePlayers, tRounds, courses, teeData, setTeeBulk, fin
   );
 }
 
-// ── The display-name rule ──
-// Every screen outside this console shows "First LastInitial" ("Aaron J") —
-// which is also where the player ids come from (aaron_j). That is persisted as
-// the player's `name` so all existing display code keeps working unchanged;
-// first_name / last_name are the full source of truth, edited only here.
-// Falls back to first-name-only when no last name is set.
-const toDisplayName = (first, last) => {
-  const f = (first || "").trim();
-  const l = (last || "").trim();
-  return l ? `${f} ${l[0].toUpperCase()}` : f;
-};
-const fullName = (p) =>
-  (p?.first_name || p?.last_name)
-    ? [p.first_name, p.last_name].filter(Boolean).join(" ").trim()
-    : (p?.name || "");
-// Best-effort split for a roster that predates first/last being stored: the
-// editor seeds from these so an existing player opens with their name already
-// in the right boxes rather than blank.
-const splitName = (p) => {
-  if (p?.first_name || p?.last_name) return { first: p.first_name || "", last: p.last_name || "" };
-  const parts = String(p?.name || "").trim().split(/\s+/);
-  return { first: parts[0] || "", last: parts.slice(1).join(" ") };
-};
-
-// How many holes a player has actually posted in a round — used by both the
-// move-to-inactive confirmation and the discard-scores action, so the number
-// the director is warned about is the number that would be affected.
-const holesEntered = (holeData, pid, round) =>
-  Object.values(holeData?.[`${pid}_${round}`] || {}).filter(s => s > 0 && s !== WD_SCORE).length;
+// The three ways this app says who somebody is — toDisplayName, fullName and
+// splitName — are in lib/playerNames with a test.
+//
+// `holesEntered` was ALSO here, byte-identical to the one in lib/scoreGuard,
+// which is the module that owns the question. This file imports that one now.
 
 // ── PlayerRow ──
 // A read-only summary line. All editing moved into PlayerEditor, following
