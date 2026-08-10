@@ -10,8 +10,15 @@
 //  closing it, opening the next — sixteen names times five games, with the
 //  running total living nowhere but the director's head. This is the same
 //  information as a table: a row per player, a column per buy-in, and the two
-//  numbers that actually matter — what this man owes, and what should be in
-//  the envelope when everybody has paid.
+//  numbers that actually matter — what this man STILL owes, and what is left
+//  to collect from the room.
+//
+//  OWES IS WHAT IS LEFT TO COLLECT, not what he was billed. Marking a cell
+//  paid takes that buy-in off his line and off the room's, so the column
+//  counts down to nothing as the money comes in — which is the only reading
+//  that matches what the director is doing while they tap. Billing him and
+//  collecting from him are the same tap on the sheet only when the sheet
+//  never moves; here it moves twice, and OWES answers the second tap.
 //
 //  The card carries no instructions. Every affordance in it is a tap on the
 //  thing it changes — a heading, a name, a cell — and a director who has used
@@ -22,6 +29,15 @@
 //  are days apart — the field is tagged in a car park on Friday and the money
 //  comes in over the weekend — so a cell cycles out → in (✓, amber, he owes)
 //  → paid (✓✓, filled) → out. See toggleCell.
+//
+//  MONEY GOES ON WITH A TAP AND COMES OFF WITH AN ANSWER. Every tap that
+//  would erase a payment already recorded — a paid cell, a paid column, a
+//  name with settled buy-ins behind it — asks first and says what it is about
+//  to forget. Nothing else does: putting a man in, marking him paid and
+//  taking a mis-typed name back out stay one tap, because a director going
+//  down sixteen names with a thumb should not be stopped for a change they
+//  can undo by tapping again. A cleared payment is the one thing on this
+//  sheet nobody can see is missing.
 //
 //  Three ways in, in descending order of how often they get used:
 //    • A COLUMN header runs that cycle over the whole buy-in. "Everybody is in
@@ -59,6 +75,8 @@
 import { useState } from "react";
 import { K, FONT, ALPHA, FS, R, ON_ACC } from "../theme";
 import { buyInSheet, toggleIn, togglePaid } from "../lib/sideGames";
+import { ConfirmModal } from "./Popup";
+import { useConfirm } from "../lib/useConfirm";
 
 const money = (n) => `$${(n || 0).toFixed(2)}`;
 
@@ -106,13 +124,14 @@ export function BuyInPrices({ players, games, onChange }) {
           </span>
         </div>
       ))}
+      {/* What every seat sold adds up to — the pot side of the sheet, which is
+          the question a price screen is answering. What is still to come in
+          belongs to the Betting tab's tracker and is repeated here only
+          because a director setting prices asks it in the same breath. */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 12 }}>
-        <span style={{ flex: 1, fontSize: FS.label, fontWeight: 800, color: K.t3, letterSpacing: 0.8 }}>TOTAL OWED</span>
+        <span style={{ flex: 1, fontSize: FS.label, fontWeight: 800, color: K.t3, letterSpacing: 0.8 }}>TOTAL BUY-INS</span>
         <span style={{ fontSize: FS.lead, fontWeight: 800, color: K.gold }}>{money(sheet.grand)}</span>
       </div>
-      {/* Owed and collected are the same number until somebody enters the
-          halfway market, which is the one buy-in a man takes on hours before
-          he can hand anybody cash. */}
       {sheet.outstanding > 0 && (
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
           <span style={{ flex: 1, fontSize: FS.label, fontWeight: 800, color: K.warn, letterSpacing: 0.8 }}>STILL TO COLLECT</span>
@@ -129,6 +148,23 @@ export function BuyInPrices({ players, games, onChange }) {
 export function BuyInTracker({ players, games, onChange }) {
   const sheet = buyInSheet({ players, games });
   const rowFor = (pid) => sheet.rows.find(r => r.pid === pid);
+  const { confirm, confirmModal } = useConfirm();
+
+  // ── Cash already handed over does not come off on one tap ──
+  //
+  // Everything else on this sheet is a cheap tap: putting a man in, marking
+  // him paid, taking a name back out that went in by mistake. All of them are
+  // undone by tapping again, and a director scrolling sixteen names with a
+  // thumb should not be interrupted for any of that.
+  //
+  // Un-marking a PAYMENT is not in that class. It is a record of money that
+  // physically changed hands, the director is the only person who knows it
+  // did, and a mis-tap that erases it reads exactly like a man who never paid
+  // — so it gets found on Sunday, by asking him for money he already gave.
+  // That asymmetry is the whole rule: this asks before money comes OFF the
+  // sheet, never before it goes on.
+  const askUnpaid = (title, message, confirmLabel) =>
+    confirm({ title, message, confirmLabel, cancelLabel: "Leave it", destructive: true });
 
   // ── One cell, three states, in the order the money moves ──
   //
@@ -146,32 +182,56 @@ export function BuyInTracker({ players, games, onChange }) {
   // from a tee box, so the director cannot put a man in or take him out. Its
   // cell only ever answers the second question, and a man who never entered
   // has nothing to pay.
-  const toggleCell = (g, pid) => {
+  //
+  // The tap that leaves the PAID state asks first — see askUnpaid.
+  const toggleCell = async (g, pid) => {
     const row = rowFor(pid);
     const isIn = row?.games[g.key];
     if (g.derived) {
       if (!g.paid || !isIn) return;
+      if (row.paid[g.key] && !await askUnpaid(
+        "Mark unpaid?",
+        `${row.name} is down as having paid ${money(g.amount)} for ${g.label}. This puts it back on what they owe.`,
+        "Mark unpaid")) return;
       return onChange({ [g.key]: { paid: togglePaid(g.paid, pid) } });
     }
     if (!isIn) return onChange({ [g.key]: { in: toggleIn(g.ids, players, pid) } });
     if (!row.paid[g.key]) return onChange({ [g.key]: { paid: togglePaid(g.paid, pid) } });
-    // Paid → out. Both lists, or he leaves a paid flag behind that would mark
-    // him settled the moment anybody put him back in.
+    // Paid → out, which is two undos in one tap: it clears the payment AND
+    // takes him out of the game. Both are said out loud before it happens.
+    if (!await askUnpaid(
+      "Take them out?",
+      `${row.name} has paid ${money(g.amount)} for ${g.label}. This takes them out of it and clears that payment.`,
+      "Take out")) return;
+    // Both lists, or he leaves a paid flag behind that would mark him settled
+    // the moment anybody put him back in.
     onChange({ [g.key]: { in: toggleIn(g.ids, players, pid), paid: (g.paid || []).filter(x => x !== pid) } });
   };
 
   // The heading runs the same cycle over the whole column: everybody in,
   // then everybody paid, then nobody. "The field is in for skins" is one tap
   // on a Friday and "they have all settled up" is one more on the Sunday.
-  const toggleColumn = (g) => {
+  //
+  // Which makes the tap AFTER that one the most expensive tap on the sheet —
+  // it clears a column the director has just spent a weekend filling in — so
+  // it asks, and says how much it is about to forget.
+  const toggleColumn = async (g) => {
     const t = sheet.totals[g.key];
     const inPids = sheet.rows.filter(r => r.games[g.key]).map(r => r.pid);
     if (g.derived) {
       if (!g.paid) return;
+      if (t.allPaid && !await askUnpaid(
+        "Mark the whole column unpaid?",
+        `All ${t.count} in ${g.label} are down as paid (${money(t.paidAmount)}). This puts every one of them back on the sheet.`,
+        "Mark unpaid")) return;
       return onChange({ [g.key]: { paid: t.allPaid ? [] : inPids } });
     }
     if (!t.all) return onChange({ [g.key]: { in: players.map(p => p.id) } });
     if (!t.allPaid) return onChange({ [g.key]: { paid: inPids } });
+    if (!await askUnpaid(
+      "Clear the whole column?",
+      `Everybody in ${g.label} is down as paid (${money(t.paidAmount)}). This takes the field out of it and clears every one of those payments.`,
+      "Clear column")) return;
     onChange({ [g.key]: { in: [], paid: [] } });
   };
 
@@ -185,7 +245,7 @@ export function BuyInTracker({ players, games, onChange }) {
   // rebuy he never paid, which is a charge appearing on the sheet from a tap
   // that meant something else. This way the tap that costs money can only
   // happen from zero, where there is nothing to misread.
-  const toggleRow = (pid) => {
+  const toggleRow = async (pid) => {
     const row = rowFor(pid);
     // Derived columns are excluded from BOTH halves. Dropping a player must
     // not silently delete the shares they placed, and adding one must not
@@ -193,10 +253,24 @@ export function BuyInTracker({ players, games, onChange }) {
     // because of what its own game recorded.
     const tagged = games.filter(g => !g.derived);
     const anyIn = tagged.some(g => row.games[g.key]);
+    // Dropping a man who has settled up is the same erasure as un-ticking his
+    // cells one at a time, done by one tap on a name — which is the easiest
+    // mis-tap on the sheet, since the name is the widest thing in the row.
+    const settled = tagged.filter(g => row.paid[g.key]);
+    const paidSum = settled.reduce((sum, g) => sum + (g.amount || 0), 0);
+    if (anyIn && settled.length > 0 && !await askUnpaid(
+      "Take them out of everything?",
+      `${row.name} has paid ${money(paidSum)} across ${settled.length} ${settled.length === 1 ? "buy-in" : "buy-ins"}. Taking them out clears those payments too.`,
+      "Take out")) return;
     const patch = {};
     tagged.forEach(g => {
       const list = g.ids ?? players.map(p => p.id);
-      patch[g.key] = { in: anyIn ? list.filter(x => x !== pid) : [...new Set([...list, pid])] };
+      // Dropping clears his paid flags with him, for the same reason the cell
+      // does: a flag left behind would mark him settled the moment anybody put
+      // him back in. Adding never touches them — being in is not being paid.
+      patch[g.key] = anyIn
+        ? { in: list.filter(x => x !== pid), paid: (g.paid || []).filter(x => x !== pid) }
+        : { in: [...new Set([...list, pid])] };
     });
     onChange(patch);
   };
@@ -275,28 +349,42 @@ export function BuyInTracker({ players, games, onChange }) {
               </div>
             );
           })}
-          <span style={{ textAlign: "right", fontSize: FS.small, fontWeight: 700, color: row.unpaid > 0 ? K.warn : row.owes > 0 ? K.gold : K.t3 }}>
-            {row.owes > 0 ? `$${row.owes}` : "—"}
+          {/* What is LEFT to collect from this man. A tick that fills in is
+              money in the director's hand, so it comes off here on the same
+              tap — a row that still read $80 after he had settled up was the
+              sheet disagreeing with the cells beside it.
+
+              Settled reads ✓, not a dash: he was in and he has paid, which is
+              a different answer from the man who was never in anything. */}
+          <span style={{ textAlign: "right", fontSize: FS.small, fontWeight: 700, color: row.unpaid > 0 ? K.warn : row.owes > 0 ? K.acc : K.t3 }}>
+            {row.unpaid > 0 ? `$${row.unpaid}` : row.owes > 0 ? "✓" : "—"}
           </span>
         </div>
       ))}
 
       {/* ── The envelope ── */}
-      {/* The one number the director is actually counting cash against. */}
+      {/* The headline is the sum of the OWES column, for the same reason the
+          column changed: the director is counting cash they have not been
+          handed yet. What is already in the envelope goes underneath, against
+          the full sheet, so the pot is still readable at a glance. */}
       <div style={{ padding: "10px 12px", background: `${K.acc}${ALPHA.wash}` }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ flex: 1, fontSize: FS.label, fontWeight: 800, color: K.t3, letterSpacing: 0.8 }}>TOTAL OWED</span>
-          <span style={{ fontSize: FS.lead, fontWeight: 800, color: K.gold }}>{money(sheet.grand)}</span>
+          <span style={{ flex: 1, fontSize: FS.label, fontWeight: 800, color: K.t3, letterSpacing: 0.8 }}>STILL TO COLLECT</span>
+          <span style={{ fontSize: FS.lead, fontWeight: 800, color: sheet.outstanding > 0 ? K.warn : K.acc }}>{money(sheet.outstanding)}</span>
         </div>
-        {/* Only once something is actually outstanding — which is only ever
-            the halfway rebuy, and only until the director has been round. */}
-        {sheet.outstanding > 0 && (
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
-            <span style={{ flex: 1, fontSize: FS.label, fontWeight: 800, color: K.warn, letterSpacing: 0.8 }}>STILL TO COLLECT</span>
-            <span style={{ fontSize: FS.body, fontWeight: 800, color: K.warn }}>{money(sheet.outstanding)}</span>
-          </div>
-        )}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
+          <span style={{ flex: 1, fontSize: FS.label, fontWeight: 800, color: K.t3, letterSpacing: 0.8 }}>COLLECTED</span>
+          <span style={{ fontSize: FS.body, fontWeight: 800, color: K.t3 }}>
+            {money(sheet.grand - sheet.outstanding)} of {money(sheet.grand)}
+          </span>
+        </div>
       </div>
+
+      {/* The sheet's own confirm host. It lives in this card rather than on
+          the Betting tab because every tap it guards is in here, and a panel
+          that can lose a weekend's collecting should carry its own brakes
+          wherever somebody drops it. */}
+      <ConfirmModal modal={confirmModal} />
     </div>
   );
 }
