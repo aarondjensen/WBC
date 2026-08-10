@@ -40,6 +40,8 @@ import { openingHole, nineComplete } from "./lib/holeAdvance";
 import { scoreWindow, nudgeUpTarget, nudgeDownTarget, scoreTerm } from "./lib/scoreEntry";
 // The small conversions every screen does — see lib/format.
 import { fmtPar, teeTimeToMinutes, minutesToTimeStr } from "./lib/format";
+// How many rounds this event plays — a live binding. See lib/rounds.
+import { NUM_ROUNDS, setRoundCount } from "./lib/rounds";
 import { groupTrouble, roundTrouble, describeTrouble, blocksScoring, missingTees, describeMissingTees } from "./lib/roundSetup";
 import { indexFor, matchHistoryName } from "./lib/handicap";
 import { groupKey as groupKeyOf, roundOfGroupKey, sameGroup, liveRound, roundFinalized, switchableGroups, groupProgress } from "./lib/groupSwitch";
@@ -59,7 +61,7 @@ import { PlayersView } from "./components/PlayersView";
 const PhotosView = lazy(() => import("./components/PhotosView"));
 import { photoUploadsAllowed, uploadsDisabledReason } from "./lib/media";
 import { returningPlayers, returningLine } from "./lib/returningPlayers";
-import { TROPHY_SVG_URL, WBC_LOGO, WBC_FAVICON, DEFAULT_NUM_ROUNDS, ROUND_CHOICES, clampRounds, CTP_MAX_FT, SIDE_GAME_KEYS, SIDE_GAME_LABELS } from "./constants";
+import { TROPHY_SVG_URL, WBC_LOGO, WBC_FAVICON, ROUND_CHOICES, clampRounds, CTP_MAX_FT, SIDE_GAME_KEYS, SIDE_GAME_LABELS } from "./constants";
 import { collection, doc, setDoc, getDocs, query, where, writeBatch, onSnapshot, deleteDoc } from "firebase/firestore";
 import { getMessaging, onMessage, isSupported as isMessagingSupported } from "firebase/messaging";
 
@@ -82,17 +84,16 @@ let DEMO_PLAYERS = [];
 // event setup a director edits in Admin → Event, stored on the tournament_state
 // document as `meta.rounds`.
 //
-// NUM_ROUNDS is a LIVE BINDING rather than a constant, the same trick
-// firebase.js uses for TOURNAMENT_ID: every round loop, leaderboard column and
-// finalization check in this file reads it at RENDER time, so pointing it at
-// the saved value before React re-renders updates all of them at once. The
-// alternative was threading a `numRounds` prop through a dozen components that
-// only need it to count to four.
-// DEFAULT_NUM_ROUNDS / ROUND_CHOICES / clampRounds moved to constants.js — the
+// NUM_ROUNDS and setRoundCount moved to lib/rounds — read the header there
+// before touching either. It explains the one rule that makes a module-level
+// mutable safe here (assigned during render, from state, before children
+// render) and why the other kind took the app down once. The screens are
+// moving out of this file one at a time, and a component in src/components
+// cannot import a binding from the app shell without a circular import.
+//
+// DEFAULT_NUM_ROUNDS / ROUND_CHOICES / clampRounds are in constants.js — the
 // Tournaments picker needs the same numbers to tell a finished year from a
-// live one. Imported at the top of this file.
-let NUM_ROUNDS = DEFAULT_NUM_ROUNDS;
-const setRoundCount = (n) => { NUM_ROUNDS = clampRounds(n); return NUM_ROUNDS; };
+// live one. Both are imported at the top of this file.
 
 // Derived from the ACTIVE edition rather than pinned to 2026, so switching to
 // wbc_2027 renames the default tournament and moves the year without a code
