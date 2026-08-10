@@ -39,7 +39,11 @@ import { isHistoryCourseId } from "./lib/historyImport";
 import { openingHole, nineComplete } from "./lib/holeAdvance";
 import { scoreWindow, nudgeUpTarget, nudgeDownTarget, scoreTerm } from "./lib/scoreEntry";
 // The small conversions every screen does — see lib/format.
-import { fmtPar, teeTimeToMinutes, minutesToTimeStr } from "./lib/format";
+import { fmtPar, teeTimeToMinutes, minutesToTimeStr, localDateISO, fmtRoundDate } from "./lib/format";
+// When a phone may post a score — see lib/scoringGate.
+import { isScoringOpen, SCORING_LEAD_MIN } from "./lib/scoringGate";
+// The three taps this app makes.
+import { tapScore, tapNudge, tapBigAction } from "./lib/haptics";
 // How many rounds this event plays — a live binding. See lib/rounds.
 import { NUM_ROUNDS, setRoundCount } from "./lib/rounds";
 import { groupTrouble, roundTrouble, describeTrouble, blocksScoring, missingTees, describeMissingTees } from "./lib/roundSetup";
@@ -61,7 +65,7 @@ import { PlayersView } from "./components/PlayersView";
 const PhotosView = lazy(() => import("./components/PhotosView"));
 import { photoUploadsAllowed, uploadsDisabledReason } from "./lib/media";
 import { returningPlayers, returningLine } from "./lib/returningPlayers";
-import { TROPHY_SVG_URL, WBC_LOGO, WBC_FAVICON, ROUND_CHOICES, clampRounds, CTP_MAX_FT, SIDE_GAME_KEYS, SIDE_GAME_LABELS } from "./constants";
+import { TROPHY_SVG_URL, WBC_LOGO, WBC_FAVICON, ROUND_CHOICES, clampRounds, CTP_MAX_FT, CTP_WHEEL_ITEM, CTP_WHEEL_H, SIDE_GAME_KEYS, SIDE_GAME_LABELS } from "./constants";
 import { collection, doc, setDoc, getDocs, query, where, writeBatch, onSnapshot, deleteDoc } from "firebase/firestore";
 import { getMessaging, onMessage, isSupported as isMessagingSupported } from "firebase/messaging";
 
@@ -122,8 +126,8 @@ const TOURNAMENT = {
 // A ball outside 60 ft on a par 3 isn't winning a closest-to-pin, so the wheel caps
 // there rather than scrolling forever.
 // CTP_MAX_FT lives in constants.js — the Betting tab needs it from its own file.
-const CTP_WHEEL_ITEM = 36;   // px per row — also the scroll-snap stride
-const CTP_WHEEL_H = 150;     // px visible wheel height
+// CTP_WHEEL_ITEM / CTP_WHEEL_H are in constants.js — the scoring screen is its
+// own file now and the wheel goes with it.
 
 // ── Google/Apple sign-in feature flags ──
 // AUTH_PROVIDERS_ENABLED is defined in src/firebase.js (single source of truth,
@@ -527,22 +531,10 @@ const mergeSideGames = (raw) => {
 // their own spacing — this is only the starting assumption.
 const TEE_INTERVAL_MIN = 10;
 
-// ── SCORING GATE HELPERS ──
-// Minutes before tee time that scoring input unlocks for non-directors.
-const SCORING_LEAD_MIN = 30;
-
-// Local calendar date as YYYY-MM-DD — matches an <input type="date"> value.
-const localDateISO = (d = new Date()) => {
-  const y = d.getFullYear(); const mo = String(d.getMonth() + 1).padStart(2, "0"); const da = String(d.getDate()).padStart(2, "0");
-  return `${y}-${mo}-${da}`;
-};
-// Pretty round date ("Sat, Aug 15") from a YYYY-MM-DD string.
-const fmtRoundDate = (iso) => {
-  if (!iso) return "";
-  const [y, mo, da] = iso.split("-").map(Number);
-  if (!y || !mo || !da) return "";
-  return new Date(y, mo - 1, da).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
-};
+// The scoring gate — SCORING_LEAD_MIN and isScoringOpen — is in
+// lib/scoringGate, with a test. See the header there for what each closed
+// door is protecting against.
+// localDateISO and fmtRoundDate are in lib/format, imported at the top.
 // Every day the event runs, start..end inclusive, as YYYY-MM-DD. This is what
 // turns two dates typed once in Admin → Event into the only dates a round can
 // be played on. Capped at 14: a longer span is a typo (2026 for 2027), and a
@@ -559,22 +551,6 @@ const tournamentDays = (start, end) => {
   }
   return out;
 };
-// Is score entry open right now for a given round + this group's tee time?
-// Director → always open. Director "scoring open" toggle → open. Otherwise the
-// automatic gate: opens SCORING_LEAD_MIN before tee time, on the round's scheduled date.
-const isScoringOpen = ({ round, teeTime, roundDates, scoringOpen, isDirector }) => {
-  if (isDirector) return true;
-  if (scoringOpen && scoringOpen[round] === true) return true;
-  const dateStr = roundDates && roundDates[round];
-  if (!dateStr) return false;                    // no date set → closed until a director opens it
-  if (dateStr !== localDateISO()) return false;  // round isn't today → closed
-  const teeMin = teeTimeToMinutes(teeTime);
-  if (teeMin == null) return false;              // no/invalid tee time → closed
-  const now = new Date();
-  const nowMin = now.getHours() * 60 + now.getMinutes();
-  return nowMin >= teeMin - SCORING_LEAD_MIN;
-};
-
 // Resolve tee color from name — handles standard colors, non-standard colors, and word names
 const TEE_COLOR_MAP = {
   black: "#2c2c2c", blue: "#2d8fd4", white: "#e8e8e8", gold: "#d4a843", red: "#9b2335",
@@ -1290,16 +1266,8 @@ function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getP
 
 // ── NINE CARD ──
 
-// ═══════════════════════════════════════════════════════════════
-//  Haptic feedback helpers (ported from MnQ league Scoring)
-// ═══════════════════════════════════════════════════════════════
-// navigator.vibrate is supported on Android + recent iOS PWAs; no-ops elsewhere.
-//   • tapScore     — single 10ms blip for entering a hole score
-//   • tapNudge     — 8ms blip for the +/− nudge buttons (lighter)
-//   • tapBigAction — three-pulse pattern for big moments (sign, attest)
-function tapScore()     { if (typeof navigator !== "undefined" && navigator.vibrate) try { navigator.vibrate(10); } catch {} }
-function tapNudge()     { if (typeof navigator !== "undefined" && navigator.vibrate) try { navigator.vibrate(8); } catch {} }
-function tapBigAction() { if (typeof navigator !== "undefined" && navigator.vibrate) try { navigator.vibrate([20, 40, 20]); } catch {} }
+// The three taps this app makes — tapScore, tapNudge, tapBigAction — live in
+// lib/haptics, imported at the top of this file.
 
 // Labels sit beneath the 5 par-relative buttons [par-1, par, par+1, par+2, par+3].
 const SCORE_LABELS = ["Birdie", "Par", "Bogey", "Double", "Triple"];

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { fmtPar, teeTimeToMinutes, minutesToTimeStr } from "./format";
+import { fmtPar, teeTimeToMinutes, minutesToTimeStr, localDateISO, fmtRoundDate } from "./format";
 
 describe("fmtPar", () => {
   it("writes level par the way a scoreboard does", () => {
@@ -87,5 +87,41 @@ describe("minutesToTimeStr", () => {
     for (const t of ["7:00 AM", "8:10 AM", "12:00 PM", "1:45 PM", "6:05 PM"]) {
       expect(minutesToTimeStr(teeTimeToMinutes(t))).toBe(t);
     }
+  });
+});
+
+describe("localDateISO", () => {
+  it("formats a date as YYYY-MM-DD", () => {
+    expect(localDateISO(new Date(2026, 7, 15))).toBe("2026-08-15");
+  });
+
+  it("pads single-digit months and days", () => {
+    expect(localDateISO(new Date(2026, 0, 5))).toBe("2026-01-05");
+  });
+
+  // The bug this shape exists to avoid: toISOString() is UTC, so an evening
+  // in Michigan is already tomorrow in London.
+  it("uses the LOCAL day, not UTC", () => {
+    const lateEvening = new Date(2026, 7, 15, 22, 30);
+    expect(localDateISO(lateEvening)).toBe("2026-08-15");
+  });
+});
+
+describe("fmtRoundDate", () => {
+  it("prints a round's date the way the chips show it", () => {
+    expect(fmtRoundDate("2026-08-15")).toMatch(/Aug/);
+    expect(fmtRoundDate("2026-08-15")).toMatch(/15/);
+  });
+
+  // `new Date("2026-08-15")` parses as UTC midnight and renders local, which
+  // is yesterday for most of the Americas. Parsing the parts avoids it.
+  it("does not slip a day west of Greenwich", () => {
+    expect(fmtRoundDate("2026-08-15")).toBe(new Date(2026, 7, 15).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }));
+  });
+
+  it("is empty for no date and for nonsense", () => {
+    expect(fmtRoundDate("")).toBe("");
+    expect(fmtRoundDate(null)).toBe("");
+    expect(fmtRoundDate("not-a-date")).toBe("");
   });
 });

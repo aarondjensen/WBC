@@ -77,3 +77,11 @@ export const SIDE_GAME_LABELS = {
   market: { label: "Market",          short: "MKT" },
   rebuy:  { label: "Market rebuy",    short: "RE" },
 };
+
+// ── The closest-to-the-pin distance wheel ───────────────────────────
+// Its two measurements. Shared because the wheel is drawn on the scoring
+// screen and its range has to match the director's override in the Betting
+// tab, which is a different file — an override that could not reproduce a
+// tagged distance would be a correction tool that cannot correct.
+export const CTP_WHEEL_ITEM = 36;   // px per row — also the scroll-snap stride
+export const CTP_WHEEL_H = 150;     // px visible wheel height

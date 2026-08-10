@@ -51,3 +51,30 @@ export const minutesToTimeStr = (mins) => {
   if (h === 0) h = 12;
   return `${h}:${String(m).padStart(2, "0")} ${ampm}`;
 };
+
+// ── Calendar dates ─────────────────────────────────────────────────
+// The app talks in YYYY-MM-DD everywhere a date is stored, because that is
+// what an `<input type="date">` gives back and what sorts correctly as a
+// string. These are the two ends of that: today, and how to print one.
+
+// Today, as the local calendar day. NOT `toISOString().slice(0,10)`, which is
+// UTC — a director in Michigan setting a round for "today" at 8pm would have
+// that write tomorrow's date for four months of the year.
+export const localDateISO = (d = new Date()) => {
+  const y = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, "0");
+  const da = String(d.getDate()).padStart(2, "0");
+  return `${y}-${mo}-${da}`;
+};
+
+// "2026-08-15" → "Sat, Aug 15".
+//
+// Parsed into local components rather than handed to `new Date(iso)`, which
+// reads a bare YYYY-MM-DD as UTC MIDNIGHT and then renders it in local time —
+// so anywhere west of Greenwich the round dated the 26th prints as the 25th.
+export const fmtRoundDate = (iso) => {
+  if (!iso) return "";
+  const [y, mo, da] = String(iso).split("-").map(Number);
+  if (!y || !mo || !da) return "";
+  return new Date(y, mo - 1, da).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+};
