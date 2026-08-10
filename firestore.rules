@@ -184,6 +184,22 @@ service cloud.firestore {
       return !enforcing() || isDirector();
     }
 
+    // ── Which PLAYER is holding this phone ────────────────────────
+    // The uid identifies an account; the tournament is played by a player_id,
+    // and wbc_users/{uid} is the map between them (written at the claim
+    // screen). This is what lets a rule say "your own book and nobody else's"
+    // about a document keyed by player rather than by uid.
+    //
+    // Null for an account that has not claimed a profile, which correctly
+    // matches nothing rather than matching everything.
+    function myPlayerId() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/wbc_users/$(request.auth.uid))
+        ? get(/databases/$(database)/documents/wbc_users/$(request.auth.uid))
+            .data.get('player_id', null)
+        : null;
+    }
+
     // The password, and the deliberate hole in it. `accessCode()` reads a
     // document no ordinary client may read — rules `get()` is not subject to
     // read rules, which is the whole trick: the secret can be compared
@@ -334,8 +350,42 @@ service cloud.firestore {
                                       allow write: if canWrite(); }
     match /hole_scores/{doc}        { allow read: if isOpen();
                                       allow write: if canWrite(); }
-    match /skins/{doc}              { allow read: if isOpen();
-                                      allow write: if canWrite(); }
+    // ── skins: three kinds of document, one of which is money ──────
+    // This collection holds the CTP tags and the market's bets (skins
+    // themselves are derived from the cards and never stored — see
+    // lib/sideGames). The two are filed together deliberately; see the note
+    // above rowsToMarket in App.jsx.
+    //
+    // CTP is communal, like scoring: any member may tag a pin, and a later
+    // group beating it is the game working. A MARKET BET is not communal. It
+    // is one player's book, it is real money, and under a flat `canWrite()`
+    // any member could rewrite anybody's — not by any path the app offers,
+    // but the app is not what enforces this.
+    //
+    // So a market document may only be written by the player it belongs to,
+    // and by a director. The director exemption is load-bearing rather than
+    // administrative: entering a book for somebody whose phone died before the
+    // bell is the one correction this game has, and the Betting tab already
+    // offers it.
+    //
+    // The write is checked against `request.resource.data`, which for a merge
+    // write is the document as it WILL be — so a CTP confirmation that carries
+    // only `confirmed_by` still reads as the ctp document it is merging into,
+    // and is judged as one.
+    function isMarketBet(data) {
+      return data.get('skin_type', '') == 'market';
+    }
+
+    match /skins/{doc} {
+      allow read: if isOpen();
+      allow create, update: if canWrite()
+                            && (!isMarketBet(request.resource.data)
+                                || isDirector()
+                                || request.resource.data.get('player_id', '') == myPlayerId());
+      // Bets and tags are only ever removed in bulk — Start Fresh, or deleting
+      // an edition — both of which are director-only screens.
+      allow delete: if canAdmin();
+    }
     match /wbc_scorecard_sigs/{doc} { allow read: if isOpen();
                                       allow write: if canWrite(); }
 

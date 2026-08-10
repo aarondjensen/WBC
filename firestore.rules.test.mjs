@@ -116,6 +116,39 @@ await check("member can claim a name (wbc_users, own uid)", () =>
 await check("member CANNOT claim a name as somebody else", () =>
   assertFails(setDoc(doc(mike, "wbc_users/uid_aaron"), { uid: "uid_aaron", player_id: "aaron_j" })));
 
+// ── The market: a book belongs to one player, and it is money ──
+// `skins` holds the CTP tags AND the market's bets. Under a flat member write
+// any player could rewrite anybody's book — not by a path the app offers, but
+// the app is not what enforces this. The rule matches a bet's player_id
+// against the claim mike made just above (uid_mike → "mike_r").
+//
+// These must run BEFORE mike is made a director further down, or the refusals
+// invert.
+await env.withSecurityRulesDisabled(async (ctx) => {
+  await setDoc(doc(ctx.firestore(), "skins/mk_aarons"), { skin_type: "market", player_id: "aaron_j", opening: [{ pid: "aaron_j", shares: 20 }] });
+});
+await check("member can write their OWN market bet", () =>
+  assertSucceeds(setDoc(doc(mike, "skins/mk_mikes"), { skin_type: "market", player_id: "mike_r", opening: [{ pid: "mike_r", shares: 20 }] })));
+await check("member CANNOT open a book in somebody else's name", () =>
+  assertFails(setDoc(doc(mike, "skins/mk_forged"), { skin_type: "market", player_id: "aaron_j", opening: [] })));
+await check("member CANNOT rewrite somebody else's book by merge", () =>
+  assertFails(setDoc(doc(mike, "skins/mk_aarons"), { opening: [{ pid: "mike_r", shares: 20 }] }, { merge: true })));
+await check("member CANNOT delete a book", () =>
+  assertFails(deleteDoc(doc(mike, "skins/mk_mikes"))));
+
+// CTP stays communal — a pin is tagged by whichever group is standing on it,
+// naming whoever hit the shot, and a later group answers the standing tag.
+// Both are member writes about somebody else and must keep working.
+await check("member can tag a CTP for another player", () =>
+  assertSucceeds(setDoc(doc(mike, "skins/ctp_r1_h4"), { skin_type: "ctp", player_id: "aaron_j", distance_ft: 12 })));
+await check("member can confirm a standing CTP tag", () =>
+  assertSucceeds(setDoc(doc(mike, "skins/ctp_r1_h4"), { confirmed_by: ["mike_r"] }, { merge: true })));
+
+// A signed-in account that never claimed a profile has no player_id, which
+// must match nothing rather than everything.
+await check("unclaimed account CANNOT write a market bet", () =>
+  assertFails(setDoc(doc(dana, "skins/mk_dana"), { skin_type: "market", player_id: "mike_r", opening: [] })));
+
 // ── The photo library ──
 // Posting is a member write, like scoring. The three things worth pinning are
 // that a member cannot post under another name, cannot quietly become the
@@ -237,6 +270,14 @@ await check("director can create an edition", () =>
 // A director is a member first — the scoring half stays open to them.
 await check("director can still write a hole score", () =>
   assertSucceeds(setDoc(doc(aaron, "hole_scores/hs_4"), { score: 3 })));
+
+// The market's one correction. Entering a book for somebody whose phone died
+// before the bell is the only way a missed allocation gets in, so a director
+// writes any player's — and clears the board at Start Fresh.
+await check("director can enter a book for another player", () =>
+  assertSucceeds(setDoc(doc(aaron, "skins/mk_carls"), { skin_type: "market", player_id: "carl_x", opening: [{ pid: "carl_x", shares: 20 }] })));
+await check("director can clear a book (Start Fresh)", () =>
+  assertSucceeds(deleteDoc(doc(aaron, "skins/mk_carls"))));
 
 // The photo library's director half: the archive, and anything a member
 // posted. A director is the one who can also re-run the Pages deploy that
