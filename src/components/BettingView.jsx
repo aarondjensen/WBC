@@ -451,6 +451,11 @@ export function BettingView({
   };
 
   const money = (n) => `$${(n || 0).toFixed(2)}`;
+  // A POT is always whole money — a round buy-in times a head count — so its
+  // cents are two characters of noise on the largest figure on the screen. A
+  // SHARE of one is not: $250 across seven skins is $35.71, and rounding that
+  // would be rounding somebody's money.
+  const potMoney = (n) => `$${Math.round(n || 0).toLocaleString()}`;
 
   const empty = (icon, title, sub) => (
     <Card style={{ padding: "48px 20px", textAlign: "center" }}>
@@ -470,17 +475,17 @@ export function BettingView({
   // All three cards open the SAME sheet. The buy-ins were never really three
   // lists; they were one table the director was being made to read a column
   // at a time.
-  const potCard = ({ label, pot, rightTop, rightBottom, summary, typed = false }) => (
+  const potCard = ({ label, pot, rightTop, rightBottom, summary, typed = false, columns = null }) => (
     <>
       <div style={{ background: K.card, borderRadius: R.lg, marginBottom: showBuyIns ? 0 : 10, border: `1px solid ${K.bdr}`, overflow: "hidden" }}>
         <div style={{ padding: "12px 14px", display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: FS.label, color: K.t3, fontWeight: 700, letterSpacing: 1 }}>{label}</div>
+            <div style={{ fontSize: FS.label, color: K.t3, fontWeight: 700, letterSpacing: 1 }}>{columns ? columns[0].label : label}</div>
             {/* Once a buy-in price is set the pot is COUNTED, not typed, so the
                 inline editor gives way — the way to change it is to change who
                 is in. */}
             {(!typed || skinsCounted) ? (
-              <div style={{ fontSize: FS.title, fontWeight: 800, color: K.gold }}>{money(pot)}</div>
+              <div style={{ fontSize: FS.title, fontWeight: 800, color: K.gold }}>{potMoney(pot)}</div>
             ) : editPot ? (
               <input autoFocus type="number" inputMode="decimal" value={potInput}
                 onChange={e => setPotInput(e.target.value)}
@@ -495,14 +500,29 @@ export function BettingView({
               // straight back out saved a stale pot over the real one.
               <div onClick={() => { if (user?.isDirector) { setPotInput(String(sideGames?.skins?.pot || 0)); setEditPot(true); } }}
                 style={{ fontSize: FS.title, fontWeight: 800, color: K.gold, cursor: user?.isDirector ? "pointer" : "default" }}>
-                {money(pot)}
+                {potMoney(pot)}
               </div>
             )}
           </div>
-          <div style={{ textAlign: "right", flexShrink: 0 }}>
-            <div style={{ fontSize: FS.label, color: K.t3 }}>{rightTop}</div>
-            <div style={{ fontSize: FS.body, fontWeight: 700, color: K.acc }}>{rightBottom}</div>
-          </div>
+          {/* THREE COLUMNS, when the tab has three numbers of equal standing
+              rather than one headline and one derived figure. Skins does: the
+              pot, how many were won, and what one is worth — and "12 skins
+              won / $20.83 per skin" stacked in a corner made the middle
+              number look like a caption on the third. The pot keeps the left
+              column so the inline editor and the gold stay where they were,
+              and the three tracks run left, centre, right so none of them
+              reads as a stray beside the others. */}
+          {columns ? columns.slice(1).map((c, i, all) => (
+            <div key={c.label} style={{ flex: 1, minWidth: 0, textAlign: i === all.length - 1 ? "right" : "center" }}>
+              <div style={{ fontSize: FS.label, color: K.t3, fontWeight: 700, letterSpacing: 1 }}>{c.label}</div>
+              <div style={{ fontSize: FS.title, fontWeight: 800, color: K.acc, overflow: "hidden", textOverflow: "ellipsis" }}>{c.value}</div>
+            </div>
+          )) : (
+            <div style={{ textAlign: "right", flexShrink: 0 }}>
+              <div style={{ fontSize: FS.label, color: K.t3 }}>{rightTop}</div>
+              <div style={{ fontSize: FS.body, fontWeight: 700, color: K.acc }}>{rightBottom}</div>
+            </div>
+          )}
         </div>
         {user?.isDirector && (
           <div
@@ -865,10 +885,13 @@ export function BettingView({
       {tab === "skins" && (
         <div>
           {potCard({
-            label: "SKINS POT", pot: skinsPot, typed: true,
+            label: "POT", pot: skinsPot, typed: true,
             summary: `${skinsField.length} IN${skinsCounted ? ` · $${sideGames.skins.amount} EACH` : ""}`,
-            rightTop: `${totalSkinsWon} skin${totalSkinsWon !== 1 ? "s" : ""} won`,
-            rightBottom: `${money(perSkin)} / skin`,
+            columns: [
+              { label: "POT" },
+              { label: "SKINS", value: totalSkinsWon },
+              { label: "EACH", value: money(perSkin) },
+            ],
           })}
 
           {/* Net or gross. Gross is the default because it is the game WBC has
