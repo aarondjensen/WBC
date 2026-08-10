@@ -149,6 +149,30 @@ await check("member can confirm a standing CTP tag", () =>
 await check("unclaimed account CANNOT write a market bet", () =>
   assertFails(setDoc(doc(dana, "skins/mk_dana"), { skin_type: "market", player_id: "mike_r", opening: [] })));
 
+// ── The market is SEALED, and not only on screen ──
+// The Betting tab hid other players' books; the collection did not. Anybody
+// could read them straight out of Firestore, which made the blind market — the
+// thing that stops the halfway window being a copy of the consensus — a
+// convention rather than a rule.
+await check("member can read their OWN book", () =>
+  assertSucceeds(getDoc(doc(mike, "skins/mk_mikes"))));
+await check("member CANNOT read somebody else's book", () =>
+  assertFails(getDoc(doc(mike, "skins/mk_aarons"))));
+await check("anon CANNOT read a book at all", () =>
+  assertFails(getDoc(doc(anon, "skins/mk_aarons"))));
+
+// CTP has to stay world-readable through all of that: a standing pin is
+// exactly the number the next group needs, and the guest leaderboard shows it.
+await check("anon can still read a CTP tag", () =>
+  assertSucceeds(getDoc(doc(anon, "skins/ctp_r1_h4"))));
+
+// The reveal. One world-readable document, written by a director once the
+// tournament is over, because sealing the books also seals the final board.
+await check("anon can read the published market result", () =>
+  assertSucceeds(getDoc(doc(anon, "wbc_market_result/mr_wbc_2026"))));
+await check("member CANNOT publish the market result", () =>
+  assertFails(setDoc(doc(mike, "wbc_market_result/mr_wbc_2026"), { bets: [] })));
+
 // ── The photo library ──
 // Posting is a member write, like scoring. The three things worth pinning are
 // that a member cannot post under another name, cannot quietly become the
@@ -278,6 +302,12 @@ await check("director can enter a book for another player", () =>
   assertSucceeds(setDoc(doc(aaron, "skins/mk_carls"), { skin_type: "market", player_id: "carl_x", opening: [{ pid: "carl_x", shares: 20 }] })));
 await check("director can clear a book (Start Fresh)", () =>
   assertSucceeds(deleteDoc(doc(aaron, "skins/mk_carls"))));
+// The whole board, throughout — the correction path and the settling-up both
+// need it, and it is what the reveal is published from.
+await check("director can read anybody's book", () =>
+  assertSucceeds(getDoc(doc(aaron, "skins/mk_aarons"))));
+await check("director can publish the market result", () =>
+  assertSucceeds(setDoc(doc(aaron, "wbc_market_result/mr_wbc_2026"), { tournament_id: "wbc_2026", bets: [] })));
 
 // The photo library's director half: the archive, and anything a member
 // posted. A director is the one who can also re-run the Pages deploy that

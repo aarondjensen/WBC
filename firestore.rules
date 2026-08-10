@@ -376,8 +376,30 @@ service cloud.firestore {
       return data.get('skin_type', '') == 'market';
     }
 
+    // ── Reading: the market is SEALED, and not only on screen ─────
+    // The Betting tab hides every other player's book until the last card is
+    // in, and the reason is the game rather than modesty: the halfway window
+    // exists to let somebody buy a correction with two rounds of evidence, and
+    // seeing the field's book first turns that into copying the consensus, or
+    // into a coordinated block on the leader. That was enforced by the SCREEN,
+    // which means it was not enforced — the app's config ships in the bundle
+    // and anybody could read the collection directly.
+    //
+    // So a market document is readable by the player it belongs to, and by a
+    // director. Everything else in here — the CTP tags — stays world-readable,
+    // because a standing pin is exactly the number the next group needs.
+    //
+    // ── What this asks of the client ──
+    // Firestore evaluates a read rule per document and fails the WHOLE query
+    // if any matched document is refused. So the app can no longer subscribe
+    // to `skins` in one go: it asks for the CTP tags in one query and its own
+    // book in another (a director asks for all of them). See App.jsx.
+    //
+    // The final board comes from wbc_market_result below, not from here.
     match /skins/{doc} {
-      allow read: if isOpen();
+      allow read: if !isMarketBet(resource.data)
+                  || isDirector()
+                  || resource.data.get('player_id', '') == myPlayerId();
       allow create, update: if canWrite()
                             && (!isMarketBet(request.resource.data)
                                 || isDirector()
@@ -457,6 +479,24 @@ service cloud.firestore {
                         && resource.data.uploadedBy == request.auth.uid
                         && resource.data.host != 'pages');
     }
+
+    // ── The market, revealed ──────────────────────────────────────
+    // One document per edition, holding every book once the tournament is
+    // over. It exists because sealing the bets above also seals the FINAL
+    // board, and the final board is the whole point of playing: everybody has
+    // to be able to see who backed the winner and what a share paid.
+    //
+    // Written by a director's device, which is the one client that can read
+    // every book. Deliberately not a Cloud Function: a function would have to
+    // re-implement the market's arithmetic in a second language, and the one
+    // thing this codebase has been most consistent about is refusing to have
+    // two implementations of the same money.
+    //
+    // Read is open, like the leaderboard — a finished tournament's result is
+    // not a secret, and the spouse on the couch should be able to see who won
+    // the market too.
+    match /wbc_market_result/{doc} { allow read: if isOpen();
+                                     allow write: if canAdmin(); }
 
     // ── Runtime switches ──────────────────────────────────────────
     // Today this holds exactly one document: wbc_config/photos, the photo

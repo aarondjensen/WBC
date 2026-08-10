@@ -8,7 +8,9 @@ import { calcCH, courseHandicapFor, buildStrokesMap, computeRoundLine, computeIn
 // Only what the SHELL still needs — the rest went to the Betting tab with it.
 import { fieldFor, computeSkins } from "./lib/sideGames";
 import { teeTimesByPlayer, roundInPlay, thruStatus } from "./lib/thruStatus";
-import { normalizeLots, openingSharesLeft, marketWindows, eligibleBets, rebuyers, teeOffAt } from "./lib/market";
+import { normalizeLots, openingSharesLeft, marketWindows, eligibleBets, rebuyers, teeOffAt, roundComplete } from "./lib/market";
+// Which books this phone may hold, and when a director publishes the reveal.
+import { betsToHold, shouldPublish, betsSignature } from "./lib/marketSeal";
 import { BuyInPrices, BuyInTracker } from "./components/BuyIns";
 import { SyncBanner } from "./components/SyncBanner";
 import { useConfirm } from "./lib/useConfirm";
@@ -6984,8 +6986,18 @@ export default function WBCApp() {
   const [registry, setRegistry] = useState([]);
   const [holeData, setHoleData] = useState({});
   const [ctpData, setCtpData] = useState({});
-  // Every player's market portfolio, one entry per bettor. See rowsToMarket.
-  const [marketBets, setMarketBets] = useState([]);
+  // ── The market's books, and which of them this phone may hold ──
+  // Sealed on the SERVER now (see firestore.rules), so there is no single
+  // subscription that returns "the bets" any more — what arrives depends on
+  // who is holding the phone. See lib/marketSeal.
+  //
+  //   ownBets        this player's book. Every phone gets this.
+  //   allBets        every book. Directors only; null on a player's phone.
+  //   publishedBets  the reveal, posted by a director once the event is over.
+  //                  Null until then; world-readable when it exists.
+  const [ownBets, setOwnBets] = useState([]);
+  const [allBets, setAllBets] = useState(null);
+  const [publishedBets, setPublishedBets] = useState(null);
   // The three side games' money, from tournament_state.side_games. Each `in`
   // is an ARRAY of player ids, or NULL when no director has ever touched it —
   // and null means everybody, which is what every tournament played before
@@ -7271,9 +7283,17 @@ export default function WBCApp() {
     // CTP is tournament-wide, so a tag from Group 1's phone has to reach Group 4's phone
     // before they hit that par 3 — otherwise the leader bar shows nothing to beat and
     // the last group in wins by default. Live subscription, same as scores.
-    unsubs.push(db.subscribe("skins", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
+    // CTP only. The market's bets used to ride along on this same
+    // subscription, and they cannot any more: firestore.rules refuses a read
+    // of somebody else's book, and Firestore fails the WHOLE query if one
+    // document in it is refused. Asking for the tags by name is what keeps
+    // this query answerable on every phone. The books arrive on their own
+    // subscription below, narrowed to what the holder may see.
+    unsubs.push(db.subscribe("skins", [
+      { field: "tournament_id", op: "==", value: TOURNAMENT_ID },
+      { field: "skin_type", op: "==", value: "ctp" },
+    ], (docs) => {
       setCtpData(rowsToCtp(docs));
-      setMarketBets(rowsToMarket(docs));
     }));
 
     unsubs.push(db.subscribe("tournament_state", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
@@ -7388,6 +7408,56 @@ export default function WBCApp() {
   // `photosOpened` latches: once opened, the subscription stays for the rest
   // of the session, so coming back to the gallery is instant and posting a
   // photo still shows up live on every phone that has it open.
+  // ── The market's books, subscribed to what this phone may read ──
+  //
+  // Separate from the mount effect above because it depends on WHO is signed
+  // in, and that resolves later — a subscription started at mount would ask
+  // as nobody and be refused.
+  //
+  // A director asks for every book; everybody else asks for their own by name.
+  // The narrowing is not decoration: rules refuse a read of somebody else's
+  // book, and a query that matched one would fail entirely rather than
+  // returning the rest.
+  // The two facts this depends on, read out as plain values. Naming `user` in
+  // the dependency list would re-subscribe on every unrelated change to it;
+  // naming only its fields while reading the whole object is the shape that
+  // emptied a tournament earlier — so the effect reads exactly what it lists.
+  const meId = user && !user.isGuest ? (user.id || null) : null;
+  const meIsDirector = !!user?.isDirector;
+  useEffect(() => {
+    if (!meId) { setOwnBets([]); setAllBets(null); return; }
+    const base = [
+      { field: "tournament_id", op: "==", value: TOURNAMENT_ID },
+      { field: "skin_type", op: "==", value: "market" },
+    ];
+    if (meIsDirector) {
+      return db.subscribe("skins", base, (docs) => {
+        const bets = rowsToMarket(docs);
+        setAllBets(bets);
+        setOwnBets(bets.filter(b => b.pid === meId));
+      });
+    }
+    setAllBets(null);
+    return db.subscribe("skins", [...base, { field: "player_id", op: "==", value: meId }], (docs) => {
+      setOwnBets(rowsToMarket(docs));
+    });
+  }, [meId, meIsDirector]);
+
+  // ── The reveal ──
+  // One world-readable document per edition, holding every book once the
+  // tournament is over. Read by everybody, written by a director — see the
+  // note in firestore.rules for why a director's device rather than a Cloud
+  // Function.
+  useEffect(() => {
+    if (!storageLoaded) return;
+    return db.subscribe("wbc_market_result", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
+      const row = docs && docs[0];
+      setPublishedBets(Array.isArray(row?.bets) ? row.bets.map(b => ({
+        pid: b.pid, opening: normalizeLots(b.opening), mid: normalizeLots(b.mid),
+      })) : null);
+    });
+  }, [storageLoaded]);
+
   const [photosOpened, setPhotosOpened] = useState(false);
   useEffect(() => { if (view === "photos") setPhotosOpened(true); }, [view]);
   useEffect(() => {
@@ -7492,6 +7562,8 @@ export default function WBCApp() {
       await db.delete("skins", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
       await db.delete("wbc_scorecard_sigs", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
       await db.delete("wbc_rounds_state", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
+      // The reveal goes with the bets it was published from.
+      await db.delete("wbc_market_result", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
     } catch(e) { console.error("Start fresh clear failed:", e); }
     // Keep tPlayers (roster + HIs) intact — clear everything else
     setTRounds([]);
@@ -7502,7 +7574,7 @@ export default function WBCApp() {
     // CTP tags AND every market portfolio, and the tournament_state delete took
     // the buy-in lists. Resetting them here keeps the screen agreeing with what
     // is left in Firestore instead of showing a pot nobody has bought into.
-    setMarketBets([]);
+    setOwnBets([]); setAllBets(null); setPublishedBets(null);
     setSideGames(mergeSideGames(null));
     setPairingsData({});
     setTeeData({});
@@ -7635,6 +7707,44 @@ export default function WBCApp() {
   // still see their edit. The difference is that React now knows when it
   // changed.
   const { allPlayers, activePlayers } = useRoster(tPlayers, registry);
+
+  // ── Publishing the reveal ──
+  // A director's device is the only client that can read every book, so it is
+  // the one that posts them when the tournament is over. Everybody else's
+  // Betting tab reads that document and gets its final board from it.
+  //
+  // Guarded three ways in lib/marketSeal — director, event actually finished,
+  // and the books changed since whatever is already up there. The third is
+  // what stops this writing on every snapshot; the second is what stops it
+  // being the leak it exists to prevent.
+  const publishedSigRef = useRef(null);
+  useEffect(() => {
+    const eventComplete = numRounds > 0 && allPlayers.length > 0
+      && Array.from({ length: numRounds }, (_, i) => i + 1)
+        .every(r => roundComplete(holeData, allPlayers, r));
+    if (!shouldPublish({
+      isDirector: meIsDirector,
+      eventComplete,
+      bets: allBets,
+      publishedSignature: publishedSigRef.current,
+    })) return;
+    const sig = betsSignature(allBets);
+    publishedSigRef.current = sig;
+    db.upsert("wbc_market_result", {
+      id: `mr_${TOURNAMENT_ID}`,
+      tournament_id: TOURNAMENT_ID,
+      bets: allBets.map(b => ({ pid: b.pid, opening: b.opening, mid: b.mid })),
+      signature: sig,
+      publishedAt: new Date().toISOString(),
+    });
+  }, [meIsDirector, allBets, holeData, allPlayers, numRounds]);
+
+  // What the Betting tab actually computes from. See lib/marketSeal.
+  const marketBets = useMemo(
+    () => betsToHold({ own: ownBets, all: allBets, published: publishedBets, isDirector: meIsDirector }),
+    [ownBets, allBets, publishedBets, meIsDirector],
+  );
+
 
   // ── Claim flow ──
   // Set of player_ids already bound to a Firebase uid (single source of truth
@@ -8204,10 +8314,15 @@ export default function WBCApp() {
     if (!pid) return;
     const opening = normalizeLots(lots.opening);
     const mid = normalizeLots(lots.mid);
-    setMarketBets(prev => {
-      const rest = prev.filter(b => b.pid !== pid);
+    // Optimistic, into whichever mirrors this phone actually holds: its own
+    // book always, and the wide list too if a director is correcting somebody
+    // else's. The subscriptions echo the same thing a moment later.
+    const merge = (prev) => {
+      const rest = (prev || []).filter(b => b.pid !== pid);
       return [...rest, { pid, opening, mid }].sort((a, b) => String(a.pid).localeCompare(String(b.pid)));
-    });
+    };
+    if (pid === user?.id) setOwnBets(merge);
+    setAllBets(prev => (prev ? merge(prev) : prev));
     await db.upsert("skins", {
       id: docIds.marketBet(_e(), pid),
       tournament_id: TOURNAMENT_ID,
