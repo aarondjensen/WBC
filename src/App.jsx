@@ -23,6 +23,9 @@ import { applyScoreChanges, roundOf } from "./lib/holeScores";
 // Whether this phone is actually reaching the server — see lib/connection.
 import { createWriteTracker } from "./lib/connection";
 import { useSyncStatus } from "./lib/useSyncStatus";
+// Edition rows + career names → the roster every screen renders. The join and
+// the rule for when to redo it live together — see lib/roster.
+import { useRoster } from "./lib/roster";
 import { useDirtyForm } from "./lib/useDirtyForm";
 import { useSheetDrag } from "./lib/useSheetDrag";
 import { usePullToRefresh, hasNewBundle } from "./lib/usePullToRefresh";
@@ -9360,45 +9363,18 @@ export default function WBCApp() {
   }, []);
 
   // ── The roster, as the app sees it ──
+  // Both cuts of it — everybody, and everybody still playing — from
+  // lib/roster, which owns the join and, more importantly, owns the
+  // dependency list that says when to redo it. See that module's header:
+  // getting this wrong emptied a live tournament, and it is the kind of wrong
+  // that only appears when the two halves land in the unlucky order.
   //
-  // A JOIN of two things that arrive separately: this edition's
-  // tournament_players rows, and the career registry that carries the names.
-  // A row whose registry entry is missing is dropped — it has no name to
-  // render — and THAT is the line to be careful around, because "the registry
-  // has not loaded yet" and "this player does not exist" look identical to it.
-  //
-  // Which is exactly how this once emptied the app. `registry` MUST stay in
-  // the dependency list. The rows arrive over a subscription that answers from
-  // the on-disk cache in a millisecond; the registry is a one-shot network
-  // read that takes far longer. So the roster is routinely computed once with
-  // rows and no names, drops every one of them, and produces an empty
-  // tournament — and if the registry landing does not re-run this, that empty
-  // answer is what the whole app keeps: no players, no leaderboard, nothing.
-  //
-  // These read `registry` — the STATE — rather than the module-level
-  // DEMO_PLAYERS they used to, and that is the whole fix. They are the same
-  // array: setRegistry is handed DEMO_PLAYERS itself, by every one of the
-  // three places that replaces it, so the callers that mutate it in place
-  // (updateName, addPlayerToTournament) still see their edit through here.
-  // The difference is only that React now knows when it changed.
-  //
-  // Reading it also keeps the dependency HONEST. Named but unused, it is an
-  // "unnecessary dependency" the linter complains about and the next person
-  // deletes — and deleting it empties the tournament again.
-  const activePlayers = useMemo(() => {
-    return tPlayers.filter(tp => tp.status !== "WD").map(tp => {
-      const p = registry.find(pl => pl.id === tp.player_id);
-      return p ? { ...p, handicap_index: parseFloat(tp.handicap_index) || 0, tp_id: tp.id } : null;
-    }).filter(Boolean).sort((a,b) => a.name.localeCompare(b.name));
-  }, [tPlayers, registry]);
-
-  // All players including WD — used for leaderboard display
-  const allPlayers = useMemo(() => {
-    return tPlayers.map(tp => {
-      const p = registry.find(pl => pl.id === tp.player_id);
-      return p ? { ...p, handicap_index: parseFloat(tp.handicap_index) || 0, tp_id: tp.id, isWD: tp.status === "WD" } : null;
-    }).filter(Boolean).sort((a,b) => a.name.localeCompare(b.name));
-  }, [tPlayers, registry]);
+  // `registry` is the STATE, not the module-level DEMO_PLAYERS this used to
+  // read. They are the same array — setRegistry is handed DEMO_PLAYERS itself
+  // by all three places that replace it — so callers that mutate it in place
+  // still see their edit. The difference is that React now knows when it
+  // changed.
+  const { allPlayers, activePlayers } = useRoster(tPlayers, registry);
 
   // ── Claim flow ──
   // Set of player_ids already bound to a Firebase uid (single source of truth

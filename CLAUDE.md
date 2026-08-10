@@ -63,6 +63,25 @@ npm run lint       # eslint
 Firestore rules have their own suite in `firestore.rules.test.mjs` — run it when
 touching `firestore.rules`.
 
+### Testing something that has to re-render
+
+Most of `src/lib/` is pure and needs no DOM. Where the thing being tested is a
+HOOK — where the bug would be "it did not recompute when it should have" — put
+`/** @vitest-environment jsdom */` at the top of the file and render it with
+`@testing-library/react`. `src/lib/roster.test.js` is the worked example.
+
+Call `afterEach(cleanup)` explicitly. Testing Library only registers its own
+cleanup when the test framework's globals are exposed, and this project imports
+`describe`/`it` rather than turning `globals` on; without it every render stacks
+up in one document.
+
+This exists because of a real outage. The roster is a join of two loads that
+arrive in either order, its `useMemo` named only one of them, and every player
+vanished from a live tournament for the session — with unit tests, lint and a
+build all green, because nothing exercised the order they arrive in. If a value
+is derived from two things that load separately, there should be a test that
+lands them the slow way round.
+
 ## Layout
 
 - `src/App.jsx` — the app shell and most screen routing
