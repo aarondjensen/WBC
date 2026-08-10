@@ -39,7 +39,7 @@ import { EditionSwitcher } from "./components/EditionSwitcher";
 import { docIds } from "./lib/editionId";
 import { isHistoryCourseId } from "./lib/historyImport";
 import { openingHole, nineComplete } from "./lib/holeAdvance";
-import { scoreWindow, nudgeUpTarget, nudgeDownTarget } from "./lib/scoreEntry";
+import { scoreWindow, nudgeUpTarget, nudgeDownTarget, scoreTerm } from "./lib/scoreEntry";
 import { groupTrouble, roundTrouble, describeTrouble, blocksScoring, missingTees, describeMissingTees } from "./lib/roundSetup";
 import { indexFor, matchHistoryName } from "./lib/handicap";
 import { groupKey as groupKeyOf, roundOfGroupKey, sameGroup, liveRound, roundFinalized, switchableGroups, groupProgress } from "./lib/groupSwitch";
@@ -1316,13 +1316,20 @@ function tapBigAction() { if (typeof navigator !== "undefined" && navigator.vibr
 // Labels sit beneath the 5 par-relative buttons [par-1, par, par+1, par+2, par+3].
 const SCORE_LABELS = ["Birdie", "Par", "Bogey", "Double", "Triple"];
 
+// `scoreTerm` — what a score is CALLED — lives in lib/scoreEntry with the rest
+// of the score-entry rules, and is imported at the top of this file.
+
 // ═══════════════════════════════════════════════════════════════
 //  ScoreButtonRow — par-relative score control (ported from league)
 // ═══════════════════════════════════════════════════════════════
 // 5 par-relative buttons that recenter around par, flanked by −/+ nudge
 // buttons. Birdie/Par/Bogey/Double/Triple labels render beneath. Tapping the
 // selected score again clears it (onPick(0)). 44px touch targets per Apple HIG.
-function ScoreButtonRow({ score, par, onPick }) {
+// `forName` is the player this row belongs to, used only to name the buttons
+// for a screen reader. On screen the name is already the card's heading and
+// repeating it would be noise; announced, "5, bogey" with no idea whose card
+// it is is the difference between usable and not.
+function ScoreButtonRow({ score, par, onPick, forName = "" }) {
   // Window and ± targets live in lib/scoreEntry — see the header there for
   // why a cold + opens past the top of the row rather than on a bogey.
   const { btns, shifted } = scoreWindow(par, score);
@@ -1334,7 +1341,7 @@ function ScoreButtonRow({ score, par, onPick }) {
   const handleNudge = (val) => { tapNudge(); onPick(Math.max(1, val)); };
   return (
     <div style={{ display: "flex", gap: 4, alignItems: "flex-start" }}>
-      <button onClick={() => handleNudge(nudgeDownTarget(score, par))} style={{ width: 36, height: 44, borderRadius: R.sm, background: K.inp, border: "none", color: K.t3, fontSize: FS.body, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>−</button>
+      <button onClick={() => handleNudge(nudgeDownTarget(score, par))} aria-label={`One lower${forName ? " for " + forName : ""}`} style={{ width: 36, height: 44, borderRadius: R.sm, background: K.inp, border: "none", color: K.t3, fontSize: FS.body, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>−</button>
       {btns.map((btn, idx) => {
         const isCur = btn === score; const sd = btn - par;
         const isPar = btn === par;
@@ -1346,7 +1353,15 @@ function ScoreButtonRow({ score, par, onPick }) {
                 the number the whole screen exists to read and to hit, it sits
                 in a 44px box with room to spare, and it is read at arm's
                 length in sun. Nothing reflows: the box height is fixed. */}
-            <button onClick={() => { tapScore(); onPick(isCur ? 0 : btn); }} style={{ width: "100%", height: 44, borderRadius: R.sm, cursor: "pointer", fontSize: FS.lead, fontWeight: 800, border: "none", background: isCur ? K.acc : K.inp, color: isCur ? K.bg : K.t2, position: "relative", transition: `all ${MOTION}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <button
+              onClick={() => { tapScore(); onPick(isCur ? 0 : btn); }}
+              // The visible label under the button is dropped on a shifted
+              // window (an ace on a par 3 is not a "Birdie"), and the ± keys
+              // have no text at all — so the name is built from par here
+              // rather than read off the DOM.
+              aria-label={`${forName ? forName + ", " : ""}${btn}${scoreTerm(btn, par) ? ", " + scoreTerm(btn, par) : ""}${isCur ? " — posted, tap to clear" : ""}`}
+              aria-pressed={isCur}
+              style={{ width: "100%", height: 44, borderRadius: R.sm, cursor: "pointer", fontSize: FS.lead, fontWeight: 800, border: "none", background: isCur ? K.acc : K.inp, color: isCur ? K.bg : K.t2, position: "relative", transition: `all ${MOTION}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
               {/* Selected-state rings: circles under par, squares over par */}
               {isCur && sd !== 0 && <div style={{ position: "absolute", width: boxSize, height: boxSize, left: "50%", top: "50%", transform: "translate(-50%, -50%)" }}><div style={{ position: "absolute", inset: 0, borderRadius: sd < 0 ? "50%" : R.xs, border: `1.5px solid ${ringClr}` }} />{Math.abs(sd) >= 2 && <div style={{ position: "absolute", inset: 3, borderRadius: sd < 0 ? "50%" : R.xs, border: `1px solid ${ringClr}` }} />}</div>}
               {/* Resting-state faint outlines on non-par, non-selected buttons */}
@@ -1359,7 +1374,7 @@ function ScoreButtonRow({ score, par, onPick }) {
           </div>
         );
       })}
-      <button onClick={() => handleNudge(nudgeUpTarget(score, par))} style={{ width: 36, height: 44, borderRadius: R.sm, background: K.inp, border: "none", color: K.t3, fontSize: FS.body, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>+</button>
+      <button onClick={() => handleNudge(nudgeUpTarget(score, par))} aria-label={`One higher${forName ? " for " + forName : ""}`} style={{ width: 36, height: 44, borderRadius: R.sm, background: K.inp, border: "none", color: K.t3, fontSize: FS.body, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>+</button>
     </div>
   );
 }
@@ -2402,7 +2417,7 @@ function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPl
               {/* Score buttons — par-relative control (ported from league) */}
               {/* saveScore, not onSaveHole: on a round that isn't live the first
                   tap asks before it writes. See the note on saveScore. */}
-              <ScoreButtonRow score={score} par={par} onPick={(val) => saveScore(p, val)} />
+              <ScoreButtonRow score={score} par={par} forName={p.name} onPick={(val) => saveScore(p, val)} />
             </div>
           );
         })}
@@ -8687,7 +8702,24 @@ export default function WBCApp() {
     document.head.appendChild(apple);
   }, []);
 
-  // Set viewport meta to prevent zoom on mobile
+  // ── Viewport: no AUTO-zoom, but pinch stays ──
+  //
+  // This used to carry `maximum-scale=1, user-scalable=no`, which does two
+  // very different things under one setting. The problem it was aimed at is
+  // real: iOS zooms the whole page when a text input smaller than 16px takes
+  // focus, and then does not zoom back, which on the scoring screen leaves a
+  // scorer looking at a magnified corner of their own card.
+  //
+  // But the fix for that is the 16px rule below — that is what removes the
+  // trigger. Blocking `user-scalable` on top of it takes away PINCH, which is
+  // a different thing entirely and the one accessibility affordance this app
+  // can least afford to lose: it is read outdoors, in sun, at arm's length, by
+  // people who are mostly over forty. Somebody who wants a closer look at a
+  // scorecard should be able to have one.
+  //
+  // iOS Safari has ignored user-scalable=no since iOS 10 anyway, so on the
+  // platform this was written for it was never doing the job — it was only
+  // taking pinch away from Android and desktop.
   useEffect(() => {
     let meta = document.querySelector('meta[name="viewport"]');
     if (!meta) {
@@ -8695,9 +8727,12 @@ export default function WBCApp() {
       meta.name = 'viewport';
       document.head.appendChild(meta);
     }
-    meta.content = 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no';
+    meta.content = 'width=device-width, initial-scale=1, viewport-fit=cover';
 
-    // Inject global style to prevent iOS zoom on inputs
+    // The actual fix for focus-zoom: a font size iOS will not zoom to reach.
+    // `touch-action: manipulation` still suppresses the double-tap-to-zoom
+    // delay, which is about tap latency on score buttons rather than about
+    // whether zooming is allowed at all.
     const style = document.createElement('style');
     style.textContent = `
       body { touch-action: manipulation; -ms-touch-action: manipulation; }
@@ -10715,11 +10750,11 @@ export default function WBCApp() {
           const clr = active ? K.acc : K.t3;
           const iconSz = 18;
           const navIcon = () => {
-            if (item.icon === "trophy") return <img src="/wbc-trophy.png" alt="Board" style={{ width: 54, height: 54, objectFit: "contain", filter: active ? "none" : "brightness(0) saturate(100%) invert(40%) sepia(20%) saturate(600%) hue-rotate(185deg) brightness(90%)", marginTop: "-20px" }} />;
-            if (item.icon === "pairings") return <svg width={iconSz} height={iconSz} viewBox="0 0 24 24" fill="none" stroke={clr} strokeWidth="2" strokeLinecap="round"><circle cx="9" cy="7" r="3"/><circle cx="17" cy="7" r="3"/><path d="M3 21v-2a4 4 0 014-4h4a4 4 0 014 4v2"/><path d="M21 21v-2a3 3 0 00-2-2.83"/></svg>;
-            if (item.icon === "score") return <svg width={iconSz} height={iconSz} viewBox="0 0 24 24" fill="none" stroke={clr} strokeWidth="2" strokeLinecap="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4z"/></svg>;
-            if (item.icon === "betting") return <svg width={iconSz} height={iconSz} viewBox="0 0 24 24" fill="none" stroke={clr} strokeWidth="2" strokeLinecap="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>;
-            if (item.icon === "more") return <svg width={iconSz} height={iconSz} viewBox="0 0 24 24" fill="none" stroke={clr} strokeWidth="2" strokeLinecap="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>;
+            if (item.icon === "trophy") return <img src="/wbc-trophy.png" alt="" style={{ width: 54, height: 54, objectFit: "contain", filter: active ? "none" : "brightness(0) saturate(100%) invert(40%) sepia(20%) saturate(600%) hue-rotate(185deg) brightness(90%)", marginTop: "-20px" }} />;
+            if (item.icon === "pairings") return <svg aria-hidden="true" width={iconSz} height={iconSz} viewBox="0 0 24 24" fill="none" stroke={clr} strokeWidth="2" strokeLinecap="round"><circle cx="9" cy="7" r="3"/><circle cx="17" cy="7" r="3"/><path d="M3 21v-2a4 4 0 014-4h4a4 4 0 014 4v2"/><path d="M21 21v-2a3 3 0 00-2-2.83"/></svg>;
+            if (item.icon === "score") return <svg aria-hidden="true" width={iconSz} height={iconSz} viewBox="0 0 24 24" fill="none" stroke={clr} strokeWidth="2" strokeLinecap="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4z"/></svg>;
+            if (item.icon === "betting") return <svg aria-hidden="true" width={iconSz} height={iconSz} viewBox="0 0 24 24" fill="none" stroke={clr} strokeWidth="2" strokeLinecap="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>;
+            if (item.icon === "more") return <svg aria-hidden="true" width={iconSz} height={iconSz} viewBox="0 0 24 24" fill="none" stroke={clr} strokeWidth="2" strokeLinecap="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>;
             return null;
           };
           const isTrophy = item.key === "leaderboard";
@@ -10739,7 +10774,16 @@ export default function WBCApp() {
                 setRound(prev => prev === activeRound ? prev : activeRound);
               }
               setView(item.key);
-            }} style={{
+            }}
+            // The trophy tab draws no text label, so without this it is a
+            // button with nothing in it but an image — "button" is all a
+            // screen reader could announce. The others carry a visible label
+            // and naming them again would say it twice.
+            aria-label={isTrophy ? item.label : undefined}
+            // `page` rather than `true`: these are destinations within the app,
+            // which is what aria-current's page value is for.
+            aria-current={active ? "page" : undefined}
+            style={{
               flex: 1, padding: "10px 4px 14px", display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
               background: "transparent", border: "none", cursor: "pointer", color: clr, position: "relative",
               marginTop: 0,
@@ -10771,7 +10815,7 @@ export default function WBCApp() {
               {(item.key === "more"
                   ? ((adminActionNeeded && user.isDirector) || (notifPerm !== "granted" && !user.isGuest))
                   : item.key === "skins" && marketNudge) && (
-                <span style={{
+                <span aria-hidden="true" style={{
                   position: "absolute", top: 6, right: "50%", marginRight: -14,
                   width: 8, height: 8, borderRadius: "50%", background: K.danger,
                   border: `2px solid ${K.nav}`,
