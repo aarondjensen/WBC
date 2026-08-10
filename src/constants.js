@@ -85,3 +85,40 @@ export const SIDE_GAME_LABELS = {
 // tagged distance would be a correction tool that cannot correct.
 export const CTP_WHEEL_ITEM = 36;   // px per row — also the scroll-snap stride
 export const CTP_WHEEL_H = 150;     // px visible wheel height
+
+
+// ── The leaderboard's fixed columns ─────────────────────────────────
+// Here rather than in the board's own file because the app shell measures
+// against them too — see the column sizing in LeaderboardView.
+// The board's fixed column widths, in one place because TWO things read them:
+// the grid template, and the measurement that centres Total under the trophy.
+// They used to be literals in the template and a comment in the measurement,
+// and the comment went stale — the # column had been widened from 24 to 36
+// while the arithmetic still said 24, so Total sat a dozen pixels off the
+// trophy it is supposed to line up with. Widths are sized to the widest string
+// each column can hold at its font size, measured rather than guessed: Total
+// takes the "STROKES" header (38px, the widest thing in that column — wider
+// than any score), Thru takes a "12:10p" tee time at 28px, # takes "T12" plus
+// a movement arrow at 32px.
+//
+// The round columns are NOT in here: they split whatever is left, four ways,
+// so `prior` is only the floor below which "+11" stops fitting. Fixed widths
+// plus a flexible gap is what made them look uneven — see LB_PAD_R.
+export const LB_COL = { num: 36, total: 40, thru: 34, priorMin: 24 };
+// The rows are padded on the LEFT only. A round column's cell is read as the
+// space between the two lines either side of it, and on the outside those
+// lines are the band's edge and the board's edge — so any padding at the right
+// edge is space the eye hands to R4, exactly as the gap column used to hand
+// its width to R1. Ending the last column flush on the board's inner edge is
+// what lets four equal tracks actually look equal.
+export const LB_PAD_L = 12;
+
+
+export const WBC_TROPHY = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIoAAADgAgMAAAChhhbLAAAACVBMVEX///8i06f///8qYg9HAAAAAXRSTlMAQObYZgAAAAFiS0dEAIgFHUgAAAAHdElNRQfqAhwPCRGrKvWFAAACeElEQVRYw+3YW3LdIAwAUPHBDsp+9NN/dQb2v5WaxzUgJFCapNOkZvK8PmM9kO2bAAwrpNdCUFYnKhpJSpJwiS1aTVrWEs6vJu2TkU16zH9pwj8W6zGKyQdRNfVo/kqqScWknfHdxK0huD6casL1mQ3uTD5yGdgZehkwGr81aDNJNXibIJrYDJbTec1E6AZl46ibq0GiycdyMsUk2ZRHxhvMtW9Sn/1tojKptbJuZBRhMkp/jobeZtL7jSuDU3/cGffpBuuBsleaqWX5bmBvcG+wzuLOlMOelBuZ3aS7OJvxW6MMRzQbZzGxn+1kcGN8M/ROE2j4przPbMbvTJuKGlIzMJQnG2cxbUcgikNGQ+mvmLJpF3S+9WqmDXIb64OpU8ZNmeP72VyT/1MTXmW14kVDt0kGEyQz7OjdoLAaN7wtKd0UjO+hamGCCaNJ68bHOZ32i2AGUrdl2S4XR1NvaNz4yTjZ0GhgLQxba/v6YTBBMnE2eRRnc704p1OSXgyejWMGuMlPG0ZyYZ6Z5f3qlbSbjYuLobO5XmGG7QTUOZi3Kywkz/RYGJbt4cGQGRIMzcYJBub3Uu1mwg1OJkgG4mjW7tQTDQ2KYqir9F9sNoTF+iwvNqpysGOoOZhm4JzOGIwMBlXjz6F60nqonvTO+FPlRuOOKd8J0daEQ3fuhPanqQnhY76dgQ86zxczYKi9XDwfYf5iny3XsuWeYDCGe1R/yBmIhhJbeip90T6QlnhIx2Dq3++7UEIwwXzW/2mdZPAxb+nhYx7zpQ3OxHJdeMnQbIJk4jc1rHaxP6yHlr0wPS8sz6b1RARnhIKZ0/4J8jqdZBo0Jn4DUtjOuhjt96MAAAAASUVORK5CYII=";
+
+// The watermark behind the leaderboard. A FILE rather than a data URI: as
+// base64 it was 27,000 characters of App.jsx and ~20KB of every JS bundle,
+// re-downloaded on every deploy because it rode inside code that changes
+// constantly. As a static asset it is fetched once and cached for a year,
+// and it stops being the reason a code generator gives up on this file.
+export const WBC_TROPHY_SILHOUETTE = "/wbc-trophy-silhouette.png";

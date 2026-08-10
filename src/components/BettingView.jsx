@@ -19,10 +19,10 @@
 // it.
 
 import { useState, useEffect, useRef } from "react";
-import { K, ON_ACC, FS, R, ALPHA, MOTION, SHADOW, FONT } from "../theme";
+import { K, FS, R, ALPHA, MOTION, FONT } from "../theme";
 import { SegmentedToggle, StickyTop, SectionLabel, Card, Btn } from "./ui";
 import { Popup, ConfirmModal } from "./Popup";
-import { BuyInPrices, BuyInTracker } from "./BuyIns";
+import { BuyInTracker } from "./BuyIns";
 import { useConfirm } from "../lib/useConfirm";
 import { CTP_MAX_FT, SIDE_GAME_KEYS, SIDE_GAME_LABELS } from "../constants";
 import { fmtPar, teeTimeToMinutes, minutesToTimeStr } from "../lib/format";

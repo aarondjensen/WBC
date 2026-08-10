@@ -24,7 +24,7 @@
 // it. This is a fact to be aware of, not a failure to acknowledge, so it says
 // what is true and takes no tap to get rid of — it goes on its own when the
 // writes land.
-import { K, R, FS, ALPHA, FONT } from "../theme";
+import { K, FS, ALPHA, FONT } from "../theme";
 
 export function SyncBanner({ status }) {
   if (!status) return null;
