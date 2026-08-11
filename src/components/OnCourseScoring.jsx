@@ -733,10 +733,7 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
       {/* Submitted notice */}
       <div style={{ background: K.acc + ALPHA.wash, border: `1px solid ${K.acc}${ALPHA.hair}`, borderRadius: R.xl, padding: "24px 20px", textAlign: "center" }}>
         <div style={{ fontSize: FS.display, marginBottom: 12 }}>🏆</div>
-        <div style={{ fontSize: FS.body, fontWeight: 800, color: K.acc, marginBottom: 6 }}>Scorecard Final</div>
-        <div style={{ fontSize: FS.small, color: K.t3, lineHeight: 1.6, marginBottom: user.isDirector ? 16 : 0 }}>
-          This group's round is signed, attested, and locked.
-        </div>
+        <div style={{ fontSize: FS.body, fontWeight: 800, color: K.acc, marginBottom: user.isDirector ? 16 : 0 }}>Scorecard Final</div>
         {user.isDirector && (
           <button onClick={() => { onUnfinalizeRound(_groupKey); notify("Round unfinalized — scores unlocked"); }} style={{
             marginTop: 4, padding: "10px 20px", borderRadius: R.md,

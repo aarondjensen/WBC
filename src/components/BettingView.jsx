@@ -1482,8 +1482,7 @@ export function BettingView({
               {showRoster && (
                 <div style={{ background: K.card, border: `1px solid ${K.acc}${ALPHA.line}`, borderRadius: R.sm, marginBottom: 10, overflow: "hidden" }}>
                   <div style={{ padding: "8px 12px", fontSize: FS.label, color: K.t3, lineHeight: 1.4, borderBottom: `1px solid ${K.bdr}` }}>
-                    Tap a name to enter or change their shares. Counts only — what they
-                    are holding stays in their book.
+                    Counts only — what they are holding stays in their book.
                   </div>
                   <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 56px 56px", gap: 2, padding: "6px 12px", borderBottom: `1px solid ${K.bdr}` }}>
                     <span style={{ fontSize: FS.label, fontWeight: 700, color: K.t3, letterSpacing: 0.5 }}>PLAYER</span>

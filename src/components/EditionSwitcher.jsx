@@ -213,12 +213,7 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
   return (
     <>
       <Popup onClose={onClose} maxWidth={400} padding={18} zIndex={3000} portal>
-        <div style={{ fontSize: FS.lead, fontWeight: 800, color: K.t1, letterSpacing: 0.5, marginBottom: 3 }}>Tournaments</div>
-        <div style={{ fontSize: FS.label, color: K.t3, marginBottom: 14 }}>
-          {canManage
-            ? "Open a past year, or build the next one from it."
-            : "Open a past year. The app reloads onto that tournament."}
-        </div>
+        <div style={{ fontSize: FS.lead, fontWeight: 800, color: K.t1, letterSpacing: 0.5, marginBottom: 14 }}>Tournaments</div>
 
         {loading ? (
           <div style={{ fontSize: FS.small, color: K.t3, padding: "10px 0 16px" }}>Loading…</div>
@@ -352,7 +347,7 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
                   </label>
                 ))}
                 <div style={{ fontSize: FS.label, color: K.t3, marginTop: 4, lineHeight: 1.4 }}>
-                  Scores, pairings, tee times, tee assignments and skins always start fresh, and so do the tournament dates.
+                  Dates, scores, pairings, tee times and skins always start fresh.
                 </div>
               </div>
             )}
