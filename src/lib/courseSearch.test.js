@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { stateMatches, decodeHtml, hasRealSlope, parseRapidAPI, parseGolfCourseAPI } from "./courseSearch";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { stateMatches, decodeHtml, hasRealSlope, parseRapidAPI, fetchCourseTees } from "./courseSearch";
 
 describe("stateMatches", () => {
   it("matches a state to itself", () => {
@@ -8,7 +8,7 @@ describe("stateMatches", () => {
     expect(stateMatches(" MI ", "MI")).toBe(true);
   });
 
-  // The two APIs disagree about this, which is the only reason it exists.
+  // The API and the director disagree about this, which is why it exists.
   it("matches an abbreviation to a full name, both ways", () => {
     expect(stateMatches("Michigan", "MI")).toBe(true);
     expect(stateMatches("MI", "Michigan")).toBe(true);
@@ -52,9 +52,9 @@ describe("decodeHtml", () => {
   });
 });
 
-// 113 is the slope of an AVERAGE course, and it is what these APIs emit when
-// they do not know. A tournament played off handicaps derived from it is wrong
-// in a way no screen would show.
+// 113 is the slope of an AVERAGE course, and it is what the API emits when it
+// does not know. A tournament played off handicaps derived from it is wrong in
+// a way no screen would show.
 describe("hasRealSlope", () => {
   it("is false when every tee is the 113 placeholder", () => {
     expect(hasRealSlope({ tee_boxes: [{ slope: 113 }, { slope: 113 }] })).toBe(false);
@@ -142,44 +142,76 @@ describe("parseRapidAPI", () => {
   });
 });
 
-describe("parseGolfCourseAPI", () => {
-  // The other API's shape: tees grouped by male/female, each with its own
-  // rating and slope, and holes hanging off the tee rather than the course.
-  const raw = {
-    courses: [{
-      id: 9, course_name: "Yarrow G&CC", location: { state: "Michigan" },
-      tees: {
-        male: [{
-          tee_name: "White", course_rating: 70.2, slope_rating: 124, par_total: 72, total_yards: 6100,
-          holes: Array.from({ length: 18 }, (_, i) => ({ par: 4, handicap: i + 1, yardage: 340 })),
-        }],
-      },
-    }],
+// The course editor's "refetch tees" button. It talks to one endpoint now —
+// there used to be a second, and the merge between them is what this replaced.
+describe("fetchCourseTees", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const holes = (yards) => Array.from({ length: 18 }, (_, i) => ({
+    Par: 4, Handicap: i + 1, tees: { teeBox1: { yards, color: "Blue" }, teeBox2: { yards: yards - 30, color: "White" } },
+  }));
+  const course = (name, slopeRating = 130) => ({
+    _id: name, name, city: "Gaylord", state: "MI",
+    courseRating: 72.4, slopeRating, scorecard: holes(380),
+  });
+
+  // Records what got asked for, so the "asks once" case can prove it.
+  const stubFetch = (body, { ok = true } = {}) => {
+    const calls = [];
+    vi.stubGlobal("fetch", vi.fn(async (url) => {
+      calls.push(url);
+      return { ok, json: async () => body };
+    }));
+    return calls;
   };
 
-  it("reads a course out of the other API's shape", () => {
-    const [c] = parseGolfCourseAPI(raw);
-    expect(c.name).toMatch(/Yarrow/);
-    expect(c.tee_boxes).toHaveLength(1);
+  it("returns the tees of the course it found", async () => {
+    stubFetch([course("Treetops Resort")]);
+    const tees = await fetchCourseTees("Treetops Resort", "MI");
+    expect(tees.map(t => t.name).sort()).toEqual(["Blue", "White"]);
   });
 
-  it("takes rating and slope from the TEE, which is where this API puts them", () => {
-    const [c] = parseGolfCourseAPI(raw);
-    expect(c.tee_boxes[0].slope).toBe(124);
-    expect(c.tee_boxes[0].rating).toBe(70.2);
+  // The whole point of deleting the other API: one course database, one call.
+  it("asks the one endpoint, once, with the state", async () => {
+    const calls = stubFetch([course("Treetops Resort")]);
+    await fetchCourseTees("Treetops Resort", "MI");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain("/api/courses2?search=Treetops%20Resort");
+    expect(calls[0]).toContain("state=MI");
   });
 
-  it("falls back to the women's tees when there are no men's", () => {
-    const womensOnly = { courses: [{ ...raw.courses[0], tees: { male: [], female: raw.courses[0].tees.male } }] };
-    expect(parseGolfCourseAPI(womensOnly)[0].tee_boxes).toHaveLength(1);
+  // Both are real courses with real numbers, and the near-miss comes back
+  // first — the exact name still has to win.
+  it("prefers an exact name match over a course that merely contains it", async () => {
+    stubFetch([course("Treetops Resort North", 141), course("Treetops Resort", 130)]);
+    const tees = await fetchCourseTees("Treetops Resort", "MI");
+    expect(tees[0].slope).toBe(130);
   });
 
-  it("accepts a bare array as well as a wrapped one", () => {
-    expect(parseGolfCourseAPI(raw.courses)).toHaveLength(1);
+  // A row of 113s is the API saying it does not know. Given the choice between
+  // two matches, take the one carrying a real number.
+  it("prefers real ratings over a row of 113s", async () => {
+    stubFetch([course("Treetops Resort", 113), course("Treetops Resort", 128)]);
+    const tees = await fetchCourseTees("Treetops Resort", "MI");
+    expect(tees[0].slope).toBe(128);
   });
 
-  it("survives an empty or malformed response", () => {
-    expect(parseGolfCourseAPI({ courses: [] })).toEqual([]);
-    expect(parseGolfCourseAPI([])).toEqual([]);
+  // Nothing to show beats a wrong tee list: the editor keeps what it has.
+  it("is empty when the query is too short to search on", async () => {
+    const calls = stubFetch([course("Treetops Resort")]);
+    expect(await fetchCourseTees("T", "MI")).toEqual([]);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("is empty when the endpoint errors or returns nothing", async () => {
+    stubFetch([], { ok: false });
+    expect(await fetchCourseTees("Treetops Resort", "MI")).toEqual([]);
+    stubFetch([]);
+    expect(await fetchCourseTees("Treetops Resort", "MI")).toEqual([]);
+  });
+
+  it("is empty rather than throwing when the network is down", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("offline"); }));
+    await expect(fetchCourseTees("Treetops Resort", "MI")).resolves.toEqual([]);
   });
 });
