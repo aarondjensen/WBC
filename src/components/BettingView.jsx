@@ -419,11 +419,23 @@ export function BettingView({
   const activeWindow = bookWindow
     || (windows.opening.open ? "opening" : windows.mid.open ? "mid" : "opening");
   const win = activeWindow === "mid" ? windows.mid : windows.opening;
-  // The halfway ten belong to whoever paid for them. Somebody who did not
-  // rebuy sees the window and what it would have cost them, and cannot place
-  // into it — including the director, whose override is over the CLOCK, not
-  // over who has handed money across.
-  // The director can place into a shut window; nobody else can.
+  // ── Who may place, in either window ──
+  // Being IN THE MARKET is the whole test, and it is the same test for the
+  // opening twenty and the halfway ten. Not being in this year's field is not
+  // a reason: the market is a bet on who wins, so somebody who is not playing
+  // holds a book like anybody else and gets both windows — the halfway ten
+  // especially, since they are the correction bought with two rounds of
+  // evidence and he watched the same two rounds.
+  //
+  // The rebuy is not a second gate either. It is INCURRED by placing rather
+  // than prepaid (see lib/market rebuyers), which is exactly why nobody has to
+  // have handed money over before the window will take shares — the sheet
+  // bills whoever placed, afterwards. This comment used to say the opposite,
+  // and the code has never done it.
+  //
+  // The one asymmetry is the CLOCK: a director can place into a shut window,
+  // because entering a book for a phone that died before the bell has to work
+  // after the bell by definition.
   const canPlace = !!bookPid && marketInSet.has(bookPid) && (win.open || !!user?.isDirector);
   // Placing anything into the second window is what takes on the rebuy, so
   // the book has to say what that costs BEFORE the first tap, not after.
