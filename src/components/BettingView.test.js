@@ -208,3 +208,76 @@ describe("BettingView with a market-only player", () => {
     expect(screen.queryByText("ghost_p")).toBeNull();
   });
 });
+
+// ── The halfway ten, for somebody who is not playing ───────────────
+//
+// The second window is the whole point of the market — twenty shares are a
+// guess, and the halfway ten are a correction bought with two rounds of
+// evidence. A man in the market without playing gets both, for the same
+// reason he gets the first: the game is picking a winner, and he watched the
+// same two rounds everybody else did.
+//
+// Round 1 and 2 in, round 3 untouched: the halfway window is open.
+const HALFWAY = Object.fromEntries(PLAYERS.flatMap(p =>
+  [[`${p.id}_1`, card(4)], [`${p.id}_2`, card(4)]]));
+
+const atHalfway = (extra = {}) => mount({
+  numRounds: 4,
+  round: 3,
+  tRounds: [1, 2, 3, 4].map(n => ({ round_number: n, course_id: "c1" })),
+  holeData: HALFWAY,
+  teeTimesData: {}, roundDates: {},
+  inactivePlayers: [{ ...GUS, note: "12 recorded · last played 2024" }],
+  sideGames: {
+    ...baseProps.sideGames,
+    market: { amount: 25, in: ["aaron_j", "dave_s", "gus_p"], paid: [] },
+    rebuy: { amount: 25, in: null, paid: [] },
+  },
+  marketBets: [],
+  ...extra,
+});
+
+describe("the halfway window for a market-only player", () => {
+  const asGus = { user: { id: "gus_p", name: "Gus P", isDirector: false } };
+
+  it("opens the second window to him and says what it will cost", () => {
+    atHalfway(asGus);
+    fireEvent.click(screen.getByText("Market"));
+    expect(screen.getByText(/After Round 2/)).toBeTruthy();
+    // The rebuy is INCURRED by placing, so the price is said before the first
+    // tap rather than after it.
+    expect(screen.getByText(/puts you in for the \$25 rebuy/)).toBeTruthy();
+  });
+
+  it("takes his ten and saves them to the halfway window", () => {
+    const onSaveMarketBet = vi.fn();
+    atHalfway({ ...asGus, onSaveMarketBet });
+    fireEvent.click(screen.getByText("Market"));
+    // Five on one golfer, five on the other, through the same steppers the
+    // field uses.
+    const plus5 = screen.getAllByText("+5");
+    fireEvent.click(plus5[0]);
+    fireEvent.click(plus5[1]);
+    fireEvent.click(screen.getByText("Wager shares"));
+    expect(onSaveMarketBet).toHaveBeenCalledWith("gus_p", expect.objectContaining({
+      mid: [{ pid: "aaron_j", shares: 5 }, { pid: "dave_s", shares: 5 }],
+    }));
+  });
+
+  // Placing is what takes on the rebuy, so the money has to follow him onto
+  // the sheet without anybody tagging anything.
+  it("bills him the rebuy the moment he places, like anybody else", () => {
+    atHalfway({
+      user: { id: "aaron_j", name: "Aaron J", isDirector: true },
+      marketBets: [{ pid: "gus_p", opening: [], mid: [{ pid: "aaron_j", shares: 10 }] }],
+    });
+    fireEvent.click(screen.getByText("Market"));
+    fireEvent.click(screen.getByText(/^BUY-INS/));
+    // $25 market + $25 rebuy, on a man who is in no other buy-in.
+    const row = screen.getByText(/NOT PLAYING/).closest("div");
+    expect(row.lastChild.textContent).toBe("$50");
+    // And the pot he is betting into grew by his rebuy: three seats at $25,
+    // plus the one halfway seat that has been taken so far.
+    expect(screen.getByText("$100")).toBeTruthy();
+  });
+});
