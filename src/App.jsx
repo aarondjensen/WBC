@@ -1291,7 +1291,7 @@ function PlayerEditor({ editing, set, onClose, tPlayers, players, memberships, c
             </div>
             <div style={{ fontSize: FS.label, color: K.t3, marginTop: 5, lineHeight: 1.4 }}>
               Tap a name to bring them back with their record attached — typing it again can
-              file them as a second player. Somebody new, fill in the boxes below.
+              file them as a second player.
             </div>
           </div>
         )}
@@ -2353,9 +2353,8 @@ function AdminView({ activePlayers, marketPool, sideGames, onUpdateSideGames, re
                   </div>
                   <Card pad={0} style={{ overflow: "hidden" }}>
                     {activePlayers.length === 0 && (
-                      <div style={{ padding: "18px 14px", textAlign: "center", fontSize: FS.small, color: K.t3, lineHeight: 1.5 }}>
-                        Nobody on the roster yet. Add the field here — everything else in this
-                        console (tees, pairings, scoring) works off it.
+                      <div style={{ padding: "18px 14px", textAlign: "center", fontSize: FS.small, color: K.t3 }}>
+                        Nobody on the roster yet.
                       </div>
                     )}
                     {[...activePlayers].sort((a,b) => a.name.localeCompare(b.name)).map((p, i) => (
@@ -2424,10 +2423,6 @@ function AdminView({ activePlayers, marketPool, sideGames, onUpdateSideGames, re
               onChange={onUpdateSideGames}
             />
           </Card>
-          <div style={{ fontSize: FS.label, color: K.t3, lineHeight: 1.5, marginTop: 12 }}>
-            A price of zero turns that game&apos;s pot off — nothing is counted and
-            nobody is billed for it.
-          </div>
         </div>
       )}
 
@@ -3075,7 +3070,6 @@ function AdminView({ activePlayers, marketPool, sideGames, onUpdateSideGames, re
                                       {!apiHasReal && <div style={{ fontSize: FS.micro, color: "#d4584580", marginTop: 1 }}>placeholder</div>}
                                     </button>
                                   </div>
-                                  <div style={{ fontSize: FS.micro, color: K.t3, marginTop: 5, fontStyle: "italic" }}>You can edit any field after selecting a source</div>
                                 </div>
                               );
                             })()}
@@ -5508,7 +5502,6 @@ export default function WBCApp() {
                 </button>
               )}
               {authMsg && <div style={{ color: K.danger, fontSize: FS.small, fontWeight: 600, marginTop: 10 }}>{authMsg}</div>}
-              <p style={{ color: K.t3, fontSize: FS.label, margin: "14px 0 0", lineHeight: 1.5 }}>First time? Sign in, then pick your name from the roster.</p>
             </div>
           {(() => { const roundIsActive = Object.keys(holeData).some(key => { const parts = key.split("_"); const rnd = parseInt(parts[parts.length - 1]); return !finalizedRounds[rnd] && Object.keys(holeData[key] || {}).length > 0; }); const btnColor = roundIsActive ? K.acc : K.t2; const btnBorder = roundIsActive ? `1px solid ${K.acc}${ALPHA.hair}` : `1px solid ${K.bdr}`; return (<div style={{ marginTop: 24, borderTop: `1px solid ${K.bdr}${ALPHA.hair}`, paddingTop: 20 }}><button onClick={() => setUser({ id: "guest", name: "Guest", isDirector: false, isGuest: true })} style={{ width: "100%", padding: "13px 0", borderRadius: R.lg, background: "transparent", border: btnBorder, color: btnColor, fontSize: FS.body, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, letterSpacing: "0.02em" }} onMouseEnter={e => { e.currentTarget.style.background = btnColor  + ALPHA.wash; }} onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}>{roundIsActive && <span style={{ width: 7, height: 7, borderRadius: "50%", background: K.acc, display: "inline-block", boxShadow: `0 0 6px ${K.acc}` }} />}<img src="/wbc-trophy.png" alt="" style={{ height: 18, width: "auto", objectFit: "contain", filter: roundIsActive ? "none" : "brightness(0) invert(0.6)" }} />Live Leaderboard</button></div>); })()}
         </div>
@@ -5903,8 +5896,7 @@ export default function WBCApp() {
             }} roundDates={roundDates} onSetRoundDate={async (rnd, dateStr) => { const next = { ...roundDates }; if (dateStr) next[rnd] = dateStr; else delete next[rnd]; setRoundDates(next); await saveTournamentState(finalizedRounds, teesSaved, teesModified, next, scoringOpen); }} scoringOpen={scoringOpen} onSetScoringOpen={async (rnd, open) => { const next = { ...scoringOpen }; if (open) next[rnd] = true; else delete next[rnd]; setScoringOpen(next); await saveTournamentState(finalizedRounds, teesSaved, teesModified, roundDates, next); }} pairingStrategy={pairingStrategy} onSetPairingStrategy={async (rnd, cfg) => { const next = { ...pairingStrategy }; if (cfg) next[rnd] = cfg; else delete next[rnd]; setPairingStrategy(next); await saveTournamentState(finalizedRounds, teesSaved, teesModified, roundDates, scoringOpen, next); }} leaderboard={getLeaderboard} holeData={holeData} finalizedRounds={finalizedRounds} onDiscardRoundScores={onDiscardRoundScores} onFinalizeRound={finalizeWholeRound} onUnfinalizeRound={unfinalizeFromAdmin} notify={notify} getPlayerTee={getPlayerTee} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} externalSettingsRound={adminSettingsRound} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); setAdminSettingsRound(null); }} teesSaved={teesSaved} onTeesSave={async r => { const next = { ...teesSaved, [r]: true }; const nextMod = { ...teesModified, [r]: false }; setTeesSaved(next); setTeesModified(nextMod); await saveTournamentState(finalizedRounds, next, nextMod); }} teesModified={teesModified} onTeesModify={async r => { const nextMod = { ...teesModified, [r]: true }; setTeesModified(nextMod); await saveTournamentState(finalizedRounds, teesSaved, nextMod); }} memberships={memberships} onSetDirector={onSetDirector} claims={claims} authUid={fbUser?.uid || null} tournamentMeta={tournamentMeta} onSaveTournamentMeta={saveTournamentMeta} /> : (
           <div style={{ textAlign: "center", padding: "40px 20px" }}>
             <div style={{ fontSize: FS.jumbo, marginBottom: 12 }}>🔒</div>
-            <div style={{ fontSize: FS.lead, fontWeight: 700, color: K.t1, marginBottom: 6 }}>Directors Only</div>
-            <div style={{ fontSize: FS.small, color: K.t3 }}>Admin settings are managed by tournament directors.</div>
+            <div style={{ fontSize: FS.lead, fontWeight: 700, color: K.t1 }}>Directors Only</div>
           </div>
         ))}
       </div>

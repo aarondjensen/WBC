@@ -31,10 +31,9 @@ export function ClaimScreen({ fbUser, candidates, onClaim, onCancel, busyId }) {
       <div style={{ width: "100%", maxWidth: 420, textAlign: "center" }}>
         <img src={WBC_LOGO} alt="WBC" style={{ height: 64, margin: "0 auto 16px", display: "block", filter: "drop-shadow(0 4px 16px rgba(34,211,167,0.3))" }} />
         <h1 style={{ fontSize: FS.hero, color: K.t1, margin: "0 0 6px", fontWeight: 800, letterSpacing: "-0.02em" }}>Claim your profile</h1>
-        <p style={{ color: K.t2, fontSize: FS.small, margin: "0 0 4px", lineHeight: 1.5 }}>
+        <p style={{ color: K.t2, fontSize: FS.small, margin: "0 0 22px", lineHeight: 1.5 }}>
           Signed in{displayName ? ` as ${displayName}` : ""}{email ? ` · ${email}` : ""}.
         </p>
-        <p style={{ color: K.t3, fontSize: FS.small, margin: "0 0 22px", lineHeight: 1.5 }}>Tap your name to link this sign-in to your WBC history.</p>
 
         {candidates.length === 0 ? (
           <div style={{ background: K.card, border: `1px dashed ${K.warn}${ALPHA.line}`, borderRadius: R.lg, padding: 24 }}>

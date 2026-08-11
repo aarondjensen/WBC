@@ -148,9 +148,6 @@ export function BuyInPrices({ players, games, onChange }) {
           <span style={{ fontSize: FS.body, fontWeight: 800, color: K.warn }}>{money(sheet.outstanding)}</span>
         </div>
       )}
-      <div style={{ fontSize: FS.label, color: K.t3, lineHeight: 1.5, marginTop: 10 }}>
-        Who is in each game is tagged on the Betting tab, under any pot.
-      </div>
     </div>
   );
 }
@@ -420,8 +417,7 @@ export function BuyInTracker({ players, games, onChange, outsideCandidates = [],
                 discovered afterwards from a row of dashes. */}
             <div style={{ fontSize: FS.label, color: K.t3, marginTop: 3, lineHeight: 1.5 }}>
               They go into the market and nothing else — betting on who wins
-              needs no tee time. Tag the rest of their sheet by hand if they
-              are in for anything more.
+              needs no tee time.
             </div>
           </div>
           {/* The list is every year the tournament has ever had, so it is

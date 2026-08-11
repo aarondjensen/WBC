@@ -414,12 +414,10 @@ export function PhotosView({
 
       {!items.length && !pending.length ? (
         <Card style={{ textAlign: "center", padding: 24 }}>
+          {/* `canPost` is already false for a guest, so the nudge to add the
+              first one only ever reaches somebody who can. */}
           <div style={{ fontSize: FS.body, color: K.t2, marginBottom: canPost ? 10 : 0 }}>
-            {isGuest
-              ? "No photos from this tournament yet."
-              : canPost
-                ? "No photos from this tournament yet. Add the first one."
-                : "No photos from this tournament yet."}
+            No photos from this tournament yet.{canPost ? " Add the first one." : ""}
           </div>
         </Card>
       ) : (

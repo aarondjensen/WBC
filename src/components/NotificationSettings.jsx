@@ -175,12 +175,11 @@ export function NotificationSettings({ user, notify, onPermissionChange }) {
         </button>
       )}
 
-      {/* The one thing people get wrong. A phone and a laptop are separate
-          subscriptions; turning it on here does not turn it on there. */}
+      {/* The one thing people get wrong, and only the asymmetric half of it:
+          a phone and a laptop are separate subscriptions on the way ON, and
+          one switch on the way OFF. */}
       <div style={{ fontSize: FS.label, color: K.t3, lineHeight: 1.6, marginTop: 12 }}>
-        Notifications are per device. Turning them on here covers this phone or browser only —
-        turn them on separately anywhere else you use the app. Turning them OFF switches off
-        every device at once.
+        On covers this device only. Off switches off everywhere.
       </div>
     </>
   );

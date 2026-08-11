@@ -116,10 +116,7 @@ export function GroupSwitcher({ groups, currentKey, live, nameOf, progressOf, on
               Score another group
             </div>
             <div style={{ fontSize: FS.label, color: K.t3, lineHeight: 1.45, marginTop: 3 }}>
-              Anything you enter is posted as that group&apos;s score, exactly as
-              if they had entered it themselves. Rounds other than the live one
-              are open to you and to nobody else — a score you fix there moves
-              the leaderboard straight away.
+              Anything you enter posts as that group&apos;s own score.
             </div>
           </div>
           <div style={{ padding: "0 10px 14px", maxHeight: "60vh", overflowY: "auto", overscrollBehavior: "contain" }}>

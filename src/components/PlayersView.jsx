@@ -612,9 +612,6 @@ export function PlayersView({ players = [], registry = [], meId = null, year = n
       {inactive.length > 0 && (
         <>
           <SectionLabel style={{ marginTop: 18, marginBottom: 6 }}>Inactive</SectionLabel>
-          <div style={{ fontSize: FS.label, color: K.t3, lineHeight: 1.5, marginBottom: 8 }}>
-            Not in this year&apos;s field.
-          </div>
           {inactive.map(row => <PlayerRow key={row.key} row={row} onOpen={setOpen} />)}
         </>
       )}
