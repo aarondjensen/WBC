@@ -1,15 +1,16 @@
 // ══════════════════════════════════════════════════════════════════
-//  courseSearch — reading a golf course out of two different APIs.
+//  courseSearch — reading a golf course out of the course API.
 // ══════════════════════════════════════════════════════════════════
 //
-// Adding a course to a round means finding it in a public database, and there
-// are two of them behind /api/courses and /api/courses2. They disagree about
-// almost everything: field names, how a tee box is shaped, whether the state
-// is "MI" or "Michigan", and whether the numbers are real.
+// Adding a course to a round means finding it in a public database. That is
+// RapidAPI, behind /api/courses2. There used to be a second one behind
+// /api/courses (golfcourseapi.com), merged in to fill gaps; it stopped
+// returning data and was removed, along with the merge logic that only existed
+// because there were two sources.
 //
-// That last one is the whole reason this file is careful. A course row is
-// frequently returned with slope 113 on every tee — 113 is the slope of an
-// AVERAGE course, and it is what these APIs emit when they do not actually
+// What survives from having had two is the caution about the numbers. A course
+// row is frequently returned with slope 113 on every tee — 113 is the slope of
+// an AVERAGE course, and it is what this API emits when it does not actually
 // know. Accept it and the tournament is played off handicaps computed from a
 // course nobody has measured, which is wrong in a way no screen would show.
 // So `hasRealSlope` exists, and search results carrying real ratings sort
@@ -21,22 +22,22 @@
 // anticipated.
 
 // ── Course-API parsing ─────────────────────────────────────────────────────
-// Hoisted out of doCourseSearch so the course EDITOR can reach the same two
-// APIs with the same parsing. Refetching a course's tees and searching for a
-// new course have to agree about what a tee box is, and the only way to be
-// sure of that is for them to run the same code.
+// Hoisted out of doCourseSearch so the course EDITOR can reach the same API
+// with the same parsing. Refetching a course's tees and searching for a new
+// course have to agree about what a tee box is, and the only way to be sure of
+// that is for them to run the same code.
 import { resolveTeeColor } from "./teeColors.js";
 
 export const STATE_NAMES = { AL:"Alabama",AK:"Alaska",AZ:"Arizona",AR:"Arkansas",CA:"California",CO:"Colorado",CT:"Connecticut",DE:"Delaware",FL:"Florida",GA:"Georgia",HI:"Hawaii",ID:"Idaho",IL:"Illinois",IN:"Indiana",IA:"Iowa",KS:"Kansas",KY:"Kentucky",LA:"Louisiana",ME:"Maine",MD:"Maryland",MA:"Massachusetts",MI:"Michigan",MN:"Minnesota",MS:"Mississippi",MO:"Missouri",MT:"Montana",NE:"Nebraska",NV:"Nevada",NH:"New Hampshire",NJ:"New Jersey",NM:"New Mexico",NY:"New York",NC:"North Carolina",ND:"North Dakota",OH:"Ohio",OK:"Oklahoma",OR:"Oregon",PA:"Pennsylvania",RI:"Rhode Island",SC:"South Carolina",SD:"South Dakota",TN:"Tennessee",TX:"Texas",UT:"Utah",VT:"Vermont",VA:"Virginia",WA:"Washington",WV:"West Virginia",WI:"Wisconsin",WY:"Wyoming" };
 export const STATE_ABBREVS = Object.fromEntries(Object.entries(STATE_NAMES).map(([k,v]) => [v.toUpperCase(), k]));
 // Does this course's state match what the director typed?
 //
-// Either side can arrive as an abbreviation or a full name — the two APIs
-// disagree, and so do people — so BOTH are normalised to an abbreviation and
-// compared once. The previous version tested three cases by hand and two of
-// them were the same one: a course returned as "MI" was dropped whenever the
-// filter was typed as "Michigan", which is the spelling somebody reaching for
-// a state filter is most likely to use.
+// Either side can arrive as an abbreviation or a full name — the API is not
+// consistent about it, and neither are people — so BOTH are normalised to an
+// abbreviation and compared once. The previous version tested three cases by
+// hand and two of them were the same one: a course returned as "MI" was
+// dropped whenever the filter was typed as "Michigan", which is the spelling
+// somebody reaching for a state filter is most likely to use.
 //
 // An empty filter matches everything: no filter means the search was not
 // narrowed, not that nothing qualifies.
@@ -92,39 +93,9 @@ export const parseRapidAPI = (rawCourses, stateFilter) => rawCourses
     };
   });
 
-export const parseGolfCourseAPI = (rawCourses) => {
-  const arr = Array.isArray(rawCourses) ? rawCourses : (rawCourses.courses || []);
-  return arr.map((c, ci) => {
-    const teesObj = c.tees || {};
-    const allTees = Array.isArray(teesObj.male) && teesObj.male.length ? teesObj.male : (teesObj.female || []);
-    const tees = allTees.map((t, ti) => ({
-      name: t.tee_name || "Default",
-      color: resolveTeeColor({ name: t.tee_name || "", color: "" }, ti),
-      rating: parseFloat(t.course_rating) || 72.0,
-      slope: parseInt(t.slope_rating) || 113,
-      par: parseInt(t.par_total) || 72,
-      yardage: parseInt(t.total_yards) || 0,
-      hole_yards: (t.holes || []).map(h => parseInt(h.yardage) || 0),
-    }));
-    const firstTee = allTees[0]; const holes = firstTee?.holes || [];
-    return {
-      id: `gc_${c.id || ci}`,
-      name: decodeHtml([c.club_name, c.course_name].filter(Boolean).join(" – ") || c.name || "Unknown"),
-      city: c.location?.city || c.city || "", state: c.location?.state || c.state || "",
-      par: parseInt(firstTee?.par_total) || 72,
-      slope: parseInt(firstTee?.slope_rating) || 113,
-      rating: parseFloat(firstTee?.course_rating) || 72.0,
-      hole_pars: holes.map(h => parseInt(h.par) || 4),
-      hole_handicaps: holes.map(h => parseInt(h.handicap) || 0),
-      tee_boxes: tees,
-      _source: "GolfCourseAPI",
-    };
-  });
-};
-
 // ── fetchCourseTees ────────────────────────────────────────────────────────
-// Ask the course APIs again for ONE course's tee boxes. Both endpoints, same
-// parsing as the search, best name match wins.
+// Ask the course API again for ONE course's tee boxes. Same parsing as the
+// search, best name match wins.
 //
 // Why the editor needs this: a course arrives with whatever tees the API had
 // that day, and the editor can delete them. Delete the wrong one — or find the
@@ -143,10 +114,6 @@ export const fetchCourseTees = async (name, state) => {
       found.push(...parseRapidAPI(Array.isArray(raw) ? raw : (raw.courses || []), state));
     }
   } catch (e) { console.log("[refetch/RapidAPI] failed:", e); }
-  try {
-    const r2 = await fetch(`/api/courses?search=${encodeURIComponent(q)}${stateParam}`);
-    if (r2.ok) found.push(...parseGolfCourseAPI(await r2.json()));
-  } catch (e) { console.log("[refetch/GolfCourseAPI] failed:", e); }
   if (!found.length) return [];
   // Exact name first, then anything containing it, then whatever came back —
   // and among equals prefer the one carrying real ratings over a row of 113s.

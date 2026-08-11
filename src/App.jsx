@@ -40,7 +40,7 @@ import { registerForPush, getCachedSubscriptionStatus } from "./lib/notification
 import { pairingScoreImpact, orphanedScores, describeScored, totalHoles, holesEntered } from "./lib/scoreGuard";
 import { groupsForRound, assignToGroup, removeFromGroup as removeFromGroupPure, clearGroup, swapIntoGroup, rowsToPairings } from "./lib/pairings";
 import { PAIRING_MODES, PAIRING_MODE_LABEL, resolvePairingCfg, buildPriorPartners, optimizeAvoidRepeats, groupByLeaderboard } from "./lib/pairingDraw";
-import { stateMatches, hasRealSlope, parseRapidAPI, parseGolfCourseAPI, fetchCourseTees } from "./lib/courseSearch";
+import { stateMatches, hasRealSlope, parseRapidAPI, fetchCourseTees } from "./lib/courseSearch";
 import { Popup, ConfirmModal } from "./components/Popup";
 import { EditionSwitcher } from "./components/EditionSwitcher";
 import { docIds } from "./lib/editionId";
@@ -1938,7 +1938,7 @@ function AdminView({ activePlayers, marketPool, sideGames, onUpdateSideGames, re
   const ac = K.acc;
   const acGlow = K.accGlow;
 
-  // Search GolfCourseAPI - debounced
+  // Search for a course - debounced
   const searchTimerRef = useRef(null);
   const doCourseSearch = (query, stateOverride) => {
     setCourseSearch(query);
@@ -1997,31 +1997,9 @@ function AdminView({ activePlayers, marketPool, sideGames, onUpdateSideGames, re
           }
         } catch(e) { console.log("[RapidAPI] failed:", e); }
 
-        // 3. GolfCourseAPI — fill gaps not covered by Firestore or RapidAPI
-        try {
-          const r2 = await fetch(`/api/courses?search=${encodeURIComponent(q)}${stateParam}`);
-          if (r2.ok) {
-            const data2 = await r2.json();
-            const gcParsed = parseGolfCourseAPI(data2);
-            for (const gc of gcParsed) {
-              if (!stateMatches(gc.state, stateFilter)) continue;
-              const nameLower = gc.name.toLowerCase();
-              if (sbCourseNames.has(nameLower)) continue; // already have local version
-              const rapidMatch = results.find(r => r.name.toLowerCase() === nameLower);
-              if (rapidMatch) {
-                const rapidReal = hasRealSlope(rapidMatch), gcReal = hasRealSlope(gc);
-                if (gcReal && !rapidReal) {
-                  results = results.map(r => r.name.toLowerCase() === nameLower
-                    ? { ...rapidMatch, tee_boxes: gc.tee_boxes, slope: gc.slope, rating: gc.rating } : r);
-                }
-              } else {
-                results.push(gc);
-              }
-            }
-          }
-        } catch(e) { console.log("[GolfCourseAPI] failed:", e); }
-
-        // 4. Flag courses where neither API had real data
+        // 3. Flag courses the API had no real ratings for — a row of 113s is
+        //    the API saying "I don't know", and a tournament must not be
+        //    played off handicaps computed from it without somebody noticing.
         results = results.map(c => ({ ...c, _incompleteData: !hasRealSlope(c) }));
 
         setSearchResults(results);
@@ -2634,7 +2612,7 @@ function AdminView({ activePlayers, marketPool, sideGames, onUpdateSideGames, re
               return (
                 <>
                   {pickable.length === 0 && (
-                    <div style={{ padding: 14, textAlign: "center", color: K.t3, fontSize: FS.label, lineHeight: 1.5 }}>No courses yet — search above to pull one from GolfCourseAPI, or add it by hand.</div>
+                    <div style={{ padding: 14, textAlign: "center", color: K.t3, fontSize: FS.label, lineHeight: 1.5 }}>No courses yet — search above to pull one from the course database, or add it by hand.</div>
                   )}
                   {courses.length > 0 && lib.length === 0 && (
                     <div style={{ padding: "9px 14px", color: K.t3, fontSize: FS.label }}>Nothing you have saved matches “{courseSearch.trim()}”.</div>
@@ -2675,7 +2653,7 @@ function AdminView({ activePlayers, marketPool, sideGames, onUpdateSideGames, re
                   {searching && (
                     <div style={{ padding: 14, borderTop: `1px solid ${K.bdr}` }}>
                       <div style={{ fontSize: FS.micro, fontWeight: 700, color: K.t3, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>Search results</div>
-                  {searchLoading && <div style={{ textAlign: "center", padding: 12, color: K.t3, fontSize: FS.label }}>Searching GolfCourseAPI...</div>}
+                  {searchLoading && <div style={{ textAlign: "center", padding: 12, color: K.t3, fontSize: FS.label }}>Searching courses...</div>}
                   {!searchLoading && courseSearch.trim().length >= 2 && searchResults.length === 0 && !manualCourse && (
                     <div style={{ textAlign: "center", padding: "10px 0", color: K.t3, fontSize: FS.label }}>No courses found</div>
                   )}
@@ -2979,17 +2957,17 @@ function AdminView({ activePlayers, marketPool, sideGames, onUpdateSideGames, re
                               try {
                                 const q = sbCourse.name;
                                 const stateParam = sbCourse.state ? `&state=${encodeURIComponent(sbCourse.state)}` : "";
-                                const [r1, r2] = await Promise.allSettled([
-                                  fetch(`/api/courses2?search=${encodeURIComponent(q)}${stateParam}`).then(r => r.json()),
-                                  fetch(`/api/courses?search=${encodeURIComponent(q)}`).then(r => r.json()),
-                                ]);
-                                const rapidRaw = r1.status === "fulfilled" ? r1.value : [];
-                                const gcRaw = r2.status === "fulfilled" ? r2.value : [];
+                                const res = await fetch(`/api/courses2?search=${encodeURIComponent(q)}${stateParam}`);
+                                const rapidRaw = res.ok ? await res.json() : [];
+                                // Through the same parser the search uses. The raw row is
+                                // scorecard/slopeRating shaped; the preview wants tee_boxes
+                                // and hole tables, so an unparsed row shows a course with no
+                                // tees at all — which is the opposite of what "fresh" means.
+                                const allApi = parseRapidAPI(Array.isArray(rapidRaw) ? rapidRaw : rapidRaw.courses || [], sbCourse.state);
                                 // Simple: find best match by name
-                                const allApi = [...(Array.isArray(rapidRaw) ? rapidRaw : rapidRaw.courses || []), ...(Array.isArray(gcRaw) ? gcRaw : gcRaw.courses || [])];
-                                const match = allApi.find(c => (c.name || c.club_name || "").toLowerCase().includes(q.toLowerCase().split(" ")[0]));
+                                const match = allApi.find(c => (c.name || "").toLowerCase().includes(q.toLowerCase().split(" ")[0]));
                                 if (match) {
-                                  setCoursePreview({ ...sbCourse, ...match, id: sbCourse.id, _source: match.source || "API", _freshFetch: true });
+                                  setCoursePreview({ ...sbCourse, ...match, id: sbCourse.id, _source: match._source || "API", _freshFetch: true });
                                 } else {
                                   // No API match — fall back to local
                                   setCoursePreview({ ...sbCourse, _source: "WBC History" });
@@ -3206,7 +3184,7 @@ function AdminView({ activePlayers, marketPool, sideGames, onUpdateSideGames, re
                       </CoursePreviewPortal>
                     );
                   })()}
-                <div style={{ fontSize: FS.micro, color: K.t3, textAlign: "center", marginTop: 6 }}>Powered by GolfCourseAPI.com · 35,000+ courses</div>
+                <div style={{ fontSize: FS.micro, color: K.t3, textAlign: "center", marginTop: 6 }}>Course data from RapidAPI · add by hand if it is not listed</div>
                     </div>
                   )}
 
@@ -4829,8 +4807,8 @@ export default function WBCApp() {
       return;
     }
     // Strip all internal UI flags and tee_boxes before saving course row
-    const { tee_boxes, _incompleteData, _apiVersion, _sbVersion, _gcVersion,
-            _sbHasReal, _apiHasReal, _rapidHasReal, _gcHasReal, _source, _freshFetch, ...rawCourseData } = course;
+    const { tee_boxes, _incompleteData, _apiVersion, _sbVersion,
+            _sbHasReal, _apiHasReal, _source, _freshFetch, ...rawCourseData } = course;
     // Ensure course has a stable id
     const courseId = rawCourseData.id || `course_${Date.now()}`;
     const courseData = { ...rawCourseData, id: courseId };

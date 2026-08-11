@@ -25,8 +25,9 @@
 // computed as `calcCH(hi, tee?.slope || course.slope, …)` — so a player with no
 // tee row for a round does not fail, they silently fall through to the COURSE's
 // own rating and slope. That number is not a tee anybody plays: it is whatever
-// the import wrote, which for a course fetched from golfcourseapi is
-// `allTees[0]`, the LONGEST tee on the property. On The Loon that is 72.8/139
+// the import wrote, and for a course brought in by the old golfcourseapi
+// importer that is `allTees[0]`, the LONGEST tee on the property — those rows
+// are still in the library even though the API is gone. On The Loon that is 72.8/139
 // where the field played BLUE at 70.5/134 — about two strokes of course
 // handicap, applied to one man, invisibly, on a card everybody else's is
 // correct on. There should never be a missing assignment, which is exactly why
