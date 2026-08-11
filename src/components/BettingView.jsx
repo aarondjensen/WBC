@@ -33,7 +33,7 @@ import {
   MARKET_OPENING_SHARES, MARKET_MID_SHARES, marketWindows, totalShares,
   countdown, countdownTick, countdownTone, midRoundFor,
   sharesOn, setLotShares, lotsFor, allLots, marketBoard, marketHoldings, marketPayouts,
-  roundComplete, eligibleBets, rebuyers, marketRoster, teeOffAt,
+  roundComplete, eligibleBets, rebuyers, marketRoster, teeOffAt, marketOutsiders,
 } from "../lib/market";
 
 
@@ -74,6 +74,10 @@ export function BettingView({
   getPlayerTee, getPlayerCH = () => null,
   sideGames, onUpdateSideGames, marketBets, onSaveMarketBet, leaderboard,
   finalizedRounds, pairingsData, firstTeeAt, marketNudge, teeTimesData, roundDates,
+  // Who could be in the market without playing, and how one of them gets
+  // added — see MARKET-ONLY PLAYERS below. Both optional: without them the
+  // Betting tab is exactly this year's field's.
+  inactivePlayers = [], onAddMarketOutsider,
 }) {
   const [tab, setTab] = useState("skins");
   const [expandedPlayer, setExpandedPlayer] = useState(null);
@@ -143,9 +147,31 @@ export function BettingView({
   // ── Who is playing for what ──
   const skinsField = fieldFor(sideGames?.skins?.in, players);
   const ctpField = fieldFor(sideGames?.ctp?.in, players);
-  const marketField = fieldFor(sideGames?.market?.in, players);
   const ctpInSet = new Set(ctpField.map(p => p.id));
+
+  // ── MARKET-ONLY PLAYERS ──
+  // The market is a bet on who WINS, so it is the only game here that does
+  // not need a scorecard — and the only one whose field can therefore include
+  // somebody who is not playing. A man off this year's roster buys in, places
+  // his twenty, and collects if he picked right.
+  //
+  // Which forces the one distinction this file did not have before: the list
+  // of people who can BET and the list of golfers who can be BACKED used to be
+  // the same array. They are not the same question any more, and conflating
+  // them would put a man who is not swinging a club on the sheet of names to
+  // wager on.
+  //
+  //   players       the field. Who can be backed, whose cards make the board,
+  //                 what every other buy-in and every window is counted from.
+  //   marketPool    the field PLUS the market-only names. Who can hold a book,
+  //                 who is billed for the market, whose name has to resolve.
+  //
+  // Everything below reads whichever of the two it actually means.
+  const outsiders = marketOutsiders({ ids: sideGames?.market?.in, roster: players, pool: inactivePlayers });
+  const marketPool = outsiders.length ? [...players, ...outsiders] : players;
+  const marketField = fieldFor(sideGames?.market?.in, marketPool);
   const marketInSet = new Set(marketField.map(p => p.id));
+  const nameIn = (pid) => marketPool.find(p => p.id === pid)?.name || pid;
 
   const skinsCounted = (sideGames?.skins?.amount || 0) > 0;
   const skinsPot = potFor({ amount: sideGames?.skins?.amount, count: skinsField.length, typed: sideGames?.skins?.pot });
@@ -375,8 +401,11 @@ export function BettingView({
   // what is owed, not a figure fixed at the turn.
   const marketPot = potFor({ amount: sideGames?.market?.amount, count: marketField.length })
     + potFor({ amount: rebuyAmount, count: rebuyField.length });
+  // The board is the GOLFERS backed, so it reads the field; the holders are
+  // the people holding, so they read the pool. Handing either one the other
+  // list prints a raw player id where a name should be.
   const board = marketBoard({ bets, players, pot: marketPot });
-  const holders = marketHoldings({ bets, players });
+  const holders = marketHoldings({ bets, players: marketPool });
   const payouts = marketPayouts({ bets, winnerId, pot: marketPot });
 
   // Whose book the editor is pointed at. A player only ever edits their own;
@@ -540,7 +569,11 @@ export function BettingView({
       </div>
       {user?.isDirector && showBuyIns && (
         <BuyInTracker
-          players={players}
+          // The POOL, so a market-only name has a row to be billed on. Its
+          // `outside` flag is what keeps him out of the other four buy-ins.
+          players={marketPool}
+          outsideCandidates={onAddMarketOutsider ? inactivePlayers : []}
+          onAddOutside={onAddMarketOutsider}
           games={SIDE_GAME_KEYS.map(k => ({
             key: k, ...SIDE_GAME_LABELS[k],
             amount: sideGames?.[k]?.amount || 0,
@@ -1505,7 +1538,7 @@ export function BettingView({
                       sign of it. */}
                   {bookPid !== myPid && (
                     <div style={{ fontSize: FS.label, color: K.warn, marginBottom: 8, lineHeight: 1.5 }}>
-                      Editing {players.find(p => p.id === bookPid)?.name || bookPid}&apos;s shares as director.
+                      Editing {nameIn(bookPid)}&apos;s shares as director.
                     </div>
                   )}
                   {/* And placing into a window the field can no longer touch is
@@ -1768,7 +1801,7 @@ export function BettingView({
               ) : payouts.rows.map(r => (
                 <div key={r.pid} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", borderBottom: `1px solid ${K.bdr}${ALPHA.hair}` }}>
                   <span style={{ flex: 1, minWidth: 0, fontSize: FS.body, fontWeight: 600, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {players.find(p => p.id === r.pid)?.name || r.pid}
+                    {nameIn(r.pid)}
                   </span>
                   <span style={{ fontSize: FS.body, fontWeight: 700, color: K.acc, flexShrink: 0 }}>{r.shares} sh</span>
                   <span style={{ fontSize: FS.small, fontWeight: 700, color: K.gold, width: 64, textAlign: "right", flexShrink: 0 }}>{money(r.payout)}</span>

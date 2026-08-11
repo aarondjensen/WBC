@@ -151,3 +151,60 @@ describe("BettingView renders", () => {
     expect(document.body.textContent.length).toBeGreaterThan(0);
   });
 });
+
+// ── The man who is not playing ─────────────────────────────────────
+//
+// The market is a bet on who wins, so somebody off this year's roster can buy
+// in and place a book. He reaches this screen the same way anybody does — he
+// signs in as himself — and his own id is not on the roster, which is a shape
+// nothing on this tab had ever been handed.
+const GUS = { id: "gus_p", name: "Gus P" };
+const withGus = (extra = {}) => mount({
+  inactivePlayers: [{ ...GUS, note: "12 recorded · last played 2024" }],
+  sideGames: { ...baseProps.sideGames, market: { amount: 25, in: ["aaron_j", "dave_s", "gus_p"], paid: [] } },
+  ...extra,
+});
+
+describe("BettingView with a market-only player", () => {
+  it("gives him a book on a tab whose roster he is not on", () => {
+    withGus({ user: { id: "gus_p", name: "Gus P", isDirector: false } });
+    fireEvent.click(screen.getByText("Market"));
+    // His own sheet — not the "you are not in the market game" notice, which
+    // is what an id the market could not resolve used to produce.
+    expect(screen.getByText(/Your wagers|Wager shares|Wagered/)).toBeTruthy();
+    expect(screen.queryByText(/not in the market/i)).toBeNull();
+  });
+
+  // What he must NOT be: a name on the sheet of golfers to back. Nothing he
+  // does this week can win the tournament, because he is not in it.
+  it("does not offer him as somebody to wager on", () => {
+    withGus({ user: { id: "gus_p", name: "Gus P", isDirector: false } });
+    fireEvent.click(screen.getByText("Market"));
+    // His own name appears nowhere in the list of golfers — the other two do.
+    expect(screen.getByText("Aaron J")).toBeTruthy();
+    expect(screen.queryByText("Gus P")).toBeNull();
+  });
+
+  it("bills him on the director's collection sheet", () => {
+    withGus({ user: { id: "aaron_j", name: "Aaron J", isDirector: true } });
+    fireEvent.click(screen.getByText("Market"));
+    fireEvent.click(screen.getByText(/^BUY-INS/));
+    expect(screen.getByText(/NOT PLAYING/)).toBeTruthy();
+    // Three in the market at $25, him included.
+    expect(screen.getByText(/^3 IN/)).toBeTruthy();
+  });
+
+  it("still renders when nobody outside the field is in the market", () => {
+    mount({ inactivePlayers: [{ ...GUS, note: "12 recorded" }] });
+    TABS.forEach(label => fireEvent.click(screen.getByText(label)));
+    expect(document.body.textContent.length).toBeGreaterThan(0);
+  });
+
+  // An id in the market that nothing can name — a registry row deleted, or a
+  // roster rebuilt under a different edition. It must not print a raw id.
+  it("ignores a market id no list can put a name to", () => {
+    mount({ sideGames: { ...baseProps.sideGames, market: { amount: 25, in: ["aaron_j", "ghost_p"], paid: [] } } });
+    fireEvent.click(screen.getByText("Market"));
+    expect(screen.queryByText("ghost_p")).toBeNull();
+  });
+});

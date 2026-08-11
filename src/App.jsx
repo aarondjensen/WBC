@@ -6,8 +6,8 @@ import { K, ON_ACC, ON_DANGER, FS, R, ALPHA, MOTION, FONT, SHADOW, SCRIM, DIM_PL
 import { SegmentedToggle, Toggle, StickyTop, SectionLabel, Card, Toast, Btn } from "./components/ui";
 import { calcCH, courseHandicapFor, computeRoundLine, computeIndividualBoard, rankIndividualBoard, rankIndividualBoardIds, WD_SCORE } from "./lib/individualBoard";
 // Only what the SHELL still needs — the rest went to the Betting tab with it.
-import { fieldFor, computeSkins } from "./lib/sideGames";
-import { normalizeLots, openingSharesLeft, marketWindows, eligibleBets, rebuyers, teeOffAt, roundComplete } from "./lib/market";
+import { fieldFor, computeSkins, toggleIn } from "./lib/sideGames";
+import { normalizeLots, openingSharesLeft, marketWindows, eligibleBets, rebuyers, teeOffAt, roundComplete, marketOutsiders } from "./lib/market";
 // Which books this phone may hold, and when a director publishes the reveal.
 import { betsToHold, shouldPublish, betsSignature } from "./lib/marketSeal";
 import { BuyInPrices, BuyInTracker } from "./components/BuyIns";
@@ -1917,7 +1917,7 @@ function TournamentPanel({ meta, onSave, notify, confirm, scoredRounds = [] }) {
 
 // AccessPanel moved to components/AccessPanel.jsx — see the header there.
 
-function AdminView({ activePlayers, rosterPlayers, sideGames, onUpdateSideGames, rebuyIds, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, roundDates, onSetRoundDate, scoringOpen, onSetScoringOpen, pairingStrategy, onSetPairingStrategy, leaderboard, holeData, finalizedRounds, onFinalizeRound, onUnfinalizeRound, onDiscardRoundScores, notify, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, externalSettingsRound, onExternalSettingsHandled, teesSaved, onTeesSave, teesModified, onTeesModify, memberships, onSetDirector, claims, authUid, tournamentMeta, onSaveTournamentMeta }) {
+function AdminView({ activePlayers, marketPool, sideGames, onUpdateSideGames, rebuyIds, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, roundDates, onSetRoundDate, scoringOpen, onSetScoringOpen, pairingStrategy, onSetPairingStrategy, leaderboard, holeData, finalizedRounds, onFinalizeRound, onUnfinalizeRound, onDiscardRoundScores, notify, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, externalSettingsRound, onExternalSettingsHandled, teesSaved, onTeesSave, teesModified, onTeesModify, memberships, onSetDirector, claims, authUid, tournamentMeta, onSaveTournamentMeta }) {
   const [tab, setTab] = useState("rounds");
   // Themed confirmations (see lib/useConfirm). The host <ConfirmModal/> is
   // rendered once at the bottom of this view; `confirm(...)` returns a
@@ -2541,7 +2541,12 @@ function AdminView({ activePlayers, rosterPlayers, sideGames, onUpdateSideGames,
           <SectionLabel>What a seat costs</SectionLabel>
           <Card>
             <BuyInPrices
-              players={rosterPlayers}
+              // The market POOL, not the roster: a man in the market without
+              // playing is a seat sold, and a price sheet that counted only
+              // the field would tell the director a different number to the
+              // one the Betting tab's pot is counted from. His `outside` flag
+              // is what keeps him out of the other four games' counts.
+              players={marketPool}
               games={SIDE_GAME_KEYS.map(k => ({
                 key: k, ...SIDE_GAME_LABELS[k],
                 amount: sideGames?.[k]?.amount || 0,
@@ -4614,6 +4619,36 @@ export default function WBCApp() {
   // changed.
   const { allPlayers, activePlayers } = useRoster(tPlayers, registry);
 
+  // ── Who is in the market without playing ──────────────────────────
+  // The market is the one buy-in that needs no tee time: it is a bet on who
+  // wins, and a man off this year's roster can place it as well as anybody in
+  // the field. So `side_games.market.in` is allowed to name somebody with no
+  // roster row — an inactive player, off the career registry — and this is
+  // where those ids get their names back.
+  //
+  // Everything else about him is unchanged. He is on no leaderboard, in no
+  // pairing, and in no other buy-in; his id is the one his career and his
+  // sign-in have always been filed under, which is the whole reason he is
+  // picked off the registry rather than typed in.
+  //
+  // It sits up here with the roster because the SIGN-IN needs it: claiming a
+  // name is the only way he reaches his own book, and that decision is made
+  // long before the Betting tab is ever mounted.
+  const inactivePlayers = useMemo(
+    () => returningPlayers({ registry, rosterIds: tPlayers.map(t => t.player_id) })
+      .map(r => ({ id: r.id, name: r.name, note: returningLine(r) })),
+    [registry, tPlayers],
+  );
+  const marketOnly = useMemo(
+    () => marketOutsiders({ ids: sideGames?.market?.in, roster: allPlayers, pool: inactivePlayers }),
+    [sideGames, allPlayers, inactivePlayers],
+  );
+  // The field plus them: who can hold a book and who the market bills. The
+  // field ALONE stays `allPlayers` — a man who is not playing cannot be backed
+  // and cannot win, so he is never a name on anybody's sheet of golfers.
+  const marketPool = useMemo(() => [...allPlayers, ...marketOnly], [allPlayers, marketOnly]);
+
+
   // ── Publishing the reveal ──
   // A director's device is the only client that can read every book, so it is
   // the one that posts them when the tournament is over. Everybody else's
@@ -4719,9 +4754,15 @@ export default function WBCApp() {
     }
 
     // 2. Manual "pick your name" (immediate link per CLAIM_REQUIRES_APPROVAL=false).
-    const unclaimed = activePlayers.filter(p => !claimedPlayerIds.has(p.id));
+    //
+    // The field, PLUS anybody the director has put in the market without
+    // playing. A market-only player has money on this tournament and a book to
+    // fill in, and the only way he reaches it is by claiming his own name —
+    // leaving him off this list would mean a man who has paid $25 cannot get
+    // past the sign-in screen. Everybody here is somebody a director named.
+    const unclaimed = [...activePlayers, ...marketOnly].filter(p => !claimedPlayerIds.has(p.id));
     setClaimState({ status: "needs-claim", candidates: unclaimed });
-  }, [fbUser, member, membership, claims, claimedPlayerIds, storageLoaded, activePlayers, user]);
+  }, [fbUser, member, membership, claims, claimedPlayerIds, storageLoaded, activePlayers, marketOnly, user]);
 
   // ── Admin access rides on the MEMBERSHIP flag ──
   // `is_director` on wbc_accounts/{uid} is the only thing the security rules
@@ -4806,9 +4847,9 @@ export default function WBCApp() {
   // and a count taken from the stored (unused) `in` list would have told the
   // director a different number to the one the pot is counted from.
   const rebuyIds = useMemo(() => {
-    const inMarket = new Set(fieldFor(sideGames?.market?.in, allPlayers).map(p => p.id));
+    const inMarket = new Set(fieldFor(sideGames?.market?.in, marketPool).map(p => p.id));
     return rebuyers(eligibleBets({ bets: marketBets, inMarket: pid => inMarket.has(pid) }));
-  }, [sideGames, allPlayers, marketBets]);
+  }, [sideGames, marketPool, marketBets]);
 
   const getLeaderboard = useMemo(() =>
     rankIndividualBoard(computeIndividualBoard({
@@ -5206,6 +5247,25 @@ export default function WBCApp() {
       side_games: patchByGame,
       updated_at: new Date().toISOString(),
     });
+  };
+
+  // ── Putting somebody in the market who is not playing ─────────────
+  // The registry row is written FIRST, and whether or not he already has one:
+  // the app resolves a sign-in by looking the claimed id up in the registry,
+  // so a market-only player without a row could claim his name and be handed
+  // the claim screen again on every launch. A man out of the record books who
+  // predates this app has no row at all until this makes him one.
+  //
+  // Then the market's own list, materialised through toggleIn for the usual
+  // reason: a market nobody has configured is stored as null, and appending to
+  // null would read back as "one man is in the market and nobody else".
+  const onAddMarketOutsider = async (person) => {
+    if (!person?.id) return;
+    const rec = { id: String(person.id), name: person.name || String(person.id) };
+    if (!DEMO_PLAYERS.find(p => p.id === rec.id)) DEMO_PLAYERS.push({ ...rec });
+    setRegistry(DEMO_PLAYERS.slice());
+    await db.upsert("players", rec, "id").catch(() => {});
+    await onUpdateSideGames({ market: { in: toggleIn(sideGames?.market?.in, allPlayers, rec.id) } });
   };
 
   // ── Placing a bet ────────────────────────────────────────────────
@@ -5947,9 +6007,9 @@ export default function WBCApp() {
             the caller's uid, so a guest — who has no uid at all — can browse
             the library but cannot add to it. */}
         {view === "photos" && <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading photos…</div>}><PhotosView items={media} year={getTournamentYear()} uid={fbUser?.uid || null} isDirector={!!user.isDirector} isGuest={!!user.isGuest} canPost={!user.isGuest && !!fbUser?.uid && photoUploadsAllowed(photoConfig)} uploadsBlockedReason={photoUploadsAllowed(photoConfig) ? "" : uploadsDisabledReason(photoConfig)} onUpload={onUploadPhoto} onDelete={onDeletePhoto} notify={notify} /></Suspense>}
-        {view === "skins" && <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading betting…</div>}><BettingView players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} numRounds={numRounds} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} marketBets={marketBets} onSaveMarketBet={onSaveMarketBet} leaderboard={getLeaderboard} finalizedRounds={finalizedRounds} pairingsData={pairingsData} firstTeeAt={firstTeeAt} marketNudge={marketNudge} teeTimesData={teeTimesData} roundDates={roundDates} /></Suspense>}
+        {view === "skins" && <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading betting…</div>}><BettingView players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} numRounds={numRounds} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} marketBets={marketBets} onSaveMarketBet={onSaveMarketBet} leaderboard={getLeaderboard} finalizedRounds={finalizedRounds} pairingsData={pairingsData} firstTeeAt={firstTeeAt} marketNudge={marketNudge} teeTimesData={teeTimesData} roundDates={roundDates} inactivePlayers={inactivePlayers} onAddMarketOutsider={user.isDirector ? onAddMarketOutsider : undefined} /></Suspense>}
         {view === "groups" && <GroupsView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} pairingsData={pairingsData} teeTimesData={teeTimesData} getPlayerTee={getPlayerTee} user={user} />}
-        {view === "admin" && (user.isDirector ? <AdminView activePlayers={activePlayers} rosterPlayers={allPlayers} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} rebuyIds={rebuyIds} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
+        {view === "admin" && (user.isDirector ? <AdminView activePlayers={activePlayers} marketPool={marketPool} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} rebuyIds={rebuyIds} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
               setTeeTimesData(prev => {
                 const next = typeof updater === "function" ? updater(prev) : updater;
                 // THE SHEET IS SAVED FIRST, and on its own document. Tee times

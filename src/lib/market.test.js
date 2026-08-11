@@ -4,6 +4,7 @@ import {
   normalizeLots, totalShares, sharesOn, setLotShares,
   roundStarted, roundComplete, marketWindows, teeOffAt, countdown, countdownTick, countdownTone, openingSharesLeft,
   lotsFor, allLots, marketBoard, marketHoldings, marketPayouts, eligibleBets, rebuyers, marketRoster,
+  marketOutsiders,
 } from "./market";
 
 const players = [
@@ -571,5 +572,58 @@ describe("countdownTone", () => {
   it("is urgent on a deadline that lands just after midnight, not merely today", () => {
     const midnightish = at(2026, 8, 16, 0, 30);
     expect(countdownTone(midnightish - at(2026, 8, 16, 0, 5), midnightish, at(2026, 8, 16, 0, 5))).toBe("urgent");
+  });
+});
+
+// ── Betting without playing ────────────────────────────────────────
+// The market's `in` list may name somebody with no roster row. These are the
+// ids that come back as people, and — just as important — the ones that do not.
+describe("marketOutsiders", () => {
+  const roster = [{ id: "aaron_j", name: "Aaron" }, { id: "dave_s", name: "Dave" }];
+  const registry = [
+    { id: "aaron_j", name: "Aaron" },
+    { id: "gus_p", name: "Gus" },
+    { id: "hank_r", name: "Hank" },
+  ];
+
+  it("resolves the names of everybody in the market who is not playing", () => {
+    const out = marketOutsiders({ ids: ["aaron_j", "dave_s", "hank_r", "gus_p"], roster, pool: registry });
+    expect(out.map(p => p.name)).toEqual(["Gus", "Hank"]);
+    expect(out.every(p => p.outside === true)).toBe(true);
+  });
+
+  // The flag is the whole contract with lib/sideGames: it is what keeps
+  // "everybody is in for skins" from meaning a man who is not at the golf
+  // course. A row without it would be billed for the whole sheet.
+  it("marks every one of them outside the field", () => {
+    expect(marketOutsiders({ ids: ["gus_p"], roster, pool: registry })).toEqual([{ id: "gus_p", name: "Gus", outside: true }]);
+  });
+
+  // A null list is the never-configured market, which means the FIELD and has
+  // never meant anybody beyond it.
+  it("returns nobody for a market nobody has configured", () => {
+    expect(marketOutsiders({ ids: null, roster, pool: registry })).toEqual([]);
+    expect(marketOutsiders({ ids: undefined, roster, pool: registry })).toEqual([]);
+  });
+
+  it("never returns somebody who is on the roster", () => {
+    // Even if the pool offers him — a registry holds every player, playing or not.
+    expect(marketOutsiders({ ids: ["aaron_j"], roster, pool: registry })).toEqual([]);
+  });
+
+  it("ignores an id nothing can name", () => {
+    // An id with no registry row is a name nobody could print. Dropping it
+    // beats a sheet row that reads "ghost_p" and bills somebody for it.
+    expect(marketOutsiders({ ids: ["ghost_p"], roster, pool: registry })).toEqual([]);
+  });
+
+  it("lists a man once, however many times the pool holds him", () => {
+    const dupes = [...registry, { id: "gus_p", name: "Gus" }];
+    expect(marketOutsiders({ ids: ["gus_p"], roster, pool: dupes })).toHaveLength(1);
+  });
+
+  it("survives an empty everything", () => {
+    expect(marketOutsiders({ ids: [] })).toEqual([]);
+    expect(marketOutsiders({ ids: ["gus_p"], roster: null, pool: null })).toEqual([]);
   });
 });

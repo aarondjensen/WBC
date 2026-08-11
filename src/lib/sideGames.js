@@ -67,6 +67,19 @@ export const perUnit = (pot, units) => ((units || 0) > 0 ? (pot || 0) / units : 
 // tapping it means everybody-in or nobody-in — computed from the ROWS rather
 // than from `ids`, so a null list (everybody) reports `all` correctly instead
 // of looking like an empty one.
+//
+// ── Players who are not in the field ───────────────────────────────
+// A player marked `outside` is on the sheet without being in this year's
+// tournament — the man who is not playing but is in the market, betting on
+// who wins. He is billed for exactly the games he was tagged into and nothing
+// else, which needs two rules, because "everybody" cannot mean him:
+//
+//   • `ids == null` is EVERYBODY IN THE FIELD, not every row on the sheet. A
+//     game nobody has ever configured bills the tournament, and he is not in
+//     the tournament.
+//   • `all` counts him only once he is in. Otherwise a column he can never
+//     join would never read as full, and its heading — which cycles all-in →
+//     all-paid → clear off that flag — would stick on its first step forever.
 export function buyInSheet({ players, games }) {
   const list = players || [];
   const gs = games || [];
@@ -83,7 +96,7 @@ export function buyInSheet({ players, games }) {
     let owes = 0;
     let unpaid = 0;
     gs.forEach(g => {
-      const isIn = g.ids == null ? true : g.ids.includes(p.id);
+      const isIn = g.ids == null ? !p.outside : g.ids.includes(p.id);
       inGames[g.key] = isIn;
       paidGames[g.key] = isIn && isPaid(g, p.id);
       if (isIn) {
@@ -94,17 +107,21 @@ export function buyInSheet({ players, games }) {
     // `wd` rides along so the sheet can say why somebody who is not playing
     // is still being billed. It changes no arithmetic: a withdrawal does not
     // refund a buy-in.
-    return { pid: p.id, name: p.name, wd: !!p.isWD, games: inGames, paid: paidGames, owes, unpaid };
+    return { pid: p.id, name: p.name, wd: !!p.isWD, outside: !!p.outside, games: inGames, paid: paidGames, owes, unpaid };
   });
 
   const totals = {};
   gs.forEach(g => {
     const inRows = rows.filter(r => r.games[g.key]);
     const paidCount = inRows.filter(r => r.paid[g.key]).length;
+    // Who this column could hold: the field, plus anybody from outside it who
+    // is already in. See the header — "everybody" is a statement about the
+    // tournament, not about the rows on screen.
+    const canBeIn = rows.filter(r => !r.outside || r.games[g.key]);
     totals[g.key] = {
       count: inRows.length,
       amount: inRows.length * (g.amount || 0),
-      all: rows.length > 0 && inRows.length === rows.length,
+      all: canBeIn.length > 0 && inRows.length === canBeIn.length,
       none: inRows.length === 0,
       // Payment, where it is tracked. `allPaid` is what a column heading
       // reads to decide whether tapping it means everybody-paid or nobody.

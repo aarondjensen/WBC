@@ -505,3 +505,62 @@ describe("lowNetRoundField", () => {
     expect(lowNetRoundField({ players: [], round: 1, lineFor: () => null })).toEqual([]);
   });
 });
+
+// ── The man who is not playing ─────────────────────────────────────
+// The market is a bet on who wins, so somebody off this year's roster can be
+// in it. He arrives on the sheet flagged `outside`, and the whole of what that
+// flag does is stop the word "everybody" meaning him.
+describe("buyInSheet with a player who is not in the field", () => {
+  const roster = [
+    { id: "a", name: "Aaron" },
+    { id: "b", name: "Brad" },
+    { id: "x", name: "Xavier", outside: true },
+  ];
+  // Skins is untagged (everybody); the market names him explicitly.
+  const games = [
+    { key: "skins", amount: 20, ids: null, paid: [] },
+    { key: "market", amount: 25, ids: ["a", "b", "x"], paid: [] },
+  ];
+  const rowFor = (sheet, pid) => sheet.rows.find(r => r.pid === pid);
+
+  it("does not bill him for a game nobody has tagged", () => {
+    const sheet = buyInSheet({ players: roster, games });
+    // The players get both; he gets the one he was named in.
+    expect(rowFor(sheet, "a").owes).toBe(45);
+    expect(rowFor(sheet, "x")).toMatchObject({ owes: 25, outside: true, games: { skins: false, market: true } });
+    expect(sheet.grand).toBe(115);
+  });
+
+  it("counts a column as full without him", () => {
+    // Skins can never hold him, so `all` has to be true or the heading's
+    // all-in → all-paid → clear cycle sticks on its first step forever.
+    const sheet = buyInSheet({ players: roster, games });
+    expect(sheet.totals.skins).toMatchObject({ count: 2, all: true });
+    expect(sheet.totals.market).toMatchObject({ count: 3, all: true });
+  });
+
+  it("counts him once he is actually in the column", () => {
+    const tagged = [{ key: "skins", amount: 20, ids: ["a", "x"], paid: [] }];
+    const sheet = buyInSheet({ players: roster, games: tagged });
+    // Brad is in the field and out of the game, so it is not full.
+    expect(sheet.totals.skins).toMatchObject({ count: 2, all: false });
+    expect(rowFor(sheet, "x").owes).toBe(20);
+  });
+
+  it("bills and collects from him like anybody else", () => {
+    const paid = [{ key: "market", amount: 25, ids: ["a", "x"], paid: ["x"] }];
+    const sheet = buyInSheet({ players: roster, games: paid });
+    expect(rowFor(sheet, "x")).toMatchObject({ owes: 25, unpaid: 0 });
+    expect(rowFor(sheet, "a")).toMatchObject({ owes: 25, unpaid: 25 });
+    expect(sheet.grand).toBe(50);
+    expect(sheet.outstanding).toBe(25);
+  });
+
+  // An empty field with one outsider is a real state on the morning an
+  // edition is created: the roster has not been entered yet.
+  it("survives a sheet with nobody but him on it", () => {
+    const sheet = buyInSheet({ players: [roster[2]], games });
+    expect(sheet.grand).toBe(25);
+    expect(sheet.totals.skins).toMatchObject({ count: 0, all: false });
+  });
+});
