@@ -67,6 +67,16 @@
 //  player off can never be read back as "the list is empty, therefore
 //  everybody is in", which would silently put them straight back in.
 //
+//  ADDING SOMEBODY WHO IS NOT PLAYING. The market is a bet on who wins, so it
+//  is the one buy-in that needs no tee time: a man who is not in this year's
+//  field can be in it. Those rows arrive tagged `outside` and are marked NOT
+//  PLAYING on the sheet, and the whole of what that flag does is keep the word
+//  "everybody" meaning the FIELD — a null list bills the tournament and not
+//  him, a column heading tapped to all-in does not sweep him up, and a column
+//  reads as full without him. He is in exactly what somebody tagged him into.
+//  Tapping his name takes him back off the sheet, because for him "out of
+//  everything" and "not here" are the same state.
+//
 //  `onChange` takes a PATCH SET — { skins: { in: [...] }, ctp: { in: [...] } }
 //  — rather than one game at a time, because a row toggle changes every game
 //  at once and five Firestore writes for one tap is five chances for half of
@@ -75,7 +85,7 @@
 import { useState } from "react";
 import { K, FONT, ALPHA, FS, R, ON_ACC } from "../theme";
 import { buyInSheet, toggleIn, togglePaid } from "../lib/sideGames";
-import { ConfirmModal } from "./Popup";
+import { Popup, ConfirmModal } from "./Popup";
 import { useConfirm } from "../lib/useConfirm";
 
 const money = (n) => `$${(n || 0).toFixed(2)}`;
@@ -145,10 +155,34 @@ export function BuyInPrices({ players, games, onChange }) {
   );
 }
 
-export function BuyInTracker({ players, games, onChange }) {
+// `outsideCandidates` / `onAddOutside` are the pair that lets somebody who is
+// not playing onto the sheet — see the ADDING SOMEBODY WHO IS NOT PLAYING note
+// in the header. Both absent, and the sheet is exactly the field's.
+export function BuyInTracker({ players, games, onChange, outsideCandidates = [], onAddOutside }) {
   const sheet = buyInSheet({ players, games });
   const rowFor = (pid) => sheet.rows.find(r => r.pid === pid);
   const { confirm, confirmModal } = useConfirm();
+  const [adding, setAdding] = useState(false);
+  const [find, setFind] = useState("");
+
+  // Who "everybody" is for a given column. THE FIELD, plus anybody from
+  // outside it who is already in that game — a man who is not playing is
+  // never swept into a buy-in by a tap that means "the field is in for
+  // skins", and is never dropped from the one he was deliberately added to.
+  const everybodyIn = (g) =>
+    players.filter(p => !p.outside || rowFor(p.id)?.games[g.key]).map(p => p.id);
+  // The field alone, for materialising a never-configured `null` list. A game
+  // nobody has tagged means everybody PLAYING is in it, so turning one man off
+  // must leave the field minus one behind — not the field plus whoever is on
+  // the sheet to bet without playing.
+  const field = players.filter(p => !p.outside);
+  // Candidates, minus anybody already on the sheet, narrowed by what has been
+  // typed. Matching on the raw string rather than on parts: a director looking
+  // for "Ferg" is looking at a list of names, not querying a database.
+  const onSheet = new Set(players.map(p => p.id));
+  const matches = outsideCandidates
+    .filter(c => c?.id && !onSheet.has(c.id))
+    .filter(c => String(c.name || "").toLowerCase().includes(find.trim().toLowerCase()));
 
   // ── Cash already handed over does not come off on one tap ──
   //
@@ -195,7 +229,7 @@ export function BuyInTracker({ players, games, onChange }) {
         "Mark unpaid")) return;
       return onChange({ [g.key]: { paid: togglePaid(g.paid, pid) } });
     }
-    if (!isIn) return onChange({ [g.key]: { in: toggleIn(g.ids, players, pid) } });
+    if (!isIn) return onChange({ [g.key]: { in: toggleIn(g.ids, field, pid) } });
     if (!row.paid[g.key]) return onChange({ [g.key]: { paid: togglePaid(g.paid, pid) } });
     // Paid → out, which is two undos in one tap: it clears the payment AND
     // takes him out of the game. Both are said out loud before it happens.
@@ -205,7 +239,7 @@ export function BuyInTracker({ players, games, onChange }) {
       "Take out")) return;
     // Both lists, or he leaves a paid flag behind that would mark him settled
     // the moment anybody put him back in.
-    onChange({ [g.key]: { in: toggleIn(g.ids, players, pid), paid: (g.paid || []).filter(x => x !== pid) } });
+    onChange({ [g.key]: { in: toggleIn(g.ids, field, pid), paid: (g.paid || []).filter(x => x !== pid) } });
   };
 
   // The heading runs the same cycle over the whole column: everybody in,
@@ -226,7 +260,7 @@ export function BuyInTracker({ players, games, onChange }) {
         "Mark unpaid")) return;
       return onChange({ [g.key]: { paid: t.allPaid ? [] : inPids } });
     }
-    if (!t.all) return onChange({ [g.key]: { in: players.map(p => p.id) } });
+    if (!t.all) return onChange({ [g.key]: { in: everybodyIn(g) } });
     if (!t.allPaid) return onChange({ [g.key]: { paid: inPids } });
     if (!await askUnpaid(
       "Clear the whole column?",
@@ -264,7 +298,7 @@ export function BuyInTracker({ players, games, onChange }) {
       "Take out")) return;
     const patch = {};
     tagged.forEach(g => {
-      const list = g.ids ?? players.map(p => p.id);
+      const list = g.ids ?? field.map(p => p.id);
       // Dropping clears his paid flags with him, for the same reason the cell
       // does: a flag left behind would mark him settled the moment anybody put
       // him back in. Adding never touches them — being in is not being paid.
@@ -319,6 +353,11 @@ export function BuyInTracker({ players, games, onChange }) {
                 the director is not left wondering why a man who went home on
                 Saturday is still being billed. */}
             {row.wd && <span style={{ color: K.t3, fontWeight: 700 }}> · WD</span>}
+            {/* And a man who is not playing at all is marked for the opposite
+                reason: so a row of dashes across four buy-ins reads as "he is
+                only in the market", which is the whole of what he signed up
+                for, rather than as a roster the director forgot to tag. */}
+            {row.outside && <span style={{ color: K.t3, fontWeight: 700 }}> · NOT PLAYING</span>}
           </span>
           {games.map(g => {
             const on = row.games[g.key];
@@ -361,6 +400,57 @@ export function BuyInTracker({ players, games, onChange }) {
           </span>
         </div>
       ))}
+
+      {/* ── Somebody who is not playing ──
+          One line under the roster, in the sheet's own quiet grey, because it
+          is used twice a year and a button styled like an action would sit
+          above sixteen names competing with them for the thumb. */}
+      {onAddOutside && (
+        <div onClick={() => { setAdding(true); setFind(""); }}
+          style={{ padding: "7px 12px", fontSize: FS.label, fontWeight: 700, color: K.t3, cursor: "pointer", letterSpacing: 0.3, borderBottom: `1px solid ${K.bdr}${ALPHA.hair}` }}>
+          + Add someone who is not playing
+        </div>
+      )}
+
+      {adding && (
+        <Popup onClose={() => setAdding(false)} maxWidth={340} padding={0} portal background={K.card} zIndex={3200}>
+          <div style={{ padding: "13px 16px", borderBottom: `1px solid ${K.bdr}` }}>
+            <div style={{ fontSize: FS.body, fontWeight: 800, color: K.t1 }}>Not playing this year</div>
+            {/* What they are being added TO, said before the tap rather than
+                discovered afterwards from a row of dashes. */}
+            <div style={{ fontSize: FS.label, color: K.t3, marginTop: 3, lineHeight: 1.5 }}>
+              They go into the market and nothing else — betting on who wins
+              needs no tee time. Tag the rest of their sheet by hand if they
+              are in for anything more.
+            </div>
+          </div>
+          {/* The list is every year the tournament has ever had, so it is
+              typed at rather than scrolled once it is longer than a screen. */}
+          <div style={{ padding: "10px 12px 0" }}>
+            <input
+              value={find} onChange={e => setFind(e.target.value)} placeholder="Find a name" autoFocus
+              style={{ width: "100%", padding: "8px 10px", background: K.inp, border: `1px solid ${K.bdr}`, borderRadius: R.sm, color: K.t1, fontSize: FS.small, fontFamily: FONT, outline: "none", boxSizing: "border-box" }}
+            />
+          </div>
+          <div style={{ maxHeight: 300, overflowY: "auto", padding: "8px 0 12px" }}>
+            {matches.length === 0 ? (
+              <div style={{ padding: "10px 16px", fontSize: FS.small, color: K.t3, lineHeight: 1.5 }}>
+                {outsideCandidates.length === 0
+                  ? "Everybody on record is already on this year's roster."
+                  : "Nobody by that name."}
+              </div>
+            ) : matches.map(c => (
+              <div key={c.id} onClick={() => { onAddOutside(c); setAdding(false); }}
+                style={{ padding: "8px 16px", cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ display: "block", fontSize: FS.small, fontWeight: 700, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</span>
+                  {c.note && <span style={{ display: "block", fontSize: FS.micro, color: K.t3, marginTop: 1 }}>{c.note}</span>}
+                </span>
+              </div>
+            ))}
+          </div>
+        </Popup>
+      )}
 
       {/* ── The envelope ── */}
       {/* The headline is the sum of the OWES column, for the same reason the

@@ -287,6 +287,40 @@ export const allLots = (bet) => normalizeLots([...(bet?.opening || []), ...(bet?
 // in one place (see lib/sideGames fieldFor).
 export const eligibleBets = ({ bets, inMarket }) => (bets || []).filter(b => inMarket(b.pid));
 
+// ── Betting without playing ────────────────────────────────────────
+// The market is the one side game that does not need a scorecard. Skins,
+// closest-to-the-pin and low net are all won by hitting a golf ball; this one
+// is won by picking correctly, and a man who is not playing this year can pick
+// as well as anybody in the field — better, some years, because he is not
+// backing himself.
+//
+// So the market's `in` list is allowed to name somebody who has no roster row:
+// an INACTIVE player, off the career registry, whose id ties him to the same
+// history and the same sign-in he has always had. Everything else about him is
+// unchanged — he is in no other buy-in, he cannot be backed (nothing he does
+// this week can win the tournament), and he appears on no leaderboard.
+//
+// This resolves those ids into player rows the sheet and the book can render.
+// `roster` is this edition's field; `pool` is who else exists — the registry,
+// or anything shaped { id, name }. Anyone already on the roster is skipped:
+// that is a player, not an outsider, however the list was assembled.
+//
+// The `outside` flag rides along because every screen downstream has to know
+// the difference. lib/sideGames' buyInSheet bills off it, and the buy-in
+// sheet's "everybody in for skins" must not sweep him up.
+export function marketOutsiders({ ids, roster = [], pool = [] }) {
+  if (ids == null) return [];
+  const onRoster = new Set((roster || []).map(p => p?.id).filter(Boolean));
+  const wanted = new Set((ids || []).filter(Boolean).map(String));
+  const rows = new Map();
+  (pool || []).forEach(p => {
+    if (!p?.id || rows.has(p.id)) return;
+    if (!wanted.has(String(p.id)) || onRoster.has(p.id)) return;
+    rows.set(p.id, { ...p, outside: true });
+  });
+  return [...rows.values()].sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+}
+
 // How many of the opening 20 a player has NOT placed yet. Zero once the book
 // is full, and 20 for somebody who has never opened it.
 //

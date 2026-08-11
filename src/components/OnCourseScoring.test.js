@@ -159,3 +159,15 @@ describe("OnCourseScoring renders", () => {
     expect(rendered().length).toBeGreaterThan(0);
   });
 });
+
+// ── Somebody who is not playing ────────────────────────────────────
+// The market takes people who are not in this year's field — see lib/market
+// marketOutsiders — and they sign in as themselves, which means this screen
+// can be handed a `user` who is on no roster and in no group. It has nothing
+// to show him, and "nothing to show" has to be a screen rather than a throw.
+describe("OnCourseScoring for a player who is not in the field", () => {
+  it("renders for a signed-in man with no roster row and no group", () => {
+    render(h(OnCourseScoring, { ...baseProps, user: { id: "gus_p", name: "Gus P", isDirector: false } }));
+    expect(document.body.textContent.length).toBeGreaterThan(0);
+  });
+});

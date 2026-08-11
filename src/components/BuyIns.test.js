@@ -188,6 +188,109 @@ describe("un-marking a payment asks first", () => {
   });
 });
 
+// ── The man who is not playing ─────────────────────────────────────
+//
+// The market needs no tee time, so somebody off this year's roster can be in
+// it — and the sheet has to bill him for that and nothing else. Every tap
+// here is one that used to mean "the whole roster" and now has to mean "the
+// field", which is not the same set once he is on screen.
+describe("a market-only player on the sheet", () => {
+  const XAVIER = { id: "x", name: "Xavier", outside: true };
+  const WITH_X = [PLAYERS[0], PLAYERS[1], XAVIER];
+  // Skins untagged (everybody), market naming him explicitly.
+  const mixed = (over = {}) => [
+    { key: "skins", label: "Skins", short: "SKIN", amount: 20, ids: null, paid: [], ...over },
+    { key: "market", label: "Market", short: "MKT", amount: 25, ids: ["a", "b", "x"], paid: [] },
+  ];
+  const sheet = (extra = {}) =>
+    render(h(BuyInTracker, { players: WITH_X, games: mixed(), onChange: vi.fn(), ...extra }));
+
+  it("says on his row that he is not playing", () => {
+    sheet();
+    expect(screen.getByText(/NOT PLAYING/)).toBeTruthy();
+  });
+
+  it("bills him for the market and nothing else", () => {
+    sheet();
+    expect(owesFor("Xavier")).toBe("$25");
+    expect(owesFor("Aaron")).toBe("$45");
+  });
+
+  // The tap that would have swept him up. "Everybody is in for skins" is a
+  // statement about the tournament, and he is not in the tournament.
+  it("leaves him out when the field is tagged into a column", () => {
+    const onChange = vi.fn();
+    // Skins with one man out, so the heading's next tap means everybody-in.
+    render(h(BuyInTracker, {
+      players: WITH_X, onChange,
+      games: [{ key: "skins", label: "Skins", short: "SKIN", amount: 20, ids: ["a"], paid: [] }],
+    }));
+    fireEvent.click(screen.getByText("SKIN"));
+    expect(onChange).toHaveBeenCalledWith({ skins: { in: ["a", "b"] } });
+  });
+
+  // Same rule one tap deeper: taking a player out of an untagged column
+  // materialises that null list, and what it materialises to is the field. A
+  // list built from everybody ON SCREEN would write him into skins as a side
+  // effect of somebody else being taken out of it.
+  it("leaves him out when a null column is materialised by a cell tap", async () => {
+    const onChange = vi.fn();
+    render(h(BuyInTracker, {
+      players: WITH_X, onChange,
+      games: [{ key: "skins", label: "Skins", short: "SKIN", amount: 20, ids: null, paid: ["a"] }],
+    }));
+    const aaronSkins = Array.from(screen.getByText("Aaron").closest("div").querySelectorAll("div"))
+      .find(d => d.textContent === "✓✓");
+    fireEvent.click(aaronSkins);
+    fireEvent.click(await screen.findByText("Take out"));
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith({ skins: { in: ["b"], paid: [] } }));
+  });
+
+  // For him, "out of everything" and "not on this sheet" are the same state.
+  it("takes him off the sheet when his name is tapped", () => {
+    const onChange = vi.fn();
+    sheet({ onChange });
+    fireEvent.click(screen.getByText("Xavier"));
+    expect(onChange).toHaveBeenCalledWith({
+      skins: { in: ["a", "b"], paid: [] },
+      market: { in: ["a", "b"], paid: [] },
+    });
+  });
+
+  it("offers the add control only where somebody can act on it", () => {
+    sheet();
+    expect(screen.queryByText(/Add someone who is not playing/)).toBeNull();
+    cleanup();
+    sheet({ onAddOutside: vi.fn(), outsideCandidates: [{ id: "g", name: "Gus", note: "last played 2023" }] });
+    expect(screen.getByText(/Add someone who is not playing/)).toBeTruthy();
+  });
+
+  it("picks a name out of the inactive list and hands it back", () => {
+    const onAddOutside = vi.fn();
+    sheet({ onAddOutside, outsideCandidates: [{ id: "g", name: "Gus", note: "8 recorded · last played 2023" }] });
+    fireEvent.click(screen.getByText(/Add someone who is not playing/));
+    expect(screen.getByText("8 recorded · last played 2023")).toBeTruthy();
+    fireEvent.click(screen.getByText("Gus"));
+    expect(onAddOutside).toHaveBeenCalledWith({ id: "g", name: "Gus", note: "8 recorded · last played 2023" });
+  });
+
+  it("does not offer somebody who is already on the sheet", () => {
+    sheet({ onAddOutside: vi.fn(), outsideCandidates: [{ id: "x", name: "Xavier" }, { id: "g", name: "Gus" }] });
+    fireEvent.click(screen.getByText(/Add someone who is not playing/));
+    // Xavier appears once — his row — and not as a candidate to add again.
+    expect(screen.getAllByText("Xavier")).toHaveLength(1);
+    expect(screen.getByText("Gus")).toBeTruthy();
+  });
+
+  it("narrows the list as the director types", () => {
+    sheet({ onAddOutside: vi.fn(), outsideCandidates: [{ id: "g", name: "Gus" }, { id: "h", name: "Hank" }] });
+    fireEvent.click(screen.getByText(/Add someone who is not playing/));
+    fireEvent.change(screen.getByPlaceholderText("Find a name"), { target: { value: "han" } });
+    expect(screen.queryByText("Gus")).toBeNull();
+    expect(screen.getByText("Hank")).toBeTruthy();
+  });
+});
+
 // The mount test the layout rule asks for: every state this panel is opened
 // in, drawn once, including the two nobody develops against.
 describe("the buy-in panels render", () => {
