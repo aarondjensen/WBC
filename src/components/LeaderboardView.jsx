@@ -483,8 +483,17 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
               {/* The one row that does NOT step up with the rest of the board.
                   These are eyebrows, not data, and "STROKES" already fills the
                   Total column at micro — a rung up and it spills over the band
-                  it is supposed to cap. */}
-              <div ref={headerRef} style={{ ...gridStyle, padding: `7px 0 7px ${LB_PAD_L}px`, fontSize: FS.micro, fontWeight: 600, color: K.t2, textTransform: "uppercase", letterSpacing: "0.06em", borderBottom: `1px solid ${K.bdr}` }}>
+                  it is supposed to cap.
+
+                  It carries the band's own wash across its full width, so the
+                  strip caps the board instead of floating over it. The tint is
+                  the one the band beneath is already drawn in rather than a
+                  second value: at this weight the header is not a surface of
+                  its own, it is the top of the same one. The band's cells give
+                  their background up inside it for that reason — painted twice
+                  the middle of the header goes darker than its ends, and the
+                  band reads as starting a shade heavier than it continues. */}
+              <div ref={headerRef} style={{ ...gridStyle, padding: `7px 0 7px ${LB_PAD_L}px`, fontSize: FS.micro, fontWeight: 600, color: K.t2, textTransform: "uppercase", letterSpacing: "0.06em", background: K.t3 + ALPHA.wash, borderBottom: `1px solid ${K.bdr}` }}>
                 <span>#</span>
                 <span>Player</span>
                 {/* Negative margin eats the header's own padding so the band
@@ -496,9 +505,9 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
                   // what tips it out over the band's hairline. The long label
                   // goes untracked rather than the column growing for a word
                   // only one of the three toggle states ever shows.
-                  return <span style={{ ...bandStart, margin: "-7px 0", padding: "7px 0", fontWeight: 700, color: K.t2, letterSpacing: label.length > 5 ? 0 : undefined }}>{label}</span>;
+                  return <span style={{ ...bandStart, background: "transparent", margin: "-7px 0", padding: "7px 0", fontWeight: 700, color: K.t2, letterSpacing: label.length > 5 ? 0 : undefined }}>{label}</span>;
                 })()}
-                <span style={{ ...bandEnd, margin: "-7px 0", padding: "7px 0", fontWeight: 700, color: K.t2 }}>Thru</span>
+                <span style={{ ...bandEnd, background: "transparent", margin: "-7px 0", padding: "7px 0", fontWeight: 700, color: K.t2 }}>Thru</span>
                 {allPriorRounds.map((r, i) => <span key={r} style={{ ...roundCell(i), margin: "-7px 0", padding: "7px 0" }}>R{r}</span>)}
               </div>
               {/* Only once the round data is actually in. An empty `lb` also means
