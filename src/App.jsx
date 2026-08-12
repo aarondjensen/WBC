@@ -52,7 +52,7 @@ import { SCORING_LEAD_MIN } from "./lib/scoringGate";
 // How many rounds this event plays — a live binding. See lib/rounds.
 import { NUM_ROUNDS, setRoundCount } from "./lib/rounds";
 import { db, writes } from "./lib/db";
-import { toDisplayName, displayNameFor, shortName, fullName, splitName } from "./lib/playerNames";
+import { toDisplayName, displayNameFor, isGeneratedName, shortName, fullName, splitName } from "./lib/playerNames";
 import { missingTees, describeMissingTees } from "./lib/roundSetup";
 import { indexFor, matchHistoryName } from "./lib/handicap";
 import { groupKey as groupKeyOf, roundOfGroupKey, liveRound, roundFinalized, switchableGroups, groupProgress } from "./lib/groupSwitch";
@@ -1149,7 +1149,7 @@ function PlayerEditor({ editing, set, onClose, tPlayers, players, memberships, c
     linked: { id: r.id, name: r.name },
     first: r.first,
     last: r.last,
-    nick: r.name === toDisplayName(r.first, r.last) ? "" : r.name,
+    nick: isGeneratedName(r.name, r.first, r.last) ? "" : r.name,
     hi: r.index == null ? "" : r.index.toFixed(1),
   });
 
@@ -2346,11 +2346,21 @@ function AdminView({ activePlayers, marketPool, sideGames, onUpdateSideGames, re
                           const parts = splitName(p);
                           setEditingPlayer({
                             pid: p.id, first: parts.first, last: parts.last,
-                            // The nickname box shows a nickname only when the
-                            // stored display name ISN'T what the parts would
-                            // derive — otherwise it sits empty on its
-                            // placeholder, which is what "no nickname" means.
-                            nick: p.name === toDisplayName(parts.first, parts.last) ? "" : p.name,
+                            // The nickname box shows a nickname only when a
+                            // PERSON typed the stored name — otherwise it sits
+                            // empty on its placeholder, which is what "no
+                            // nickname" means.
+                            //
+                            // Tested against both conventions, which is the
+                            // whole trap: this compared against the current
+                            // one only, so every roster name written under the
+                            // old one arrived here looking hand-chosen and
+                            // pre-filled the box. Then it won on save — a
+                            // director could type the surname that was missing,
+                            // save, and watch the name not change, because the
+                            // legacy name had been sitting in the nickname
+                            // field the entire time.
+                            nick: isGeneratedName(p.name, parts.first, parts.last) ? "" : p.name,
                             hi: String(p.handicap_index ?? ""),
                             dir: playerIsDirector(memberships, claims, p.id),
                           });

@@ -61,6 +61,20 @@ export const legacyDisplayName = (first, last) => {
   return l ? `${f} ${l[0].toUpperCase()}`.trim() : f;
 };
 
+// Did the APP write this name, or did a person type it?
+//
+// The question every caller here is really asking, and it has to be asked
+// against BOTH conventions: a name generated in 2019 is "Aaron J" and one
+// generated today is "A Jensen", and both are the app's own work. Answering it
+// against only the current one makes every name in the roster look
+// hand-chosen, which is the difference between a name that restyles itself and
+// a nickname that must not be touched.
+export const isGeneratedName = (name, first, last) => {
+  const stored = (name || "").trim();
+  if (!stored) return false;
+  return stored === toDisplayName(first, last) || stored === legacyDisplayName(first, last);
+};
+
 // What to print for a player on file.
 //
 // A row with no first/last is a legacy row and prints exactly as stored:
@@ -73,9 +87,8 @@ export const displayNameFor = (p) => {
   const last = (p?.last_name || "").trim();
   const stored = (p?.name || "").trim();
   if (!first && !last) return stored;
-  const current = toDisplayName(first, last);
-  if (!stored) return current;
-  return stored === current || stored === legacyDisplayName(first, last) ? current : stored;
+  if (!stored) return toDisplayName(first, last);
+  return isGeneratedName(stored, first, last) ? toDisplayName(first, last) : stored;
 };
 
 // Parts from whatever is on file. Stored parts win; otherwise the display name
