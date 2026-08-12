@@ -52,7 +52,7 @@ import { SCORING_LEAD_MIN } from "./lib/scoringGate";
 // How many rounds this event plays — a live binding. See lib/rounds.
 import { NUM_ROUNDS, setRoundCount } from "./lib/rounds";
 import { db, writes } from "./lib/db";
-import { toDisplayName, displayNameFor, isGeneratedName, shortName, fullName, splitName } from "./lib/playerNames";
+import { toDisplayName, displayNameFor, withKnownSurname, isGeneratedName, shortName, fullName, splitName } from "./lib/playerNames";
 import { missingTees, describeMissingTees } from "./lib/roundSetup";
 import { indexFor, matchHistoryName } from "./lib/handicap";
 import { groupKey as groupKeyOf, roundOfGroupKey, liveRound, roundFinalized, switchableGroups, groupProgress } from "./lib/groupSwitch";
@@ -3971,7 +3971,14 @@ export default function WBCApp() {
         // that binds a man to sixteen years of history was derived from that
         // string, so it is identity rather than presentation.
         DEMO_PLAYERS = playerRows
-          .map(r => ({ id: r.id, name: displayNameFor(r), first_name: r.first_name || "", last_name: r.last_name || "", index_override: r.index_override ?? null }))
+          .map(r => {
+            // The surname first, where the record does not carry one — see
+            // data/surnames.js. Sixteen years of records store "Aaron J" and
+            // no surname anywhere, so without this the convention below has
+            // nothing to restyle and every board reads exactly as it did.
+            const full = withKnownSurname(r);
+            return { id: r.id, name: displayNameFor(full), first_name: full.first_name || "", last_name: full.last_name || "", index_override: r.index_override ?? null };
+          })
           .sort((a, b) => a.name.localeCompare(b.name));
         setRegistry(DEMO_PLAYERS);
       }
