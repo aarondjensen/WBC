@@ -31,7 +31,8 @@
 // along in replaceMany.
 
 import {
-  collection, query, where, getDocs, doc, setDoc, deleteDoc, writeBatch, onSnapshot,
+  collection, query, where, getDocs, getDocsFromCache, doc, setDoc, deleteDoc,
+  writeBatch, onSnapshot,
 } from "firebase/firestore";
 import { _db } from "../firebase";
 import { createWriteTracker } from "./connection";
@@ -55,6 +56,29 @@ export const db = {
       const snap = await getDocs(db._q(col, filters));
       return snap.docs.map(d => d.data());
     } catch(e) { console.error("db.get error:", col, e); return null; }
+  },
+  // ── This phone's own copy, with no round trip at all ──
+  // firebase.js goes to some trouble to enable a persistent cache, and the
+  // SUBSCRIBED collections get the benefit for free: a listener answers from
+  // disk the moment it attaches. The four READ-ONCE collections did not —
+  // getDocs asks the server — so a relaunch spent two chained round trips
+  // fetching the rounds, the courses and their tee boxes before a leaderboard
+  // had a par to compare anything to, every time, on data that had not
+  // changed since the last launch.
+  //
+  // Reading them from the cache first draws the board off the stored copy and
+  // lets the server's answer land on top of it. It is billed nothing: a cache
+  // read never reaches Firestore.
+  //
+  // Null when nothing is stored — a fresh install, a cleared browser, a
+  // collection this device has never queried. "Nothing stored" and "nothing
+  // there" are different answers and only the second one is worth painting,
+  // so a caller that would act on emptiness is handed neither.
+  getCached: async (col, filters = []) => {
+    try {
+      const snap = await getDocsFromCache(db._q(col, filters));
+      return snap.empty ? null : snap.docs.map(d => d.data());
+    } catch { return null; }  // no cache, cache disabled, or nothing stored
   },
   upsert: async (col, data) => {
     if (!data.id) { console.error("db.upsert: missing id", col, data); return null; }

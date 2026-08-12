@@ -53,7 +53,8 @@ import { SCORING_LEAD_MIN } from "./lib/scoringGate";
 // How many rounds this event plays — a live binding. See lib/rounds.
 import { NUM_ROUNDS, setRoundCount } from "./lib/rounds";
 import { db, writes } from "./lib/db";
-import { toDisplayName, displayNameFor, withKnownSurname, isGeneratedName, shortName, fullName, splitName } from "./lib/playerNames";
+import { toDisplayName, isGeneratedName, shortName, fullName, splitName } from "./lib/playerNames";
+import { registryRows, roundRows, courseIdsOf, stitchCourses } from "./lib/staticData";
 import { missingTees, describeMissingTees } from "./lib/roundSetup";
 import { indexFor, matchHistoryName } from "./lib/handicap";
 import { groupKey as groupKeyOf, roundOfGroupKey, liveRound, roundFinalized, switchableGroups, groupProgress } from "./lib/groupSwitch";
@@ -73,7 +74,12 @@ const PhotosView = lazy(() => import("./components/PhotosView"));
 import { photoUploadsAllowed, uploadsDisabledReason } from "./lib/media";
 import { returningPlayers, returningLine } from "./lib/returningPlayers";
 import { TROPHY_SVG_URL, WBC_LOGO, WBC_FAVICON, ROUND_CHOICES, clampRounds, CTP_MAX_FT, CTP_WHEEL_ITEM, CTP_WHEEL_H, SIDE_GAME_KEYS, SIDE_GAME_LABELS } from "./constants";
-import { getMessaging, onMessage, isSupported as isMessagingSupported } from "firebase/messaging";
+// firebase/messaging is NOT imported here — see the MODULE LOAD POLICY note in
+// lib/notifications.js. It is pulled in dynamically by the one effect that
+// listens for foreground pushes, so it stays out of the startup bundle (it is
+// the largest piece of the SDK nothing needs to draw a leaderboard) and a
+// browser that cannot load it at all fails inside that effect rather than
+// taking this whole chunk down with it.
 
 
 
@@ -3895,12 +3901,29 @@ export default function WBCApp() {
   // four more live listeners on every device would be a poor trade. The cost
   // is that a course assigned mid-trip doesn't reach anyone else's phone until
   // they relaunch. This is the pull that fixes that.
-  const refreshStaticData = useCallback(async () => {
-    const playerRows = await db.get("players");
+  // ── The static half, in two hops instead of four ──
+  // ONE loader, used by the mount load, by the cache pass in front of it and
+  // by the pull. It used to be written twice and the copies had drifted —
+  // see the header of lib/staticData, which now owns the shaping.
+  //
+  // `read` is what does the fetching: db.get asks the server, db.getCached
+  // asks this phone's own disk. Everything else is identical, which is the
+  // point — a cache pass that shaped its rows differently would repaint the
+  // whole board the moment the server answered.
+  //
+  // The two `Promise.all`s are the other half. The registry does not depend
+  // on the rounds, and the tee boxes do not depend on the courses — both were
+  // awaited one after the other, so a cold start spent four sequential round
+  // trips fetching things that could have travelled together. Now it is two:
+  // players+rounds, then courses+tees.
+  const loadStaticData = useCallback(async (read) => {
+    const [playerRows, trRows] = await Promise.all([
+      read("players"),
+      read("tournament_rounds", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]),
+    ]);
+
     if (playerRows?.length) {
-      DEMO_PLAYERS = playerRows
-        .map(r => ({ id: r.id, name: r.name, first_name: r.first_name || "", last_name: r.last_name || "", index_override: r.index_override ?? null }))
-        .sort((a, b) => a.name.localeCompare(b.name));
+      DEMO_PLAYERS = registryRows(playerRows);
       setRegistry(DEMO_PLAYERS);
       // DEMO_PLAYERS is module-level, so replacing it does not by itself
       // re-render anything that reads it. Nudge the state the roster derives
@@ -3908,24 +3931,21 @@ export default function WBCApp() {
       setTPlayers(prev => [...prev]);
     }
 
-    const trRows = await db.get("tournament_rounds", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
-    const sortedTRounds = (trRows || []).sort((a, b) => a.round_number - b.round_number);
-    if (!sortedTRounds.length) return;
-    setTRounds(sortedTRounds.map(r => ({ id: r.id, tournament_id: r.tournament_id, round_number: r.round_number, course_id: r.course_id })));
+    const rounds = roundRows(trRows);
+    if (!rounds.length) return playerRows || [];
+    setTRounds(rounds);
 
-    const courseIds = sortedTRounds.map(r => r.course_id).filter(Boolean);
-    if (!courseIds.length) return;
-    const cRows = await db.get("courses", [{ field: "id", op: "in", value: courseIds }]);
-    if (!cRows?.length) return;
-    const tbRows = await db.get("tee_boxes", [{ field: "course_id", op: "in", value: courseIds }]);
-    const coursesWithTees = cRows.map(c => ({
-      ...c,
-      hole_pars: c.hole_pars || [],
-      hole_handicaps: c.hole_handicaps || [],
-      tee_boxes: (tbRows || []).filter(t => t.course_id === c.id).map(t => ({ name: t.name, color: t.color, rating: parseFloat(t.rating), slope: parseInt(t.slope), par: parseInt(t.par), yardage: parseInt(t.yardage) })),
-    }));
-    setCourseList(sortCoursesByRound(coursesWithTees, sortedTRounds));
+    const courseIds = courseIdsOf(rounds);
+    if (!courseIds.length) return playerRows || [];
+    const [cRows, tbRows] = await Promise.all([
+      read("courses", [{ field: "id", op: "in", value: courseIds }]),
+      read("tee_boxes", [{ field: "course_id", op: "in", value: courseIds }]),
+    ]);
+    if (cRows?.length) setCourseList(sortCoursesByRound(stitchCourses(cRows, tbRows), rounds));
+    return playerRows || [];
   }, []);
+
+  const refreshStaticData = useCallback(() => loadStaticData(db.get), [loadStaticData]);
 
   const { pullY, refreshing: pullRefreshing, PULL_THRESHOLD } = usePullToRefresh({
     hasNewBundle,
@@ -3960,35 +3980,28 @@ export default function WBCApp() {
   // its stored token and is sent only what changed since this phone last had
   // it. On the collections that matter the listener is strictly cheaper.
   useEffect(() => {
-    // The registry, as a promise. The roster bootstrap below needs it and the
-    // two now arrive on different clocks — this one over a one-shot read, the
-    // roster over its subscription — so the seeding awaits it rather than
-    // racing it.
-    const registryReady = (async () => {
-      const playerRows = await db.get("players");
-      if (playerRows?.length) {
-        // The one place a career record becomes something a screen renders,
-        // and so the one place the display convention is applied. A name the
-        // app generated years ago under the old one — "Aaron J" — is restyled
-        // here on the way in; a nickname a director typed is not, and a row
-        // with no first/last to restyle from is not either. See
-        // lib/playerNames, and note that what is STORED never changes: the id
-        // that binds a man to sixteen years of history was derived from that
-        // string, so it is identity rather than presentation.
-        DEMO_PLAYERS = playerRows
-          .map(r => {
-            // The surname first, where the record does not carry one — see
-            // data/surnames.js. Sixteen years of records store "Aaron J" and
-            // no surname anywhere, so without this the convention below has
-            // nothing to restyle and every board reads exactly as it did.
-            const full = withKnownSurname(r);
-            return { id: r.id, name: displayNameFor(full), first_name: full.first_name || "", last_name: full.last_name || "", index_override: r.index_override ?? null };
-          })
-          .sort((a, b) => a.name.localeCompare(b.name));
-        setRegistry(DEMO_PLAYERS);
-      }
-      return playerRows || [];
-    })();
+    // The static half, as a promise. The roster bootstrap below needs the
+    // registry and the two arrive on different clocks — this one over
+    // one-shot reads, the roster over its subscription — so the seeding
+    // awaits it rather than racing it.
+    //
+    // TWO PASSES over the same four collections, and the first one costs no
+    // network at all: it reads what this phone already has on disk (see
+    // db.getCached), so a relaunch has its roster, its rounds and every
+    // course rating in hand on the frame it mounts instead of after two
+    // chained round trips. The server pass follows and replaces it.
+    //
+    // Awaited rather than raced, so the stored copy can never land on top of
+    // the fresh one. It is an IndexedDB read of four small collections — a
+    // few milliseconds against the hundreds the server pass is about to
+    // spend — and on a cold install it finds nothing and returns immediately.
+    //
+    // The roster bootstrap below waits on the SERVER pass specifically: it
+    // WRITES a roster off what it is handed, and seeding one off a stored copy
+    // is the kind of thing that must not happen from a device's own memory.
+    const registryReady = loadStaticData(db.getCached)
+      .catch(() => null)
+      .then(() => loadStaticData(db.get));
     registryReady.catch(e => console.error("Registry load failed:", e));
 
     (async () => {
@@ -4007,27 +4020,9 @@ export default function WBCApp() {
             setClaims(Object.fromEntries(userRows.map(r => [r.uid || r.id, r.player_id]).filter(([u, pid]) => u && pid)));
           }
         }).catch(e => console.warn("[claims] wbc_users load skipped:", e?.message || e));
-
-        const trRows = await db.get("tournament_rounds", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
-        const sortedTRounds = (trRows || []).sort((a, b) => a.round_number - b.round_number);
-        if (sortedTRounds.length) setTRounds(sortedTRounds.map(r => ({ id: r.id, tournament_id: r.tournament_id, round_number: r.round_number, course_id: r.course_id })));
-
-        const courseIds = sortedTRounds.map(r => r.course_id).filter(Boolean);
-        if (courseIds.length) {
-          const cRows = await db.get("courses", [{ field: "id", op: "in", value: courseIds }]);
-          if (cRows?.length) {
-            const tbRows = await db.get("tee_boxes", [{ field: "course_id", op: "in", value: courseIds }]);
-            const coursesWithTees = cRows.map(c => ({
-              ...c,
-              hole_pars: c.hole_pars || [],
-              hole_handicaps: c.hole_handicaps || [],
-              tee_boxes: (tbRows || []).filter(t => t.course_id === c.id).map(t => ({ name: t.name, color: t.color, rating: parseFloat(t.rating), slope: t.slope, par: t.par, yardage: t.yardage })),
-            }));
-            setCourseList(sortCoursesByRound(coursesWithTees, sortedTRounds));
-          }
-        }
       } catch(e) { console.error("Load failed:", e); }
     })();
+
 
     // ── Real-time subscriptions via Firestore onSnapshot ──
     const unsubs = [];
@@ -4168,7 +4163,9 @@ export default function WBCApp() {
     }));
 
     return () => unsubs.forEach(u => u && u());
-  }, []);
+    // loadStaticData is a stable useCallback — named so the linter can see it,
+    // not because this block should ever re-run.
+  }, [loadStaticData]);
 
   // ── The photo index, subscribed only once somebody opens Photos ──
   // Deliberately NOT in the block above. Every other subscription there is
@@ -4416,7 +4413,11 @@ export default function WBCApp() {
     let unsub;
     (async () => {
       try {
-        const supported = await isMessagingSupported().catch(() => false);
+        // Fetched here rather than at the top of the file: this listener is a
+        // nicety that runs after a player is signed in, and the leaderboard
+        // should not wait on the push SDK to download before it can paint.
+        const { getMessaging, onMessage, isSupported } = await import("firebase/messaging");
+        const supported = await isSupported().catch(() => false);
         if (!supported) return;
         const messaging = getMessaging(_app);
         unsub = onMessage(messaging, (payload) => {
