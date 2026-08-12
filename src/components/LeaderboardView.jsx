@@ -445,7 +445,7 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
           the round columns in place without changing what is on the board —
           and the rounds toggle changes which COLUMNS ARE THERE. Two of a kind
           and then the odd one, which is why the odd one is on the end. */}
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, marginBottom: 10 }}>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <h2 style={{ fontFamily: "'Montserrat', sans-serif", fontSize: FS.title, margin: 0, fontWeight: 800 }}>Leaderboard</h2>
           {(() => {
@@ -480,8 +480,15 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
         {/* Three of the same control, so they are drawn by the same code —
             they were three copies of one twelve-line block, which is how the
             unselected label on one of them ended up a different grey from the
-            other two for a while. */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: `0 ${LB_PAD_L}px` }}>
+            other two for a while.
+
+            Ruled off underneath. This rule and the one under the column heads
+            are the two structural lines on the screen, and between them they
+            make the heads a band rather than a row of grey words floating over
+            the first player: controls above the line, what the columns are
+            inside it, the board below. They are the weight the row dividers
+            are, so the whole screen is ruled in one hairline and not three. */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: `0 ${LB_PAD_L}px 9px`, borderBottom: `1px solid ${K.bdr}${ALPHA.line}` }}>
           <Toggle options={[["Net", false], ["Gross", true]]} value={showGross} onPick={setShowGross} />
           <Toggle options={[["Par", true], ["Total", false]]} value={showToPar} onPick={setShowToPar} />
           {/* The round side names the round it is offering to leave: "R2" is
@@ -543,13 +550,15 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
             <>
               {/* Eyebrows, not data, and they say so: the smallest thing on
                   the screen, tracked wide, in the quiet grey, on nothing. No
-                  fill and no rule under it — the gap below is what separates
-                  it from the board, and a strip of tint here would be the one
-                  boxed thing left on a board with no boxes.
+                  fill — the rule under it is what separates it from the board,
+                  and a strip of tint on top of that would be the one boxed
+                  thing left on a board with no boxes. Paired with the rule
+                  under the toggles it reads as a band; on its own it was a row
+                  of grey words floating over the leader.
                   The position column goes unlabelled. A column of 1, 2, T3 in
                   front of a column of names is not a question anybody needs a
                   head to answer, and "#" was a character doing nothing. */}
-              <div ref={headerRef} style={{ ...gridStyle, padding: `0 ${LB_PAD_L}px 9px ${LB_PAD_L}px`, fontSize: FS.micro, fontWeight: 700, color: K.t3, textTransform: "uppercase", letterSpacing: "0.12em" }}>
+              <div ref={headerRef} style={{ ...gridStyle, padding: `9px ${LB_PAD_L}px`, fontSize: FS.micro, fontWeight: 700, color: K.t3, textTransform: "uppercase", letterSpacing: "0.12em", borderBottom: `1px solid ${K.bdr}${ALPHA.line}` }}>
                 <span />
                 <span>Player</span>
                 {(() => {
@@ -645,12 +654,37 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
                         names. Not under the last one — there is nothing below
                         it to separate from.
 
-                        The leader takes an accent wash that fades out before
-                        the middle of the row, rather than a filled row or a
-                        badge. It marks where the eye should land first without
-                        drawing a box on a board whose whole idea is that there
-                        are none. */}
-                    <div onClick={() => { setExpanded(isExpanded ? null : p.id); setScorecardRound(null); }} style={{ ...gridStyle, padding: `0 ${LB_PAD_L}px`, height: rowH || 28, flex: "0 0 auto", alignItems: "center", boxShadow: idx === lb.length - 1 ? undefined : `inset 0 -1px 0 ${K.bdr}${ALPHA.line}`, background: top3 && !p.isWD ? `linear-gradient(90deg, ${K.acc}${ALPHA.wash}, transparent 45%)` : "transparent", cursor: "pointer", fontSize: rowStyle.fontSize, lineHeight: 1 }}>
+                        The leader is marked with a RULE, not with shading. It
+                        was an accent wash fading out across the row, and a
+                        gradient is the one thing on a flat board that cannot
+                        help drawing attention to itself: it has no edge to
+                        line up with anything, it reads as a smudge behind the
+                        name rather than a mark on the row, and in daylight it
+                        came out as a grey-green rectangle dying in the middle
+                        of nowhere. Three pixels of accent down the left edge
+                        says the same thing in a shape the rest of the screen
+                        already uses — it lines up with the rules under the
+                        heads, it has an edge, and it leaves the row the same
+                        colour as every other row.
+
+                        Painted as an inset shadow rather than a border for the
+                        usual reason: a border is width, and it would push this
+                        one row's columns three pixels right of the eleven
+                        above and below it. */}
+                    <div onClick={() => { setExpanded(isExpanded ? null : p.id); setScorecardRound(null); }} style={{ ...gridStyle, padding: `0 ${LB_PAD_L}px`, height: rowH || 28, flex: "0 0 auto", alignItems: "center",
+                      boxShadow: idx === lb.length - 1 ? undefined : `inset 0 -1px 0 ${K.bdr}${ALPHA.line}`,
+                      // Drawn as a background image sized to 60% of the row —
+                      // the same trick the skins card marks a won hole with —
+                      // rather than as an edge on the box. An edge runs the
+                      // full height, so a tie at the top came out as one bar
+                      // down two rows instead of a mark on each of them.
+                      ...(top3 && !p.isWD ? {
+                        backgroundImage: `linear-gradient(${K.acc}, ${K.acc})`,
+                        backgroundSize: "3px 58%",
+                        backgroundPosition: "left center",
+                        backgroundRepeat: "no-repeat",
+                      } : null),
+                      cursor: "pointer", fontSize: rowStyle.fontSize, lineHeight: 1 }}>
                       {/* Position — a rung UNDER the row size and in the quiet
                           grey. It was the row's heaviest ink after the total,
                           which put the most weight on the least interesting
