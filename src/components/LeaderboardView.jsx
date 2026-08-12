@@ -35,8 +35,10 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
   useEffect(() => { setShowGross(false); setShowToPar(true); }, []);
   const containerRef = useRef(null);
   const headerRef = useRef(null);
+  const rowsRef = useRef(null);
+  const expandedRef = useRef(null);
   const [rowStyle, setRowStyle] = useState({ padding: "6px 12px", fontSize: FS.small });
-  const [rowMinH, setRowMinH] = useState(0);
+  const [rowH, setRowH] = useState(0);
 
   // Compute player column width to center Total, and align trophy to match.
   //
@@ -92,9 +94,17 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
     prevPositions.current = newPos;
   }, [lb.map(p => p.id).join(",")]);
 
-  // Row styles handled via CSS flex — rowStyle kept for font size only.
+  // Every row is MEASURED to one height and then held there, rather than each
+  // row flexing to fill what is left. The rows divide the board's height evenly
+  // the same way either way — but a flexed row is a row whose height is a
+  // function of its neighbours, so opening one player's card re-laid out the
+  // whole board around it: the tapped row lost the air it was centred in and
+  // every other row resized under the scroll. A fixed height means expanding is
+  // what it looks like — the card grows underneath the row and pushes the rows
+  // below it down, and nothing above it moves at all.
+  //
   // useLayoutEffect for the same reason as the column measurement above: this
-  // reads the rendered height and rewrites the row font size and padding from
+  // reads the rendered height and rewrites the row height and font size from
   // it, so running it after paint shows one frame at the pre-measurement size.
   useLayoutEffect(() => {
     const calc = () => {
@@ -102,9 +112,18 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
       // Use the container's own bounding rect — it already lives inside the padded content area
       const containerRect = containerRef.current.getBoundingClientRect();
       const headerH = headerRef.current.offsetHeight;
-      // Available = space from bottom of grid header to bottom of container
-      const available = containerRect.height - headerH;
-      const perRow = Math.floor(available / lb.length);
+      // The rows box itself, once it exists: it is what the rows actually have
+      // to divide, and unlike the container it does not count the board's own
+      // border. It is a flex child with basis 0 and its overflow is not
+      // visible, so its height is the space left over and never its content —
+      // which is what makes it safe to measure while a card is open.
+      // Container-minus-header is the same number a pixel or two out, for the
+      // first pass before the box is on the page.
+      const available = rowsRef.current?.clientHeight || (containerRect.height - headerH);
+      // Two decimals rather than whole pixels: the rows are meant to fill the
+      // board exactly, and rounding each one up is how a board with a full
+      // field ends up a scroll tall with nothing to scroll to.
+      const perRow = Math.floor((available / lb.length) * 100) / 100;
       const clampedPerRow = Math.min(perRow, 36);
       // The rung the whole row is built from: the name and Total sit one above
       // it, Thru and the round columns one below. A full field on a short
@@ -124,13 +143,37 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
       // re-measure below is free unless it actually found a different layout.
       setRowStyle(prev => (prev.fontSize === fSize && prev.lineHeight === 1 && prev.padding === undefined)
         ? prev : { fontSize: fSize, lineHeight: 1 });
-      setRowMinH(perRow);
+      // 28 is the floor a row is still readable at. Past that the board is
+      // taller than the box and scrolls, which it has to be allowed to do —
+      // the alternative is the bottom of the field being clipped off.
+      setRowH(Math.max(28, perRow));
     };
     calc();
     const t = setTimeout(calc, 100);
     window.addEventListener("resize", calc);
     return () => { clearTimeout(t); window.removeEventListener("resize", calc); };
   }, [lb.length]);
+
+  // Open a card on the bottom row of a full board and the card itself is below
+  // the fold — the row you tapped is all you see happen. So once it has grown,
+  // bring it up far enough to read, and no further: the row that was tapped
+  // stays where the finger left it if the whole card cannot fit.
+  //
+  // Scrolls the rows box by hand rather than scrollIntoView, which walks up and
+  // scrolls every ancestor it finds — on this screen that is the page behind
+  // the board.
+  useEffect(() => {
+    if (!expanded) return;
+    const t = setTimeout(() => {
+      const el = expandedRef.current, box = rowsRef.current;
+      if (!el || !box) return;
+      const r = el.getBoundingClientRect(), b = box.getBoundingClientRect();
+      const below = r.bottom - b.bottom;
+      if (below <= 0) return;
+      box.scrollTo?.({ top: box.scrollTop + Math.min(below, r.top - b.top), behavior: "smooth" });
+    }, 220);
+    return () => clearTimeout(t);
+  }, [expanded, scorecardRound]);
 
   // What the Thru column is counting right now — see lib/thruStatus. The round
   // is "in play" from the first score anyone posts until the director
@@ -444,7 +487,22 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
               {lb.length === 0 && (loaded
                 ? <div style={{ padding: 24, textAlign: "center", color: K.t2, fontSize: FS.small }}>No scores yet — be the first!</div>
                 : <div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small, opacity: 0.5 }}>&nbsp;</div>)}
-              <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: expanded ? "auto" : "hidden" }}>
+              {/* The card grows out of the row rather than appearing at full
+                  size under it: the wrapper is a one-track grid animated from
+                  a zero fraction to its content, which is the only way to run
+                  a height transition to a height nobody has measured. A
+                  browser that will not interpolate the track just shows the
+                  card, which is where this was before.
+
+                  Opening only. Closing a card is a tap that wants the board
+                  back, and playing it out is 200ms of the row you are trying
+                  to get to still moving. */}
+              <style>{`@keyframes wbcCardOpen{from{grid-template-rows:0fr}to{grid-template-rows:1fr}}`}</style>
+              {/* Always scrollable, not only while a card is open. A full field
+                  on a short phone is already taller than the box before
+                  anything is expanded, and hidden meant the last few players
+                  were simply not reachable. */}
+              <div ref={rowsRef} style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "auto" }}>
               {(() => {
                 // Pre-compute tied positions
                 const posMap = {};
@@ -493,8 +551,8 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
                         return hasAny ? netTotal : null;
                       })();
                 return (
-                  <div key={p.id} style={{ flex: isExpanded ? "0 0 auto" : 1, minHeight: (expanded && !isExpanded) ? rowMinH : 0, display: "flex", flexDirection: "column", justifyContent: "center" }}>
-                    <div onClick={() => { setExpanded(isExpanded ? null : p.id); setScorecardRound(null); }} style={{ ...gridStyle, padding: `0 0 0 ${LB_PAD_L}px`, minHeight: 28, height: "100%", alignItems: "center", borderBottom: `1px solid ${K.bdr}${ALPHA.wash}`, background: "transparent", cursor: "pointer", fontSize: rowStyle.fontSize, lineHeight: 1 }}>
+                  <div key={p.id} ref={isExpanded ? expandedRef : undefined} style={{ flex: "0 0 auto", display: "flex", flexDirection: "column" }}>
+                    <div onClick={() => { setExpanded(isExpanded ? null : p.id); setScorecardRound(null); }} style={{ ...gridStyle, padding: `0 0 0 ${LB_PAD_L}px`, height: rowH || 28, flex: "0 0 auto", alignItems: "center", borderBottom: `1px solid ${K.bdr}${ALPHA.wash}`, background: "transparent", cursor: "pointer", fontSize: rowStyle.fontSize, lineHeight: 1 }}>
                       {/* # */}
                       <span style={{ fontWeight: 800, fontSize: rowStyle.fontSize, color: top3 ? K.acc : K.t2, display: "flex", alignItems: "center", gap: 1 }}>
                         {isChampion
@@ -578,8 +636,10 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
                       })}
                     </div>
                     {isExpanded && (
-                      <div style={{ borderBottom: `1px solid ${K.bdr}${ALPHA.hair}`, background: K.bg + ALPHA.panel }}>
-                        {renderScorecard(p)}
+                      <div style={{ display: "grid", gridTemplateRows: "1fr", animation: `wbcCardOpen ${MOTION} ease-out` }}>
+                        <div style={{ overflow: "hidden", borderBottom: `1px solid ${K.bdr}${ALPHA.hair}`, background: K.bg + ALPHA.panel }}>
+                          {renderScorecard(p)}
+                        </div>
                       </div>
                     )}
                   </div>
