@@ -30,6 +30,15 @@
 //  director's, set in Admin → Event; the fallback is only for an edition that
 //  has not been through that screen.
 //
+//  That fallback is looked up BY YEAR — see lib/editionLocation — and used to
+//  be the literal string "Gaylord, MI". None of the imported years (2010–2025)
+//  carries a location, because the source data in data/ records courses and
+//  scores and nothing about where the trip was based, so every one of them
+//  inherited the current year's city: switching to 2015 in Tournaments read
+//  "2015 · Gaylord, MI" for a tournament played in Augusta. The WBC plays
+//  somewhere new nearly every year, so one fallback city can only ever be
+//  right for one of them.
+//
 //  The mark is the APP LOGO — the golfer — not the trophy. They are different
 //  things: the golfer is WBC's identity (home-screen icon, pull-to-refresh
 //  spinner, this header), while the trophy is an award, used where a result is
@@ -40,6 +49,7 @@
 import { K, FONT, FS } from "../theme";
 import { WBC_LOGO } from "../constants";
 import { getTournamentYear } from "../firebase";
+import { locationForYear } from "../lib/editionLocation";
 import { BellCountdown } from "./BellCountdown";
 
 // The single knob for how far the header sits from the top of the screen.
@@ -57,7 +67,12 @@ export const HEADER_SAFE_PAD = "calc(env(safe-area-inset-top, 0px) + 5px)";
 // around it — see BellCountdown for why the digits flank the logo rather than
 // taking a corner. Given null, or once it has run out, the header is exactly
 // the header it has always been.
-export function AppHeader({ location, fallbackLocation = "Gaylord, MI", right, countdownAt = null }) {
+export function AppHeader({ location, right, countdownAt = null }) {
+  const year = getTournamentYear();
+  // The director's answer first, then the year's own. A year with neither
+  // shows the bare year rather than a dangling separator — which is what an
+  // edition nobody has set a location on honestly is.
+  const where = location || locationForYear(year);
   const mark = (
     <div style={{
       width: 30, height: 30, background: K.acc, flexShrink: 0,
@@ -88,12 +103,26 @@ export function AppHeader({ location, fallbackLocation = "Gaylord, MI", right, c
           WBC sets its titles the opposite way, and does so everywhere else
           in the app — larger, NEGATIVE tracking, full-strength ink, and
           sentence case, so a location reads "Gaylord, MI" rather than being
-          shouted. */}
+          shouted.
+
+          UP TO TWO LINES, not one with an ellipsis. Nearly every location is
+          a town and a state and fits on one line, so this changes nothing for
+          them — but not every tournament HAS a town. 2013 toured four courses
+          in four towns with no base anybody remembers, and its location is
+          the four course names; on one nowrap line that read "2013 · Black
+          Forest / Lochenheath / The Le…", which names two of the four.
+          Wrapping keeps the caption centred — the column is centred, so a
+          second line is centred too — and only makes the band taller. The
+          clamp is the backstop: a director who pastes an address into
+          Admin → Event gets two lines and an ellipsis, not a header that eats
+          the screen. */}
       <div style={{
         fontSize: FS.lead, fontWeight: 800, letterSpacing: "-0.01em", color: K.t1,
-        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%",
+        textAlign: "center", maxWidth: "100%", lineHeight: 1.25,
+        display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 2,
+        overflow: "hidden",
       }}>
-        {getTournamentYear()} · {location || fallbackLocation}
+        {where ? `${year} · ${where}` : year}
       </div>
 
       {right && (

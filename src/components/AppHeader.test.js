@@ -1,0 +1,74 @@
+/** @vitest-environment jsdom */
+// ══════════════════════════════════════════════════════════════════
+//  Does the header say where this tournament was played?
+// ══════════════════════════════════════════════════════════════════
+//
+// One job, and it is the one nothing else could catch. lib/editionLocation has
+// its own suite for what city a year is in; this checks that the header
+// actually ASKS it — the bug was not a wrong table, it was a literal
+// "Gaylord, MI" sitting in this component as the fallback for every edition
+// that had no location of its own. Which is all sixteen imported ones.
+//
+// firebase.js initializes a Firebase app at import time, so it is mocked
+// rather than imported: getTournamentYear() is the only thing this component
+// wants from it, and standing it up for real would mean a network client in a
+// unit test.
+import { describe, it, expect, afterEach, vi } from "vitest";
+import { render, screen, cleanup } from "@testing-library/react";
+import { createElement as h } from "react";
+
+let year = 2026;
+vi.mock("../firebase", () => ({ getTournamentYear: () => year }));
+
+import { AppHeader } from "./AppHeader";
+
+afterEach(() => { cleanup(); year = 2026; });
+
+describe("AppHeader", () => {
+  it("shows the director's location when the edition has one", () => {
+    render(h(AppHeader, { location: "Gaylord, MI" }));
+    expect(screen.getByText("2026 · Gaylord, MI")).toBeTruthy();
+  });
+
+  it("falls back to the year's own city, not the current year's", () => {
+    // A historical edition carries no meta.location — the import had no city
+    // to write. Before this it read "2015 · Gaylord, MI"; 2015 was Augusta.
+    year = 2015;
+    render(h(AppHeader, { location: "" }));
+    expect(screen.getByText("2015 · Augusta, MI")).toBeTruthy();
+  });
+
+  it("gives two historical editions two different cities", () => {
+    year = 2021;
+    const { unmount } = render(h(AppHeader, {}));
+    expect(screen.getByText("2021 · Lewiston, MI")).toBeTruthy();
+    unmount();
+    year = 2019;
+    render(h(AppHeader, {}));
+    expect(screen.getByText("2019 · Stanwood, MI")).toBeTruthy();
+  });
+
+  it("prints a long location in full rather than truncating it", () => {
+    // 2013 has no home base, so its location is the four courses. The caption
+    // wraps to two lines for exactly this — the whole string has to be there.
+    year = 2013;
+    render(h(AppHeader, {}));
+    expect(screen.getByText(
+      "2013 · Black Forest / Lochenheath / The Legend / Forest Dunes")).toBeTruthy();
+  });
+
+  it("shows the bare year for an edition with no city anywhere", () => {
+    year = 2031;
+    render(h(AppHeader, { location: "" }));
+    expect(screen.getByText("2031")).toBeTruthy();
+  });
+
+  it("mounts with the countdown and the right-hand controls", () => {
+    render(h(AppHeader, {
+      location: "Gaylord, MI",
+      countdownAt: Date.now() + 60 * 60 * 1000,
+      right: h("button", null, "Account"),
+    }));
+    expect(screen.getByText("Account")).toBeTruthy();
+  });
+});

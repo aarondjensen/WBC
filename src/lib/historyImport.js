@@ -71,6 +71,7 @@
 // a TRANSITIVE dependency (vitest brings it) whose binary npm does not reliably
 // link. One character here beats a dependency that is only sometimes there.
 import { docIds, editionIdForYear, editionSlug } from "./editionId.js";
+import { locationForYear } from "./editionLocation.js";
 
 // The WD sentinel, re-stated rather than imported from individualBoard: this
 // module is about what a document holds, and importing the board to name a
@@ -172,7 +173,15 @@ export const editionDocFor = ({ year, name, champion = null }) => ({
 // tournament_state — the singleton carrying the event setup. `rounds` is what
 // the app counts to; a three-round year that said four would render an empty
 // fourth column on its leaderboard forever.
-export const stateDocFor = ({ year, rounds, location = "" }) => ({
+//
+// `location` defaults to the year's own city rather than to blank. It is not
+// in data/ — the CSVs record courses and scores, not where the trip was based
+// — so it comes from lib/editionLocation, which keys it off the courses each
+// year played. Written into the document so the city travels with the
+// tournament: the app has a matching fallback for the years already imported,
+// but a year whose state doc says where it was played needs no fallback at
+// all, and a director who corrects one under Admin → Event has it stick.
+export const stateDocFor = ({ year, rounds, location = locationForYear(year) }) => ({
   id: `ts_${editionIdForYear(year)}`,
   tournament_id: editionIdForYear(year),
   meta: {
