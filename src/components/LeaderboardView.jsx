@@ -3,20 +3,24 @@
 // ══════════════════════════════════════════════════════════════════
 //
 // The screen the app opens on, and the one a spectator on a couch is looking
-// at. A row per player, ranked, with the round columns beside it; tapping one
-// opens that player's card for whichever round they want.
+// at. A row per player, ranked, with the round beside it; tapping one opens
+// that player's card for whichever round they want.
 //
 // The ranking is not here. lib/individualBoard computes and orders the board,
 // and it is deliberately the same code the `leaderboard` pairing mode draws
 // its order from — see that module's header for why the standings players read
 // and the order the draw is taken from must be one number, not two.
 //
-// What is here is the layout, and the layout has one hard problem worth
-// knowing about before touching it: the columns are MEASURED, not guessed, so
-// Total lands under the trophy behind it. That is a read-then-restyle, which
-// is why it runs in useLayoutEffect — in useEffect the browser paints the
-// guessed width first and the real one a frame later, and the whole player
-// column visibly jumps on every mount.
+// What is here is the layout, and it is drawn with NO RULES — no line between
+// two columns, none between two rows bar one hairline, no box around anything.
+// Alignment holds the columns apart and weight carries the hierarchy. That is
+// worth knowing before touching it, because every instinct when a board looks
+// crowded is to reach for a divider, and a divider is what this stopped being.
+//
+// The one measurement left is vertical: the rows are fitted to the height of
+// the board so a full field lands on one screen, in a useLayoutEffect, because
+// it is a read-then-restyle and running it after paint shows a frame at the
+// wrong size.
 import { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { K, FS, fsStep, R, ALPHA, MOTION } from "../theme";
 import { Popup } from "./Popup";
@@ -33,8 +37,28 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
   const [scorecardRound, setScorecardRound] = useState(null);
   const [showGross, setShowGross] = useState(false);
   const [showToPar, setShowToPar] = useState(true);
-  // Reset to Net + To-Par whenever leaderboard mounts
-  useEffect(() => { setShowGross(false); setShowToPar(true); }, []);
+  // ── One round, or all of them ──
+  // The board carried a column per round at all times, which on a phone meant
+  // five numbers sharing the ~170px left after the name, and Total and Thru —
+  // the two anybody actually reads — squeezed to make room for three columns of
+  // history that are mostly dashes until Saturday. One round shows by default
+  // and the rest are a tap away.
+  //
+  // The round it shows is the round the board is ABOUT: the last one anybody
+  // has posted a score in. That is the same round Thru is counting, so the two
+  // columns beside each other agree — "thru 14, four under today" — and the
+  // morning of round 2 still shows round 1 rather than a fresh column of
+  // nothing.
+  const [showAllRounds, setShowAllRounds] = useState(false);
+  // The board stops being a running total and becomes a RESULT the moment the
+  // director finalizes the last round. Nothing else marks the end of a
+  // tournament — scores can still be corrected up to that point.
+  const tournamentOver = !!finalizedRounds[NUM_ROUNDS];
+  // Reset to Net + To-Par whenever leaderboard mounts — and to the whole week
+  // once there is a whole week to show. "R4 only" is the wrong summary of a
+  // finished tournament; by then the history IS the story, and the four
+  // columns have no live round to compete with.
+  useEffect(() => { setShowGross(false); setShowToPar(true); setShowAllRounds(tournamentOver); }, [tournamentOver]);
   const containerRef = useRef(null);
   const headerRef = useRef(null);
   const rowsRef = useRef(null);
@@ -153,10 +177,20 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
   // this round for anyone who has teed off, the group's tee time for anyone who
   // hasn't. Outside it, the tournament total.
   const inPlay = roundInPlay(lb, round, finalizedRounds[round]);
-  // The board stops being a running total and becomes a RESULT the moment the
-  // director finalizes the last round. Nothing else marks the end of a
-  // tournament — scores can still be corrected up to that point.
-  const tournamentOver = !!finalizedRounds[NUM_ROUNDS];
+  // The round the single round column shows — see the note on showAllRounds.
+  // Counted DOWN from the last round so that a round somebody has started
+  // always wins over one they have not, and falling back to the app's own
+  // current round for a board where nobody has posted anything at all.
+  const shownRound = useMemo(() => {
+    for (let r = NUM_ROUNDS; r >= 1; r--) {
+      const played = lb.some(p => {
+        const rd = p?.rds?.[r - 1];
+        return rd && (rd.netToPar != null || (rd.thru || 0) > 0 || rd.wd);
+      });
+      if (played) return r;
+    }
+    return round;
+  }, [lb, round]);
   const teeTimes = useMemo(
     () => teeTimesByPlayer((pairingsData || {})[round], (teeTimesData || {})[round]),
     [pairingsData, teeTimesData, round],
@@ -338,20 +372,19 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
     <div style={{ position: "relative", height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
       {/* Giant trophy silhouette behind entire leaderboard — fixed so it never
           shifts.
-          Held back to half what it was. It could carry 8% when the board in
-          front of it was a grid of ruled, tinted boxes, because the boxes were
-          what the eye read and the trophy sat behind them. With the rules gone
-          the rows are ink on the page, and at that strength the silhouette
-          stopped being a watermark and became texture UNDER the names — its
-          own edges reading as marks across the middle of the field. Low enough
-          now that you see it when you look for it and not when you are reading
-          somebody's score, which is what a watermark is for. */}
+          Held back from the 8% it carried against the old board, but not by
+          much. It could take 8% when what sat in front of it was a grid of
+          ruled, tinted boxes, because the boxes were what the eye read; with
+          the rules gone the rows are ink on the page and the silhouette's own
+          edges started reading as marks across the middle of the field. Two
+          points down is the settled answer: plainly there behind the board,
+          and not competing with a score while somebody reads it. */}
       <img src={WBC_TROPHY_SILHOUETTE} alt="" style={{
         position: "fixed", top: "50%", left: "50%",
         transform: "translate(-50%, -50%)",
         width: 480, height: "100vh",
         maxWidth: "100vw",
-        opacity: 0.04,
+        opacity: 0.06,
         pointerEvents: "none",
         userSelect: "none",
         zIndex: 0,
@@ -360,7 +393,17 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
       <div style={{ position: "relative", zIndex: 1, flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
       {/* Title inline with stacked pills */}
       <div style={{ display: "flex", alignItems: "center", marginBottom: 10, gap: 8 }}>
-        {/* Left pill — Net/Gross */}
+        {/* Left — Net/Gross, and LIVE under it.
+            The badge used to sit beside the title, and beside the title is
+            where it broke the row: title plus badge plus a stack of pills each
+            side comes to 392px, and a 360 phone pushed the right-hand stack off
+            its own screen — with the board's overflow hidden, that is not a
+            scroll, it is toggles that cannot be reached. It happened only while
+            a round was in play, which is the one time anybody is looking.
+            Stacked under the left pill it costs the row nothing, it is still
+            the second thing on the screen, and the two sides balance: controls
+            on the left with the state of play beneath them, controls on the
+            right. */}
         <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
           <div onClick={() => setShowGross(g => !g)} style={{
             display: "flex", alignItems: "center", cursor: "pointer", userSelect: "none",
@@ -380,10 +423,6 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
               }}>{label}</span>
             ))}
           </div>
-        </div>
-        {/* Center — title */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <h2 style={{ fontFamily: "'Montserrat', sans-serif", fontSize: FS.title, margin: 0, fontWeight: 800 }}>Leaderboard</h2>
           {(() => {
             // No FINAL badge beside the title: the trophy on position 1 says
             // the tournament is decided, and saying it twice on one screen
@@ -408,7 +447,22 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
             );
           })()}
         </div>
-        {/* Right pill — Par/Total */}
+        {/* Center — title.
+            A rung down on a phone narrower than 340. The word is 200px at
+            title size and the two pill stacks either side are 66 each, which
+            is 12px more than a 320 screen has — and what gives way is the
+            heading, because the other two are things you tap. Written as a
+            media query rather than measured: it is one breakpoint on one word,
+            and this file has one measurement left in it on purpose. */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {/* Both sizes in the rule, and none of it inline: an inline
+              font-size outranks a stylesheet class, so a base size on the
+              element would win over the breakpoint and the query would look
+              like it was never there. */}
+          <style>{`.wbcLbTitle{font-size:${FS.title}px}@media (max-width:340px){.wbcLbTitle{font-size:${FS.lead}px}}`}</style>
+          <h2 className="wbcLbTitle" style={{ fontFamily: "'Montserrat', sans-serif", margin: 0, fontWeight: 800 }}>Leaderboard</h2>
+        </div>
+        {/* Right pills — Par/Total, and how many rounds to show under it */}
         <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
           <div onClick={() => setShowToPar(v => !v)} style={{
             display: "flex", alignItems: "center", cursor: "pointer", userSelect: "none",
@@ -424,11 +478,35 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
               }}>{label}</span>
             ))}
           </div>
+          {/* The round side names the round it is offering to leave: "R2" is
+              the column you are looking at, not a round number in the
+              abstract, so it moves with the board. Nothing to offer on a
+              one-round event, where the two states are the same board. */}
+          {NUM_ROUNDS > 1 && (
+            <div onClick={() => setShowAllRounds(v => !v)} style={{
+              display: "flex", alignItems: "center", cursor: "pointer", userSelect: "none",
+              background: K.bdr + ALPHA.tint, borderRadius: R.pill, padding: "2px 3px", gap: 1,
+            }}>
+              {[[`R${shownRound}`, false], ["All", true]].map(([label, val]) => (
+                <span key={label} style={{
+                  fontSize: FS.micro, fontWeight: 600, padding: "2px 0", borderRadius: R.xl,
+                  width: 30, textAlign: "center",
+                  background: showAllRounds === val ? K.t3 + ALPHA.hair : "transparent",
+                  color: showAllRounds === val ? K.t1 : K.t3,
+                  transition: `background ${MOTION}, color ${MOTION}`,
+                }}>{label}</span>
+              ))}
+            </div>
+          )}
         </div>
       </div>
       <div ref={containerRef} style={{ background: "transparent", overflow: "hidden", display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
         {(() => {
-          const allPriorRounds = Array.from({ length: NUM_ROUNDS }, (_, i) => i + 1);
+          // Every round, or the one the board is about. This list is what the
+          // header and every row map over, so the two cannot come apart.
+          const shownRounds = showAllRounds
+            ? Array.from({ length: NUM_ROUNDS }, (_, i) => i + 1)
+            : [shownRound];
           // ── No rules on this board, in any direction ──
           // What made it read as a spreadsheet was the grid: a line down every
           // column boundary and another across every row, so twelve players
@@ -441,18 +519,26 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
           // hairline is left between players, at a third strength, and one
           // accent wash under the leader.
           //
-          // The four rounds are nested in a track of their own rather than
-          // four top-level ones. They are one thing — the history behind the
+          // The rounds are nested in a track of their own rather than sitting
+          // as top-level columns. They are one thing — the history behind the
           // number in front — and grouping them is what lets the gap either
-          // side of the group do the work the rules used to.
-          const gridCols = `${LB_COL.num}px minmax(0, 1fr) ${LB_COL.total}px ${LB_COL.thru}px ${LB_COL.priorMin * NUM_ROUNDS}px`;
+          // side of the group do the work the rules used to. It is also what
+          // makes one round and four the same layout with a different width.
+          //
+          // Showing one round hands back three columns' worth of board, and it
+          // goes where the squeeze was: Thru and the round column each take a
+          // wider track, so the two live numbers stop touching, and everything
+          // still going spare falls through to the name.
+          const roundsW = showAllRounds ? LB_COL.priorMin * NUM_ROUNDS : LB_COL.oneRound;
+          const thruW = showAllRounds ? LB_COL.thru : LB_COL.thruRoomy;
+          const gridCols = `${LB_COL.num}px minmax(0, 1fr) ${LB_COL.total}px ${thruW}px ${roundsW}px`;
           // No column gap. The tracks are already wider than their contents —
           // that surplus IS the gap, and it sits where the alignment puts it:
           // to the LEFT of a right-aligned number, between it and whatever
           // ends before it. A gap on top of that would only push the four
           // rounds off the right edge.
           const gridStyle = { display: "grid", gridTemplateColumns: gridCols, alignItems: "center" };
-          const roundGrid = { display: "grid", gridTemplateColumns: `repeat(${NUM_ROUNDS}, 1fr)`, alignItems: "center" };
+          const roundGrid = { display: "grid", gridTemplateColumns: `repeat(${shownRounds.length}, 1fr)`, alignItems: "center" };
           // Right-aligned, both of them: a column of numbers reads as a column
           // when its digits line up on the same edge, and these are the two
           // that change width — "E" against "+11", "9" against "18".
@@ -482,7 +568,7 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
                 })()}
                 <span style={{ textAlign: "right" }}>Thru</span>
                 <div style={roundGrid}>
-                  {allPriorRounds.map(r => <span key={r} style={{ textAlign: "center" }}>R{r}</span>)}
+                  {shownRounds.map(r => <span key={r} style={{ textAlign: "center" }}>R{r}</span>)}
                 </div>
               </div>
               {/* Only once the round data is actually in. An empty `lb` also means
@@ -636,7 +722,7 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
                           either side of it, rather than four columns fenced
                           off from the row they belong to. */}
                       <div style={roundGrid}>
-                      {allPriorRounds.map((r) => {
+                      {shownRounds.map((r) => {
                         const prRd = p.rds[r - 1];
                         const isWDRound = prRd?.wd;
                         const prVal = isWDRound ? null : showGross

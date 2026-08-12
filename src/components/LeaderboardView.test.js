@@ -93,6 +93,22 @@ describe("LeaderboardView renders", () => {
     expect(rendered().length).toBeGreaterThan(0);
   });
 
+  // The board shows the round it is about, and the rest are a tap away. R4 is
+  // the assertion because it is the one label that appears nowhere else — "R1"
+  // is also what the pill itself says while a first round is the one showing.
+  it("shows one round, and all of them on the toggle", () => {
+    mount();
+    expect(screen.queryByText("R4")).toBeNull();
+    fireEvent.click(screen.getByText("All"));
+    expect(screen.getByText("R4")).toBeTruthy();
+  });
+
+  // A finished tournament is a week, not a Sunday. Nothing to toggle to.
+  it("opens on every round once the last one is finalized", () => {
+    mount({ finalizedRounds: { 1: true, 2: true, 3: true, 4: true } });
+    expect(screen.getByText("R4")).toBeTruthy();
+  });
+
   it("switches between net and gross, and to-par and total", () => {
     mount();
     fireEvent.click(screen.getByText("Gross"));
