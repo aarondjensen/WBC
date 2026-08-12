@@ -114,9 +114,16 @@ export const CTP_WHEEL_H = 150;     // px visible wheel height
 // four ways rather than four tracks.
 // Measured, twice, against the two states that squeeze this row hardest.
 //
-// The player column is what is left after these four, and the longest name in
-// the field has to fit it: at 360 they leave it 116px, and "O FITZGERALD" — the
-// longest surname on the roster, in the caps the board draws — takes 109.
+// The player column is what is left after these four, and it is measured
+// against the app's real body padding, not the harness's — 20px a side, which
+// is 40 off the top of every number below.
+//
+// Nothing clips at 375 and up in either state. At 360 the default board is
+// still clean and only the longest surname on the roster ellipsizes with all
+// four rounds showing, which is the trade that view is: five numeric columns
+// and a name do not fit a 360 screen at full size, and the name is the one
+// that degrades gracefully — an initial and most of a surname still tells you
+// who it is.
 //
 // `thru` is 40 for a value that is not a hole count. On the morning of a round
 // this column holds a TEE TIME, and "10:24a" measures 33.7 even at the two
@@ -130,14 +137,14 @@ export const CTP_WHEEL_H = 150;     // px visible wheel height
 // air around it rather than merely clearing the total, the round column takes
 // the same width so the pair reads as a pair, and everything left over falls
 // through to the names.
-export const LB_COL = { num: 26, total: 50, thru: 40, thruRoomy: 46, priorMin: 25, oneRound: 46 };
-// A hair of padding either side of a row, and no more. The board used to be a
-// bordered card inset from the page, so its rows needed room between their ink
-// and that border; it has no border now — the page's own padding is the margin
-// — and anything more here would set the board in from a frame that is not
-// there. Even on both sides, because there is no longer a band running to the
-// right-hand edge for the last round column to sit against.
-export const LB_PAD_L = 2;
+export const LB_COL = { num: 26, total: 46, thru: 40, thruRoomy: 46, priorMin: 23, oneRound: 46 };
+// The board has no border of its own — the page's padding is its margin — so
+// this is not room between ink and a frame. It is the gutter the leader's
+// accent mark is drawn in: three pixels of rule at the left edge of the row,
+// and enough clear space after it that a "T1" does not sit on top of it.
+// Even on both sides, so the four round columns end as far from the right
+// edge as the position sits from the left.
+export const LB_PAD_L = 7;
 
 
 export const WBC_TROPHY = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIoAAADgAgMAAAChhhbLAAAACVBMVEX///8i06f///8qYg9HAAAAAXRSTlMAQObYZgAAAAFiS0dEAIgFHUgAAAAHdElNRQfqAhwPCRGrKvWFAAACeElEQVRYw+3YW3LdIAwAUPHBDsp+9NN/dQb2v5WaxzUgJFCapNOkZvK8PmM9kO2bAAwrpNdCUFYnKhpJSpJwiS1aTVrWEs6vJu2TkU16zH9pwj8W6zGKyQdRNfVo/kqqScWknfHdxK0huD6casL1mQ3uTD5yGdgZehkwGr81aDNJNXibIJrYDJbTec1E6AZl46ibq0GiycdyMsUk2ZRHxhvMtW9Sn/1tojKptbJuZBRhMkp/jobeZtL7jSuDU3/cGffpBuuBsleaqWX5bmBvcG+wzuLOlMOelBuZ3aS7OJvxW6MMRzQbZzGxn+1kcGN8M/ROE2j4przPbMbvTJuKGlIzMJQnG2cxbUcgikNGQ+mvmLJpF3S+9WqmDXIb64OpU8ZNmeP72VyT/1MTXmW14kVDt0kGEyQz7OjdoLAaN7wtKd0UjO+hamGCCaNJ68bHOZ32i2AGUrdl2S4XR1NvaNz4yTjZ0GhgLQxba/v6YTBBMnE2eRRnc704p1OSXgyejWMGuMlPG0ZyYZ6Z5f3qlbSbjYuLobO5XmGG7QTUOZi3Kywkz/RYGJbt4cGQGRIMzcYJBub3Uu1mwg1OJkgG4mjW7tQTDQ2KYqir9F9sNoTF+iwvNqpysGOoOZhm4JzOGIwMBlXjz6F60nqonvTO+FPlRuOOKd8J0daEQ3fuhPanqQnhY76dgQ86zxczYKi9XDwfYf5iny3XsuWeYDCGe1R/yBmIhhJbeip90T6QlnhIx2Dq3++7UEIwwXzW/2mdZPAxb+nhYx7zpQ3OxHJdeMnQbIJk4jc1rHaxP6yHlr0wPS8sz6b1RARnhIKZ0/4J8jqdZBo0Jn4DUtjOuhjt96MAAAAASUVORK5CYII=";
