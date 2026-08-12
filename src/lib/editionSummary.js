@@ -128,6 +128,47 @@ export const writeSummaryCache = (byId = {}) => {
   } catch { return false; }
 };
 
+// ── And the years themselves ──────────────────────────────────────
+// The same trick one level up. The LIST of years is a single read, but it is
+// the read the whole picker waits on: until it lands there is nothing on
+// screen but "Loading…", and then seventeen rows arrive at once and the popup
+// grows from a strip to its full height. Remembering the rows means the years
+// are drawn on the frame it opens, and the read that follows corrects them.
+//
+// Only what a row is DRAWN from is kept — id, year, name. Nothing decides
+// anything off this: the delete guard re-reads the year's counts itself, and a
+// year deleted from another phone disappears the moment the real list lands.
+export const EDITIONS_CACHE_KEY = "wbc_edition_list";
+export const EDITIONS_CACHE_VERSION = 1;
+
+// Null rather than [] when there is nothing cached, so the picker can tell
+// "we don't know the years yet" (show "Loading…") from "we know, and there are
+// none" — which the read itself will say soon enough either way.
+export const readEditionsCache = () => {
+  const s = _store();
+  if (!s) return null;
+  try {
+    const raw = JSON.parse(s.getItem(EDITIONS_CACHE_KEY) || "null");
+    if (!raw || raw.v !== EDITIONS_CACHE_VERSION) return null;
+    return Array.isArray(raw.rows) && raw.rows.length ? raw.rows : null;
+  } catch { return null; }
+};
+
+// REPLACED, not merged — unlike the counts. This is the whole index, so a year
+// missing from it has been deleted, and merging would keep painting a row for
+// a tournament that is gone.
+export const writeEditionsCache = (rows = []) => {
+  const s = _store();
+  if (!s) return false;
+  try {
+    const slim = (rows || [])
+      .filter(e => e?.id)
+      .map(e => ({ id: e.id, year: Number(e.year) || 0, name: e.name || "" }));
+    s.setItem(EDITIONS_CACHE_KEY, JSON.stringify({ v: EDITIONS_CACHE_VERSION, rows: slim }));
+    return true;
+  } catch { return false; }
+};
+
 // Drop one year — after a delete, so the picker does not paint a row for a
 // tournament that no longer exists the next time it opens.
 export const forgetSummary = (id) => {
