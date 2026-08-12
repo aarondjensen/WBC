@@ -56,18 +56,18 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
       const containerW = containerRef.current.offsetWidth;
       const innerW = containerW - 2;          // inside the board's border
       const gridW = innerW - LB_PAD_L;        // the row's content box
-      // Total's centre sits at padL + num + playerW + total/2 from the board's
-      // inner edge, and the board is centred in the viewport — so putting that
-      // at the board's own midpoint puts it under the trophy behind it. The
-      // padding is one-sided now, so it has to be in this sum rather than
-      // cancelling out of it.
-      const centred = innerW / 2 - LB_PAD_L - LB_COL.num - LB_COL.total / 2;
+      // Total's centre sits at padL + chev + num + playerW + total/2 from the
+      // board's inner edge, and the board is centred in the viewport — so
+      // putting that at the board's own midpoint puts it under the trophy
+      // behind it. The padding is one-sided now, so it has to be in this sum
+      // rather than cancelling out of it.
+      const centred = innerW / 2 - LB_PAD_L - LB_COL.chev - LB_COL.num - LB_COL.total / 2;
       // On a narrow phone the fixed columns want more than half the width, and
       // honouring the centring would squeeze the round columns below the width
       // a "+11" needs. So centred is a CEILING, not a rule: the player column
       // gives way first, and Total drifts off the trophy rather than the round
       // columns becoming unreadable.
-      const fixed = LB_COL.num + LB_COL.total + LB_COL.thru + LB_COL.priorMin * NUM_ROUNDS;
+      const fixed = LB_COL.chev + LB_COL.num + LB_COL.total + LB_COL.thru + LB_COL.priorMin * NUM_ROUNDS;
       const playerW = Math.max(60, Math.min(centred, gridW - fixed));
       setPlayerColW(`${Math.floor(playerW)}px`);
     };
@@ -364,7 +364,7 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
         </div>
       </div>
       <div ref={containerRef} style={{ background: "transparent", borderRadius: R.lg, border: `1px solid ${K.bdr}`, overflow: "hidden", display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
-        {/* Build dynamic grid: #, Player, Total, Thru, then one equal track per round */}
+        {/* Build dynamic grid: chevron, #, Player, Total, Thru, then one equal track per round */}
         {(() => {
           const allPriorRounds = Array.from({ length: NUM_ROUNDS }, (_, i) => i + 1);
           // Four EQUAL tracks filling everything left over, instead of four
@@ -374,7 +374,7 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
           // same for R4 against the board's edge. On a 390 phone that read as
           // 100 / 55 / 56 / 83 against tracks that were all exactly 24: the
           // arithmetic was even and the board was not.
-          const gridCols = `${LB_COL.num}px ${playerColW} ${LB_COL.total}px ${LB_COL.thru}px${allPriorRounds.map(() => " 1fr").join("")}`;
+          const gridCols = `${LB_COL.chev}px ${LB_COL.num}px ${playerColW} ${LB_COL.total}px ${LB_COL.thru}px${allPriorRounds.map(() => " 1fr").join("")}`;
           const gridStyle = { display: "grid", gridTemplateColumns: gridCols, alignItems: "center" };
           // Total and Thru are drawn as one band running the whole height of
           // the board rather than as numbers sitting loose in each row. Every
@@ -422,6 +422,9 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
                   Total column at micro — a rung up and it spills over the band
                   it is supposed to cap. */}
               <div ref={headerRef} style={{ ...gridStyle, padding: `7px 0 7px ${LB_PAD_L}px`, fontSize: FS.micro, fontWeight: 600, color: K.t2, textTransform: "uppercase", letterSpacing: "0.06em", borderBottom: `1px solid ${K.bdr}` }}>
+                {/* The chevron's track. Nothing labels it — the mark under it
+                    is an affordance, not a column of data. */}
+                <span />
                 <span>#</span>
                 <span>Player</span>
                 {/* Negative margin eats the header's own padding so the band
@@ -495,6 +498,26 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
                 return (
                   <div key={p.id} style={{ flex: isExpanded ? "0 0 auto" : 1, minHeight: (expanded && !isExpanded) ? rowMinH : 0, display: "flex", flexDirection: "column", justifyContent: "center" }}>
                     <div onClick={() => { setExpanded(isExpanded ? null : p.id); setScorecardRound(null); }} style={{ ...gridStyle, padding: `0 0 0 ${LB_PAD_L}px`, minHeight: 28, height: "100%", alignItems: "center", borderBottom: `1px solid ${K.bdr}${ALPHA.wash}`, background: "transparent", cursor: "pointer", fontSize: rowStyle.fontSize, lineHeight: 1 }}>
+                      {/* Chevron — first thing in the row, ahead of the
+                          position. It marks the row as something that opens,
+                          and on the left it does that for the whole board in
+                          one column the eye reads down, instead of once per
+                          name at whatever width that name left behind.
+                          FS.micro flat, not a step off the row size: this is
+                          an affordance, not data, and stepping it meant it
+                          grew whenever the board had room to grow — which is
+                          backwards for the quietest mark in the row.
+                          Micro is the bottom of the type scale and this still
+                          wants to be smaller, so the last bit comes off the
+                          MARK rather than the type: the rung stays on the
+                          ladder and scale() takes the glyph to about 6px.
+                          Sizing it as type instead would have put a number
+                          below the scale's floor into the file, which is the
+                          drift the scale exists to stop — and a transform
+                          costs no layout, so the track keeps its width
+                          whatever the glyph does. Below ~0.6 the triangle
+                          stops reading as one and turns into a dot. */}
+                      <span style={{ fontSize: FS.micro, color: isExpanded ? K.acc : K.t2, transition: `transform ${MOTION}`, display: "flex", alignItems: "center", justifyContent: "center", transform: `${isExpanded ? "rotate(180deg)" : "rotate(0)"} scale(0.75)` }}>▼</span>
                       {/* # */}
                       <span style={{ fontWeight: 800, fontSize: rowStyle.fontSize, color: top3 ? K.acc : K.t2, display: "flex", alignItems: "center", gap: 1 }}>
                         {isChampion
@@ -508,29 +531,8 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
                       {/* Player — a rung above the fitted row size. The name is
                           what you scan the board for, and at the row size it
                           was reading as one column of many. */}
-                      <div style={{ fontWeight: isChampion ? 800 : 600, color: isChampion ? K.acc : undefined, fontSize: fsStep(rowStyle.fontSize, 1), display: "flex", alignItems: "center", gap: 3, overflow: "hidden", paddingRight: 4 }}>
-                        {/* flex:1 on the name is what parks the chevron on the
-                            right edge of the column instead of trailing the
-                            last letter — with names of six or seven characters
-                            it was landing in a different place on every row.
-                            minWidth:0 keeps the ellipsis working inside a flex
-                            item that is now allowed to grow. */}
-                        <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
-                        {/* FS.micro flat, not a step off the row size: this is
-                            an affordance, not data, and stepping it meant it
-                            grew whenever the board had room to grow — which is
-                            backwards for the quietest mark in the row.
-                            Micro is the bottom of the type scale and this still
-                            wants to be smaller, so the last bit comes off the
-                            MARK rather than the type: the rung stays on the
-                            ladder and scale() takes the glyph to about 6px.
-                            Sizing it as type instead would have put a number
-                            below the scale's floor into the file, which is the
-                            drift the scale exists to stop — and a transform
-                            costs no layout, so the gutter to the band stays put
-                            whatever the glyph does. Below ~0.6 the triangle
-                            stops reading as one and turns into a dot. */}
-                        <span style={{ fontSize: FS.micro, flexShrink: 0, color: isExpanded ? K.acc : K.t2, transition: `transform ${MOTION}`, display: "inline-block", transform: `${isExpanded ? "rotate(180deg)" : "rotate(0)"} scale(0.75)` }}>▼</span>
+                      <div style={{ fontWeight: isChampion ? 800 : 600, color: isChampion ? K.acc : undefined, fontSize: fsStep(rowStyle.fontSize, 1), overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", paddingRight: 4 }}>
+                        {p.name}
                       </div>
                       {/* Total */}
                       {/* Full-strength ink, not the t2 the row's other numbers

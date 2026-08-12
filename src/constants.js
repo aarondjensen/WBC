@@ -99,12 +99,14 @@ export const CTP_WHEEL_H = 150;     // px visible wheel height
 // each column can hold at its font size, measured rather than guessed: Total
 // takes the "STROKES" header (38px, the widest thing in that column — wider
 // than any score), Thru takes a "12:10p" tee time at 28px, # takes "T12" plus
-// a movement arrow at 32px.
+// a movement arrow at 32px. `chev` is the one that isn't sized to a string —
+// the glyph is about 6px, and the rest is the gutter that keeps it off the
+// board's edge on one side and off the position on the other.
 //
 // The round columns are NOT in here: they split whatever is left, four ways,
 // so `prior` is only the floor below which "+11" stops fitting. Fixed widths
 // plus a flexible gap is what made them look uneven — see LB_PAD_R.
-export const LB_COL = { num: 36, total: 40, thru: 34, priorMin: 24 };
+export const LB_COL = { chev: 14, num: 36, total: 40, thru: 34, priorMin: 24 };
 // The rows are padded on the LEFT only. A round column's cell is read as the
 // space between the two lines either side of it, and on the outside those
 // lines are the band's edge and the board's edge — so any padding at the right
