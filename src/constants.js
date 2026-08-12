@@ -123,7 +123,14 @@ export const CTP_WHEEL_H = 150;     // px visible wheel height
 // rungs down it is drawn at — in a 34px track it ran flush into the total
 // beside it, which by then is a real number rather than a dash. The six
 // pixels come off the four rounds, which have digits to spare.
-export const LB_COL = { num: 26, total: 50, thru: 40, priorMin: 25 };
+//
+// `thruRoomy` and `oneRound` are the same two columns on a board showing ONE
+// round instead of all of them, which is the default. Three columns' worth of
+// board comes back; the first six pixels of it go to Thru, so a tee time has
+// air around it rather than merely clearing the total, the round column takes
+// the same width so the pair reads as a pair, and everything left over falls
+// through to the names.
+export const LB_COL = { num: 26, total: 50, thru: 40, thruRoomy: 46, priorMin: 25, oneRound: 46 };
 // A hair of padding either side of a row, and no more. The board used to be a
 // bordered card inset from the page, so its rows needed room between their ink
 // and that border; it has no border now — the page's own padding is the margin
