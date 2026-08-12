@@ -141,6 +141,21 @@ describe("document shapes", () => {
       .toEqual({ 1: true, 2: true, 3: true, 4: true });
   });
 
+  it("carries the city that year was played in", () => {
+    // Not in data/ — the CSVs record courses and scores, never a town — so it
+    // comes from lib/editionLocation. Without it the state doc has no
+    // location and the app's header falls back to whatever city it knows,
+    // which is how every imported year came out reading "Gaylord, MI".
+    expect(stateDocFor({ year: 2019, rounds: 4 }).meta.location).toBe("Stanwood, MI");
+    expect(stateDocFor({ year: 2015, rounds: 4 }).meta.location).toBe("Augusta, MI");
+  });
+
+  it("an explicit location still wins, and a year with none writes no field", () => {
+    expect(stateDocFor({ year: 2019, rounds: 4, location: "Canadian Lakes, MI" }).meta.location)
+      .toBe("Canadian Lakes, MI");
+    expect(stateDocFor({ year: 2031, rounds: 4 }).meta).not.toHaveProperty("location");
+  });
+
   it("roster, round, tee and hole ids match the app's own id scheme", () => {
     expect(rosterDocFor({ year: 2015, playerId: "aaron_j", handicapIndex: 9.4 }).id)
       .toBe("tp_2015_aaron_j");
