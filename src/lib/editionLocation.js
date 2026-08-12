@@ -26,10 +26,10 @@
 //
 // A year run out of ONE RESORT is named for the resort, not for the township
 // it is registered in — "2021 · Garland, MI", not Lewiston; "2018 · Lakewood
-// Shores, MI", not Oscoda. Six of the sixteen are like that, and the resort is
-// the name the trip is remembered by: nobody says they played Kewadin, they
-// say they played A-Ga-Ming. Half of those towns are unincorporated places
-// whose name means nothing to anybody who was there.
+// Shores, MI", not Oscoda. Seven of the sixteen are like that, and the
+// resort is the name the trip is remembered by: nobody says they played
+// Kewadin, they say they played A-Ga-Ming. Half of those townships are
+// unincorporated places whose name means nothing to anybody who was there.
 //
 // A year that TOURED gets the town it was based out of, which is not the only
 // town it touched: 2014 played Black Lake in Onaway and three Gaylord courses,
@@ -87,9 +87,9 @@ export const EDITION_LOCATIONS = {
   // Back to Gull Lake View, seven years on — Stoatin Brae twice and
   // Stonehedge North.
   2022: "Gull Lake View, MI",
-  // Shanty Creek's Legend and Cedar River plus Hawk's Eye, all Bellaire, with
-  // Forest Dunes in Roscommon on the front end.
-  2023: "Bellaire, MI",
+  // The Legend and Cedar River are two of Shanty Creek's own, with Hawk's Eye
+  // in the same town and Forest Dunes an hour out on the front end.
+  2023: "Shanty Creek, MI",
   // Southwest Michigan, spread wide: Pine View Spruce is Three Rivers, and
   // Medalist (Marshall), Angels Crossing (Vicksburg) and Binder Park (Battle
   // Creek) are the drives out of it.

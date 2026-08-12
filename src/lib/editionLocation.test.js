@@ -9,7 +9,7 @@ describe("locationForYear", () => {
     expect(locationForYear(2018)).toBe("Lakewood Shores, MI");
     expect(locationForYear(2019)).toBe("Tullymore, MI");
     expect(locationForYear(2021)).toBe("Garland, MI");
-    expect(locationForYear(2023)).toBe("Bellaire, MI");
+    expect(locationForYear(2023)).toBe("Shanty Creek, MI");
   });
 
   it("names the RESORT for a year run out of one, not its township", () => {
