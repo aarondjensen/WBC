@@ -31,7 +31,11 @@ import {
 } from "./editionClone";
 import { editionRounds, indexFor, matchHistoryName } from "./handicap";
 import { editionYear } from "./editionId";
-import { allRoundsFinalized, editionState, deleteVerdict } from "./editionLifecycle";
+import { editionState, deleteVerdict } from "./editionLifecycle";
+import {
+  countByTournament, firstByTournament, needsPairings,
+  readSummaryCache, writeSummaryCache, forgetSummary,
+} from "./editionSummary";
 import { rowsToPairings } from "./pairings";
 import { clampRounds } from "../constants";
 
@@ -63,15 +67,21 @@ export const loadEditions = async () => byYearDesc(await _get(EDITIONS_COL));
 // reading PUBLISHED on an empty year and DRAFT on a finished tournament — so
 // what a year holds has to be counted rather than believed.
 //
-// getCountFromServer, not getDocs: this is a server-side aggregation, so a
-// year with thirteen hundred hole scores costs one small response instead of
-// downloading every score to call `.length` on them. Opening the picker must
-// not pull a tournament's worth of data across a phone's connection.
-const SUMMARY_COUNTS = [
-  ["players", "tournament_players"],
-  ["rounds", "tournament_rounds"],
-  ["scores", "hole_scores"],
-];
+// ── How it is gathered, and why not one query per year ────────────
+// See the header of lib/editionSummary for the shape of the problem. The short
+// version: the roster, the round setup and the state document are TINY across
+// the whole history — a few hundred documents between them — so each is read
+// ONCE, whole, and split by tournament_id. That is three round trips in place
+// of fifty-one, and it also collapses a hop: the state documents arrive with
+// the finalization map already on them, where before the state could only be
+// fetched after a score count came back saying the year had been played.
+//
+// hole_scores is the exception and stays a server-side aggregation, one per
+// edition. getCountFromServer, not getDocs: a year with thirteen hundred hole
+// scores costs one small response instead of downloading every score to call
+// `.length` on it. Opening the picker must not pull a tournament's worth of
+// data across a phone's connection.
+const BULK_COLS = ["tournament_players", "tournament_rounds", "tournament_state"];
 
 const _count = async (col, tid) => {
   const snap = await getCountFromServer(
@@ -82,46 +92,78 @@ const _count = async (col, tid) => {
 
 const _tidFilter = (tid) => [{ field: "tournament_id", op: "==", value: tid }];
 
-// Whether every round of a year that HAS been played is signed off. This is
-// what stands between a finished tournament and the delete button, so it is
-// gathered properly rather than inferred from a label.
-//
-// Two reads at most, and usually one. `finalized_rounds` keyed by round NUMBER
-// — what Admin's Finalize writes — resolves with no draw at all, so the
-// pairings are only fetched when the group-key half of the answer is needed
-// (every group signing its own card, which is how a round played entirely on
-// the course ends).
-const _finalization = async (id) => {
-  const state = (await _get("tournament_state", _tidFilter(id)))[0];
-  const finalizedRounds = state?.finalized_rounds || {};
-  const roundCount = clampRounds(state?.meta?.rounds);
-  if (allRoundsFinalized({ roundCount, finalizedRounds, pairings: {} })) {
-    return { roundCount, finalizedRounds, pairings: {} };
-  }
-  const pairings = rowsToPairings(await _get("pairings", _tidFilter(id)));
-  return { roundCount, finalizedRounds, pairings };
-};
-
 // { [editionId]: { players, rounds, scores, roundCount, finalizedRounds, pairings } }
 //
 // An edition whose reads fail is left OUT of the map rather than reported as
 // zero — "we couldn't read it" and "there is nothing in it" are opposite
 // answers, and the second one would have the form offering to clone from a
-// year it just failed to see, and the delete button offering to bin it.
+// year it just failed to see, and the delete button offering to bin it. A
+// failure of one of the WHOLE-collection reads takes every year with it, which
+// is the same rule applied honestly: nothing was readable, so nothing is
+// reported, and deleteVerdict refuses across the board.
 export const loadEditionSummaries = async (ids = []) => {
+  const list = (ids || []).filter(Boolean);
+  if (!list.length) return {};
   const out = {};
-  await Promise.all((ids || []).filter(Boolean).map(async (id) => {
-    try {
-      const counts = await Promise.all(SUMMARY_COUNTS.map(([, col]) => _count(col, id)));
-      const summary = Object.fromEntries(SUMMARY_COUNTS.map(([key], i) => [key, counts[i]]));
-      // A year nobody has played cannot be finished, so there is nothing to ask
-      // about it — and asking would cost two reads per empty year.
-      if (summary.scores > 0) Object.assign(summary, await _finalization(id));
-      out[id] = summary;
-    } catch { /* leave this edition unsummarised */ }
-  }));
+
+  // One hop: the three small collections and every score count together,
+  // rather than the counts first and the state documents behind them. A score
+  // count that fails resolves to null and leaves that year unsummarised,
+  // exactly as its own try/catch used to.
+  let bulk, scored;
+  try {
+    [bulk, scored] = await Promise.all([
+      Promise.all(BULK_COLS.map(col => _get(col))),
+      Promise.all(list.map(id => _count("hole_scores", id).then(n => [id, n], () => [id, null]))),
+    ]);
+  } catch { return out; }
+
+  const [playerRows, roundRows, stateRows] = bulk;
+  const players = countByTournament(playerRows);
+  const rounds = countByTournament(roundRows);
+  const states = firstByTournament(stateRows);
+
+  for (const [id, scores] of scored) {
+    if (scores === null) continue;
+    const state = states.get(id);
+    const summary = {
+      players: players.get(id) || 0,
+      rounds: rounds.get(id) || 0,
+      scores,
+    };
+    // A year nobody has played cannot be finished, so there is nothing to ask
+    // about it — and `finalizedRounds` on an empty year would read as a claim
+    // about rounds that were never played.
+    if (scores > 0) {
+      summary.roundCount = clampRounds(state?.meta?.rounds);
+      summary.finalizedRounds = state?.finalized_rounds || {};
+      summary.pairings = {};
+    }
+    out[id] = summary;
+  }
+
+  // The second hop, and only for the years the finalization map could not
+  // settle on its own — a round that ended by every group signing its card
+  // stores a GROUP KEY, which cannot be checked without knowing the groups.
+  // In practice that is the tournament being played, if any: one read, not
+  // seventeen.
+  await Promise.all(Object.entries(out)
+    .filter(([, s]) => needsPairings(s))
+    .map(async ([id, s]) => {
+      try { s.pairings = rowsToPairings(await _get("pairings", _tidFilter(id))); }
+      catch { delete out[id]; }
+    }));
+
+  writeSummaryCache(out);
   return out;
 };
+
+// What the picker already knows, read synchronously so the list can paint its
+// summary lines on the frame it opens instead of showing "Counting…" for as
+// long as the network takes. Replaced by loadEditionSummaries the moment that
+// resolves — see the cache note in lib/editionSummary for why a stale count
+// here cannot become a wrong delete.
+export const cachedEditionSummaries = (ids = []) => readSummaryCache(ids);
 
 // Seed the currently-active edition into the collection if it isn't there yet,
 // so the picker always shows at least the running year. Idempotent — safe to
@@ -340,6 +382,8 @@ export const deleteEdition = async (id) => {
     for (const r of rows) if (r.id) await _deleteDoc(col, r.id);
   }
   await _deleteDoc(EDITIONS_COL, id);
+  // Or the picker paints a row for it from the cache the next time it opens.
+  forgetSummary(id);
   return true;
 };
 

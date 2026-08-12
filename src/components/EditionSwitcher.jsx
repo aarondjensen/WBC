@@ -25,8 +25,8 @@ import { Btn } from "./ui";
 import { Popup, ConfirmModal } from "./Popup";
 import { getActiveTournamentId } from "../firebase";
 import {
-  loadEditions, loadEditionSummaries, createEdition, cloneEdition, deleteEdition,
-  switchEdition, ensureActiveEditionDoc,
+  loadEditions, loadEditionSummaries, cachedEditionSummaries, createEdition,
+  cloneEdition, deleteEdition, switchEdition, ensureActiveEditionDoc,
 } from "../lib/editions";
 import {
   plannedYear, plannedSource, summaryLine, editionHasContent, overwriteWarning,
@@ -101,14 +101,23 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
     (async () => {
       setLoading(true); setErr("");
       try {
-        await ensureActiveEditionDoc();
-        const rows = await loadEditions();
+        // ONE read of wbc_editions, not two. This used to call
+        // ensureActiveEditionDoc and then loadEditions, which fetched the same
+        // collection a second time and made the list wait two round trips to
+        // show what the first one had already returned.
+        const rows = await ensureActiveEditionDoc();
         if (!alive) return;
         setEditions(rows);
         setLoading(false);
+        // Whatever the last open learned, on this frame — so the rows carry
+        // their summary line immediately instead of reading "Counting…" for
+        // as long as the network takes. It is replaced below.
+        const cached = cachedEditionSummaries(rows.map(e => e.id));
+        if (cached) setSummaries(cached);
         // The counts are what every default below is built on, so the form
-        // waits for them rather than guessing off `status` and being wrong.
-        // They come second because the LIST can be drawn without them.
+        // waits for them rather than guessing off `status` and being wrong —
+        // and off the FRESH ones, never the cache, so a year that has been
+        // built since cannot be offered as the year to build.
         const sums = await loadEditionSummaries(rows.map(e => e.id));
         if (!alive) return;
         setSummaries(sums);
