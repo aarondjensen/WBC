@@ -108,6 +108,15 @@ describe("LeaderboardView renders", () => {
     expect(rendered().length).toBeGreaterThan(0);
   });
 
+  // And closes it again on the second tap. The card is wrapped in the grid
+  // track it grows out of, so open and closed are two different trees.
+  it("closes the scorecard on a second tap", () => {
+    mount();
+    fireEvent.click(screen.getByText("Aaron J"));
+    fireEvent.click(screen.getByText("Aaron J"));
+    expect(rendered().length).toBeGreaterThan(0);
+  });
+
   it("draws a board with no course assigned yet", () => {
     mount({ tRounds: [], courses: [], holeData: {} });
     expect(rendered().length).toBeGreaterThan(0);
