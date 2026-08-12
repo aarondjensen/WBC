@@ -9,24 +9,29 @@
 //
 // That leaves these questions, and they have different answers:
 //
-//   toDisplayName   given the parts, what goes on a leaderboard row. A first
-//                   INITIAL and the surname, the way a tour board prints it.
-//   displayNameFor  the same answer for a player already on file, whose name
-//                   was generated years ago under an older convention or typed
-//                   by a director as a nickname. See below.
-//   shortName       one word, for the places a row only has room for one.
-//   fullName        the whole thing, for the admin console and anywhere a
-//                   person is being administered rather than scored.
-//   splitName       the inverse, best-effort, so opening the player editor on
-//                   a roster row from 2011 puts the name in the right boxes
-//                   instead of showing blanks.
+//   toDisplayName    given the parts, what goes on a leaderboard row. A first
+//                    INITIAL and the surname, the way a tour board prints it.
+//   displayNameFor   the same answer for a player already on file, whose name
+//                    was generated years ago under an older convention or typed
+//                    by a director as a nickname. See below.
+//   withKnownSurname the half of the name sixteen years of records never held.
+//   shortName        one word, for the places a row only has room for one.
+//   fullName         the whole thing, for the admin console and anywhere a
+//                    person is being administered rather than scored.
+//   splitName        the inverse, best-effort, so opening the player editor on
+//                    a roster row from 2011 puts the name in the right boxes
+//                    instead of showing blanks.
 //
 // ── Why the convention changed, and what it cost ───────────────────
 // It was "Aaron J" — the first name and a last initial. It is the other way
 // round now, which is how every tour prints a board and how a room of golfers
-// says a name out loud. The surname is the part that distinguishes people, and
-// on a board that has held two Daves for a decade it was the part being thrown
-// away.
+// says a name out loud.
+//
+// It cost a whole half of every name. Nothing in this app has ever stored a
+// surname — not the registry, not the history, not one of sixteen years of
+// CSVs — so the new convention had nothing to build from and every board went
+// on reading "Aaron J". data/surnames.js is the missing half, given by the
+// director, and withKnownSurname is what puts it back.
 //
 // The names on file did NOT change. A player's id is derived from his display
 // name the first time he is added ("Aaron J" → aaron_j) and that id is what
@@ -40,6 +45,8 @@
 // on the first space, so "Van Der Berg" seeds as first "Van", last "Der Berg"
 // — wrong, and wrong in a way somebody can see and fix in the field they are
 // already looking at, which is the point.
+
+import { SURNAMES } from "../data/surnames";
 
 // First initial + surname. What goes on a row.
 //
@@ -102,13 +109,36 @@ export const splitName = (p) => {
 // One word, where a row has room for one: the group line on the scoring
 // screen, the player column on a scorecard nine holes wide.
 //
-// The surname, which is the word that tells two of them apart — but not when
-// the surname IS the initial, which is what a name stored under the old
-// convention reduces to. "A Jensen" is Jensen; "Aaron J" is still Aaron.
+// The FIRST name, and this field is the reason. A tour board would use the
+// surname — it is the word that tells two players apart — but the surnames
+// here are three Vigos and two Kelleys, and a group line reading "Vigo, Vigo,
+// Kelley" identifies nobody. The first names are all distinct, and they are
+// what these men call each other besides.
+//
+// Falling back to the surname when there is no first name to use, and skipping
+// a "last name" that is only an initial, which is what a name stored under the
+// old convention splits into.
 export const shortName = (p) => {
   const { first, last } = splitName(p);
-  const l = (last || "").trim().replace(/\.$/, "");
-  return l.length > 1 ? l : ((first || "").trim() || l);
+  const f = (first || "").trim();
+  if (f.replace(/\.$/, "").length > 1) return f;
+  const l = (last || "").trim();
+  return l || f;
+};
+
+// A registry row with its surname filled in — see data/surnames.js for why one
+// has to be filled in at all.
+//
+// A record that carries its own first/last is left exactly as it is: what a
+// director typed into the player editor outranks a file in the repo. Only the
+// first name is taken from the stored display name, because that is the only
+// half of it that was ever a name — the other half is an initial.
+export const withKnownSurname = (row) => {
+  if (!row || row.first_name || row.last_name) return row;
+  const last = SURNAMES[row.id];
+  if (!last) return row;
+  const { first } = splitName(row);
+  return { ...row, first_name: first, last_name: last };
 };
 
 // The whole name, from the parts when they exist and from the display name

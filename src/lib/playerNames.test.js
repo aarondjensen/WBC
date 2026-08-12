@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { toDisplayName, legacyDisplayName, displayNameFor, isGeneratedName, shortName, fullName, splitName } from "./playerNames";
+import { toDisplayName, legacyDisplayName, displayNameFor, isGeneratedName, withKnownSurname, shortName, fullName, splitName } from "./playerNames";
+import { SURNAMES } from "../data/surnames";
 
 describe("toDisplayName", () => {
   it("is a first initial and the surname", () => {
@@ -100,16 +101,23 @@ describe("displayNameFor", () => {
 });
 
 describe("shortName", () => {
-  it("is the surname", () => {
-    expect(shortName({ name: "A Jensen", first_name: "Aaron", last_name: "Jensen" })).toBe("Jensen");
-    expect(shortName({ name: "A Jensen" })).toBe("Jensen");
+  it("is the first name", () => {
+    expect(shortName({ name: "A Jensen", first_name: "Aaron", last_name: "Jensen" })).toBe("Aaron");
+    expect(shortName({ name: "Aaron J" })).toBe("Aaron");
   });
 
-  // A legacy row's surname is a single initial, which tells nobody anything.
-  it("is the first name when the surname is only an initial", () => {
-    expect(shortName({ name: "Aaron J" })).toBe("Aaron");
-    expect(shortName({ name: "Aaron J." })).toBe("Aaron");
-    expect(shortName({ first_name: "Dave", last_name: "S" })).toBe("Dave");
+  // THE reason it is the first name and not the surname. A group line reading
+  // "Vigo, Vigo, Kelley" identifies nobody; this field has three of one and
+  // two of the other, and every first name in it is distinct.
+  it("tells the three Vigos apart, which a surname cannot", () => {
+    const vigos = ["Andy", "Matt", "Steve"].map(f => shortName({ first_name: f, last_name: "Vigo" }));
+    expect(new Set(vigos).size).toBe(3);
+    expect(vigos).toEqual(["Andy", "Matt", "Steve"]);
+  });
+
+  it("falls back to the surname when the first name is only an initial", () => {
+    expect(shortName({ name: "A Jensen" })).toBe("Jensen");
+    expect(shortName({ first_name: "A", last_name: "Jensen" })).toBe("Jensen");
   });
 
   it("copes with a one-word name", () => {
@@ -119,6 +127,44 @@ describe("shortName", () => {
   it("is empty for nothing at all", () => {
     expect(shortName({})).toBe("");
     expect(shortName(null)).toBe("");
+  });
+});
+
+describe("withKnownSurname", () => {
+  it("fills in the surname the record never carried", () => {
+    expect(withKnownSurname({ id: "aaron_j", name: "Aaron J" }))
+      .toMatchObject({ first_name: "Aaron", last_name: "Jensen" });
+  });
+
+  // What a director typed beats a file in the repo, always.
+  it("leaves a record that knows its own parts alone", () => {
+    const row = { id: "aaron_j", name: "Chief", first_name: "Aaron", last_name: "Jensen-Smith" };
+    expect(withKnownSurname(row)).toBe(row);
+  });
+
+  it("leaves a player it has never heard of alone", () => {
+    const row = { id: "gus_p", name: "Gus P" };
+    expect(withKnownSurname(row)).toBe(row);
+  });
+
+  it("copes with nothing at all", () => {
+    expect(withKnownSurname(null)).toBe(null);
+  });
+
+  // The whole point, end to end: an id and a legacy name in, a board name out.
+  it("carries every man in the field to the new convention", () => {
+    const board = Object.keys(SURNAMES).map(id => {
+      const legacy = id.split("_");
+      const name = `${legacy[0][0].toUpperCase()}${legacy[0].slice(1)} ${legacy[1].toUpperCase()}`;
+      return displayNameFor(withKnownSurname({ id, name }));
+    });
+    expect(board).toContain("A Jensen");
+    expect(board).toContain("B Bergeron");
+    expect(board).toContain("S Rhoades");
+    // A first initial, a space, then a surname of more than one letter.
+    board.forEach(n => expect(n).toMatch(/^[A-Z] [A-Z][a-z]+$/));
+    // Nobody comes out looking like anybody else.
+    expect(new Set(board).size).toBe(board.length);
   });
 });
 
