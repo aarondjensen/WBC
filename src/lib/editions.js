@@ -77,6 +77,19 @@ export const loadEditions = async () => _index(await _get(EDITIONS_COL));
 // here cannot become a wrong switch or a wrong delete.
 export const cachedEditions = () => readEditionsCache();
 
+// Fetch the years a tap early, so the picker has rows to draw the frame it
+// opens instead of a round trip to wait on. More → Tournaments is the door
+// nearly everybody uses, and the moment the menu opens is a free half-second.
+//
+// Once. A device that has opened Tournaments before already has the list and
+// pays nothing here; one that hasn't pays a single read of a collection that
+// holds one small document per year. Fire and forget — nothing is waiting on
+// it, and a failure just means the picker loads the way it used to.
+export const warmEditions = () => {
+  if (readEditionsCache()) return;
+  loadEditions().catch(() => {});
+};
+
 // ── How much is actually in each year ───────────────────────────────
 // The picker's ONE reliable signal. `status` is a label somebody's phone
 // stamped — see the note at the top of lib/editionClone.js for how it ends up
@@ -131,7 +144,17 @@ const _tidFilter = (tid) => [{ field: "tournament_id", op: "==", value: tid }];
 // failure of one of the WHOLE-collection reads takes every year with it, which
 // is the same rule applied honestly: nothing was readable, so nothing is
 // reported, and deleteVerdict refuses across the board.
-export const loadEditionSummaries = async (ids = []) => {
+// ── Reported one year at a time ────────────────────────────────────
+// `onEdition(id, summary)` is called the moment THAT year's counts land,
+// before the others have. It is the difference between a list that fills in
+// over a second and a list that sits on "Counting…" for a second and then
+// fills in at once: fifty-one requests go out together, and the list used to
+// wait on the slowest of them to say anything about any year.
+//
+// The map is still returned whole at the end, and it is the answer of record
+// — a year left out of it could not be read, and a caller that only listened
+// to the callback would never hear that.
+export const loadEditionSummaries = async (ids = [], { onEdition } = {}) => {
   const list = (ids || []).filter(Boolean);
   if (!list.length) return {};
   const out = {};
@@ -140,21 +163,25 @@ export const loadEditionSummaries = async (ids = []) => {
   // flight together — rather than the counts first and the state behind them.
   // A year whose counts fail resolves to null and is left unsummarised,
   // exactly as its own try/catch used to do.
-  let bulk, counted;
-  try {
-    [bulk, counted] = await Promise.all([
-      Promise.all(BULK_COLS.map(col => _get(col))),
-      Promise.all(list.map(id =>
-        Promise.all(COUNT_COLS.map(([, col]) => _count(col, id)))
-          .then(ns => [id, ns], () => [id, null]))),
-    ]);
-  } catch { return out; }
+  const bulk = Promise.all(BULK_COLS.map(col => _get(col)));
+  const counted = list.map(id =>
+    Promise.all(COUNT_COLS.map(([, col]) => _count(col, id)))
+      .then(ns => [id, ns], () => [id, null]));
 
-  const [stateRows] = bulk;
+  let stateRows;
+  try {
+    [stateRows] = await bulk;
+  } catch {
+    // Nothing was readable, so nothing is reported — but the counts are
+    // already in flight and their failures have to be collected, or a
+    // rejection lands with nobody listening.
+    await Promise.allSettled(counted);
+    return out;
+  }
   const states = firstByTournament(stateRows);
 
-  for (const [id, ns] of counted) {
-    if (ns === null) continue;
+  await Promise.all(counted.map(p => p.then(async ([id, ns]) => {
+    if (ns === null) return;
     const state = states.get(id);
     const summary = Object.fromEntries(COUNT_COLS.map(([key], i) => [key, ns[i]]));
     const scores = summary.scores;
@@ -166,20 +193,25 @@ export const loadEditionSummaries = async (ids = []) => {
       summary.finalizedRounds = state?.finalized_rounds || {};
       summary.pairings = {};
     }
+    // The second hop, and only for the years the finalization map could not
+    // settle on its own — a round that ended by every group signing its card
+    // stores a GROUP KEY, which cannot be checked without knowing the groups.
+    // In practice that is the tournament being played, if any: one read, not
+    // seventeen.
+    //
+    // That year is held back until the draw lands rather than reported early:
+    // without the groups it reads as still being played, and a dot that turns
+    // from orange to green a moment later is a worse answer than one that
+    // arrives a moment late. The other sixteen do not wait for it.
+    if (needsPairings(summary)) {
+      try { summary.pairings = rowsToPairings(await _get("pairings", _tidFilter(id))); }
+      catch { return; }
+    }
     out[id] = summary;
-  }
-
-  // The second hop, and only for the years the finalization map could not
-  // settle on its own — a round that ended by every group signing its card
-  // stores a GROUP KEY, which cannot be checked without knowing the groups.
-  // In practice that is the tournament being played, if any: one read, not
-  // seventeen.
-  await Promise.all(Object.entries(out)
-    .filter(([, s]) => needsPairings(s))
-    .map(async ([id, s]) => {
-      try { s.pairings = rowsToPairings(await _get("pairings", _tidFilter(id))); }
-      catch { delete out[id]; }
-    }));
+    // A painter that throws is the picker's problem, not this load's — the
+    // remaining years must still be gathered and cached.
+    try { onEdition?.(id, summary); } catch { /* ignore */ }
+  })));
 
   writeSummaryCache(out);
   return out;

@@ -53,7 +53,8 @@ vi.mock("firebase/firestore", () => ({
   },
 }));
 
-const { loadEditionSummaries, cachedEditionSummaries } = await import("./editions");
+const { loadEditionSummaries, cachedEditionSummaries, cachedEditions, warmEditions } =
+  await import("./editions");
 
 // ── The fixture ───────────────────────────────────────────────────
 // One of each kind of year the picker has to tell apart: a finished
@@ -154,6 +155,58 @@ describe("loadEditionSummaries — what it reads", () => {
   });
 });
 
+// ── One year at a time ────────────────────────────────────────────
+// The list used to sit on "Counting…" until the slowest of fifty-one requests
+// came back, and then fill in all at once. Each year is now reported as its
+// own counts land.
+describe("loadEditionSummaries — reporting as it goes", () => {
+  it("hands over each year the moment its counts land", async () => {
+    const seen = [];
+    const out = await loadEditionSummaries(IDS, { onEdition: (id, s) => seen.push([id, s]) });
+    expect(seen.map(([id]) => id).sort()).toEqual(IDS.slice().sort());
+    // What is streamed IS what the map ends up holding — not a thinner
+    // version of it that the row would have to draw differently.
+    for (const [id, s] of seen) expect(out[id]).toEqual(s);
+  });
+
+  it("never reports a year it could not read", async () => {
+    failCountFor.add("wbc_2015");
+    failCollections.add("pairings");
+    const seen = [];
+    await loadEditionSummaries(IDS, { onEdition: (id) => seen.push(id) });
+    // 2015's counts failed and 2026's draw could not be read — "we couldn't
+    // read it" is not a summary line, and the final map leaves both out too.
+    expect(seen.sort()).toEqual(["wbc_2027", "wbc_2028"]);
+  });
+
+  it("holds back the year being played until its draw lands, not a moment before", async () => {
+    // Without the groups that year reads as still being played, and a dot
+    // that turns from orange to green a moment later is a worse answer than
+    // one that arrives a moment late.
+    const at = [];
+    await loadEditionSummaries(IDS, {
+      onEdition: (id) => at.push([id, reads.filter(r => r.col === "pairings").length]),
+    });
+    const [, pairingsDone] = at.find(([id]) => id === "wbc_2026");
+    expect(pairingsDone).toBe(1);
+  });
+
+  it("gathers and caches every year even when the caller's painter throws", async () => {
+    const out = await loadEditionSummaries(IDS, {
+      onEdition: () => { throw new Error("unmounted mid-paint"); },
+    });
+    expect(Object.keys(out).sort()).toEqual(IDS.slice().sort());
+    expect(cachedEditionSummaries(IDS).wbc_2015.scores).toBe(432);
+  });
+
+  it("still reports nothing when a whole-collection read fails", async () => {
+    failCollections.add("tournament_players");
+    const seen = [];
+    expect(await loadEditionSummaries(IDS, { onEdition: (id) => seen.push(id) })).toEqual({});
+    expect(seen).toEqual([]);
+  });
+});
+
 describe("loadEditionSummaries — what it answers", () => {
   it("counts a finished year and reports every round signed off", async () => {
     const s = (await loadEditionSummaries(IDS)).wbc_2015;
@@ -201,6 +254,15 @@ describe("loadEditionSummaries — when a read fails", () => {
     expect(await loadEditionSummaries(IDS)).toEqual({});
   });
 
+  it("reports nothing when the state read fails, and swallows the counts with it", async () => {
+    // The counts are already in flight when the state read comes back empty,
+    // so their failures still have to be collected — a rejection landing with
+    // nobody listening is an unhandled rejection in a director's console.
+    failCollections.add("tournament_state");
+    failCountFor.add("wbc_2015");
+    expect(await loadEditionSummaries(IDS)).toEqual({});
+  });
+
   it("drops a year whose pairings could not be read", async () => {
     failCollections.add("pairings");
     const out = await loadEditionSummaries(IDS);
@@ -228,5 +290,35 @@ describe("the cache the picker paints from", () => {
     DB.hole_scores.push(...rep(50, { tournament_id: "wbc_2026" }));
     await loadEditionSummaries(IDS);
     expect(cachedEditionSummaries(["wbc_2026"]).wbc_2026.scores).toBe(150);
+  });
+});
+
+// ── The tap early ─────────────────────────────────────────────────
+// Tournaments sits one tap inside the More menu, so the years are fetched
+// while the menu is being read and the picker opens with rows already drawn.
+describe("warmEditions", () => {
+  beforeEach(() => { DB.wbc_editions = [{ id: "wbc_2026", year: 2026, name: "WBC 2026" }]; });
+
+  it("fetches the years once, so the picker has rows the frame it opens", async () => {
+    expect(cachedEditions()).toBeNull();
+    warmEditions();
+    await vi.waitFor(() => expect(cachedEditions()).toHaveLength(1));
+    expect(reads.filter(r => r.col === "wbc_editions")).toHaveLength(1);
+  });
+
+  it("costs nothing on a device that has opened the picker before", async () => {
+    warmEditions();
+    await vi.waitFor(() => expect(cachedEditions()).toHaveLength(1));
+    reads = [];
+    warmEditions();
+    warmEditions();
+    expect(reads).toHaveLength(0);
+  });
+
+  it("is fire and forget — a read that fails is not a failure anybody waits on", async () => {
+    failCollections.add("wbc_editions");
+    expect(() => warmEditions()).not.toThrow();
+    await vi.waitFor(() => expect(reads.some(r => r.col === "wbc_editions")).toBe(true));
+    expect(cachedEditions()).toBeNull();
   });
 });
