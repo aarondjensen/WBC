@@ -4,45 +4,12 @@
 // it against a stub that cannot throw the way Safari's private mode does.
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
-  countByTournament, firstByTournament, needsPairings,
+  firstByTournament, needsPairings,
   readSummaryCache, writeSummaryCache, forgetSummary,
   SUMMARY_CACHE_KEY, SUMMARY_CACHE_VERSION,
 } from "./editionSummary";
 
 beforeEach(() => localStorage.clear());
-
-describe("countByTournament", () => {
-  it("splits one whole-collection read into a count per edition", () => {
-    // The read that replaced seventeen count queries: every roster row for
-    // every year in one response, grouped here rather than by the server.
-    const rows = [
-      { tournament_id: "wbc_2015" }, { tournament_id: "wbc_2015" },
-      { tournament_id: "wbc_2024" },
-    ];
-    const counts = countByTournament(rows);
-    expect(counts.get("wbc_2015")).toBe(2);
-    expect(counts.get("wbc_2024")).toBe(1);
-  });
-
-  it("gives no count for a year with no rows, rather than zero", () => {
-    // The caller defaults a miss to 0. A Map entry of 0 and no entry at all
-    // read the same there, but only one of them can be told apart later.
-    expect(countByTournament([{ tournament_id: "wbc_2015" }]).has("wbc_2019")).toBe(false);
-  });
-
-  it("drops a row carrying no tournament_id instead of counting it somewhere", () => {
-    // A row that belongs to no year must not land on one — that would put a
-    // phantom score on a real tournament.
-    const counts = countByTournament([{ tournament_id: "" }, {}, null, { tournament_id: "wbc_2015" }]);
-    expect([...counts.keys()]).toEqual(["wbc_2015"]);
-    expect(counts.get("wbc_2015")).toBe(1);
-  });
-
-  it("survives being handed nothing", () => {
-    expect(countByTournament().size).toBe(0);
-    expect(countByTournament(null).size).toBe(0);
-  });
-});
 
 describe("firstByTournament", () => {
   it("keeps the first state document per year", () => {
@@ -55,6 +22,18 @@ describe("firstByTournament", () => {
 
   it("has nothing for a year with no state document", () => {
     expect(firstByTournament([]).get("wbc_2015")).toBeUndefined();
+  });
+
+  it("drops a row carrying no tournament_id instead of filing it somewhere", () => {
+    // A row that belongs to no year must not land on one — that would put one
+    // tournament's round count and finalization map on another.
+    const m = firstByTournament([{ tournament_id: "" }, {}, null, { tournament_id: "wbc_2015" }]);
+    expect([...m.keys()]).toEqual(["wbc_2015"]);
+  });
+
+  it("survives being handed nothing", () => {
+    expect(firstByTournament().size).toBe(0);
+    expect(firstByTournament(null).size).toBe(0);
   });
 });
 

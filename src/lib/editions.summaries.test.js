@@ -97,25 +97,26 @@ beforeEach(() => {
 const countOf = (op, col) => reads.filter(r => r.op === op && r.col === col).length;
 
 describe("loadEditionSummaries — what it reads", () => {
-  it("reads each small collection ONCE, not once per edition", async () => {
-    // The change this file exists for. Four editions used to cost twelve count
-    // queries across these three plus four more reads for the state documents;
-    // it is now three reads flat, and it stays three at sixteen editions.
+  it("counts on the server and never reads a countable collection whole", async () => {
+    // A count is billed one read per thousand index entries; reading the same
+    // collection to count it here is billed one read PER ROW. This file once
+    // read the roster and round setup in bulk to save a hop, and it took the
+    // picker from ~107 billed reads to ~250 — the hop is saved elsewhere now.
     await loadEditionSummaries(IDS);
-    expect(countOf("getDocs", "tournament_players")).toBe(1);
-    expect(countOf("getDocs", "tournament_rounds")).toBe(1);
-    expect(countOf("getDocs", "tournament_state")).toBe(1);
-    expect(countOf("count", "tournament_players")).toBe(0);
-    expect(countOf("count", "tournament_rounds")).toBe(0);
+    for (const col of ["tournament_players", "tournament_rounds", "hole_scores"]) {
+      expect(countOf("count", col), `${col} should be counted`).toBe(IDS.length);
+      expect(countOf("getDocs", col), `${col} should never be read whole`).toBe(0);
+    }
   });
 
-  it("keeps hole_scores a server-side count, one per edition", async () => {
-    // The one collection too big to read: a year holds well over a thousand
-    // scores, and downloading them to call .length on them is the thing
-    // getCountFromServer exists to avoid.
+  it("reads tournament_state ONCE, not once per edition", async () => {
+    // The one collection worth reading whole: a single document per year, and
+    // what the picker wants from it is the finalization map rather than a
+    // count. Read in bulk it arrives alongside the counts instead of behind
+    // them, which is the hop that used to cost a whole extra round trip.
     await loadEditionSummaries(IDS);
-    expect(countOf("count", "hole_scores")).toBe(IDS.length);
-    expect(countOf("getDocs", "hole_scores")).toBe(0);
+    expect(countOf("getDocs", "tournament_state")).toBe(1);
+    expect(countOf("count", "tournament_state")).toBe(0);
   });
 
   it("reads pairings only for a year the finalization map couldn't settle", async () => {
@@ -127,10 +128,24 @@ describe("loadEditionSummaries — what it reads", () => {
     expect(pairingReads[0].tid).toBe("wbc_2026");
   });
 
-  it("costs a flat handful of round trips, not one per year per collection", async () => {
+  it("bills a handful of reads, not one per document in the history", async () => {
+    // The number that matters for a squad of twelve toggling between years for
+    // a fortnight. Counts are one billed read each at this scale, the state
+    // read is one per year, and only the year being played costs its draw:
+    //   4 editions × 3 counts + 4 state documents + 2 pairing rows = 18.
+    // Reading the roster and round setup whole instead put the document total
+    // in the hundreds for the same answer.
     await loadEditionSummaries(IDS);
-    // 3 collection reads + 4 score counts + 1 pairings read.
-    expect(reads).toHaveLength(8);
+    const billed = reads.reduce((n, r) => n + (
+      r.op === "count" ? 1 : rowsIn(r.col, r.tid ? [{ field: "tournament_id", value: r.tid }] : []).length
+    ), 0);
+    expect(billed).toBeLessThan(25);
+  });
+
+  it("costs one burst of requests and one small follow-up, not four hops", async () => {
+    await loadEditionSummaries(IDS);
+    // 12 counts + 1 state read + 1 pairings read.
+    expect(reads).toHaveLength(14);
   });
 
   it("does nothing at all when asked about no editions", async () => {

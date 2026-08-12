@@ -19,17 +19,18 @@
 //      score counts came back, because the state was only fetched for a year
 //      that turned out to have scores
 //
-// Three of those four collections are TINY across every year there has ever
-// been — a roster row per golfer per year (~140 documents), four round rows a
-// year (~60), one state document a year (~17). Reading each of them whole, once,
-// is one round trip where the per-edition query was seventeen, and it hands
-// back more than a count: the state documents carry the finalization map, so
-// hop 4 disappears into hop 3 rather than waiting behind it.
+// Hops 1 and 2 were the same collection read twice. Hop 4 exists only because
+// the state document was fetched after the score count came back, and reading
+// tournament_state whole — seventeen documents for the whole history — hands
+// the finalization map over in the same burst as the counts, so hop 4
+// disappears into hop 3 rather than waiting behind it.
 //
-// hole_scores is the exception and stays a server-side aggregation, one per
-// edition. It is thousands of documents — 7,632 in the imported years alone —
-// and downloading them to call `.length` is exactly what getCountFromServer
-// exists to avoid.
+// The counts themselves STAY counts. A server-side aggregation is billed one
+// read per thousand index entries it matches, so asking how many roster rows a
+// year holds costs one read whatever the answer; reading that collection whole
+// to count it here costs one read per row. See the note above BULK_COLS in
+// lib/editions for the version of this file that read the roster in bulk too
+// and took the picker from ~107 billed reads to ~250 in exchange for the hop.
 //
 // ── And the cache ─────────────────────────────────────────────────
 // Switching editions HARD-RELOADS the app (see switchEdition), so a director
@@ -45,23 +46,15 @@
 // display artefact.
 import { allRoundsFinalized } from "./editionLifecycle";
 
-// ── Grouping whole-collection reads by edition ────────────────────
-// Both take the rows of an entire collection and split them by the
-// `tournament_id` every edition-scoped document carries. A row without one is
-// dropped rather than counted against some default edition — it belongs to no
-// year, and guessing which would put a phantom score on a real tournament.
-export const countByTournament = (rows = []) => {
-  const out = new Map();
-  for (const r of rows || []) {
-    const tid = r?.tournament_id;
-    if (tid) out.set(tid, (out.get(tid) || 0) + 1);
-  }
-  return out;
-};
-
-// The FIRST document per edition. tournament_state is a singleton per year, so
+// ── Splitting a whole-collection read by edition ──────────────────
+// The FIRST document per edition, keyed off the `tournament_id` every
+// edition-scoped document carries. tournament_state is a singleton per year, so
 // a second one is a duplicate rather than a sibling, and taking the first is
 // the same thing the per-edition query did when it read `[0]`.
+//
+// A row with no tournament_id is dropped rather than filed under some default
+// edition — it belongs to no year, and guessing which would put one
+// tournament's setup on another.
 export const firstByTournament = (rows = []) => {
   const out = new Map();
   for (const r of rows || []) {

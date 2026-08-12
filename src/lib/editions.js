@@ -33,7 +33,7 @@ import { editionRounds, indexFor, matchHistoryName } from "./handicap";
 import { editionYear } from "./editionId";
 import { editionState, deleteVerdict } from "./editionLifecycle";
 import {
-  countByTournament, firstByTournament, needsPairings,
+  firstByTournament, needsPairings,
   readSummaryCache, writeSummaryCache, forgetSummary,
 } from "./editionSummary";
 import { rowsToPairings } from "./pairings";
@@ -67,21 +67,35 @@ export const loadEditions = async () => byYearDesc(await _get(EDITIONS_COL));
 // reading PUBLISHED on an empty year and DRAFT on a finished tournament — so
 // what a year holds has to be counted rather than believed.
 //
-// ── How it is gathered, and why not one query per year ────────────
-// See the header of lib/editionSummary for the shape of the problem. The short
-// version: the roster, the round setup and the state document are TINY across
-// the whole history — a few hundred documents between them — so each is read
-// ONCE, whole, and split by tournament_id. That is three round trips in place
-// of fifty-one, and it also collapses a hop: the state documents arrive with
-// the finalization map already on them, where before the state could only be
-// fetched after a score count came back saying the year had been played.
+// ── How it is gathered: counts on the server, state in bulk ───────
+// Two different tricks, because ROUND TRIPS and DOCUMENT READS are different
+// costs and the picker has to be cheap in both.
 //
-// hole_scores is the exception and stays a server-side aggregation, one per
-// edition. getCountFromServer, not getDocs: a year with thirteen hundred hole
-// scores costs one small response instead of downloading every score to call
-// `.length` on it. Opening the picker must not pull a tournament's worth of
-// data across a phone's connection.
-const BULK_COLS = ["tournament_players", "tournament_rounds", "tournament_state"];
+// A COUNT is one billed read per thousand index entries it matches, so asking
+// the server how many roster rows a year has costs one read whatever the
+// answer is. Reading the roster collection whole to count it in JavaScript
+// costs one read PER ROW — 131 of them across the history, against 17 for the
+// counts. So players, rounds and scores are all counted on the server, and all
+// three counts for all editions go out in ONE burst.
+//
+// Reading a collection whole is only the cheaper move when the documents are
+// few and something other than their number is wanted. That is exactly
+// tournament_state: one document per year, seventeen in total, and the picker
+// needs the finalization map inside it rather than a count of it. Read whole it
+// costs 17 reads instead of 14, and it collapses a HOP — the state used to be
+// fetched only after a score count came back saying the year had been played,
+// so it could not start until the counts had finished.
+//
+// This file briefly read the roster and round collections in bulk too, which
+// cut the same hop but took the picker from ~107 billed reads to ~250. Counting
+// on the server gets the hop back for ~93.
+const BULK_COLS = ["tournament_state"];
+// Counted per edition, never read whole. hole_scores is the one that would be
+// ruinous — a year holds hundreds of scores and 7,632 sit in the imported
+// years alone — but the roster and the round setup are the same argument at a
+// smaller scale.
+const COUNT_COLS = [["players", "tournament_players"], ["rounds", "tournament_rounds"],
+                    ["scores", "hole_scores"]];
 
 const _count = async (col, tid) => {
   const snap = await getCountFromServer(
@@ -106,31 +120,28 @@ export const loadEditionSummaries = async (ids = []) => {
   if (!list.length) return {};
   const out = {};
 
-  // One hop: the three small collections and every score count together,
-  // rather than the counts first and the state documents behind them. A score
-  // count that fails resolves to null and leaves that year unsummarised,
-  // exactly as its own try/catch used to.
-  let bulk, scored;
+  // ONE hop: every count for every edition, and the state documents, all in
+  // flight together — rather than the counts first and the state behind them.
+  // A year whose counts fail resolves to null and is left unsummarised,
+  // exactly as its own try/catch used to do.
+  let bulk, counted;
   try {
-    [bulk, scored] = await Promise.all([
+    [bulk, counted] = await Promise.all([
       Promise.all(BULK_COLS.map(col => _get(col))),
-      Promise.all(list.map(id => _count("hole_scores", id).then(n => [id, n], () => [id, null]))),
+      Promise.all(list.map(id =>
+        Promise.all(COUNT_COLS.map(([, col]) => _count(col, id)))
+          .then(ns => [id, ns], () => [id, null]))),
     ]);
   } catch { return out; }
 
-  const [playerRows, roundRows, stateRows] = bulk;
-  const players = countByTournament(playerRows);
-  const rounds = countByTournament(roundRows);
+  const [stateRows] = bulk;
   const states = firstByTournament(stateRows);
 
-  for (const [id, scores] of scored) {
-    if (scores === null) continue;
+  for (const [id, ns] of counted) {
+    if (ns === null) continue;
     const state = states.get(id);
-    const summary = {
-      players: players.get(id) || 0,
-      rounds: rounds.get(id) || 0,
-      scores,
-    };
+    const summary = Object.fromEntries(COUNT_COLS.map(([key], i) => [key, ns[i]]));
+    const scores = summary.scores;
     // A year nobody has played cannot be finished, so there is nothing to ask
     // about it — and `finalizedRounds` on an empty year would read as a claim
     // about rounds that were never played.
