@@ -14,7 +14,7 @@
 // gate opens, mid-round, on a completed card, on a round nobody has drawn, and
 // with no course assigned at all.
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { createElement as h } from "react";
 import { OnCourseScoring } from "./OnCourseScoring";
 import { localDateISO } from "../lib/format";
@@ -88,6 +88,24 @@ describe("OnCourseScoring renders", () => {
   it("mounts on a fresh card with nothing posted", () => {
     mount({ holeData: {} });
     expect(rendered().length).toBeGreaterThan(0);
+  });
+
+  // The Full Scorecard is a whole second render path — its own grid, and the
+  // ring-and-dots cell every other card in the app is now drawn from. Opened
+  // on a part-played card, so it covers a hole with a score, a hole without
+  // one, and the strokes that fall on both.
+  it("opens the full scorecard", () => {
+    mount();
+    fireEvent.click(screen.getByText("Full Scorecard"));
+    // One head per nine, and the legend that says what the rings mean.
+    expect(screen.getAllByText("HOLE")).toHaveLength(2);
+    expect(screen.getByText("Bogey+")).toBeTruthy();
+  });
+
+  it("opens the full scorecard on a round nobody has posted to", () => {
+    mount({ holeData: {} });
+    fireEvent.click(screen.getByText("Full Scorecard"));
+    expect(screen.getAllByText("HOLE")).toHaveLength(2);
   });
 
   it("mounts on a completed card, which opens the finalize path", () => {

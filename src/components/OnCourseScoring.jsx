@@ -29,6 +29,7 @@ import { K, ON_ACC, FS, R, ALPHA, MOTION, FONT, SHADOW } from "../theme";
 import { Btn } from "./ui";
 import { Popup, ConfirmModal } from "./Popup";
 import { TeeColorSwatch } from "./TeeColorSwatch";
+import { ScoreCell } from "./ScoreCell";
 import { GroupSwitcher } from "./GroupSwitcher";
 import { OffRoundBanner } from "./OffRoundBanner";
 import { HEADER_SAFE_PAD } from "./AppHeader";
@@ -1248,26 +1249,16 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
                         <div key={p.id + "-n"} style={{ ...cb, justifyContent: "flex-start", overflow: "hidden" }}>
                           <span style={{ fontSize: FS.label, fontWeight: 700, color: K.t1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name.split(" ")[0]}</span>
                         </div>,
-                        ...holes.map(h => {
-                          const v = scMap[h];
-                          const has = v > 0 && v < 90;
-                          const wd = v >= 90;
-                          const ph = holePars[h] || 4;
-                          const sd = has ? v - ph : null;
-                          const st = getStrokes(p, h);
-                          const shaped = sd != null && sd !== 0;
-                          const dbl = sd != null && (sd <= -2 || sd >= 2);
-                          const clr = sd == null ? K.t3 : sd < 0 ? K.under : sd > 0 ? K.eagle : K.t1;
-                          const radius = sd != null && sd < 0 ? "50%" : 4;
-                          return (
-                            <div key={p.id + "-" + h} style={{ ...cb, position: "relative", fontSize: FS.label, fontWeight: 700, color: K.t1 }}>
-                              {shaped && <div style={{ position: "absolute", width: 20, height: 20, borderRadius: radius, border: `1.5px solid ${clr}`, left: "50%", top: "50%", transform: "translate(-50%,-50%)" }} />}
-                              {dbl && <div style={{ position: "absolute", width: 24, height: 24, borderRadius: radius, border: `1px solid ${clr}`, left: "50%", top: "50%", transform: "translate(-50%,-50%)" }} />}
-                              {st > 0 && <div style={{ position: "absolute", top: 1, left: "50%", transform: "translateX(-50%)", display: "flex", gap: 2 }}>{Array.from({ length: Math.min(st, 2) }).map((_, di) => <div key={di} style={{ width: 3, height: 3, borderRadius: "50%", background: K.acc }} />)}</div>}
-                              <span style={{ position: "relative", zIndex: 1 }}>{has ? v : (wd ? "—" : "")}</span>
-                            </div>
-                          );
-                        }),
+                        // The card's marks live in components/ScoreCell now —
+                        // the ring, the second ring, the stroke dots and which
+                        // of them a given number gets. They were drawn here
+                        // and copied by hand onto the leaderboard's card,
+                        // where the copy drifted; this is still the card that
+                        // decides how they look, it just no longer decides it
+                        // privately.
+                        ...holes.map(h => (
+                          <ScoreCell key={p.id + "-" + h} score={scMap[h]} par={holePars[h] || 4} strokes={getStrokes(p, h)} style={cb} />
+                        )),
                         <div key={p.id + "-o"} style={{ ...cb, fontSize: FS.label, fontWeight: 800, color: K.t1 }}>{sum9 || ""}</div>,
                         ...(isFront ? [] : [<div key={p.id + "-t"} style={{ ...cb, fontSize: FS.label, fontWeight: 800, color: K.acc }}>{sum18 || ""}</div>]),
                       ];

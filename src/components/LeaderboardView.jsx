@@ -20,10 +20,12 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { K, FS, fsStep, R, ALPHA, MOTION } from "../theme";
 import { Popup } from "./Popup";
+import { ScoreCell } from "./ScoreCell";
 import { LB_COL, LB_PAD_L, WBC_TROPHY, WBC_TROPHY_SILHOUETTE } from "../constants";
 import { NUM_ROUNDS } from "../lib/rounds";
 import { fmtPar } from "../lib/format";
 import { courseHandicapFor, buildStrokesMap, WD_SCORE } from "../lib/individualBoard";
+import { scoreCellMetrics } from "../lib/scoreMarks";
 import { teeTimesByPlayer, roundInPlay, thruStatus } from "../lib/thruStatus";
 
 export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getPlayerTee, getPlayerCH = () => null, finalizedRounds, skinWins, pairingsData, teeTimesData, loaded = true }) {
@@ -253,12 +255,13 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
     // made an 18-hole card something you had to bring the phone up to your face
     // to read — the whole point of opening it is to read the holes. Nothing is
     // competing with it for the width once it is open, so the numbers take the
-    // room: the scores are body, a rung above the player names on the board
-    // itself, and the heads and pars sit a rung under them.
+    // room: the scores are small, the size the board's own rows are built on,
+    // and the heads and pars sit a rung under them.
     //
-    // Body is where it stops. The nine tracks split whatever the board is wide,
-    // which is ~31px a hole on a 390 phone and ~27 on a 360 — a rung further up
-    // and a two-digit score in its ring is wider than the track it sits in.
+    // Small is where it stops. The nine tracks split whatever the board is
+    // wide, which is ~30px a hole on a 390 phone and ~27 on a 360, and a score
+    // two or more off par is ringed TWICE — a rung further up and the outer
+    // ring is wider than the track it has to fit in.
     return (
       <div style={{ padding: "10px 10px 12px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 7 }}>
@@ -300,42 +303,25 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: `30px repeat(${count}, 1fr) 34px`, gap: 1 }}>
                   <div style={{ color: K.t2, padding: "3px 0", fontSize: FS.label, fontWeight: 600 }}>Scr</div>
-                  {Array.from({length: count}, (_, i) => start + i).map(h => {
-                    const s = rc.scores[h];
-                    const d = s ? s - rc.holePars[h] : null;
-                    const st = rc.strokeMap[h] || 0;
-                    const isSkin = skinWins[`${rc.r}_${h}`] === p.id;
-                    const clr = isSkin ? K.gold : K.t2;
-                    return (
-                      <div key={h} style={{
-                        textAlign: "center", fontSize: FS.body, fontWeight: 700, padding: "1px 0",
-                        position: "relative", display: "flex", alignItems: "center", justifyContent: "center",
-                        height: 28,
-                      }}>
-                        {s && d !== 0 && d != null && (
-                          // Capped at the track it is drawn in rather than set
-                          // flat, so the ring grows with the number up to the
-                          // point where the nine columns are narrower than it —
-                          // a small phone gets touching rings otherwise.
-                          <div style={{ position: "absolute", width: "min(25px, 100%)", aspectRatio: "1", left: "50%", top: "50%", transform: "translate(-50%, -50%)" }}>
-                            <div style={{ position: "absolute", inset: 0, borderRadius: d < 0 ? "50%" : R.xs, border: `1.5px solid ${clr}` }} />
-                            {(d <= -2 || d >= 2) && <div style={{ position: "absolute", inset: 3.5, borderRadius: d < 0 ? "50%" : R.xs, border: `1px solid ${clr}` }} />}
-                          </div>
-                        )}
-                        {/* The scores are the card. They were drawn in the same
-                            secondary ink as the pars and the column heads
-                            around them, so the one row you opened this to read
-                            was the same weight as its own scaffolding. */}
-                        <span style={{ position: "relative", zIndex: 1, color: isSkin ? K.gold : s ? K.t1 : K.t3 }}>
-                          {s || "·"}
-                          {st > 0 && <span style={{ position: "absolute", top: -1, left: "100%", display: "flex", gap: 1, paddingLeft: 1 }}>
-                            {Array.from({length: st}).map((_, i) => <span key={i} style={{ width: 3, height: 3, borderRadius: "50%", background: K.acc, display: "block" }} />)}
-                          </span>}
-                        </span>
-                      </div>
-                    );
-                  })}
-                  <div style={{ textAlign: "center", fontSize: FS.body, fontWeight: 800, color: K.t1, display: "flex", alignItems: "center", justifyContent: "center", height: 28 }}>{grossT || ""}</div>
+                  {/* Every mark on these — the ring, the ring outside it, the
+                      stroke dots — is components/ScoreCell, which is the
+                      scoring screen's Full Scorecard lifted out of it. This
+                      card used to draw its own: dots hung off the top-right
+                      corner of the digit, one per stroke however many that
+                      was, and the ring coloured by whether the hole won a skin
+                      instead of by what was shot. Two cards of the same round,
+                      neither agreeing with the other.
+
+                      A rung under the scoring screen's card in size, because
+                      it is drawn in a board nine columns wide rather than in a
+                      popup, and the outer ring has to fit the track it is in.
+                      Everything else about it is that card. */}
+                  {Array.from({length: count}, (_, i) => start + i).map(h => (
+                    <ScoreCell key={h} fontSize={FS.small}
+                      score={rc.scores[h]} par={rc.holePars[h]} strokes={rc.strokeMap[h]}
+                      skin={skinWins[`${rc.r}_${h}`] === p.id} />
+                  ))}
+                  <div style={{ textAlign: "center", fontSize: FS.body, fontWeight: 800, color: K.t1, display: "flex", alignItems: "center", justifyContent: "center", height: scoreCellMetrics(FS.small).cell }}>{grossT || ""}</div>
                 </div>
               </div>
             ))}
@@ -439,23 +425,25 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
           // arithmetic was even and the board was not.
           const gridCols = `${LB_COL.num}px ${playerColW} ${LB_COL.total}px ${LB_COL.thru}px${allPriorRounds.map(() => " 1fr").join("")}`;
           const gridStyle = { display: "grid", gridTemplateColumns: gridCols, alignItems: "center" };
-          // Total and Thru are drawn as one block running the whole height of
-          // the board rather than as numbers sitting loose in each row. Every
-          // row paints its own slice — full-bleed top to bottom — and the
-          // slices stack into one continuous column, so where a player stands
-          // and how far in they are read together, ruled off from the
-          // round-by-round detail either side. The hairline is on the OUTER
-          // edge of each end only: a rule between Total and Thru would split
-          // the pair back into two columns, which is what this exists to undo.
+          // Where the rules fall between the name and the rounds. Total has
+          // none on its left: the name and the number a player is ranked on are
+          // the row, and a line between them was cutting the one thing you read
+          // as a phrase — "Aaron J, four under" — into two cells. It has all
+          // the room it needs to sit apart from the name without one.
           //
-          // The rules are all it is, though — the tint moved off it and onto
-          // the four rounds. Total and Thru are where the eye goes first and
-          // they are already the biggest, brightest numbers in the row; shading
-          // them too was pressing on the one part of the board that was not
-          // asking for help. Under the rounds the same wash does work: it makes
-          // four narrow columns of small dim numbers read as one block of
-          // history rather than as a run of digits trailing off the right-hand
-          // edge.
+          // Thru is ruled on both sides. It is a different kind of value from
+          // the total beside it — a count of holes, not a score — and the same
+          // rule that separates the two is what caps the four rounds on its
+          // right. So Total sits open against the name, and Thru is the boxed
+          // column that ends the standings and starts the history.
+          //
+          // Both are tint-free: the wash they used to carry is on the four
+          // rounds now. Total and Thru are where the eye goes first and are
+          // already the biggest, brightest numbers in the row; shading them too
+          // was pressing on the one part of the board that was not asking for
+          // help. Under the rounds the same wash does work — it makes four
+          // narrow columns of small dim numbers read as one block of history
+          // rather than a run of digits trailing off the right-hand edge.
           //
           // Inset shadows rather than borders for the same reason the round
           // columns use them — a border is width, and Total is the column the
@@ -463,9 +451,8 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
           // number half a pixel off the trophy behind it.
           const bandStart = {
             alignSelf: "stretch", display: "flex", alignItems: "center", justifyContent: "center",
-            boxShadow: `inset 1px 0 0 ${K.bdr}`,
           };
-          const bandEnd = { ...bandStart, boxShadow: `inset -1px 0 0 ${K.bdr}` };
+          const bandEnd = { ...bandStart, boxShadow: `inset 1px 0 0 ${K.bdr}, inset -1px 0 0 ${K.bdr}` };
           // Ruling between the round columns, so four numbers in a row read as
           // four rounds rather than one string of digits. Full-strength K.bdr,
           // the same rule the card edge and the header divider are drawn in:
@@ -515,7 +502,7 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
                   const label = showGross ? "Gross" : showToPar ? "Total" : "Strokes";
                   // "STROKES" is two letters longer than the other two labels
                   // and fills the column on its own; the eyebrow tracking is
-                  // what tips it out over the column's hairline. The long label
+                  // what tips it out over Thru's rule. The long label
                   // goes untracked rather than the column growing for a word
                   // only one of the three toggle states ever shows.
                   return <span style={{ ...bandStart, margin: "-7px 0", padding: "7px 0", fontWeight: 700, color: K.t2, letterSpacing: label.length > 5 ? 0 : undefined }}>{label}</span>;
