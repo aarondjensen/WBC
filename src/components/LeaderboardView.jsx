@@ -20,10 +20,12 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { K, FS, fsStep, R, ALPHA, MOTION } from "../theme";
 import { Popup } from "./Popup";
+import { ScoreCell } from "./ScoreCell";
 import { LB_COL, LB_PAD_L, WBC_TROPHY, WBC_TROPHY_SILHOUETTE } from "../constants";
 import { NUM_ROUNDS } from "../lib/rounds";
 import { fmtPar } from "../lib/format";
 import { courseHandicapFor, buildStrokesMap, WD_SCORE } from "../lib/individualBoard";
+import { scoreCellMetrics } from "../lib/scoreMarks";
 import { teeTimesByPlayer, roundInPlay, thruStatus } from "../lib/thruStatus";
 
 export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getPlayerTee, getPlayerCH = () => null, finalizedRounds, skinWins, pairingsData, teeTimesData, loaded = true }) {
@@ -253,12 +255,13 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
     // made an 18-hole card something you had to bring the phone up to your face
     // to read — the whole point of opening it is to read the holes. Nothing is
     // competing with it for the width once it is open, so the numbers take the
-    // room: the scores are body, a rung above the player names on the board
-    // itself, and the heads and pars sit a rung under them.
+    // room: the scores are small, the size the board's own rows are built on,
+    // and the heads and pars sit a rung under them.
     //
-    // Body is where it stops. The nine tracks split whatever the board is wide,
-    // which is ~31px a hole on a 390 phone and ~27 on a 360 — a rung further up
-    // and a two-digit score in its ring is wider than the track it sits in.
+    // Small is where it stops. The nine tracks split whatever the board is
+    // wide, which is ~30px a hole on a 390 phone and ~27 on a 360, and a score
+    // two or more off par is ringed TWICE — a rung further up and the outer
+    // ring is wider than the track it has to fit in.
     return (
       <div style={{ padding: "10px 10px 12px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 7 }}>
@@ -300,42 +303,25 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: `30px repeat(${count}, 1fr) 34px`, gap: 1 }}>
                   <div style={{ color: K.t2, padding: "3px 0", fontSize: FS.label, fontWeight: 600 }}>Scr</div>
-                  {Array.from({length: count}, (_, i) => start + i).map(h => {
-                    const s = rc.scores[h];
-                    const d = s ? s - rc.holePars[h] : null;
-                    const st = rc.strokeMap[h] || 0;
-                    const isSkin = skinWins[`${rc.r}_${h}`] === p.id;
-                    const clr = isSkin ? K.gold : K.t2;
-                    return (
-                      <div key={h} style={{
-                        textAlign: "center", fontSize: FS.body, fontWeight: 700, padding: "1px 0",
-                        position: "relative", display: "flex", alignItems: "center", justifyContent: "center",
-                        height: 28,
-                      }}>
-                        {s && d !== 0 && d != null && (
-                          // Capped at the track it is drawn in rather than set
-                          // flat, so the ring grows with the number up to the
-                          // point where the nine columns are narrower than it —
-                          // a small phone gets touching rings otherwise.
-                          <div style={{ position: "absolute", width: "min(25px, 100%)", aspectRatio: "1", left: "50%", top: "50%", transform: "translate(-50%, -50%)" }}>
-                            <div style={{ position: "absolute", inset: 0, borderRadius: d < 0 ? "50%" : R.xs, border: `1.5px solid ${clr}` }} />
-                            {(d <= -2 || d >= 2) && <div style={{ position: "absolute", inset: 3.5, borderRadius: d < 0 ? "50%" : R.xs, border: `1px solid ${clr}` }} />}
-                          </div>
-                        )}
-                        {/* The scores are the card. They were drawn in the same
-                            secondary ink as the pars and the column heads
-                            around them, so the one row you opened this to read
-                            was the same weight as its own scaffolding. */}
-                        <span style={{ position: "relative", zIndex: 1, color: isSkin ? K.gold : s ? K.t1 : K.t3 }}>
-                          {s || "·"}
-                          {st > 0 && <span style={{ position: "absolute", top: -1, left: "100%", display: "flex", gap: 1, paddingLeft: 1 }}>
-                            {Array.from({length: st}).map((_, i) => <span key={i} style={{ width: 3, height: 3, borderRadius: "50%", background: K.acc, display: "block" }} />)}
-                          </span>}
-                        </span>
-                      </div>
-                    );
-                  })}
-                  <div style={{ textAlign: "center", fontSize: FS.body, fontWeight: 800, color: K.t1, display: "flex", alignItems: "center", justifyContent: "center", height: 28 }}>{grossT || ""}</div>
+                  {/* Every mark on these — the ring, the ring outside it, the
+                      stroke dots — is components/ScoreCell, which is the
+                      scoring screen's Full Scorecard lifted out of it. This
+                      card used to draw its own: dots hung off the top-right
+                      corner of the digit, one per stroke however many that
+                      was, and the ring coloured by whether the hole won a skin
+                      instead of by what was shot. Two cards of the same round,
+                      neither agreeing with the other.
+
+                      A rung under the scoring screen's card in size, because
+                      it is drawn in a board nine columns wide rather than in a
+                      popup, and the outer ring has to fit the track it is in.
+                      Everything else about it is that card. */}
+                  {Array.from({length: count}, (_, i) => start + i).map(h => (
+                    <ScoreCell key={h} fontSize={FS.small}
+                      score={rc.scores[h]} par={rc.holePars[h]} strokes={rc.strokeMap[h]}
+                      skin={skinWins[`${rc.r}_${h}`] === p.id} />
+                  ))}
+                  <div style={{ textAlign: "center", fontSize: FS.body, fontWeight: 800, color: K.t1, display: "flex", alignItems: "center", justifyContent: "center", height: scoreCellMetrics(FS.small).cell }}>{grossT || ""}</div>
                 </div>
               </div>
             ))}
