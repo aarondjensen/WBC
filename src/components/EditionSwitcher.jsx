@@ -147,7 +147,19 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
         // waits for them rather than guessing off `status` and being wrong —
         // and off the FRESH ones, never the cache, so a year that has been
         // built since cannot be offered as the year to build.
-        const sums = await loadEditionSummaries(rows.map(e => e.id));
+        //
+        // Each year is painted as its own counts land rather than seventeen
+        // at once behind the slowest of fifty-one requests, so the list fills
+        // in from "Counting…" a row at a time. The map that arrives at the end
+        // still REPLACES what was painted — a year that could not be read has
+        // to lose its cached line and read "Couldn't read", and a stream of
+        // successes can never say that.
+        const sums = await loadEditionSummaries(rows.map(e => e.id), {
+          onEdition: (id, summary) => {
+            if (!alive) return;
+            setSummaries(prev => ({ ...(prev || {}), [id]: summary }));
+          },
+        });
         if (!alive) return;
         setSummaries(sums);
         setSummariesFresh(true);
@@ -297,7 +309,14 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
               const isActive = e.id === activeId;
               const state = stateOf(e);
               const verdict = deleteVerdict(state, { isActive });
-              const summary = summaries ? (summaryLine(summaries[e.id]) || "Couldn't read") : "Counting…";
+              // Three answers, not two. The counts arrive a year at a time, so
+              // a year MISSING from the map is either one still being counted
+              // or one that could not be read — and those are opposite
+              // sentences. Only once the whole load has settled does absence
+              // mean failure; until then it means we are still looking.
+              const known = summaries?.[e.id] || null;
+              const summary = known ? summaryLine(known)
+                : summariesFresh ? "Couldn't read" : "Counting…";
               // "WBC 2015" beside a bold 2015 is the same word seventeen times.
               // A name that ISN'T the default is worth the space; the default
               // is not.
@@ -314,7 +333,7 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
                   <button
                     onClick={isActive ? undefined : () => setPending(e)}
                     disabled={isActive}
-                    title={summaries ? STATE_LABEL[state] : "Counting…"}
+                    title={known || summariesFresh ? STATE_LABEL[state] : "Counting…"}
                     style={{
                       flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 8,
                       padding: "9px 10px", background: "transparent", border: "none",

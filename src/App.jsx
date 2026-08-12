@@ -43,6 +43,7 @@ import { PAIRING_MODES, PAIRING_MODE_LABEL, resolvePairingCfg, buildPriorPartner
 import { stateMatches, hasRealSlope, parseRapidAPI, fetchCourseTees } from "./lib/courseSearch";
 import { Popup, ConfirmModal } from "./components/Popup";
 import { EditionSwitcher } from "./components/EditionSwitcher";
+import { warmEditions } from "./lib/editions";
 import { docIds } from "./lib/editionId";
 import { isHistoryCourseId } from "./lib/historyImport";
 // The small conversions every screen does — see lib/format.
@@ -3538,6 +3539,10 @@ export default function WBCApp() {
   // view because opening one RELOADS the app onto that edition (see
   // lib/editions.js), so there is nothing to route back from.
   const [editionsOpen, setEditionsOpen] = useState(false);
+  // Tournaments is a tap further in than this menu, so the years are fetched
+  // while the menu is being read — see warmEditions, which does nothing at all
+  // on a device that has opened the picker before.
+  useEffect(() => { if (menuOpen) warmEditions(); }, [menuOpen]);
   // The bar's real height, measured rather than guessed: the menu sits flush
   // on top of it, and the bar's height moves with the device's bottom inset.
   const navRef = useRef(null);

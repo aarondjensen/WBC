@@ -19,7 +19,7 @@
 // the section is one button until it is tapped, and the form's defaults are
 // not even worked out before then.
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor, act } from "@testing-library/react";
 import { createElement as h } from "react";
 
 const EDITIONS = [
@@ -38,15 +38,19 @@ const SUMMARIES = {
 // rather than a network one.
 vi.mock("../firebase", () => ({ getActiveTournamentId: () => "wbc_2026" }));
 
-// Resolved by hand so the test can hold the counts in flight and look at what
-// is on screen while they are still coming.
-let releaseSummaries;
-const summariesLanded = () => new Promise((res) => { releaseSummaries = () => res(SUMMARIES); });
+// Driven by hand so the test can hold the counts in flight and look at what
+// is on screen while they are still coming — including handing over ONE year,
+// the way the real load reports each as its own counts land.
+let load;
+const releaseSummaries = (map = SUMMARIES) => load.resolve(map);
+const streamYear = (id) => act(() => { load.onEdition?.(id, SUMMARIES[id]); });
 
 vi.mock("../lib/editions", () => ({
   ensureActiveEditionDoc: async () => EDITIONS,
   loadEditions: async () => EDITIONS,
-  loadEditionSummaries: () => summariesLanded(),
+  loadEditionSummaries: (_ids, { onEdition } = {}) => new Promise((res) => {
+    load = { onEdition, resolve: (map) => res(map) };
+  }),
   cachedEditionSummaries: () => null,
   cachedEditions: () => null,
   createEdition: async () => ({ id: "wbc_2027" }),
@@ -89,6 +93,34 @@ describe("EditionSwitcher", () => {
     // The counts have landed and the form is still put away.
     expect(screen.queryByText("Copy from")).toBeNull();
     expect(screen.queryByText("What comes across")).toBeNull();
+  });
+
+  it("fills a row in as that year's counts land, without waiting for the rest", async () => {
+    open();
+    await screen.findByText("2026");
+    // Nothing counted yet: every row says so rather than claiming a year is
+    // empty when we simply have not looked.
+    expect(screen.getAllByText("Counting…").length).toBe(EDITIONS.length);
+
+    streamYear("wbc_2025");
+    expect(screen.getByText("16 players · 4 rounds · 1,152 scores")).toBeTruthy();
+    // And the years still in flight are still saying so.
+    expect(screen.getAllByText("Counting…").length).toBe(EDITIONS.length - 1);
+  });
+
+  it("tells a year it could not read apart from one it has not counted yet", async () => {
+    // Opposite sentences, and the second one is what puts a delete button on a
+    // finished tournament — so a year is only called unreadable once the whole
+    // load has settled without it.
+    open();
+    await screen.findByText("2026");
+    expect(screen.queryByText("Couldn't read")).toBeNull();
+
+    // 2026 is left out of the answer: its counts failed.
+    const { wbc_2026: _gone, ...rest } = SUMMARIES;
+    await act(async () => { releaseSummaries(rest); });
+    expect(screen.getByText("Couldn't read")).toBeTruthy();
+    expect(screen.queryByText("Counting…")).toBeNull();
   });
 
   it("builds the form only once it is expanded, pointed at the next year from the last one played", async () => {
