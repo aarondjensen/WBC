@@ -27,6 +27,7 @@ import { useConfirm } from "../lib/useConfirm";
 import { CTP_MAX_FT, SIDE_GAME_KEYS, SIDE_GAME_LABELS } from "../constants";
 import { fmtPar, teeTimeToMinutes, minutesToTimeStr } from "../lib/format";
 import { courseHandicapFor, buildStrokesMap, computeRoundLine, WD_SCORE } from "../lib/individualBoard";
+import { shortName } from "../lib/playerNames";
 import { fieldFor, potFor, perUnit, computeSkins, allSkins, skinCounts, lowNetRounds, lowNetRoundField } from "../lib/sideGames";
 import { roundFinalized } from "../lib/groupSwitch";
 import {
@@ -737,14 +738,21 @@ export function BettingView({
                     })}
                     <td style={{ ...totCell, fontSize: FS.micro, fontWeight: 800, color: K.t3, letterSpacing: 0.5, borderBottom: hair }}>{label}</td>
                   </tr>
-                  <tr>
+                  {/* Par sits on the same wash as the hole numbers above it,
+                      and the pair is closed off with the heavier rule. Two
+                      lines of heading over the scores, rather than the hole
+                      numbers being a heading and par being the first row of
+                      the table — which is what it read as when the wash
+                      stopped at the row above and the rule under it was the
+                      same hairline as every other. */}
+                  <tr style={{ background: `${K.bdr}${ALPHA.wash}` }}>
                     {holes.map(i => (
                       <td key={i} style={{
                         textAlign: "center", fontSize: FS.micro, color: K.t3, padding: "2px 1px",
-                        borderLeft: i === holes[0] ? "none" : hair, borderBottom: hair,
+                        borderLeft: i === holes[0] ? "none" : hair, borderBottom: edge,
                       }}>{pars[i] || ""}</td>
                     ))}
-                    <td style={{ ...totCell, fontSize: FS.micro, color: K.t3, borderBottom: hair }}>{t.par || ""}</td>
+                    <td style={{ ...totCell, fontSize: FS.micro, color: K.t3, borderBottom: edge }}>{t.par || ""}</td>
                   </tr>
                   <tr>
                     {holes.map(i => (
@@ -836,7 +844,14 @@ export function BettingView({
             <col style={{ width: "20%" }} />
             {holes.map((_, i) => <col key={i} style={{ width: `${80 / holes.length}%` }} />)}
           </colgroup>
-          <thead style={{ background: `${K.bdr}${ALPHA.wash}` }}>
+          {/* Hole and Par are a HEADING, and they were drawn in the same wash
+              the striped player rows underneath are — so the head was the
+              same shade as every second row of scores and read as two more
+              of them. A rung up the alpha ladder separates the two: the head
+              is the darker band, the stripes stay where they were, and the
+              rule under Par closes the block at full strength rather than at
+              a third of it. */}
+          <thead style={{ background: `${K.bdr}${ALPHA.tint}` }}>
             <tr style={{ borderBottom: cellBdr }}>
               <td style={{ fontSize: FS.micro, fontWeight: 700, color: K.t2, padding: "4px 6px", borderBottom: cellBdr }}>Hole</td>
               {holes.map(i => (
@@ -845,7 +860,7 @@ export function BettingView({
                 </td>
               ))}
             </tr>
-            <tr style={{ borderBottom: `1px solid ${K.bdr}${ALPHA.line}` }}>
+            <tr style={{ borderBottom: `1px solid ${K.bdr}` }}>
               <td style={{ fontSize: FS.micro, fontWeight: 600, color: K.t3, padding: "3px 6px", letterSpacing: "0.03em" }}>Par</td>
               {holes.map(i => <td key={i} style={{ textAlign: "center", fontSize: FS.micro, fontWeight: 600, color: K.t3, padding: "3px 1px", borderLeft: cellBdr }}>{pars[i] || ""}</td>)}
             </tr>
@@ -856,7 +871,7 @@ export function BettingView({
               return (
                 <tr key={p.id} style={{ borderTop: cellBdr, background: pi % 2 === 1 ? `${K.bdr}${ALPHA.wash}` : "transparent" }}>
                   <td style={{ fontSize: FS.label, fontWeight: 600, color: K.t1, padding: "3px 4px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {p.name.split(" ")[0]}
+                    {shortName(p)}
                   </td>
                   {holes.map(i => {
                     // The WD sentinel is a marker, not a score. Withdrawals

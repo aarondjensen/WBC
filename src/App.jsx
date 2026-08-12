@@ -52,7 +52,7 @@ import { SCORING_LEAD_MIN } from "./lib/scoringGate";
 // How many rounds this event plays — a live binding. See lib/rounds.
 import { NUM_ROUNDS, setRoundCount } from "./lib/rounds";
 import { db, writes } from "./lib/db";
-import { toDisplayName, fullName, splitName } from "./lib/playerNames";
+import { toDisplayName, displayNameFor, shortName, fullName, splitName } from "./lib/playerNames";
 import { missingTees, describeMissingTees } from "./lib/roundSetup";
 import { indexFor, matchHistoryName } from "./lib/handicap";
 import { groupKey as groupKeyOf, roundOfGroupKey, liveRound, roundFinalized, switchableGroups, groupProgress } from "./lib/groupSwitch";
@@ -3347,7 +3347,7 @@ function AdminView({ activePlayers, marketPool, sideGames, onUpdateSideGames, re
                     }, 0);
                     const playerNames = grp.map(pid => {
                       const p = activePlayers.find(x => x.id === pid);
-                      return p ? p.name.split(" ")[0] : pid;
+                      return p ? shortName(p) : pid;
                     }).join(", ");
                     return (
                       <div key={gi} style={{
@@ -3952,8 +3952,16 @@ export default function WBCApp() {
     const registryReady = (async () => {
       const playerRows = await db.get("players");
       if (playerRows?.length) {
+        // The one place a career record becomes something a screen renders,
+        // and so the one place the display convention is applied. A name the
+        // app generated years ago under the old one — "Aaron J" — is restyled
+        // here on the way in; a nickname a director typed is not, and a row
+        // with no first/last to restyle from is not either. See
+        // lib/playerNames, and note that what is STORED never changes: the id
+        // that binds a man to sixteen years of history was derived from that
+        // string, so it is identity rather than presentation.
         DEMO_PLAYERS = playerRows
-          .map(r => ({ id: r.id, name: r.name, first_name: r.first_name || "", last_name: r.last_name || "", index_override: r.index_override ?? null }))
+          .map(r => ({ id: r.id, name: displayNameFor(r), first_name: r.first_name || "", last_name: r.last_name || "", index_override: r.index_override ?? null }))
           .sort((a, b) => a.name.localeCompare(b.name));
         setRegistry(DEMO_PLAYERS);
       }

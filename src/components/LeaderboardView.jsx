@@ -192,6 +192,25 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
     [pairingsData, teeTimesData, round],
   );
 
+  // ── The card's two rule weights ──
+  // The same pair the betting card is ruled in, and the same job: a hairline
+  // between the holes inside a nine, so a column can be followed down from its
+  // number to what was shot on it; `edge` around the nine and down the side of
+  // the totals, which are not a hole and should not read as one.
+  //
+  // Both at full-strength K.bdr, which is the same call the board's own round
+  // columns make a few lines down and for the same reason: this card is drawn
+  // on the near-black panel behind the board rather than on the betting tab's
+  // lighter card, and a rule held back to a fifth of the border colour on THIS
+  // ground computes to about 1.05:1 — a line that exists in the stylesheet and
+  // not on the screen. The nine holes lead on the wash behind their heads
+  // rather than on a heavier rule.
+  const cardHair = K.bdr;
+  const cardEdge = `1px solid ${K.bdr}`;
+  // First hole of the nine takes no rule — its left edge is the card's own.
+  const cardCell = (first) => (first ? undefined : { boxShadow: `inset 1px 0 0 ${cardHair}` });
+  const cardTotal = { boxShadow: `inset 1px 0 0 ${K.bdr}`, background: K.bdr + ALPHA.wash };
+
   const renderScorecard = (p) => {
     const tp = tPlayers.find(t => t.player_id === p.id);
     const hi = parseFloat(tp?.handicap_index) || 0;
@@ -286,23 +305,39 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
           </div>
         </div>
             {[["Front", 0, 9, rc.frontPar, rc.frontGross], ["Back", 9, 9, rc.backPar, rc.backGross]].map(([label, start, count, parT, grossT]) => (
-              <div key={label} style={{ marginBottom: 7 }}>
-                <div style={{ display: "grid", gridTemplateColumns: `30px repeat(${count}, 1fr) 34px`, gap: 1, fontSize: FS.label }}>
-                  <div style={{ color: K.t2, fontWeight: 600, padding: "2px 0" }}></div>
+              // ── Ruled, the way the skins card is ──
+              // Nine numbers in a row with nothing between them is a string of
+              // digits, not nine holes: following one hole down from its
+              // number to its par to what was shot there meant counting across
+              // three separate rows with the phone at arm's length. The rules
+              // are the same two weights the betting card uses — `hair`
+              // between holes inside a nine, `edge` around the nine and down
+              // the side of the totals — and the two head rows sit on the same
+              // wash so they read as one heading over the scores rather than
+              // as two more rows of numbers.
+              //
+              // The vertical rules are inset shadows rather than borders,
+              // which is the same reason the board's own round columns use
+              // them: a border is width, and it would come off the inside of
+              // eight cells out of nine and leave the first one a pixel wider
+              // than its neighbours, with its digit half a pixel off centre.
+              <div key={label} style={{ marginBottom: 8, border: cardEdge, borderRadius: R.xs, overflow: "hidden" }}>
+                <div style={{ display: "grid", gridTemplateColumns: `30px repeat(${count}, 1fr) 34px`, fontSize: FS.label, background: K.bdr + ALPHA.wash }}>
+                  <div style={{ color: K.t2, fontWeight: 600, padding: "3px 0 3px 4px" }}></div>
                   {Array.from({length: count}, (_, i) => start + i).map(h => (
-                    <div key={h} style={{ textAlign: "center", color: K.t2, fontWeight: 600, padding: "2px 0" }}>{h+1}</div>
+                    <div key={h} style={{ ...cardCell(h === start), textAlign: "center", color: K.t2, fontWeight: 600, padding: "3px 0" }}>{h+1}</div>
                   ))}
-                  <div style={{ textAlign: "center", color: K.t2, fontWeight: 700 }}></div>
+                  <div style={{ ...cardTotal, textAlign: "center", color: K.t3, fontWeight: 800 }}>{label === "Front" ? "OUT" : "IN"}</div>
                 </div>
-                <div style={{ display: "grid", gridTemplateColumns: `30px repeat(${count}, 1fr) 34px`, gap: 1, fontSize: FS.label }}>
-                  <div style={{ color: K.t2, padding: "2px 0" }}>Par</div>
+                <div style={{ display: "grid", gridTemplateColumns: `30px repeat(${count}, 1fr) 34px`, fontSize: FS.label, background: K.bdr + ALPHA.wash, borderBottom: cardEdge }}>
+                  <div style={{ color: K.t3, padding: "3px 0 3px 4px" }}>Par</div>
                   {Array.from({length: count}, (_, i) => start + i).map(h => (
-                    <div key={h} style={{ textAlign: "center", color: K.t2, padding: "2px 0" }}>{rc.holePars[h]}</div>
+                    <div key={h} style={{ ...cardCell(h === start), textAlign: "center", color: K.t3, padding: "3px 0" }}>{rc.holePars[h]}</div>
                   ))}
-                  <div style={{ textAlign: "center", color: K.t2, fontWeight: 700 }}>{parT}</div>
+                  <div style={{ ...cardTotal, textAlign: "center", color: K.t3, fontWeight: 700 }}>{parT}</div>
                 </div>
-                <div style={{ display: "grid", gridTemplateColumns: `30px repeat(${count}, 1fr) 34px`, gap: 1 }}>
-                  <div style={{ color: K.t2, padding: "3px 0", fontSize: FS.label, fontWeight: 600 }}>Scr</div>
+                <div style={{ display: "grid", gridTemplateColumns: `30px repeat(${count}, 1fr) 34px` }}>
+                  <div style={{ color: K.t2, padding: "0 0 0 4px", fontSize: FS.label, fontWeight: 600, display: "flex", alignItems: "center" }}>Scr</div>
                   {/* Every mark on these — the ring, the ring outside it, the
                       stroke dots — is components/ScoreCell, which is the
                       scoring screen's Full Scorecard lifted out of it. This
@@ -317,11 +352,11 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
                       popup, and the outer ring has to fit the track it is in.
                       Everything else about it is that card. */}
                   {Array.from({length: count}, (_, i) => start + i).map(h => (
-                    <ScoreCell key={h} fontSize={FS.small}
+                    <ScoreCell key={h} fontSize={FS.small} style={cardCell(h === start)}
                       score={rc.scores[h]} par={rc.holePars[h]} strokes={rc.strokeMap[h]}
                       skin={skinWins[`${rc.r}_${h}`] === p.id} />
                   ))}
-                  <div style={{ textAlign: "center", fontSize: FS.body, fontWeight: 800, color: K.t1, display: "flex", alignItems: "center", justifyContent: "center", height: scoreCellMetrics(FS.small).cell }}>{grossT || ""}</div>
+                  <div style={{ ...cardTotal, textAlign: "center", fontSize: FS.body, fontWeight: 800, color: K.t1, display: "flex", alignItems: "center", justifyContent: "center", height: scoreCellMetrics(FS.small).cell }}>{grossT || ""}</div>
                 </div>
               </div>
             ))}
