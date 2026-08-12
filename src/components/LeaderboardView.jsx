@@ -247,13 +247,25 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
     const totalPar = rc.frontPar + rc.backPar;
     const netToPar = totalNet - totalPar;
 
+    // ── How big the card is drawn ──
+    // The card is a SCREEN, not a cell in the board. It was built out of the
+    // same micro/label rungs the row above it is squeezed into, which is what
+    // made an 18-hole card something you had to bring the phone up to your face
+    // to read — the whole point of opening it is to read the holes. Nothing is
+    // competing with it for the width once it is open, so the numbers take the
+    // room: the scores are body, a rung above the player names on the board
+    // itself, and the heads and pars sit a rung under them.
+    //
+    // Body is where it stops. The nine tracks split whatever the board is wide,
+    // which is ~31px a hole on a 390 phone and ~27 on a 360 — a rung further up
+    // and a two-digit score in its ring is wider than the track it sits in.
     return (
-      <div style={{ padding: "8px 10px 8px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+      <div style={{ padding: "10px 10px 12px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 7 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             {availRounds.length > 1 ? (
               <select value={viewRound} onChange={e => setScorecardRound(parseInt(e.target.value))} onClick={e => e.stopPropagation()} style={{
-                background: K.inp, border: `1px solid ${K.bdr}`, borderRadius: R.xs, color: K.acc, fontSize: FS.label, fontWeight: 700, padding: "2px 4px", cursor: "pointer",
+                background: K.inp, border: `1px solid ${K.bdr}`, borderRadius: R.xs, color: K.acc, fontSize: FS.small, fontWeight: 700, padding: "3px 5px", cursor: "pointer",
               }}>
                 {availRounds.map(r => {
                   const c = courses.find(cs => cs.id === tRounds.find(t => t.round_number === r)?.course_id);
@@ -261,33 +273,33 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
                 })}
               </select>
             ) : (
-              <span style={{ fontSize: FS.label, fontWeight: 700, color: K.acc }}>Rd {rc.r}: {rc.course.name}</span>
+              <span style={{ fontSize: FS.small, fontWeight: 700, color: K.acc }}>Rd {rc.r}: {rc.course.name}</span>
             )}
-            <span style={{ fontSize: FS.micro, color: K.t2 }}>CH {rc.ch}</span>
+            <span style={{ fontSize: FS.label, color: K.t2 }}>CH {rc.ch}</span>
           </div>
-          <div style={{ display: "flex", gap: 8, fontSize: FS.label }}>
-            <span style={{ color: K.t2 }}>Gross <strong style={{ color: K.t1 }}>{totalGross || "—"}</strong></span>
-            <span style={{ color: K.t2 }}>Net <strong style={{ color: netToPar < 0 ? K.under : K.t1 }}>{totalNet || "—"}</strong></span>
+          <div style={{ display: "flex", gap: 10, fontSize: FS.label, alignItems: "baseline" }}>
+            <span style={{ color: K.t2 }}>Gross <strong style={{ fontSize: FS.small, color: K.t1 }}>{totalGross || "—"}</strong></span>
+            <span style={{ color: K.t2 }}>Net <strong style={{ fontSize: FS.small, color: netToPar < 0 ? K.under : K.t1 }}>{totalNet || "—"}</strong></span>
           </div>
         </div>
             {[["Front", 0, 9, rc.frontPar, rc.frontGross], ["Back", 9, 9, rc.backPar, rc.backGross]].map(([label, start, count, parT, grossT]) => (
-              <div key={label} style={{ marginBottom: 4 }}>
-                <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 32px`, gap: 1, fontSize: FS.micro }}>
+              <div key={label} style={{ marginBottom: 7 }}>
+                <div style={{ display: "grid", gridTemplateColumns: `30px repeat(${count}, 1fr) 34px`, gap: 1, fontSize: FS.label }}>
                   <div style={{ color: K.t2, fontWeight: 600, padding: "2px 0" }}></div>
                   {Array.from({length: count}, (_, i) => start + i).map(h => (
                     <div key={h} style={{ textAlign: "center", color: K.t2, fontWeight: 600, padding: "2px 0" }}>{h+1}</div>
                   ))}
                   <div style={{ textAlign: "center", color: K.t2, fontWeight: 700 }}></div>
                 </div>
-                <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 32px`, gap: 1, fontSize: FS.micro }}>
-                  <div style={{ color: K.t2, padding: "2px 0", fontSize: FS.micro }}>Par</div>
+                <div style={{ display: "grid", gridTemplateColumns: `30px repeat(${count}, 1fr) 34px`, gap: 1, fontSize: FS.label }}>
+                  <div style={{ color: K.t2, padding: "2px 0" }}>Par</div>
                   {Array.from({length: count}, (_, i) => start + i).map(h => (
                     <div key={h} style={{ textAlign: "center", color: K.t2, padding: "2px 0" }}>{rc.holePars[h]}</div>
                   ))}
                   <div style={{ textAlign: "center", color: K.t2, fontWeight: 700 }}>{parT}</div>
                 </div>
-                <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 32px`, gap: 1 }}>
-                  <div style={{ color: K.t2, padding: "3px 0", fontSize: FS.micro, fontWeight: 600 }}>Scr</div>
+                <div style={{ display: "grid", gridTemplateColumns: `30px repeat(${count}, 1fr) 34px`, gap: 1 }}>
+                  <div style={{ color: K.t2, padding: "3px 0", fontSize: FS.label, fontWeight: 600 }}>Scr</div>
                   {Array.from({length: count}, (_, i) => start + i).map(h => {
                     const s = rc.scores[h];
                     const d = s ? s - rc.holePars[h] : null;
@@ -296,17 +308,25 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
                     const clr = isSkin ? K.gold : K.t2;
                     return (
                       <div key={h} style={{
-                        textAlign: "center", fontSize: FS.label, fontWeight: 700, padding: "1px 0",
+                        textAlign: "center", fontSize: FS.body, fontWeight: 700, padding: "1px 0",
                         position: "relative", display: "flex", alignItems: "center", justifyContent: "center",
-                        height: 22,
+                        height: 28,
                       }}>
                         {s && d !== 0 && d != null && (
-                          <div style={{ position: "absolute", width: 20, height: 20, left: "50%", top: "50%", transform: "translate(-50%, -50%)" }}>
+                          // Capped at the track it is drawn in rather than set
+                          // flat, so the ring grows with the number up to the
+                          // point where the nine columns are narrower than it —
+                          // a small phone gets touching rings otherwise.
+                          <div style={{ position: "absolute", width: "min(25px, 100%)", aspectRatio: "1", left: "50%", top: "50%", transform: "translate(-50%, -50%)" }}>
                             <div style={{ position: "absolute", inset: 0, borderRadius: d < 0 ? "50%" : R.xs, border: `1.5px solid ${clr}` }} />
-                            {(d <= -2 || d >= 2) && <div style={{ position: "absolute", inset: 3, borderRadius: d < 0 ? "50%" : R.xs, border: `1px solid ${clr}` }} />}
+                            {(d <= -2 || d >= 2) && <div style={{ position: "absolute", inset: 3.5, borderRadius: d < 0 ? "50%" : R.xs, border: `1px solid ${clr}` }} />}
                           </div>
                         )}
-                        <span style={{ position: "relative", zIndex: 1, color: isSkin ? K.gold : K.t2 }}>
+                        {/* The scores are the card. They were drawn in the same
+                            secondary ink as the pars and the column heads
+                            around them, so the one row you opened this to read
+                            was the same weight as its own scaffolding. */}
+                        <span style={{ position: "relative", zIndex: 1, color: isSkin ? K.gold : s ? K.t1 : K.t3 }}>
                           {s || "·"}
                           {st > 0 && <span style={{ position: "absolute", top: -1, left: "100%", display: "flex", gap: 1, paddingLeft: 1 }}>
                             {Array.from({length: st}).map((_, i) => <span key={i} style={{ width: 3, height: 3, borderRadius: "50%", background: K.acc, display: "block" }} />)}
@@ -315,7 +335,7 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
                       </div>
                     );
                   })}
-                  <div style={{ textAlign: "center", fontSize: FS.small, fontWeight: 800, color: K.t2, display: "flex", alignItems: "center", justifyContent: "center", height: 22 }}>{grossT || ""}</div>
+                  <div style={{ textAlign: "center", fontSize: FS.body, fontWeight: 800, color: K.t1, display: "flex", alignItems: "center", justifyContent: "center", height: 28 }}>{grossT || ""}</div>
                 </div>
               </div>
             ))}
