@@ -42,44 +42,14 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
   const [rowStyle, setRowStyle] = useState({ padding: "6px 12px", fontSize: FS.small });
   const [rowH, setRowH] = useState(0);
 
-  // Compute player column width to center Total, and align trophy to match.
-  //
-  // useLayoutEffect, not useEffect: this MEASURES the container and then
-  // restyles from the measurement. useEffect runs after the browser has
-  // painted, so the "auto" width below was painted first and the real width
-  // one frame later — the player column visibly jumped from ~39px to ~122px
-  // on every mount, which is what the pull-to-refresh flash was. Laying out
-  // synchronously before paint means the wrong layout is never shown.
-  const [playerColW, setPlayerColW] = useState("auto");
-  useLayoutEffect(() => {
-    const align = () => {
-      if (!containerRef.current) return;
-      // offsetWidth counts the board's own 1px border on each side; inside it
-      // the rows are padded on the left only, and run to the board's inner edge
-      // on the right.
-      const containerW = containerRef.current.offsetWidth;
-      const innerW = containerW - 2;          // inside the board's border
-      const gridW = innerW - LB_PAD_L;        // the row's content box
-      // Total's centre sits at padL + num + playerW + total/2 from the board's
-      // inner edge, and the board is centred in the viewport — so putting that
-      // at the board's own midpoint puts it under the trophy behind it. The
-      // padding is one-sided now, so it has to be in this sum rather than
-      // cancelling out of it.
-      const centred = innerW / 2 - LB_PAD_L - LB_COL.num - LB_COL.total / 2;
-      // On a narrow phone the fixed columns want more than half the width, and
-      // honouring the centring would squeeze the round columns below the width
-      // a "+11" needs. So centred is a CEILING, not a rule: the player column
-      // gives way first, and Total drifts off the trophy rather than the round
-      // columns becoming unreadable.
-      const fixed = LB_COL.num + LB_COL.total + LB_COL.thru + LB_COL.priorMin * NUM_ROUNDS;
-      const playerW = Math.max(60, Math.min(centred, gridW - fixed));
-      setPlayerColW(`${Math.floor(playerW)}px`);
-    };
-    align();
-    const t = setTimeout(align, 150);
-    window.addEventListener("resize", align);
-    return () => { clearTimeout(t); window.removeEventListener("resize", align); };
-  }, [lb.length]);
+  // The player column used to be MEASURED, so that Total landed dead centre of
+  // the board and therefore under the trophy watermark behind it. That whole
+  // apparatus is gone with the band it served: Total is right-aligned in a
+  // fixed column now, on an edge shared with every other number in the stack,
+  // and the name simply takes whatever is left. A column that fills the space
+  // needs no arithmetic to find its width — and the pull-to-refresh flash the
+  // measurement had to run in useLayoutEffect to avoid cannot happen to a
+  // layout that is never computed in the first place.
 
   // Track previous positions for movement arrows
   const prevPositions = useRef({});
@@ -366,13 +336,22 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
 
   return (
     <div style={{ position: "relative", height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
-      {/* Giant trophy silhouette behind entire leaderboard — fixed so it never shifts */}
+      {/* Giant trophy silhouette behind entire leaderboard — fixed so it never
+          shifts.
+          Held back to half what it was. It could carry 8% when the board in
+          front of it was a grid of ruled, tinted boxes, because the boxes were
+          what the eye read and the trophy sat behind them. With the rules gone
+          the rows are ink on the page, and at that strength the silhouette
+          stopped being a watermark and became texture UNDER the names — its
+          own edges reading as marks across the middle of the field. Low enough
+          now that you see it when you look for it and not when you are reading
+          somebody's score, which is what a watermark is for. */}
       <img src={WBC_TROPHY_SILHOUETTE} alt="" style={{
         position: "fixed", top: "50%", left: "50%",
         transform: "translate(-50%, -50%)",
         width: 480, height: "100vh",
         maxWidth: "100vw",
-        opacity: 0.08,
+        opacity: 0.04,
         pointerEvents: "none",
         userSelect: "none",
         zIndex: 0,
@@ -447,103 +426,64 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
           </div>
         </div>
       </div>
-      <div ref={containerRef} style={{ background: "transparent", borderRadius: R.lg, border: `1px solid ${K.bdr}`, overflow: "hidden", display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
-        {/* Build dynamic grid: #, Player, Total, Thru, then one equal track per round */}
+      <div ref={containerRef} style={{ background: "transparent", overflow: "hidden", display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
         {(() => {
           const allPriorRounds = Array.from({ length: NUM_ROUNDS }, (_, i) => i + 1);
-          // Four EQUAL tracks filling everything left over, instead of four
-          // fixed ones with a flexible gap in front. The gap column made R1's
-          // cell — the space between the band's edge and the first rule — the
-          // width of a round plus the gap, and the row's right padding did the
-          // same for R4 against the board's edge. On a 390 phone that read as
-          // 100 / 55 / 56 / 83 against tracks that were all exactly 24: the
-          // arithmetic was even and the board was not.
-          const gridCols = `${LB_COL.num}px ${playerColW} ${LB_COL.total}px ${LB_COL.thru}px${allPriorRounds.map(() => " 1fr").join("")}`;
+          // ── No rules on this board, in any direction ──
+          // What made it read as a spreadsheet was the grid: a line down every
+          // column boundary and another across every row, so twelve players
+          // came out as ninety-six boxes. All of it is gone. The columns are
+          // held apart by ALIGNMENT — the name flush left and everything after
+          // it flush right or centred in its own track — and the hierarchy is
+          // carried by weight and ink instead of by a box: the total is the
+          // biggest thing on the row, the name a rung under it, the position
+          // and the thru and the rounds behind both in the quiet grey. One
+          // hairline is left between players, at a third strength, and one
+          // accent wash under the leader.
+          //
+          // The four rounds are nested in a track of their own rather than
+          // four top-level ones. They are one thing — the history behind the
+          // number in front — and grouping them is what lets the gap either
+          // side of the group do the work the rules used to.
+          const gridCols = `${LB_COL.num}px minmax(0, 1fr) ${LB_COL.total}px ${LB_COL.thru}px ${LB_COL.priorMin * NUM_ROUNDS}px`;
+          // No column gap. The tracks are already wider than their contents —
+          // that surplus IS the gap, and it sits where the alignment puts it:
+          // to the LEFT of a right-aligned number, between it and whatever
+          // ends before it. A gap on top of that would only push the four
+          // rounds off the right edge.
           const gridStyle = { display: "grid", gridTemplateColumns: gridCols, alignItems: "center" };
-          // Where the rules fall between the name and the rounds. Total has
-          // none on its left: the name and the number a player is ranked on are
-          // the row, and a line between them was cutting the one thing you read
-          // as a phrase — "Aaron J, four under" — into two cells. It has all
-          // the room it needs to sit apart from the name without one.
-          //
-          // Thru is ruled on both sides. It is a different kind of value from
-          // the total beside it — a count of holes, not a score — and the same
-          // rule that separates the two is what caps the four rounds on its
-          // right. So Total sits open against the name, and Thru is the boxed
-          // column that ends the standings and starts the history.
-          //
-          // Both are tint-free: the wash they used to carry is on the four
-          // rounds now. Total and Thru are where the eye goes first and are
-          // already the biggest, brightest numbers in the row; shading them too
-          // was pressing on the one part of the board that was not asking for
-          // help. Under the rounds the same wash does work — it makes four
-          // narrow columns of small dim numbers read as one block of history
-          // rather than a run of digits trailing off the right-hand edge.
-          //
-          // Inset shadows rather than borders for the same reason the round
-          // columns use them — a border is width, and Total is the column the
-          // whole board is aligned to. Drawn as a border it pushed its own
-          // number half a pixel off the trophy behind it.
-          const bandStart = {
-            alignSelf: "stretch", display: "flex", alignItems: "center", justifyContent: "center",
-          };
-          const bandEnd = { ...bandStart, boxShadow: `inset 1px 0 0 ${K.bdr}, inset -1px 0 0 ${K.bdr}` };
-          // Ruling between the round columns, so four numbers in a row read as
-          // four rounds rather than one string of digits. Full-strength K.bdr,
-          // the same rule the card edge and the header divider are drawn in:
-          // held back to a third of that it computed to 1.08:1 against the
-          // background, which is a line that exists in the stylesheet and not
-          // on the screen. The columns still lead on their background tint
-          // rather than on having a heavier edge. None on R1 — Thru's own
-          // right-hand rule is already the left edge of the four, and a second
-          // line a pixel inside it just draws the same edge twice.
-          //
-          // Drawn as an inset shadow rather than a border because a border is
-          // LAYOUT. Under border-box it ate a pixel off the left of every cell
-          // that had one, which R1 did not — so R1 centred its number in 24px
-          // while R2-R4 centred theirs in 23px starting a pixel over, and the
-          // four columns came out spaced 24.5, 24, 24. The same pixel pushed
-          // every number half a pixel right of its own track, giving each cell
-          // 12.5 of air on one side of its value and 11.5 on the other. A
-          // shadow paints the identical line and costs no width, so all four
-          // tracks are the same box and the numbers sit dead centre in them.
-          const roundCell = (i) => ({
-            alignSelf: "stretch", display: "flex", alignItems: "center", justifyContent: "center",
-            background: K.t3 + ALPHA.wash,
-            boxShadow: i === 0 ? undefined : `inset 1px 0 0 ${K.bdr}`,
-          });
+          const roundGrid = { display: "grid", gridTemplateColumns: `repeat(${NUM_ROUNDS}, 1fr)`, alignItems: "center" };
+          // Right-aligned, both of them: a column of numbers reads as a column
+          // when its digits line up on the same edge, and these are the two
+          // that change width — "E" against "+11", "9" against "18".
+          const totalCell = { textAlign: "right", fontVariantNumeric: "tabular-nums" };
+          const thruCell = { textAlign: "right", color: K.t3, fontVariantNumeric: "tabular-nums" };
           return (
             <>
-              {/* The one row that does NOT step up with the rest of the board.
-                  These are eyebrows, not data, and "STROKES" already fills the
-                  Total column at micro — a rung up and it spills over the band
-                  it is supposed to cap.
-
-                  It carries the round columns' own wash across its full width,
-                  so the strip caps the board instead of floating over it. The
-                  tint is the one already running down the right of the board
-                  rather than a second value: at this weight the header is not
-                  a surface of its own, it is the top of the same one. The
-                  round cells give their background up inside it for that
-                  reason — painted twice, the right end of the header goes
-                  darker than the rest of it, and the four rounds read as
-                  starting a shade heavier than they continue. */}
-              <div ref={headerRef} style={{ ...gridStyle, padding: `7px 0 7px ${LB_PAD_L}px`, fontSize: FS.micro, fontWeight: 600, color: K.t2, textTransform: "uppercase", letterSpacing: "0.06em", background: K.t3 + ALPHA.wash, borderBottom: `1px solid ${K.bdr}` }}>
-                <span>#</span>
+              {/* Eyebrows, not data, and they say so: the smallest thing on
+                  the screen, tracked wide, in the quiet grey, on nothing. No
+                  fill and no rule under it — the gap below is what separates
+                  it from the board, and a strip of tint here would be the one
+                  boxed thing left on a board with no boxes.
+                  The position column goes unlabelled. A column of 1, 2, T3 in
+                  front of a column of names is not a question anybody needs a
+                  head to answer, and "#" was a character doing nothing. */}
+              <div ref={headerRef} style={{ ...gridStyle, padding: `0 ${LB_PAD_L}px 9px ${LB_PAD_L}px`, fontSize: FS.micro, fontWeight: 700, color: K.t3, textTransform: "uppercase", letterSpacing: "0.12em" }}>
+                <span />
                 <span>Player</span>
-                {/* Negative margin eats the header's own padding so the rules
-                    start at the top edge instead of 7px down from it. */}
                 {(() => {
                   const label = showGross ? "Gross" : showToPar ? "Total" : "Strokes";
                   // "STROKES" is two letters longer than the other two labels
                   // and fills the column on its own; the eyebrow tracking is
-                  // what tips it out over Thru's rule. The long label
-                  // goes untracked rather than the column growing for a word
-                  // only one of the three toggle states ever shows.
-                  return <span style={{ ...bandStart, margin: "-7px 0", padding: "7px 0", fontWeight: 700, color: K.t2, letterSpacing: label.length > 5 ? 0 : undefined }}>{label}</span>;
+                  // what tips it past the edge its digits line up on. The long
+                  // label goes untracked rather than the column growing for a
+                  // word only one of the three toggle states ever shows.
+                  return <span style={{ textAlign: "right", letterSpacing: label.length > 5 ? 0 : undefined }}>{label}</span>;
                 })()}
-                <span style={{ ...bandEnd, margin: "-7px 0", padding: "7px 0", fontWeight: 700, color: K.t2 }}>Thru</span>
-                {allPriorRounds.map((r, i) => <span key={r} style={{ ...roundCell(i), background: "transparent", margin: "-7px 0", padding: "7px 0" }}>R{r}</span>)}
+                <span style={{ textAlign: "right" }}>Thru</span>
+                <div style={roundGrid}>
+                  {allPriorRounds.map(r => <span key={r} style={{ textAlign: "center" }}>R{r}</span>)}
+                </div>
               </div>
               {/* Only once the round data is actually in. An empty `lb` also means
                   "Firestore has not answered yet", and reporting that as "no scores"
@@ -616,40 +556,50 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
                       })();
                 return (
                   <div key={p.id} ref={isExpanded ? expandedRef : undefined} style={{ flex: "0 0 auto", display: "flex", flexDirection: "column" }}>
-                    {/* One player, one rule. The divider was K.bdr held back to
-                        8%, which on either theme is a line that exists in the
-                        stylesheet and not on the screen — twelve names ran
-                        together as one column of text. At full strength it is
-                        the same hairline the board's own edge and the header
-                        are drawn in, so a row reads as its own slice without
-                        the board turning into a grid of boxes.
+                    {/* One player, one hairline, at a third of the border
+                        colour. It was at full strength when there were rules
+                        in the other direction too and it had to hold its own
+                        against them; with those gone it is the only line on
+                        the board, and a third is all it takes to separate two
+                        names. Not under the last one — there is nothing below
+                        it to separate from.
 
-                        Not under the last one: the rows fill the box exactly,
-                        so its rule would land on top of the board's bottom
-                        border and read as one thick edge. */}
-                    <div onClick={() => { setExpanded(isExpanded ? null : p.id); setScorecardRound(null); }} style={{ ...gridStyle, padding: `0 0 0 ${LB_PAD_L}px`, height: rowH || 28, flex: "0 0 auto", alignItems: "center", borderBottom: idx === lb.length - 1 ? "none" : `1px solid ${K.bdr}`, background: "transparent", cursor: "pointer", fontSize: rowStyle.fontSize, lineHeight: 1 }}>
-                      {/* # */}
-                      <span style={{ fontWeight: 800, fontSize: rowStyle.fontSize, color: top3 ? K.acc : K.t2, display: "flex", alignItems: "center", gap: 1 }}>
+                        The leader takes an accent wash that fades out before
+                        the middle of the row, rather than a filled row or a
+                        badge. It marks where the eye should land first without
+                        drawing a box on a board whose whole idea is that there
+                        are none. */}
+                    <div onClick={() => { setExpanded(isExpanded ? null : p.id); setScorecardRound(null); }} style={{ ...gridStyle, padding: `0 ${LB_PAD_L}px`, height: rowH || 28, flex: "0 0 auto", alignItems: "center", boxShadow: idx === lb.length - 1 ? undefined : `inset 0 -1px 0 ${K.bdr}${ALPHA.line}`, background: top3 && !p.isWD ? `linear-gradient(90deg, ${K.acc}${ALPHA.wash}, transparent 45%)` : "transparent", cursor: "pointer", fontSize: rowStyle.fontSize, lineHeight: 1 }}>
+                      {/* Position — a rung UNDER the row size and in the quiet
+                          grey. It was the row's heaviest ink after the total,
+                          which put the most weight on the least interesting
+                          number: the order is already the order of the rows. */}
+                      <span style={{ fontWeight: 700, fontSize: fsStep(rowStyle.fontSize, -1), color: top3 ? K.acc : K.t3, display: "flex", alignItems: "center", gap: 2, fontVariantNumeric: "tabular-nums" }}>
                         {isChampion
                           ? <img src={WBC_TROPHY} alt="Champion" title="Champion" style={{ height: fsStep(rowStyle.fontSize, 2), display: "block" }} />
                           : pos}
                         {/* Stays at micro while the rest of the row steps up:
-                            "T12" plus an arrow is what sizes the # column, and
+                            "T12" plus an arrow is what sizes this column, and
                             a bigger glyph pushes the pair past its width. */}
                         {mov && <span style={{ fontSize: FS.micro, color: mov === "up" ? K.ok : K.danger, lineHeight: 1 }}>{mov === "up" ? "▲" : "▼"}</span>}
                       </span>
                       {/* Player — a rung above the fitted row size. The name is
                           what you scan the board for, and at the row size it
-                          was reading as one column of many. */}
-                      <div style={{ fontWeight: isChampion ? 800 : 600, color: isChampion ? K.acc : undefined, fontSize: fsStep(rowStyle.fontSize, 1), overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", paddingRight: 4 }}>
+                          was reading as one column of many. Tightened a hair:
+                          at this weight and size the default tracking makes a
+                          long surname wider than it needs to be. */}
+                      <div style={{ fontWeight: isChampion ? 800 : 600, color: isChampion ? K.acc : K.t1, fontSize: fsStep(rowStyle.fontSize, 1), letterSpacing: "-0.01em", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {p.name}
                       </div>
-                      {/* Total */}
-                      {/* Full-strength ink, not the t2 the row's other numbers
-                          take: under par still prints red, everything else is
-                          the brightest thing in the row. */}
-                      <span style={{ ...bandStart, fontWeight: 800, fontSize: fsStep(rowStyle.fontSize, 1), color: p.isWD || displayTotal == null ? K.t2 : (!showGross && showToPar && displayTotal < 0 ? K.under : K.t1) }}>
-                        {p.isWD ? <span style={{ fontSize: fsStep(rowStyle.fontSize, -1), color: K.t2, fontWeight: 700 }}>WD</span> : displayTotal != null ? (showGross || !showToPar ? displayTotal : fmtPar(displayTotal)) : "—"}
+                      {/* Total — the biggest thing on the row, two rungs over
+                          the fitted size and one over the name. It is the
+                          number the board exists to report, and it used to be
+                          the same size as the name beside it, told apart only
+                          by sitting in a tinted box. The box is gone; the size
+                          is what says it matters now. Full-strength ink, and
+                          under par still prints red. */}
+                      <span style={{ ...totalCell, fontWeight: 800, fontSize: fsStep(rowStyle.fontSize, 2), color: p.isWD || displayTotal == null ? K.t3 : (!showGross && showToPar && displayTotal < 0 ? K.under : K.t1) }}>
+                        {p.isWD ? <span style={{ fontSize: fsStep(rowStyle.fontSize, -1), color: K.t3, fontWeight: 700 }}>WD</span> : displayTotal != null ? (showGross || !showToPar ? displayTotal : fmtPar(displayTotal)) : "—"}
                       </span>
                       {/* Thru — today's holes while the round is being played,
                           the tournament total once it is finalized. A tee time
@@ -665,25 +615,28 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
                         });
                         return (
                           <span style={{
-                            ...bandEnd,
+                            ...thruCell,
                             fontSize: fsStep(rowStyle.fontSize, st.kind === "tee" ? -2 : -1),
-                            color: K.t2,
                             // The one cell the app-wide caps have to sit out.
                             // teeTimeLabel lowercases the meridiem to make a
                             // time fit this column, and it fits by a third of a
                             // pixel: "10:24a" measures 33.7 against a 34px
-                            // track, "10:24A" measures 34.9 and crosses the
-                            // band's right-hand rule. Two rungs down is already
-                            // as small as this value goes, so the case is the
-                            // only thing left to give.
+                            // track, "10:24A" measures 34.9 and runs into the
+                            // rounds beside it. Two rungs down is already as
+                            // small as this value goes, so the case is the only
+                            // thing left to give.
                             textTransform: st.kind === "tee" ? "none" : undefined,
                           }}>
                             {st.text}
                           </span>
                         );
                       })()}
-                      {/* Prior rounds — always show all 4 */}
-                      {allPriorRounds.map((r, i) => {
+                      {/* Prior rounds — always show all 4, in a track of their
+                          own. The group is the unit: four numbers with air
+                          either side of it, rather than four columns fenced
+                          off from the row they belong to. */}
+                      <div style={roundGrid}>
+                      {allPriorRounds.map((r) => {
                         const prRd = p.rds[r - 1];
                         const isWDRound = prRd?.wd;
                         const prVal = isWDRound ? null : showGross
@@ -701,14 +654,21 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
                         // which put a played round at under 2:1 against the
                         // background — a number you could see was there without
                         // being able to read it. The ink alone sets them back
-                        // now: t2 for a round played, t3 for the dash standing
-                        // in for one that wasn't.
+                        // now: t2 for a round played, t3 for the round not
+                        // reached yet.
+                        //
+                        // An en dash for a round that has not happened, not an
+                        // em dash. Four of them across a row of unplayed rounds
+                        // is a lot of ink for four pieces of nothing, and the
+                        // shorter mark reads as a placeholder rather than as a
+                        // result.
                         return (
-                          <span key={r} style={{ ...roundCell(i), fontSize: fsStep(rowStyle.fontSize, -1), color: prVal != null && !showGross && showToPar && prVal < 0 ? K.under : isWDRound || prVal == null ? K.t3 : K.t2 }}>
-                            {isWDRound ? "WD" : prVal != null ? (showGross || !showToPar ? prVal : fmtPar(prVal)) : "—"}
+                          <span key={r} style={{ textAlign: "center", fontVariantNumeric: "tabular-nums", fontSize: fsStep(rowStyle.fontSize, -1), color: prVal != null && !showGross && showToPar && prVal < 0 ? K.under : isWDRound || prVal == null ? K.t3 : K.t2 }}>
+                            {isWDRound ? "WD" : prVal != null ? (showGross || !showToPar ? prVal : fmtPar(prVal)) : "–"}
                           </span>
                         );
                       })}
+                      </div>
                     </div>
                     {isExpanded && (
                       <div style={{ display: "grid", gridTemplateRows: "1fr", animation: `wbcCardOpen ${MOTION} ease-out` }}>

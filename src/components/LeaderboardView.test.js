@@ -117,6 +117,26 @@ describe("LeaderboardView renders", () => {
     expect(rendered().length).toBeGreaterThan(0);
   });
 
+  // The morning of a round, which is the state the row is tightest in: one
+  // group is out (so the round is "in play" and Thru switches to today), and
+  // everybody still waiting holds a TEE TIME in the column beside a total they
+  // already have from the round before.
+  it("draws a round in play, with tee times beside the totals", () => {
+    mount({
+      round: 2,
+      tRounds: [{ round_number: 1, course_id: "c1" }, { round_number: 2, course_id: "c1" }],
+      // Two groups: the first is out on the course, the second still waiting.
+      teeTimesData: { 2: ["7:00 AM", "10:24 AM"] },
+      pairingsData: { 2: [["aaron_j"], ["dave_s"]] },
+      lb: [
+        row("aaron_j", "A Jensen", -2, { rds: [{ netToPar: -2, thru: 18, wd: false }, { netToPar: null, thru: 9, wd: false }, { netToPar: null, thru: 0, wd: false }, { netToPar: null, thru: 0, wd: false }] }),
+        row("dave_s", "D Smith", 1, { rds: [{ netToPar: 1, thru: 18, wd: false }, { netToPar: null, thru: 0, wd: false }, { netToPar: null, thru: 0, wd: false }, { netToPar: null, thru: 0, wd: false }] }),
+      ],
+    });
+    expect(screen.getByText("A Jensen")).toBeTruthy();
+    expect(rendered()).toMatch(/10:24/);
+  });
+
   it("draws a board with no course assigned yet", () => {
     mount({ tRounds: [], courses: [], holeData: {} });
     expect(rendered().length).toBeGreaterThan(0);
