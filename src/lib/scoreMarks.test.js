@@ -63,15 +63,29 @@ describe("scoreCellMetrics", () => {
   // any of this was shared. Everything else derives from the same ratios, so
   // if this drifts, every card in the app drifts with it.
   it("reproduces the scoring card at its own type size", () => {
-    expect(scoreCellMetrics(FS.label)).toEqual({ cell: 32, ring: 20, outer: 24, dot: 3 });
+    expect(scoreCellMetrics(FS.label)).toEqual({ cell: 32, ring: 20, inner: 15, dot: 3 });
   });
 
-  it("keeps the second ring outside the first at every size", () => {
+  // The ring is the ceiling: a double bogey is a line INSIDE a bogey's box,
+  // not a bigger box. Drawn outside, the worse the score the more of the card
+  // it took, until on a nine-column card it was touching its neighbours.
+  it("keeps the second ring inside the first at every size", () => {
     for (const size of [FS.micro, FS.label, FS.small, FS.body, FS.lead]) {
       const m = scoreCellMetrics(size);
-      expect(m.outer).toBeGreaterThan(m.ring);
-      expect(m.cell).toBeGreaterThan(m.outer);
+      expect(m.inner).toBeLessThan(m.ring);
+      expect(m.ring).toBeLessThan(m.cell);
       expect(m.dot).toBeGreaterThanOrEqual(3);
+    }
+  });
+
+  // Close enough to read as two lines, far enough not to read as one thick
+  // one: two or three pixels of air at every size on the scale.
+  it("leaves a hair of air between the two, and only a hair", () => {
+    for (const size of [FS.micro, FS.label, FS.small, FS.body, FS.lead]) {
+      const m = scoreCellMetrics(size);
+      const gap = (m.ring - m.inner) / 2;
+      expect(gap).toBeGreaterThanOrEqual(1.5);
+      expect(gap).toBeLessThanOrEqual(3.5);
     }
   });
 });

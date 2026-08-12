@@ -4,15 +4,19 @@
 //
 // The Full Scorecard on the scoring screen is where this comes from, and it is
 // the only place it is decided now: a red circle under par, a blue square over
-// it, a second ring outside the first for two or more either way, and the
+// it, a second ring INSIDE the first for two or more either way, and the
 // strokes received as accent dots centred over the number. lib/scoreMarks says
 // WHAT is on the hole; this says what it looks like.
 //
+// One ring size for every marked hole, and the second one drawn within it. A
+// bogey and a triple take the same room on the card; what separates them is a
+// line inside, not a bigger footprint.
+//
 // The metrics all come off the type size so a card can be drawn bigger than
 // the one it copies without re-deciding any of the above. At FS.label they are
-// the numbers the scoring screen has always used — a 20px ring, 24px outside
-// it, 3px dots, a 32px cell. The leaderboard's card sets a rung higher and
-// everything on it scales together.
+// the numbers the scoring screen has always used — a 20px ring, 3px dots, a
+// 32px cell. The leaderboard's card sets a rung higher and everything on it
+// scales together.
 import { K, FS, R } from "../theme";
 import { scoreMarks, scoreCellMetrics } from "../lib/scoreMarks";
 
@@ -30,8 +34,19 @@ export function ScoreCell({ score, par, strokes = 0, fontSize = FS.label, skin =
   // Capped at the column it is drawn in as well as at its own size: the
   // leaderboard splits the board's width nine ways and its tracks come out
   // narrower than the ring wants on a small phone.
-  const ringBox = (px, weight) => ({
-    position: "absolute", width: `min(${px}px, 100%)`, aspectRatio: "1",
+  //
+  // The cap is why each ring carries a percentage of the column as well as a
+  // size in pixels. On a narrow track the outer ring clamps to the column, and
+  // an inner ring clamped against the same 100% would clamp to the same number
+  // — two rings landing on top of each other, which is a double bogey drawn as
+  // a slightly thick bogey. Clamping it to its own share of the column instead
+  // keeps the pair proportional at any width.
+  //
+  // Not a transform: scaling the outer box would scale its border with it, and
+  // a 1px line drawn at three quarters is a line that half disappears.
+  const pct = Math.round((s.inner / s.ring) * 100);
+  const ringBox = (px, cap, weight) => ({
+    position: "absolute", width: `min(${px}px, ${cap}%)`, aspectRatio: "1",
     left: "50%", top: "50%", transform: "translate(-50%, -50%)",
     borderRadius: radius, border: `${weight}px solid ${clr}`,
   });
@@ -40,8 +55,8 @@ export function ScoreCell({ score, par, strokes = 0, fontSize = FS.label, skin =
       position: "relative", display: "flex", alignItems: "center", justifyContent: "center",
       height: s.cell, fontSize, fontWeight: 700, color: K.t1, ...style,
     }}>
-      {m.ring && <div style={ringBox(s.ring, 1.5)} />}
-      {m.double && <div style={ringBox(s.outer, 1)} />}
+      {m.ring && <div style={ringBox(s.ring, 100, 1.5)} />}
+      {m.double && <div style={ringBox(s.inner, pct, 1)} />}
       {/* Over the number rather than off its corner. A digit is not a fixed
           width — a 1 and a 10 hang their corner in different places — and the
           dots wandered with it. */}
