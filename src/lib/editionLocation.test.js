@@ -2,14 +2,25 @@ import { describe, it, expect } from "vitest";
 import { EDITION_LOCATIONS, locationForYear } from "./editionLocation";
 
 describe("locationForYear", () => {
-  it("gives each imported year its own city", () => {
+  it("gives each imported year its own location", () => {
     // The bug this table exists for: every one of these read "Gaylord, MI",
     // because a year with no location fell through to a hardcoded fallback.
-    expect(locationForYear(2015)).toBe("Augusta, MI");
-    expect(locationForYear(2018)).toBe("Oscoda, MI");
-    expect(locationForYear(2019)).toBe("Stanwood, MI");
-    expect(locationForYear(2021)).toBe("Lewiston, MI");
+    expect(locationForYear(2015)).toBe("Gull Lake View, MI");
+    expect(locationForYear(2018)).toBe("Lakewood Shores, MI");
+    expect(locationForYear(2019)).toBe("Tullymore, MI");
+    expect(locationForYear(2021)).toBe("Garland, MI");
     expect(locationForYear(2023)).toBe("Bellaire, MI");
+  });
+
+  it("names the RESORT for a year run out of one, not its township", () => {
+    // "2021 · Garland, MI" is how that trip is remembered; Lewiston is an
+    // unincorporated place nobody who was there would recognise.
+    expect(locationForYear(2017)).toBe("A-Ga-Ming, MI");
+    expect(locationForYear(2020)).toBe("Crystal Mountain, MI");
+    // And the towns stay towns where the year toured several of them.
+    expect(locationForYear(2014)).toBe("Gaylord, MI");
+    expect(locationForYear(2016)).toBe("Jackson, MI");
+    expect(locationForYear(2024)).toBe("Three Rivers, MI");
   });
 
   it("covers every year the WBC has been played", () => {
@@ -26,7 +37,7 @@ describe("locationForYear", () => {
       .toBe("Black Forest / Lochenheath / The Legend / Forest Dunes");
   });
 
-  it("the years that shared a venue share a city, and the rest do not", () => {
+  it("the years that shared a venue read the same, and the rest do not", () => {
     // 2010–2012 are all PGA Village and 2015/2022 are both Gull Lake View —
     // everything else is somewhere new, which is the fact that made one
     // hardcoded city wrong fifteen times out of sixteen.
@@ -38,7 +49,7 @@ describe("locationForYear", () => {
   });
 
   it("takes a year as a string, which is how an edition id yields one", () => {
-    expect(locationForYear("2017")).toBe("Kewadin, MI");
+    expect(locationForYear("2017")).toBe("A-Ga-Ming, MI");
   });
 
   it("is empty for a year we have no answer for, rather than guessing", () => {
