@@ -439,23 +439,25 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
           // arithmetic was even and the board was not.
           const gridCols = `${LB_COL.num}px ${playerColW} ${LB_COL.total}px ${LB_COL.thru}px${allPriorRounds.map(() => " 1fr").join("")}`;
           const gridStyle = { display: "grid", gridTemplateColumns: gridCols, alignItems: "center" };
-          // Total and Thru are drawn as one block running the whole height of
-          // the board rather than as numbers sitting loose in each row. Every
-          // row paints its own slice — full-bleed top to bottom — and the
-          // slices stack into one continuous column, so where a player stands
-          // and how far in they are read together, ruled off from the
-          // round-by-round detail either side. The hairline is on the OUTER
-          // edge of each end only: a rule between Total and Thru would split
-          // the pair back into two columns, which is what this exists to undo.
+          // Where the rules fall between the name and the rounds. Total has
+          // none on its left: the name and the number a player is ranked on are
+          // the row, and a line between them was cutting the one thing you read
+          // as a phrase — "Aaron J, four under" — into two cells. It has all
+          // the room it needs to sit apart from the name without one.
           //
-          // The rules are all it is, though — the tint moved off it and onto
-          // the four rounds. Total and Thru are where the eye goes first and
-          // they are already the biggest, brightest numbers in the row; shading
-          // them too was pressing on the one part of the board that was not
-          // asking for help. Under the rounds the same wash does work: it makes
-          // four narrow columns of small dim numbers read as one block of
-          // history rather than as a run of digits trailing off the right-hand
-          // edge.
+          // Thru is ruled on both sides. It is a different kind of value from
+          // the total beside it — a count of holes, not a score — and the same
+          // rule that separates the two is what caps the four rounds on its
+          // right. So Total sits open against the name, and Thru is the boxed
+          // column that ends the standings and starts the history.
+          //
+          // Both are tint-free: the wash they used to carry is on the four
+          // rounds now. Total and Thru are where the eye goes first and are
+          // already the biggest, brightest numbers in the row; shading them too
+          // was pressing on the one part of the board that was not asking for
+          // help. Under the rounds the same wash does work — it makes four
+          // narrow columns of small dim numbers read as one block of history
+          // rather than a run of digits trailing off the right-hand edge.
           //
           // Inset shadows rather than borders for the same reason the round
           // columns use them — a border is width, and Total is the column the
@@ -463,9 +465,8 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
           // number half a pixel off the trophy behind it.
           const bandStart = {
             alignSelf: "stretch", display: "flex", alignItems: "center", justifyContent: "center",
-            boxShadow: `inset 1px 0 0 ${K.bdr}`,
           };
-          const bandEnd = { ...bandStart, boxShadow: `inset -1px 0 0 ${K.bdr}` };
+          const bandEnd = { ...bandStart, boxShadow: `inset 1px 0 0 ${K.bdr}, inset -1px 0 0 ${K.bdr}` };
           // Ruling between the round columns, so four numbers in a row read as
           // four rounds rather than one string of digits. Full-strength K.bdr,
           // the same rule the card edge and the header divider are drawn in:
@@ -515,7 +516,7 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
                   const label = showGross ? "Gross" : showToPar ? "Total" : "Strokes";
                   // "STROKES" is two letters longer than the other two labels
                   // and fills the column on its own; the eyebrow tracking is
-                  // what tips it out over the column's hairline. The long label
+                  // what tips it out over Thru's rule. The long label
                   // goes untracked rather than the column growing for a word
                   // only one of the three toggle states ever shows.
                   return <span style={{ ...bandStart, margin: "-7px 0", padding: "7px 0", fontWeight: 700, color: K.t2, letterSpacing: label.length > 5 ? 0 : undefined }}>{label}</span>;
