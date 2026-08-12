@@ -32,6 +32,37 @@ import { courseHandicapFor, buildStrokesMap, WD_SCORE } from "../lib/individualB
 import { scoreCellMetrics } from "../lib/scoreMarks";
 import { teeTimesByPlayer, roundInPlay, thruStatus } from "../lib/thruStatus";
 
+// ── Toggle ─────────────────────────────────────────────────────────
+// The board's segmented pill: two labels, one of them on. Every control on
+// this screen is one of these, and they were three hand-copied versions of the
+// same twelve lines.
+//
+// `options` is [label, value] pairs and `value` is whichever is showing, so a
+// toggle carries no state of its own — the board holds it, which is what lets
+// the round pill relabel itself as the round moves.
+function Toggle({ options, value, onPick }) {
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", cursor: "pointer", userSelect: "none",
+      background: K.bdr + ALPHA.tint, borderRadius: R.pill, padding: "2px 3px", gap: 1,
+    }} onClick={() => onPick(v => !v)}>
+      {options.map(([label, val]) => (
+        // The unselected label was t3 held back to 53% — under 2:1 on this
+        // background, so the option you were NOT on was the one you could not
+        // read. Off is plain t3 and on is t1: the same on/off gap, both
+        // legible.
+        <span key={label} style={{
+          fontSize: FS.micro, fontWeight: 600, padding: "2px 0", borderRadius: R.xl,
+          width: 30, textAlign: "center",
+          background: value === val ? K.t3 + ALPHA.hair : "transparent",
+          color: value === val ? K.t1 : K.t3,
+          transition: `background ${MOTION}, color ${MOTION}`,
+        }}>{label}</span>
+      ))}
+    </div>
+  );
+}
+
 export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayers, getPlayerTee, getPlayerCH = () => null, finalizedRounds, skinWins, pairingsData, teeTimesData, loaded = true }) {
   const [expanded, setExpanded] = useState(null);
   const [scorecardRound, setScorecardRound] = useState(null);
@@ -402,70 +433,23 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
         objectFit: "contain",
       }} />
       <div style={{ position: "relative", zIndex: 1, flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
-      {/* Title inline with stacked pills */}
-      <div style={{ display: "flex", alignItems: "center", marginBottom: 10, gap: 8 }}>
-        {/* Left — the two toggles that change what the NUMBERS MEAN, stacked.
-            Net or gross, and to-par or a stroke count: both of them rewrite
-            the total and the round columns in place, and neither changes what
-            the board is showing. Keeping the pair together on one side is what
-            makes the third pill legible as a different kind of switch — that
-            one changes which COLUMNS are there, not what is in them. */}
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
-          <div onClick={() => setShowGross(g => !g)} style={{
-            display: "flex", alignItems: "center", cursor: "pointer", userSelect: "none",
-            background: K.bdr + ALPHA.tint, borderRadius: R.pill, padding: "2px 3px", gap: 1,
-          }}>
-            {/* The unselected label was t3 held back to 53% — under 2:1 on
-                this background, so the option you were NOT on was the one you
-                could not read. Off is plain t3 and on is t1: the same on/off
-                gap, both legible. */}
-            {[["Net", false], ["Gross", true]].map(([label, val]) => (
-              <span key={label} style={{
-                fontSize: FS.micro, fontWeight: 600, padding: "2px 0", borderRadius: R.xl,
-                width: 30, textAlign: "center",
-                background: showGross === val ? K.t3 + ALPHA.hair : "transparent",
-                color: showGross === val ? K.t1 : K.t3,
-                transition: `background ${MOTION}, color ${MOTION}`,
-              }}>{label}</span>
-            ))}
-          </div>
-          <div onClick={() => setShowToPar(v => !v)} style={{
-            display: "flex", alignItems: "center", cursor: "pointer", userSelect: "none",
-            background: K.bdr + ALPHA.tint, borderRadius: R.pill, padding: "2px 3px", gap: 1,
-          }}>
-            {[["Par", true], ["Total", false]].map(([label, val]) => (
-              <span key={label} style={{
-                fontSize: FS.micro, fontWeight: 600, padding: "2px 0", borderRadius: R.xl,
-                width: 30, textAlign: "center",
-                background: showToPar === val ? K.t3 + ALPHA.hair : "transparent",
-                color: showToPar === val ? K.t1 : K.t3,
-                transition: `background ${MOTION}, color ${MOTION}`,
-              }}>{label}</span>
-            ))}
-          </div>
-        </div>
-        {/* Center — the title, and under it whether the board is live.
-            LIVE sits below the word rather than beside it. Beside it, it made
-            this row 392px wide and a 360 phone pushed the right-hand pill off
-            its own screen — and with the board's overflow hidden that is not a
-            scroll, it is a toggle nobody can reach, at the one time anybody is
-            looking. Under the title it costs the row no width at all, and it
-            reads as what it is: a note on the board, not a third control.
+      {/* ── The title, and the three toggles under it ──
+          One row each, so the toggles read as one set of controls rather than
+          as decoration flanking a heading. They are spread edge to edge under
+          it: the outer two line up with the ends of the rows below, the middle
+          one sits under the title, and the row is symmetrical about the same
+          centre line the heading is.
 
-            The title drops a rung below 340px, where the word plus a pill
-            stack either side is still wider than the screen. What gives way is
-            the heading, because the other two are things you tap. A media
-            query rather than a measurement: it is one breakpoint on one word,
-            and this file has one measurement left in it on purpose. */}
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
-          {/* Both sizes in the rule, and none of it inline: an inline
-              font-size outranks a stylesheet class, so a base size on the
-              element would win over the breakpoint and the query would look
-              like it was never there. */}
-          <style>{`.wbcLbTitle{font-size:${FS.title}px}@media (max-width:340px){.wbcLbTitle{font-size:${FS.lead}px}}`}</style>
-          <h2 className="wbcLbTitle" style={{ fontFamily: "'Montserrat', sans-serif", margin: 0, fontWeight: 800 }}>Leaderboard</h2>
+          The order left to right is the order they bite. Net/Gross and
+          Par/Total change what the NUMBERS MEAN — both rewrite the total and
+          the round columns in place without changing what is on the board —
+          and the rounds toggle changes which COLUMNS ARE THERE. Two of a kind
+          and then the odd one, which is why the odd one is on the end. */}
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, marginBottom: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <h2 style={{ fontFamily: "'Montserrat', sans-serif", fontSize: FS.title, margin: 0, fontWeight: 800 }}>Leaderboard</h2>
           {(() => {
-            // No FINAL badge under the title: the trophy on position 1 says
+            // No FINAL badge beside the title: the trophy on position 1 says
             // the tournament is decided, and saying it twice on one screen
             // only competes with itself.
             //
@@ -473,42 +457,42 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
             // round can still hold a card that stops short — a withdrawal, a
             // group that signed at 14 — and a partial card in a closed round
             // is not play in progress.
+            //
+            // It fits beside the word again now that nothing else is on this
+            // line. It did not when a stack of pills held both ends: heading
+            // plus badge plus two stacks came to 392px, and a 360 phone put
+            // the right-hand stack past its own edge — which, with the board's
+            // overflow hidden, is not a scroll but a toggle nobody can reach.
             const live = !finalizedRounds[round]
               && lb.some(p => !p.isWD && p.rds?.[round - 1]?.thru > 0 && p.rds[round - 1].thru < 18);
             if (!live) return null;
             return (
               <>
                 <style>{`@keyframes wbcLivePulse{0%,100%{opacity:1}50%{opacity:.4}}`}</style>
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "1px 7px", borderRadius: R.md, background: K.danger + ALPHA.wash, border: "1px solid #ef444440" }}>
-                  <span style={{ width: 5, height: 5, borderRadius: "50%", background: K.danger, animation: "wbcLivePulse 1.5s ease-in-out infinite" }} />
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 7px", borderRadius: R.md, background: K.danger + ALPHA.wash, border: "1px solid #ef444440" }}>
+                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: K.danger, animation: "wbcLivePulse 1.5s ease-in-out infinite" }} />
                   <span style={{ fontSize: FS.micro, fontWeight: 800, color: K.danger, letterSpacing: ".08em" }}>LIVE</span>
                 </span>
               </>
             );
           })()}
         </div>
-        {/* Right — how many rounds the board is showing */}
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+        {/* Three of the same control, so they are drawn by the same code —
+            they were three copies of one twelve-line block, which is how the
+            unselected label on one of them ended up a different grey from the
+            other two for a while. */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: `0 ${LB_PAD_L}px` }}>
+          <Toggle options={[["Net", false], ["Gross", true]]} value={showGross} onPick={setShowGross} />
+          <Toggle options={[["Par", true], ["Total", false]]} value={showToPar} onPick={setShowToPar} />
           {/* The round side names the round it is offering to leave: "R2" is
               the column you are looking at, not a round number in the
               abstract, so it moves with the board. Nothing to offer on a
-              one-round event, where the two states are the same board. */}
-          {NUM_ROUNDS > 1 && (
-            <div onClick={() => setShowAllRounds(v => !v)} style={{
-              display: "flex", alignItems: "center", cursor: "pointer", userSelect: "none",
-              background: K.bdr + ALPHA.tint, borderRadius: R.pill, padding: "2px 3px", gap: 1,
-            }}>
-              {[[`R${shownRound}`, false], ["All", true]].map(([label, val]) => (
-                <span key={label} style={{
-                  fontSize: FS.micro, fontWeight: 600, padding: "2px 0", borderRadius: R.xl,
-                  width: 30, textAlign: "center",
-                  background: showAllRounds === val ? K.t3 + ALPHA.hair : "transparent",
-                  color: showAllRounds === val ? K.t1 : K.t3,
-                  transition: `background ${MOTION}, color ${MOTION}`,
-                }}>{label}</span>
-              ))}
-            </div>
-          )}
+              one-round event, where the two states are the same board — but
+              the slot stays, so the other two do not slide across when a
+              three-round year becomes a four-round one. */}
+          {NUM_ROUNDS > 1
+            ? <Toggle options={[[`R${shownRound}`, false], ["All", true]]} value={showAllRounds} onPick={setShowAllRounds} />
+            : <span />}
         </div>
       </div>
       <div ref={containerRef} style={{ background: "transparent", overflow: "hidden", display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
