@@ -155,3 +155,10 @@ export const WBC_TROPHY = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIoAAAD
 // constantly. As a static asset it is fetched once and cached for a year,
 // and it stops being the reason a code generator gives up on this file.
 export const WBC_TROPHY_SILHOUETTE = "/wbc-trophy-silhouette.png";
+
+// ── What a tournament is called before anyone names it ──
+// The app shell and the admin console both fall back to this, and they are
+// separate bundles now (see components/AdminView), so it lives here rather
+// than in whichever of them happened to declare it first. Takes the year
+// rather than reading it, so this file still knows nothing about Firebase.
+export const defaultTournamentName = (year) => `WBC ${year}`;
