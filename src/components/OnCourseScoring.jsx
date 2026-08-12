@@ -35,6 +35,7 @@ import { OffRoundBanner } from "./OffRoundBanner";
 import { HEADER_SAFE_PAD } from "./AppHeader";
 import { CTP_MAX_FT, CTP_WHEEL_ITEM, CTP_WHEEL_H } from "../constants";
 import { NUM_ROUNDS } from "../lib/rounds";
+import { shortName } from "../lib/playerNames";
 import { fmtPar, teeTimeToMinutes, minutesToTimeStr, fmtRoundDate } from "../lib/format";
 import { isScoringOpen, SCORING_LEAD_MIN } from "../lib/scoringGate";
 import { tapScore, tapNudge, tapBigAction } from "../lib/haptics";
@@ -675,7 +676,7 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
                   }}>
                     <div>
                       <div style={{ fontSize: FS.label, fontWeight: 700, color: K.acc, marginBottom: 4 }}>Group {gi + 1}</div>
-                      <div style={{ fontSize: FS.small, fontWeight: 600, color: K.t1 }}>{grpPlayers.map(p => p.name.split(" ")[0]).join(", ")}</div>
+                      <div style={{ fontSize: FS.small, fontWeight: 600, color: K.t1 }}>{grpPlayers.map(shortName).join(", ")}</div>
                     </div>
                     <div style={{ textAlign: "right" }}>
                       {isFinalized
@@ -1247,7 +1248,7 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
                       const sum18 = Array.from({ length: 18 }, (_, h) => h).reduce((a, h) => { const v = scMap[h]; return a + ((v > 0 && v < 90) ? v : 0); }, 0);
                       const cells = [
                         <div key={p.id + "-n"} style={{ ...cb, justifyContent: "flex-start", overflow: "hidden" }}>
-                          <span style={{ fontSize: FS.label, fontWeight: 700, color: K.t1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name.split(" ")[0]}</span>
+                          <span style={{ fontSize: FS.label, fontWeight: 700, color: K.t1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{shortName(p)}</span>
                         </div>,
                         // The card's marks live in components/ScoreCell now —
                         // the ring, the second ring, the stroke dots and which
@@ -1313,7 +1314,7 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
                   const out = holes.reduce((a, h) => { const v = scMap[h]; return a + ((v > 0 && v < 90) ? v : 0); }, 0);
                   return [
                     <div key={p.id + "-n"} style={{ ...cb, justifyContent: "flex-start", overflow: "hidden" }}>
-                      <span style={{ fontSize: FS.label, fontWeight: 700, color: K.t1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name.split(" ")[0]}</span>
+                      <span style={{ fontSize: FS.label, fontWeight: 700, color: K.t1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{shortName(p)}</span>
                     </div>,
                     ...holes.map(h => {
                       const v = scMap[h];
@@ -1524,7 +1525,7 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
                   {/* Why the tag button is dead — surfaced instead of leaving it mysteriously grey */}
                   {!chosen && (
                     <div style={{ fontSize: FS.label, color: K.t3, textAlign: "center", marginBottom: 8, lineHeight: 1.4 }}>
-                      Spin the wheel to set how close {players.find(p => p.id === ctpPickPlayer)?.name.split(" ")[0] || "they"} was.
+                      Spin the wheel to set how close {shortName(players.find(p => p.id === ctpPickPlayer)) || "they"} was.
                     </div>
                   )}
                   {chosen && !beatsLeader && (
