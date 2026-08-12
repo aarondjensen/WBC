@@ -67,9 +67,32 @@ export function ScoreCell({ score, par, strokes = 0, fontSize = FS.label, skin =
           ))}
         </div>
       )}
-      {/* Gold for a hole that won a skin — the one thing a card can say that
-          the scoring screen's has no way to know. Everything else about the
-          cell is the same on both. */}
+      {/* A hole that won a skin — the one thing this card can say that the
+          scoring screen's has no way to know. Everything else about the cell
+          is the same on both.
+          It was gold INK and nothing else, which works in the dark, where gold
+          against a near-white number is a colour you cannot miss. In daylight
+          the palette's gold is a dark ochre and the ink beside it is
+          near-black: both read as "dark", and a skin was something you had to
+          go looking for. So it is a gold TICK under the number as well — the
+          same mark, at the same 55%, that the betting card puts under a hole
+          it won — and the skin is now a shape rather than a hue. Inset rather
+          than edge to edge because three skins in a row should read as three
+          marks and not as one underline. */}
+      {skin && (
+        // Clear of the ring rather than a fixed drop from the bottom of the
+        // cell: a skin is usually a birdie, so the mark and the ring are drawn
+        // on the same hole more often than not, and measured off the cell the
+        // tick landed on the ring's lower edge at both card sizes. The gap
+        // between the two is what the ring leaves, less two pixels.
+        <span style={{
+          position: "absolute", left: "50%", transform: "translateX(-50%)",
+          bottom: Math.max(1, Math.round((s.cell - s.ring) / 2) - 4),
+          // Square ends, like the tick the betting card draws. At two pixels
+          // tall a radius is a rounding error with an opinion.
+          width: Math.round(s.ring * 0.55), height: 2, background: K.gold,
+        }} />
+      )}
       <span style={{ position: "relative", zIndex: 1, color: skin ? K.gold : undefined }}>{m.text}</span>
     </div>
   );
