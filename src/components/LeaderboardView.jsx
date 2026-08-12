@@ -439,21 +439,31 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
           // arithmetic was even and the board was not.
           const gridCols = `${LB_COL.num}px ${playerColW} ${LB_COL.total}px ${LB_COL.thru}px${allPriorRounds.map(() => " 1fr").join("")}`;
           const gridStyle = { display: "grid", gridTemplateColumns: gridCols, alignItems: "center" };
-          // Total and Thru are drawn as one band running the whole height of
+          // Total and Thru are drawn as one block running the whole height of
           // the board rather than as numbers sitting loose in each row. Every
           // row paints its own slice — full-bleed top to bottom — and the
-          // slices stack into one continuous block, so where a player stands
-          // and how far in they are read together, boxed off from the
+          // slices stack into one continuous column, so where a player stands
+          // and how far in they are read together, ruled off from the
           // round-by-round detail either side. The hairline is on the OUTER
           // edge of each end only: a rule between Total and Thru would split
-          // the band back into two columns, which is what it exists to undo.
+          // the pair back into two columns, which is what this exists to undo.
+          //
+          // The rules are all it is, though — the tint moved off it and onto
+          // the four rounds. Total and Thru are where the eye goes first and
+          // they are already the biggest, brightest numbers in the row; shading
+          // them too was pressing on the one part of the board that was not
+          // asking for help. Under the rounds the same wash does work: it makes
+          // four narrow columns of small dim numbers read as one block of
+          // history rather than as a run of digits trailing off the right-hand
+          // edge.
+          //
           // Inset shadows rather than borders for the same reason the round
           // columns use them — a border is width, and Total is the column the
           // whole board is aligned to. Drawn as a border it pushed its own
           // number half a pixel off the trophy behind it.
           const bandStart = {
             alignSelf: "stretch", display: "flex", alignItems: "center", justifyContent: "center",
-            background: K.t3 + ALPHA.wash, boxShadow: `inset 1px 0 0 ${K.bdr}`,
+            boxShadow: `inset 1px 0 0 ${K.bdr}`,
           };
           const bandEnd = { ...bandStart, boxShadow: `inset -1px 0 0 ${K.bdr}` };
           // Ruling between the round columns, so four numbers in a row read as
@@ -461,9 +471,10 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
           // the same rule the card edge and the header divider are drawn in:
           // held back to a third of that it computed to 1.08:1 against the
           // background, which is a line that exists in the stylesheet and not
-          // on the screen. The band still leads on its background tint rather
-          // than on having a heavier edge. None on R1 — its left edge is
-          // already the gap.
+          // on the screen. The columns still lead on their background tint
+          // rather than on having a heavier edge. None on R1 — Thru's own
+          // right-hand rule is already the left edge of the four, and a second
+          // line a pixel inside it just draws the same edge twice.
           //
           // Drawn as an inset shadow rather than a border because a border is
           // LAYOUT. Under border-box it ate a pixel off the left of every cell
@@ -476,6 +487,7 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
           // tracks are the same box and the numbers sit dead centre in them.
           const roundCell = (i) => ({
             alignSelf: "stretch", display: "flex", alignItems: "center", justifyContent: "center",
+            background: K.t3 + ALPHA.wash,
             boxShadow: i === 0 ? undefined : `inset 1px 0 0 ${K.bdr}`,
           });
           return (
@@ -485,30 +497,31 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
                   Total column at micro — a rung up and it spills over the band
                   it is supposed to cap.
 
-                  It carries the band's own wash across its full width, so the
-                  strip caps the board instead of floating over it. The tint is
-                  the one the band beneath is already drawn in rather than a
-                  second value: at this weight the header is not a surface of
-                  its own, it is the top of the same one. The band's cells give
-                  their background up inside it for that reason — painted twice
-                  the middle of the header goes darker than its ends, and the
-                  band reads as starting a shade heavier than it continues. */}
+                  It carries the round columns' own wash across its full width,
+                  so the strip caps the board instead of floating over it. The
+                  tint is the one already running down the right of the board
+                  rather than a second value: at this weight the header is not
+                  a surface of its own, it is the top of the same one. The
+                  round cells give their background up inside it for that
+                  reason — painted twice, the right end of the header goes
+                  darker than the rest of it, and the four rounds read as
+                  starting a shade heavier than they continue. */}
               <div ref={headerRef} style={{ ...gridStyle, padding: `7px 0 7px ${LB_PAD_L}px`, fontSize: FS.micro, fontWeight: 600, color: K.t2, textTransform: "uppercase", letterSpacing: "0.06em", background: K.t3 + ALPHA.wash, borderBottom: `1px solid ${K.bdr}` }}>
                 <span>#</span>
                 <span>Player</span>
-                {/* Negative margin eats the header's own padding so the band
-                    starts at the top edge instead of 7px down from it. */}
+                {/* Negative margin eats the header's own padding so the rules
+                    start at the top edge instead of 7px down from it. */}
                 {(() => {
                   const label = showGross ? "Gross" : showToPar ? "Total" : "Strokes";
                   // "STROKES" is two letters longer than the other two labels
                   // and fills the column on its own; the eyebrow tracking is
-                  // what tips it out over the band's hairline. The long label
+                  // what tips it out over the column's hairline. The long label
                   // goes untracked rather than the column growing for a word
                   // only one of the three toggle states ever shows.
-                  return <span style={{ ...bandStart, background: "transparent", margin: "-7px 0", padding: "7px 0", fontWeight: 700, color: K.t2, letterSpacing: label.length > 5 ? 0 : undefined }}>{label}</span>;
+                  return <span style={{ ...bandStart, margin: "-7px 0", padding: "7px 0", fontWeight: 700, color: K.t2, letterSpacing: label.length > 5 ? 0 : undefined }}>{label}</span>;
                 })()}
-                <span style={{ ...bandEnd, background: "transparent", margin: "-7px 0", padding: "7px 0", fontWeight: 700, color: K.t2 }}>Thru</span>
-                {allPriorRounds.map((r, i) => <span key={r} style={{ ...roundCell(i), margin: "-7px 0", padding: "7px 0" }}>R{r}</span>)}
+                <span style={{ ...bandEnd, margin: "-7px 0", padding: "7px 0", fontWeight: 700, color: K.t2 }}>Thru</span>
+                {allPriorRounds.map((r, i) => <span key={r} style={{ ...roundCell(i), background: "transparent", margin: "-7px 0", padding: "7px 0" }}>R{r}</span>)}
               </div>
               {/* Only once the round data is actually in. An empty `lb` also means
                   "Firestore has not answered yet", and reporting that as "no scores"
@@ -581,7 +594,18 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
                       })();
                 return (
                   <div key={p.id} ref={isExpanded ? expandedRef : undefined} style={{ flex: "0 0 auto", display: "flex", flexDirection: "column" }}>
-                    <div onClick={() => { setExpanded(isExpanded ? null : p.id); setScorecardRound(null); }} style={{ ...gridStyle, padding: `0 0 0 ${LB_PAD_L}px`, height: rowH || 28, flex: "0 0 auto", alignItems: "center", borderBottom: `1px solid ${K.bdr}${ALPHA.wash}`, background: "transparent", cursor: "pointer", fontSize: rowStyle.fontSize, lineHeight: 1 }}>
+                    {/* One player, one rule. The divider was K.bdr held back to
+                        8%, which on either theme is a line that exists in the
+                        stylesheet and not on the screen — twelve names ran
+                        together as one column of text. At full strength it is
+                        the same hairline the board's own edge and the header
+                        are drawn in, so a row reads as its own slice without
+                        the board turning into a grid of boxes.
+
+                        Not under the last one: the rows fill the box exactly,
+                        so its rule would land on top of the board's bottom
+                        border and read as one thick edge. */}
+                    <div onClick={() => { setExpanded(isExpanded ? null : p.id); setScorecardRound(null); }} style={{ ...gridStyle, padding: `0 0 0 ${LB_PAD_L}px`, height: rowH || 28, flex: "0 0 auto", alignItems: "center", borderBottom: idx === lb.length - 1 ? "none" : `1px solid ${K.bdr}`, background: "transparent", cursor: "pointer", fontSize: rowStyle.fontSize, lineHeight: 1 }}>
                       {/* # */}
                       <span style={{ fontWeight: 800, fontSize: rowStyle.fontSize, color: top3 ? K.acc : K.t2, display: "flex", alignItems: "center", gap: 1 }}>
                         {isChampion
