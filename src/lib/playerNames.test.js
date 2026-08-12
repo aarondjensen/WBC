@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { toDisplayName, legacyDisplayName, displayNameFor, shortName, fullName, splitName } from "./playerNames";
+import { toDisplayName, legacyDisplayName, displayNameFor, isGeneratedName, shortName, fullName, splitName } from "./playerNames";
 
 describe("toDisplayName", () => {
   it("is a first initial and the surname", () => {
@@ -40,6 +40,31 @@ describe("legacyDisplayName", () => {
     expect(legacyDisplayName("Aaron", "Jensen")).toBe("Aaron J");
     expect(legacyDisplayName("Dave", "smith")).toBe("Dave S");
     expect(legacyDisplayName("Finn", "")).toBe("Finn");
+  });
+});
+
+describe("isGeneratedName", () => {
+  it("knows its own work under either convention", () => {
+    expect(isGeneratedName("A Jensen", "Aaron", "Jensen")).toBe(true);
+    expect(isGeneratedName("Aaron J", "Aaron", "Jensen")).toBe(true);
+  });
+
+  it("knows a name a person typed", () => {
+    expect(isGeneratedName("Chief", "Aaron", "Jensen")).toBe(false);
+    expect(isGeneratedName("Aaron Jensen", "Aaron", "Jensen")).toBe(false);
+  });
+
+  it("is false for no name at all", () => {
+    expect(isGeneratedName("", "Aaron", "Jensen")).toBe(false);
+    expect(isGeneratedName(null, "Aaron", "Jensen")).toBe(false);
+  });
+
+  // The bug this exists to stop: a roster name written under the old
+  // convention read as hand-chosen, so the editor pre-filled it into the
+  // nickname box, where it then outranked the surname the director had just
+  // typed. The name never changed and nothing said why.
+  it("does not mistake a legacy roster name for a nickname", () => {
+    expect(isGeneratedName("Dave S", "Dave", "Smith")).toBe(true);
   });
 });
 
