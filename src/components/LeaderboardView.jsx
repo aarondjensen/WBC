@@ -378,8 +378,19 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
           the rules gone the rows are ink on the page and the silhouette's own
           edges started reading as marks across the middle of the field. Two
           points down is the settled answer: plainly there behind the board,
-          and not competing with a score while somebody reads it. */}
-      <img src={WBC_TROPHY_SILHOUETTE} alt="" style={{
+          and not competing with a score while somebody reads it.
+
+          INVERTED in daylight, which is the whole reason it was missing there.
+          The file is a WHITE silhouette with an alpha channel — the right
+          thing behind a near-black page and completely invisible against a
+          near-white one, where it had been quietly absent rather than subtle.
+          Inverting turns it black and the same 6% reads as the same watermark.
+          Keyed off the html data-theme attribute rather than off K, because
+          this is a filter on an image and not a colour token — and that
+          attribute is set by the pre-paint script in index.html, so it is
+          right on the very first frame. */}
+      <style>{`[data-theme="light"] .wbcLbMark{filter:invert(1)}`}</style>
+      <img src={WBC_TROPHY_SILHOUETTE} alt="" className="wbcLbMark" style={{
         position: "fixed", top: "50%", left: "50%",
         transform: "translate(-50%, -50%)",
         width: 480, height: "100vh",
@@ -393,17 +404,12 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
       <div style={{ position: "relative", zIndex: 1, flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
       {/* Title inline with stacked pills */}
       <div style={{ display: "flex", alignItems: "center", marginBottom: 10, gap: 8 }}>
-        {/* Left — Net/Gross, and LIVE under it.
-            The badge used to sit beside the title, and beside the title is
-            where it broke the row: title plus badge plus a stack of pills each
-            side comes to 392px, and a 360 phone pushed the right-hand stack off
-            its own screen — with the board's overflow hidden, that is not a
-            scroll, it is toggles that cannot be reached. It happened only while
-            a round was in play, which is the one time anybody is looking.
-            Stacked under the left pill it costs the row nothing, it is still
-            the second thing on the screen, and the two sides balance: controls
-            on the left with the state of play beneath them, controls on the
-            right. */}
+        {/* Left — the two toggles that change what the NUMBERS MEAN, stacked.
+            Net or gross, and to-par or a stroke count: both of them rewrite
+            the total and the round columns in place, and neither changes what
+            the board is showing. Keeping the pair together on one side is what
+            makes the third pill legible as a different kind of switch — that
+            one changes which COLUMNS are there, not what is in them. */}
         <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
           <div onClick={() => setShowGross(g => !g)} style={{
             display: "flex", alignItems: "center", cursor: "pointer", userSelect: "none",
@@ -423,47 +429,6 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
               }}>{label}</span>
             ))}
           </div>
-          {(() => {
-            // No FINAL badge beside the title: the trophy on position 1 says
-            // the tournament is decided, and saying it twice on one screen
-            // only competes with itself.
-            //
-            // The round still has to be UNfinalized for LIVE, which is what
-            // the badge used to establish by returning before this line. A
-            // finalized round can still hold a card that stops short — a
-            // withdrawal, a group that signed at 14 — and a partial card in a
-            // closed round is not play in progress.
-            const live = !finalizedRounds[round]
-              && lb.some(p => !p.isWD && p.rds?.[round - 1]?.thru > 0 && p.rds[round - 1].thru < 18);
-            if (!live) return null;
-            return (
-              <>
-                <style>{`@keyframes wbcLivePulse{0%,100%{opacity:1}50%{opacity:.4}}`}</style>
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 7px", borderRadius: R.md, background: K.danger + ALPHA.wash, border: "1px solid #ef444440" }}>
-                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: K.danger, animation: "wbcLivePulse 1.5s ease-in-out infinite" }} />
-                  <span style={{ fontSize: FS.micro, fontWeight: 800, color: K.danger, letterSpacing: ".08em" }}>LIVE</span>
-                </span>
-              </>
-            );
-          })()}
-        </div>
-        {/* Center — title.
-            A rung down on a phone narrower than 340. The word is 200px at
-            title size and the two pill stacks either side are 66 each, which
-            is 12px more than a 320 screen has — and what gives way is the
-            heading, because the other two are things you tap. Written as a
-            media query rather than measured: it is one breakpoint on one word,
-            and this file has one measurement left in it on purpose. */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {/* Both sizes in the rule, and none of it inline: an inline
-              font-size outranks a stylesheet class, so a base size on the
-              element would win over the breakpoint and the query would look
-              like it was never there. */}
-          <style>{`.wbcLbTitle{font-size:${FS.title}px}@media (max-width:340px){.wbcLbTitle{font-size:${FS.lead}px}}`}</style>
-          <h2 className="wbcLbTitle" style={{ fontFamily: "'Montserrat', sans-serif", margin: 0, fontWeight: 800 }}>Leaderboard</h2>
-        </div>
-        {/* Right pills — Par/Total, and how many rounds to show under it */}
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
           <div onClick={() => setShowToPar(v => !v)} style={{
             display: "flex", alignItems: "center", cursor: "pointer", userSelect: "none",
             background: K.bdr + ALPHA.tint, borderRadius: R.pill, padding: "2px 3px", gap: 1,
@@ -478,6 +443,52 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
               }}>{label}</span>
             ))}
           </div>
+        </div>
+        {/* Center — the title, and under it whether the board is live.
+            LIVE sits below the word rather than beside it. Beside it, it made
+            this row 392px wide and a 360 phone pushed the right-hand pill off
+            its own screen — and with the board's overflow hidden that is not a
+            scroll, it is a toggle nobody can reach, at the one time anybody is
+            looking. Under the title it costs the row no width at all, and it
+            reads as what it is: a note on the board, not a third control.
+
+            The title drops a rung below 340px, where the word plus a pill
+            stack either side is still wider than the screen. What gives way is
+            the heading, because the other two are things you tap. A media
+            query rather than a measurement: it is one breakpoint on one word,
+            and this file has one measurement left in it on purpose. */}
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+          {/* Both sizes in the rule, and none of it inline: an inline
+              font-size outranks a stylesheet class, so a base size on the
+              element would win over the breakpoint and the query would look
+              like it was never there. */}
+          <style>{`.wbcLbTitle{font-size:${FS.title}px}@media (max-width:340px){.wbcLbTitle{font-size:${FS.lead}px}}`}</style>
+          <h2 className="wbcLbTitle" style={{ fontFamily: "'Montserrat', sans-serif", margin: 0, fontWeight: 800 }}>Leaderboard</h2>
+          {(() => {
+            // No FINAL badge under the title: the trophy on position 1 says
+            // the tournament is decided, and saying it twice on one screen
+            // only competes with itself.
+            //
+            // The round still has to be UNfinalized for LIVE. A finalized
+            // round can still hold a card that stops short — a withdrawal, a
+            // group that signed at 14 — and a partial card in a closed round
+            // is not play in progress.
+            const live = !finalizedRounds[round]
+              && lb.some(p => !p.isWD && p.rds?.[round - 1]?.thru > 0 && p.rds[round - 1].thru < 18);
+            if (!live) return null;
+            return (
+              <>
+                <style>{`@keyframes wbcLivePulse{0%,100%{opacity:1}50%{opacity:.4}}`}</style>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "1px 7px", borderRadius: R.md, background: K.danger + ALPHA.wash, border: "1px solid #ef444440" }}>
+                  <span style={{ width: 5, height: 5, borderRadius: "50%", background: K.danger, animation: "wbcLivePulse 1.5s ease-in-out infinite" }} />
+                  <span style={{ fontSize: FS.micro, fontWeight: 800, color: K.danger, letterSpacing: ".08em" }}>LIVE</span>
+                </span>
+              </>
+            );
+          })()}
+        </div>
+        {/* Right — how many rounds the board is showing */}
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
           {/* The round side names the round it is offering to leave: "R2" is
               the column you are looking at, not a round number in the
               abstract, so it moves with the board. Nothing to offer on a
