@@ -4,9 +4,9 @@
 //
 // The number, the ring around it, and the strokes the player got there. This
 // is the paper convention the Full Scorecard on the scoring screen has always
-// drawn — a circle under par, a square over it, a second ring outside the
-// first at two or more either way, and a dot per stroke received — lifted out
-// of that screen so every card in the app draws from one answer.
+// drawn — a circle under par, a square over it, a second ring at two or more
+// either way, and a dot per stroke received — lifted out of that screen so
+// every card in the app draws from one answer.
 //
 // It is here because it was being re-decided at each call site and the cards
 // drifted apart. The leaderboard's card hung the stroke dots off the top-right
@@ -57,14 +57,29 @@ export function scoreMarks(score, par, strokes = 0) {
 // ── How big any of it is drawn ─────────────────────────────────────
 // Everything on the cell comes off the type size, so a card can be drawn
 // bigger or smaller than the one it copies without re-deciding the convention
-// above. The ratios are the scoring screen's card read back off itself: at an
-// 11px number that card draws a 20px ring, 24px outside it, 3px dots and a
-// 32px cell, and those are the numbers these return at FS.label.
+// above. At an 11px number that is a 20px ring, 3px dots and a 32px cell.
+//
+// `ring` is the CEILING. It is the biggest mark a hole can carry and every
+// hole with a mark carries it — a bogey and a triple are the same size on the
+// card, and what tells them apart is the second ring INSIDE the first. The
+// second ring used to be drawn outside, which made a double the largest thing
+// on the row: on a card nine columns wide it grew until it was touching the
+// holes either side of it, and it meant the worse the score the more of the
+// card it took.
+//
+// `inner` is close in, and it is an INSET off the ring rather than a fraction
+// of it: the air between two lines is a constant of drawing, not something
+// that should double because the card is drawn a rung larger. Two and a half
+// pixels a side at the sizes these cards use, opening a shade at the top of
+// the scale where the lines themselves have more room.
 //
 // Rounded rather than fractional so a ring stays a circle on a 1x screen.
-export const scoreCellMetrics = (fontSize) => ({
-  cell: Math.round(fontSize * 2.9),
-  ring: Math.round(fontSize * 1.8),
-  outer: Math.round(fontSize * 2.2),
-  dot: Math.max(3, Math.round(fontSize * 0.27)),
-});
+export const scoreCellMetrics = (fontSize) => {
+  const ring = Math.round(fontSize * 1.8);
+  return {
+    cell: Math.round(fontSize * 2.9),
+    ring,
+    inner: ring - Math.max(5, Math.round(fontSize * 0.4)),
+    dot: Math.max(3, Math.round(fontSize * 0.27)),
+  };
+};

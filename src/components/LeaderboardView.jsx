@@ -313,9 +313,9 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
     // and the heads and pars sit a rung under them.
     //
     // Small is where it stops. The nine tracks split whatever the board is
-    // wide, which is ~30px a hole on a 390 phone and ~27 on a 360, and a score
-    // two or more off par is ringed TWICE — a rung further up and the outer
-    // ring is wider than the track it has to fit in.
+    // wide, which is ~30px a hole on a 390 phone and ~27 on a 360, and the ring
+    // around a score is 1.8 times the number inside it — a rung further up and
+    // the ring is wider than the track it has to fit in.
     return (
       <div style={{ padding: "10px 10px 12px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 7 }}>
@@ -384,7 +384,7 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
 
                       A rung under the scoring screen's card in size, because
                       it is drawn in a board nine columns wide rather than in a
-                      popup, and the outer ring has to fit the track it is in.
+                      popup, and the ring has to fit the track it is in.
                       Everything else about it is that card. */}
                   {Array.from({length: count}, (_, i) => start + i).map(h => (
                     <ScoreCell key={h} fontSize={FS.small} style={cardCell(h === start)}
