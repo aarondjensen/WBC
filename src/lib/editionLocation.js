@@ -21,14 +21,19 @@
 // sixteen it has been run.
 //
 // ── Where these came from ─────────────────────────────────────────
-// The courses each year was played on, in data/courses.csv, and the town each
-// of those courses is in. Most years are one RESORT and the answer is not in
-// doubt — 2021 is all four Garland courses (Lewiston), 2018 is the three
-// Lakewood Shores courses (Oscoda), 2019 is Tullymore and St Ives (Stanwood),
-// 2017 is both A-Ga-Ming courses (Kewadin). Where a year toured several towns
-// this is the base the trip was run out of, not the only town it touched:
-// 2014 played Black Lake in Onaway and three Gaylord courses, and it is a
-// Gaylord tournament.
+// The courses each year was played on, in data/courses.csv, and where the trip
+// that played them was based.
+//
+// A year run out of ONE RESORT is named for the resort, not for the township
+// it is registered in — "2021 · Garland, MI", not Lewiston; "2018 · Lakewood
+// Shores, MI", not Oscoda. Six of the sixteen are like that, and the resort is
+// the name the trip is remembered by: nobody says they played Kewadin, they
+// say they played A-Ga-Ming. Half of those towns are unincorporated places
+// whose name means nothing to anybody who was there.
+//
+// A year that TOURED gets the town it was based out of, which is not the only
+// town it touched: 2014 played Black Lake in Onaway and three Gaylord courses,
+// and it is a Gaylord tournament.
 //
 // It is a hand-kept table rather than something derived from the course rows
 // because a course's town is not in the data — data/courses.csv carries a
@@ -59,28 +64,29 @@ export const EDITION_LOCATIONS = {
   // Black Lake in Onaway, then The Tribute, The Signature and The Masterpiece
   // — Otsego Club and Treetops, both Gaylord.
   2014: "Gaylord, MI",
-  // Gull Lake View country: Yarrow, Stonehedge South and Gull Lake West are
-  // Augusta, Bedford Valley the next town over.
-  2015: "Augusta, MI",
+  // Three of the four are Gull Lake View's own — Bedford Valley, Stonehedge
+  // South and Gull Lake West — with Yarrow, up the road in the same town.
+  2015: "Gull Lake View, MI",
   // The Grande and Cascades are Jackson; Calderone is Grass Lake, ten minutes
   // east.
   2016: "Jackson, MI",
-  // Sundance and Torch are the two courses at A-Ga-Ming.
-  2017: "Kewadin, MI",
-  // The Gailes, Serradella and Blackshire are Lakewood Shores; Red Hawk is
-  // East Tawas, just down the shore.
-  2018: "Oscoda, MI",
-  // Tullymore and St Ives, the two courses at Tullymore Golf Resort.
-  2019: "Stanwood, MI",
+  // Sundance and Torch are the two courses at A-Ga-Ming, played twice each.
+  2017: "A-Ga-Ming, MI",
+  // The Gailes, Serradella and Blackshire are all three of Lakewood Shores';
+  // Red Hawk is East Tawas, just down the shore.
+  2018: "Lakewood Shores, MI",
+  // Tullymore and St Ives, the resort's two courses, played twice each.
+  2019: "Tullymore, MI",
   // Based at Crystal Mountain — its Mountain course, plus Arcadia Bluffs and
   // its South course down the coast and Betsie Valley in between. The RESORT
   // rather than its town (Thompsonville), because that is the name the trip
   // is remembered by.
   2020: "Crystal Mountain, MI",
   // All four Garland courses: Fountains, Reflections, Swampfire, Monarch.
-  2021: "Lewiston, MI",
-  // Back to Gull Lake View — Stoatin Brae twice and Stonehedge North.
-  2022: "Augusta, MI",
+  2021: "Garland, MI",
+  // Back to Gull Lake View, seven years on — Stoatin Brae twice and
+  // Stonehedge North.
+  2022: "Gull Lake View, MI",
   // Shanty Creek's Legend and Cedar River plus Hawk's Eye, all Bellaire, with
   // Forest Dunes in Roscommon on the front end.
   2023: "Bellaire, MI",

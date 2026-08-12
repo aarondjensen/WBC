@@ -146,8 +146,8 @@ describe("document shapes", () => {
     // comes from lib/editionLocation. Without it the state doc has no
     // location and the app's header falls back to whatever city it knows,
     // which is how every imported year came out reading "Gaylord, MI".
-    expect(stateDocFor({ year: 2019, rounds: 4 }).meta.location).toBe("Stanwood, MI");
-    expect(stateDocFor({ year: 2015, rounds: 4 }).meta.location).toBe("Augusta, MI");
+    expect(stateDocFor({ year: 2019, rounds: 4 }).meta.location).toBe("Tullymore, MI");
+    expect(stateDocFor({ year: 2015, rounds: 4 }).meta.location).toBe("Gull Lake View, MI");
   });
 
   it("an explicit location still wins, and a year with none writes no field", () => {

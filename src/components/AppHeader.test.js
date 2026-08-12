@@ -30,22 +30,23 @@ describe("AppHeader", () => {
     expect(screen.getByText("2026 · Gaylord, MI")).toBeTruthy();
   });
 
-  it("falls back to the year's own city, not the current year's", () => {
+  it("falls back to the year's own location, not the current year's", () => {
     // A historical edition carries no meta.location — the import had no city
-    // to write. Before this it read "2015 · Gaylord, MI"; 2015 was Augusta.
+    // to write. Before this it read "2015 · Gaylord, MI"; 2015 was played at
+    // Gull Lake View, three hours south.
     year = 2015;
     render(h(AppHeader, { location: "" }));
-    expect(screen.getByText("2015 · Augusta, MI")).toBeTruthy();
+    expect(screen.getByText("2015 · Gull Lake View, MI")).toBeTruthy();
   });
 
-  it("gives two historical editions two different cities", () => {
+  it("gives two historical editions two different locations", () => {
     year = 2021;
     const { unmount } = render(h(AppHeader, {}));
-    expect(screen.getByText("2021 · Lewiston, MI")).toBeTruthy();
+    expect(screen.getByText("2021 · Garland, MI")).toBeTruthy();
     unmount();
     year = 2019;
     render(h(AppHeader, {}));
-    expect(screen.getByText("2019 · Stanwood, MI")).toBeTruthy();
+    expect(screen.getByText("2019 · Tullymore, MI")).toBeTruthy();
   });
 
   it("prints a long location in full rather than truncating it", () => {
