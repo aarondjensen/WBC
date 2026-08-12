@@ -27,6 +27,19 @@ export default defineConfig({
         // transitive half — which is most of it.
         manualChunks(id) {
           if (!id.includes("node_modules")) return;
+          // ── Push and photo storage, on their own ──
+          // Neither is imported statically anywhere: messaging is dynamic by
+          // the MODULE LOAD POLICY in lib/notifications.js, and storage is
+          // dynamic in lib/mediaUpload for its size. A dynamic import still
+          // lands in whatever chunk it is ASSIGNED to, though, so folding both
+          // in with `firebase` below undid the deferral and shipped them to
+          // every phone anyway — the deliberate `import()` bought nothing.
+          //
+          // Split out they are fetched by the phone that registers for
+          // notifications and the phone that posts a photo, and never by
+          // somebody opening a leaderboard.
+          if (/[\\/]node_modules[\\/](@firebase|firebase)[\\/]messaging[\\/]/.test(id)) return "firebase-messaging";
+          if (/[\\/]node_modules[\\/](@firebase|firebase)[\\/]storage[\\/]/.test(id)) return "firebase-storage";
           if (/[\\/]node_modules[\\/](@firebase|firebase|idb)[\\/]/.test(id)) return "firebase";
           if (/[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/.test(id)) return "react";
           return "vendor";
