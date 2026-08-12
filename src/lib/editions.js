@@ -35,6 +35,7 @@ import { editionState, deleteVerdict } from "./editionLifecycle";
 import {
   firstByTournament, needsPairings,
   readSummaryCache, writeSummaryCache, forgetSummary,
+  readEditionsCache, writeEditionsCache,
 } from "./editionSummary";
 import { rowsToPairings } from "./pairings";
 import { clampRounds } from "../constants";
@@ -59,7 +60,22 @@ const _deleteDoc = async (col, id) => { await deleteDoc(doc(_db, col, String(id)
 
 const byYearDesc = (rows) => [...rows].sort((a, b) => (b.year || 0) - (a.year || 0));
 
-export const loadEditions = async () => byYearDesc(await _get(EDITIONS_COL));
+// Newest first, and remembered — every path that produces the index writes it
+// to the cache the picker paints from, including the one after a delete, so
+// the list on screen next time is the list as it was left.
+const _index = (rows) => {
+  const out = byYearDesc(rows);
+  writeEditionsCache(out);
+  return out;
+};
+
+export const loadEditions = async () => _index(await _get(EDITIONS_COL));
+
+// The years we already know about, read synchronously so the picker opens with
+// its rows in place instead of "Loading…". Replaced by the real read on the
+// same open — see the cache note in lib/editionSummary for why a stale row
+// here cannot become a wrong switch or a wrong delete.
+export const cachedEditions = () => readEditionsCache();
 
 // ── How much is actually in each year ───────────────────────────────
 // The picker's ONE reliable signal. `status` is a label somebody's phone
@@ -182,12 +198,12 @@ export const cachedEditionSummaries = (ids = []) => readSummaryCache(ids);
 export const ensureActiveEditionDoc = async (name) => {
   const id = getActiveTournamentId();
   const rows = await _get(EDITIONS_COL);
-  if (rows.some(e => e.id === id)) return byYearDesc(rows);
+  if (rows.some(e => e.id === id)) return _index(rows);
   const year = parseInt(String(id).replace(/\D/g, ""), 10) || new Date().getFullYear();
   await _upsert(EDITIONS_COL, {
     id, year, name: name || `WBC ${year}`, status: "published", created_from: null,
   });
-  return byYearDesc(await _get(EDITIONS_COL));
+  return _index(await _get(EDITIONS_COL));
 };
 
 export const editionId = (year) => `wbc_${year}`;

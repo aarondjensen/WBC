@@ -6,7 +6,9 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   firstByTournament, needsPairings,
   readSummaryCache, writeSummaryCache, forgetSummary,
+  readEditionsCache, writeEditionsCache,
   SUMMARY_CACHE_KEY, SUMMARY_CACHE_VERSION,
+  EDITIONS_CACHE_KEY, EDITIONS_CACHE_VERSION,
 } from "./editionSummary";
 
 beforeEach(() => localStorage.clear());
@@ -129,6 +131,76 @@ describe("the summary cache", () => {
     const getItem = vi.spyOn(Storage.prototype, "getItem")
       .mockImplementation(() => { throw new Error("SecurityError"); });
     expect(readSummaryCache(["wbc_2015"])).toBeNull();
+    getItem.mockRestore();
+  });
+});
+
+describe("the years cache", () => {
+  const ROWS = [
+    { id: "wbc_2026", year: 2026, name: "WBC 2026", status: "published", created_from: null },
+    { id: "wbc_2015", year: 2015, name: "Gull Lake View", status: "draft", created_from: null },
+  ];
+
+  it("hands the years straight back, in the order they were written", () => {
+    expect(writeEditionsCache(ROWS)).toBe(true);
+    expect(readEditionsCache()).toEqual([
+      { id: "wbc_2026", year: 2026, name: "WBC 2026" },
+      { id: "wbc_2015", year: 2015, name: "Gull Lake View" },
+    ]);
+  });
+
+  it("keeps only what a row is drawn from", () => {
+    writeEditionsCache(ROWS);
+    // `status` is the field lib/editionLifecycle exists because nobody
+    // maintains — a cached copy of it would be a second, staler source for
+    // something nothing here reads.
+    expect(Object.keys(readEditionsCache()[0]).sort()).toEqual(["id", "name", "year"]);
+  });
+
+  it("drops a row with no id, which nothing could be keyed on", () => {
+    writeEditionsCache([{ year: 2026 }, ...ROWS]);
+    expect(readEditionsCache().map(e => e.id)).toEqual(["wbc_2026", "wbc_2015"]);
+  });
+
+  it("REPLACES rather than merges, so a deleted year stops being painted", () => {
+    writeEditionsCache(ROWS);
+    writeEditionsCache([ROWS[0]]);
+    expect(readEditionsCache().map(e => e.id)).toEqual(["wbc_2026"]);
+  });
+
+  it("says nothing rather than empty when there is nothing to say", () => {
+    // Null and [] are different answers to the picker: the first shows
+    // "Loading…", the second would show an account with no tournaments at all.
+    expect(readEditionsCache()).toBeNull();
+    writeEditionsCache([]);
+    expect(readEditionsCache()).toBeNull();
+  });
+
+  it("drops a cache written by a build with a different row shape", () => {
+    localStorage.setItem(EDITIONS_CACHE_KEY, JSON.stringify({
+      v: EDITIONS_CACHE_VERSION + 1, rows: ROWS,
+    }));
+    expect(readEditionsCache()).toBeNull();
+  });
+
+  it("ignores a corrupt cache, and anything that isn't a list of years", () => {
+    localStorage.setItem(EDITIONS_CACHE_KEY, "not json{");
+    expect(readEditionsCache()).toBeNull();
+    localStorage.setItem(EDITIONS_CACHE_KEY, JSON.stringify({ v: EDITIONS_CACHE_VERSION, rows: "wbc_2026" }));
+    expect(readEditionsCache()).toBeNull();
+    expect(writeEditionsCache(ROWS)).toBe(true);
+    expect(readEditionsCache()).toHaveLength(2);
+  });
+
+  it("survives storage that throws, which is Safari in private mode", () => {
+    const setItem = vi.spyOn(Storage.prototype, "setItem")
+      .mockImplementation(() => { throw new Error("QuotaExceededError"); });
+    expect(writeEditionsCache(ROWS)).toBe(false);
+    setItem.mockRestore();
+
+    const getItem = vi.spyOn(Storage.prototype, "getItem")
+      .mockImplementation(() => { throw new Error("SecurityError"); });
+    expect(readEditionsCache()).toBeNull();
     getItem.mockRestore();
   });
 });
