@@ -493,7 +493,11 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
         <ConfirmModal
           eyebrow="Switch tournament"
           title={`Open ${pending.name}?`}
-          message="The app will reload to load this tournament's data. You'll stay signed in, but you may need to pick your name again."
+          // No explanation under it. This said the app would reload and that
+          // you might have to pick your name again — the second half was not
+          // true in practice, and the first half is a paragraph about a
+          // reload nobody needs warning about. The eyebrow and the title say
+          // what the button does.
           confirmLabel="Open"
           onConfirm={() => switchEdition(pending.id)}
           onCancel={() => setPending(null)}
