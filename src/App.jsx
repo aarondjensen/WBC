@@ -1,6 +1,8 @@
 import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, lazy, Suspense } from "react";
 import { _app, _db, _auth, onAuthStateChanged, doGoogleSignIn, doAppleSignIn, doSignOut, consumeRedirectResult, deleteAccount, USERS_COLLECTION, NATIVE_APPLE_ENABLED, APPLE_PROVIDER_ENABLED, isNativePlatform, isAndroidNative, AUTH_PROVIDERS_ENABLED, TOURNAMENT_ID, getEditionSlug, getTournamentYear, isDefaultEdition } from "./firebase";
 import { readMembership, isDirectorAccount, resolveMember, setDirector, subscribeMemberships } from "./lib/accounts";
+// The fourth way in — no account, no password, no roster spot, no writes.
+import { guestUser, isGuest, setGuestWrites, GUEST_NOTICE } from "./lib/guestMode";
 import { K, ON_ACC, ON_DANGER, FS, R, ALPHA, MOTION, FONT, SHADOW, SCRIM, DIM_PLACED, getTheme, setTheme } from "./theme";
 import { SegmentedToggle, Toggle, StickyTop, SectionLabel, Card, Toast, Btn } from "./components/ui";
 import { computeIndividualBoard, rankIndividualBoard, WD_SCORE } from "./lib/individualBoard";
@@ -367,6 +369,14 @@ export default function WBCApp() {
       else localStorage.removeItem("wbc_user");
     } catch {}
   }, [user]);
+
+  // ── The guest tour writes nothing ──
+  // Set here rather than at the Guest button, because this is the one place
+  // that sees EVERY change of who is holding the phone — including logging out
+  // of the tour, which is what clears it. The data layer reads the latch; see
+  // lib/guestMode for why it takes being signed out as well as being latched
+  // before it swallows anything.
+  useEffect(() => { setGuestWrites(isGuest(user)); }, [user]);
 
   // ── Google/Apple auth + prebuild-and-claim state ──
   // claims: uid → player_id (mirror of the wbc_users collection). Its VALUES
@@ -2410,33 +2420,31 @@ export default function WBCApp() {
               )}
               {authMsg && <div style={{ color: K.danger, fontSize: FS.small, fontWeight: 600, marginTop: 10 }}>{authMsg}</div>}
             </div>
-          {(() => { const roundIsActive = Object.keys(holeData).some(key => { const parts = key.split("_"); const rnd = parseInt(parts[parts.length - 1]); return !finalizedRounds[rnd] && Object.keys(holeData[key] || {}).length > 0; }); const btnColor = roundIsActive ? K.acc : K.t2; const btnBorder = roundIsActive ? `1px solid ${K.acc}${ALPHA.hair}` : `1px solid ${K.bdr}`; return (<div style={{ marginTop: 24, borderTop: `1px solid ${K.bdr}${ALPHA.hair}`, paddingTop: 20 }}><button onClick={() => setUser({ id: "guest", name: "Guest", isDirector: false, isGuest: true })} style={{ width: "100%", padding: "13px 0", borderRadius: R.lg, background: "transparent", border: btnBorder, color: btnColor, fontSize: FS.body, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, letterSpacing: "0.02em" }} onMouseEnter={e => { e.currentTarget.style.background = btnColor  + ALPHA.wash; }} onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}>{roundIsActive && <span style={{ width: 7, height: 7, borderRadius: "50%", background: K.acc, display: "inline-block", boxShadow: `0 0 6px ${K.acc}` }} />}<img src="/wbc-trophy.png" alt="" style={{ height: 18, width: "auto", objectFit: "contain", filter: roundIsActive ? "none" : "brightness(0) invert(0.6)" }} />Live Leaderboard</button></div>); })()}
+          {(() => { const roundIsActive = Object.keys(holeData).some(key => { const parts = key.split("_"); const rnd = parseInt(parts[parts.length - 1]); return !finalizedRounds[rnd] && Object.keys(holeData[key] || {}).length > 0; }); const btnColor = roundIsActive ? K.acc : K.t2; const btnBorder = roundIsActive ? `1px solid ${K.acc}${ALPHA.hair}` : `1px solid ${K.bdr}`; return (<div style={{ marginTop: 24, borderTop: `1px solid ${K.bdr}${ALPHA.hair}`, paddingTop: 20 }}><button onClick={() => setUser(guestUser())} style={{ width: "100%", padding: "13px 0", borderRadius: R.lg, background: "transparent", border: btnBorder, color: btnColor, fontSize: FS.body, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, letterSpacing: "0.02em" }} onMouseEnter={e => { e.currentTarget.style.background = btnColor  + ALPHA.wash; }} onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}>{roundIsActive && <span style={{ width: 7, height: 7, borderRadius: "50%", background: K.acc, display: "inline-block", boxShadow: `0 0 6px ${K.acc}` }} />}<img src="/wbc-trophy.png" alt="" style={{ height: 18, width: "auto", objectFit: "contain", filter: roundIsActive ? "none" : "brightness(0) invert(0.6)" }} />Live Leaderboard</button>
+            {/* Said out loud, because the button no longer opens only a board.
+                A guest gets every screen a player gets and can change none of
+                them — which is the whole answer for a store reviewer or a beta
+                tester, neither of whom has a password or a name on the roster,
+                and it is what makes the button worth tapping for the spouse who
+                only wanted the score. */}
+            <div style={{ color: K.t3, fontSize: FS.label, fontWeight: 500, marginTop: 8, lineHeight: 1.4 }}>
+              No account needed — browse the whole app, read-only.
+            </div></div>); })()}
         </div>
       </div>
     );
   }
-  if (user.isGuest) {
-    return (
-      <div style={{ minHeight: "var(--app-height, 100dvh)", background: "#030810", display: "flex", justifyContent: "center", overflow: "hidden" }}>
-      <div style={{ height: "var(--app-height, 100dvh)", display: "flex", flexDirection: "column", background: K.bg, fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", color: K.t1, width: "100%", maxWidth: 480, position: "relative", boxShadow: "0 0 80px rgba(0,0,0,0.8)", flexShrink: 0, overflow: "hidden" }}>
-        <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
-        {/* The guest leaderboard is its own render branch, so it gets the
-            same header rather than a second left-aligned copy of one. */}
-        <AppHeader
-          location={tournamentLocation}
-          countdownAt={firstTeeAt}
-          right={<button onClick={handleLogout} style={{ background: "transparent", border: `1px solid ${K.bdr}`, borderRadius: R.sm, color: K.t3, fontSize: FS.small, fontWeight: 600, padding: "5px 12px", cursor: "pointer" }}>Exit</button>}
-        />
-        {/* A spectator watching a board that has stopped updating deserves to
-            be told, the same as a scorer does. */}
-        <SyncBanner status={syncStatus} />
-        <div style={{ padding: "14px 20px 0 20px", flex: 1, overflowY: "hidden", overflowX: "hidden", display: "flex", flexDirection: "column", minHeight: 0, marginBottom: 8 }}>
-          <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} finalizedRounds={finalizedRounds} skinWins={skinWins} pairingsData={pairingsData} teeTimesData={teeTimesData} loaded={storageLoaded} />
-        </div>
-      </div>
-      </div>
-    );
-  }
+  // A guest used to get its own render branch here: the leaderboard, a header
+  // and nothing else. It is gone, and a guest now falls through into the app
+  // proper — same tabs, same screens, same pairings and betting and photos —
+  // because the board alone was never the thing somebody with no account needed
+  // to see. A store reviewer or a beta tester has to be able to MOVE around the
+  // app to have looked at it, and none of them can be handed the event password
+  // or a name off a roster of sixteen.
+  //
+  // What keeps that safe is not this screen: it is lib/guestMode's latch on the
+  // data layer, and behind that firestore.rules, which refuses every write from
+  // an account that has no membership — and a guest has no account at all.
 
   // ── MAIN ──
   // How far the bar's contents sit above the bottom of the screen.
@@ -2495,6 +2503,20 @@ export default function WBCApp() {
       {/* "This phone is on its own." Renders nothing at all unless it has
           something to say — see components/SyncBanner. */}
       <SyncBanner status={syncStatus} />
+
+      {/* ── The guest strip ──
+          A guest can tap anything, and what they tap moves on their screen and
+          nowhere else. That has to be SAID: a tester who types a score, watches
+          the board move and then reloads to find it gone would file a bug, and
+          the honest answer — "you were never signed in" — is not something a
+          screen can leave to be inferred. It carries the way out too, since a
+          guest has no account sheet worth opening for one button. */}
+      {isGuest(user) && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 20px", background: K.warn + ALPHA.wash, borderBottom: `1px solid ${K.warn}${ALPHA.hair}` }}>
+          <span style={{ flex: 1, minWidth: 0, fontSize: FS.label, fontWeight: 600, color: K.warn, lineHeight: 1.4 }}>{GUEST_NOTICE}</span>
+          <button onClick={handleLogout} style={{ flexShrink: 0, background: "transparent", border: `1px solid ${K.warn}${ALPHA.line}`, borderRadius: R.sm, color: K.warn, fontSize: FS.label, fontWeight: 700, padding: "4px 12px", cursor: "pointer" }}>Exit</button>
+        </div>
+      )}
 
       {/* Pull-to-refresh indicator. The app logo (golfer) as a MASK rather
           than an <img>, the same technique the nav uses, so the silhouette can
@@ -2644,7 +2666,7 @@ export default function WBCApp() {
                   </div>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: FS.body, fontWeight: 700, color: K.t1 }}>{user.name}</div>
-                    <div style={{ fontSize: FS.label, color: K.t3 }}>{user.isDirector ? "Tournament director" : "Player"}</div>
+                    <div style={{ fontSize: FS.label, color: K.t3 }}>{user.isDirector ? "Tournament director" : isGuest(user) ? "Guest — read-only" : "Player"}</div>
                   </div>
                 </div>
 
@@ -2673,16 +2695,21 @@ export default function WBCApp() {
                     It was a menu row of its own, which put "which of my devices
                     buzzes" a level up alongside the tournament itself — and
                     made My Account a screen with two buttons on it. */}
-                <NotificationSettings
-                  user={user}
-                  notify={notify}
-                  onPermissionChange={setNotifPerm}
-                />
+                {/* Not for a guest: every switch in here registers a push
+                    token against a player id, and "guest" is not one. There is
+                    nothing to notify them about and nobody to notify. */}
+                {!isGuest(user) && (
+                  <NotificationSettings
+                    user={user}
+                    notify={notify}
+                    onPermissionChange={setNotifPerm}
+                  />
+                )}
 
                 <div style={{ height: 1, background: K.bdr, margin: "18px 0 14px" }} />
 
                 <Btn variant="secondary" block onClick={() => { setAccountOpen(false); handleLogout(); }}>
-                  Log out
+                  {isGuest(user) ? "Exit guest preview" : "Log out"}
                 </Btn>
 
                 {fbUser && (

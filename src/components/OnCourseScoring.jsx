@@ -651,12 +651,17 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
       setGroup(myPresetGroup);
       return null;
     }
-    // Directors can pick any group to score
-    if (user.isDirector && presetGroups.length > 0) {
+    // Directors can pick any group to score. So can a GUEST — not to score it,
+    // but because this screen is the app's centre of gravity and a guest has no
+    // name in the draw, so without a picker the whole tab is a permanent
+    // "waiting for pairings" for somebody who is not waiting for anything. What
+    // they open is the same card the group is filling in; the writes behind
+    // every tap on it stop in lib/guestMode, one layer down.
+    if ((user.isDirector || user.isGuest) && presetGroups.length > 0) {
       return (
         <div style={{ padding: "16px 0" }}>
           {offRoundBanner}
-          <div style={{ fontSize: FS.small, fontWeight: 700, color: K.t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 12 }}>Select Group to Score</div>
+          <div style={{ fontSize: FS.small, fontWeight: 700, color: K.t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 12 }}>{user.isGuest ? "Select Group to Watch" : "Select Group to Score"}</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {presetGroups.map((grp, gi) => {
               const grpPlayers = grp.map(id => players.find(p => p.id === id)).filter(Boolean);
@@ -689,7 +694,7 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
                       }
                     </div>
                   </button>
-                  {allComplete && !isFinalized && (
+                  {allComplete && !isFinalized && !user.isGuest && (
                     <button onClick={() => { onFinalizeRound(grpKey); notify("Group finalized! ✓"); }} style={{
                       padding: "0 16px", borderRadius: R.lg, background: K.acc, border: "none",
                       color: K.bg, fontSize: FS.label, fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap",
