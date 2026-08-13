@@ -25,7 +25,7 @@
 import { K, FONT, FS, R, ALPHA, MOTION, SHADOW } from "../theme";
 import { useSheetDrag } from "../lib/useSheetDrag";
 
-export function MoreMenu({ open, onClose, onSelect, isDirector, adminFlag, notifFlag, activeYear, navH = 62 }) {
+export function MoreMenu({ open, onClose, onSelect, isDirector, isGuest, adminFlag, notifFlag, activeYear, navH = 62 }) {
   const { dragY, handlers } = useSheetDrag({ onClose });
 
   if (!open) return null;
@@ -49,7 +49,13 @@ export function MoreMenu({ open, onClose, onSelect, isDirector, adminFlag, notif
     // control that changes which year is on screen rather than above it — the
     // row that answers "which tournament" reads first, then the two rows that
     // show one.
-    { key: "photos", label: "Photos" },
+    //
+    // Not for a guest. Everything else behind this menu is the tournament —
+    // scores, groups, indexes, a list of years — and a stranger reading it
+    // learns who beat whom. The gallery is the sixteen of them off the course,
+    // and it is the one thing here that is not a result. Guests get every other
+    // screen (see lib/guestMode); they do not get the photographs.
+    ...(isGuest ? [] : [{ key: "photos", label: "Photos" }]),
     // Notifications used to be a row of its own here. It is a setting ABOUT
     // YOU — which device buzzes, and for what — so it lives inside My Account
     // beside the other two, rather than as a sibling of the tournament. The
