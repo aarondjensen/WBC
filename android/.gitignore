@@ -53,9 +53,14 @@ captures/
 .idea/navEditor.xml
 
 # Keystore files
-# Uncomment the following lines if you do not want to check your keystore files in.
-#*.jks
-#*.keystore
+# Uncommented, and they stay that way: the upload key signs every future
+# version of this app and cannot be rotated casually — a leaked one means
+# whoever has it can publish as us. Same for the passwords beside it, which is
+# what keystore.properties holds. keystore.properties.example is the template
+# and carries no values, so it is tracked; the pattern below does not match it.
+*.jks
+*.keystore
+keystore.properties
 
 # External native build folder generated in Android Studio 2.2 and later
 .externalNativeBuild

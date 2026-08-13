@@ -1,5 +1,76 @@
 apply plugin: 'com.android.application'
 
+// ══════════════════════════════════════════════════════════════════
+//  Signing a release
+// ══════════════════════════════════════════════════════════════════
+//
+// Play will not take an unsigned bundle, and until this block existed
+// `./gradlew bundleRelease` produced exactly that — the release build type had
+// no signingConfig at all, so the only way to a shippable artifact was Android
+// Studio's Generate Signed Bundle wizard, by hand, every time.
+//
+// The keystore and its passwords are NOT in this repo and must never be. An
+// upload key is the one credential that cannot be rotated casually: lose
+// control of it and every future update to the app has to come from whoever
+// holds it. So the values are read from one of two places, neither of them
+// version-controlled:
+//
+//   android/keystore.properties   — a local file, gitignored, on the machine
+//                                   that cuts releases. See the .example
+//                                   beside it for the four keys.
+//   the environment               — WBC_KEYSTORE_FILE, WBC_KEYSTORE_PASSWORD,
+//                                   WBC_KEY_ALIAS, WBC_KEY_PASSWORD, for a CI
+//                                   runner that has secrets but no file.
+//
+// The environment wins, so a runner can override a file that happens to exist.
+//
+// ── When none of it is configured ──
+// The release build type is left unsigned, exactly as it was before this
+// block, and debug builds are untouched — a checkout with no keystore still
+// builds and installs, which is what anybody wanting an APK to sideload needs.
+// A warning is raised when a RELEASE task is actually in the graph, because
+// "silently unsigned" is the failure that is only discovered at the upload
+// screen. It is a warning rather than an error on purpose: Studio's signed-
+// bundle wizard drives a release build and injects its own signing, and
+// failing here would break that path.
+def keystoreProps = new Properties()
+def keystorePropsFile = rootProject.file('keystore.properties')
+if (keystorePropsFile.exists()) {
+    keystorePropsFile.withInputStream { keystoreProps.load(it) }
+}
+
+def signingValue = { String key, String envVar ->
+    def fromEnv = System.getenv(envVar)
+    (fromEnv?.trim()) ?: keystoreProps.getProperty(key)?.trim()
+}
+
+def keystorePath = signingValue('storeFile', 'WBC_KEYSTORE_FILE')
+def keystorePassword = signingValue('storePassword', 'WBC_KEYSTORE_PASSWORD')
+def keystoreAlias = signingValue('keyAlias', 'WBC_KEY_ALIAS')
+def keystoreAliasPassword = signingValue('keyPassword', 'WBC_KEY_PASSWORD')
+
+// A relative storeFile resolves against android/, so keystore.properties can
+// name a key sitting beside it without anybody hardcoding a home directory.
+def keystoreFile = keystorePath ? rootProject.file(keystorePath) : null
+def releaseSigningReady = keystoreFile != null && keystorePassword && keystoreAlias && keystoreAliasPassword
+
+// Configured, but the key is not where it says it is. Treated as unconfigured
+// so debug builds carry on, and named loudly — a typo'd path would otherwise
+// surface as an unsigned bundle rejected by Play with no mention of a path.
+if (releaseSigningReady && !keystoreFile.exists()) {
+    logger.warn("WBC: keystore not found at ${keystoreFile.absolutePath} — release builds will be UNSIGNED.")
+    releaseSigningReady = false
+}
+
+gradle.taskGraph.whenReady { graph ->
+    if (releaseSigningReady) return
+    if (graph.allTasks.any { it.name.toLowerCase().contains('release') }) {
+        logger.warn("WBC: no release signing configured — this artifact will be UNSIGNED and Play will refuse it. " +
+                    "Fill in android/keystore.properties (see keystore.properties.example) or set WBC_KEYSTORE_FILE, " +
+                    "WBC_KEYSTORE_PASSWORD, WBC_KEY_ALIAS and WBC_KEY_PASSWORD.")
+    }
+}
+
 android {
     namespace = "com.wannabecup.app"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -16,8 +87,28 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        // Declared only when there is something to declare: an empty config
+        // attached to the release type is worse than none, because it fails
+        // deep inside the packaging task rather than here. Must stay ABOVE
+        // buildTypes, which looks it up by name.
+        if (releaseSigningReady) {
+            release {
+                storeFile keystoreFile
+                storePassword keystorePassword
+                keyAlias keystoreAlias
+                keyPassword keystoreAliasPassword
+            }
+        }
+    }
     buildTypes {
         release {
+            // findByName rather than signingConfigs.release: it answers null
+            // when the config above was not created, which is AGP's own
+            // default for this build type — so an unconfigured checkout
+            // behaves exactly as it did before, and no spelling of this line
+            // can throw on the way there.
+            signingConfig signingConfigs.findByName('release')
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
