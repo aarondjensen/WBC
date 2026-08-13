@@ -34,8 +34,9 @@ import {
   collection, query, where, getDocs, getDocsFromCache, doc, setDoc, deleteDoc,
   writeBatch, onSnapshot,
 } from "firebase/firestore";
-import { _db } from "../firebase";
+import { _db, _auth } from "../firebase";
 import { createWriteTracker } from "./connection";
+import { writesBlocked } from "./guestMode";
 
 // ── Writes handed over but not yet acknowledged ──
 // Every write below is registered here on its way out. See lib/connection for
@@ -44,6 +45,28 @@ import { createWriteTracker } from "./connection";
 // resolves, so a queue that is not draining is the symptom and there is no
 // error anywhere to catch.
 export const writes = createWriteTracker();
+
+// ── The guest tour writes nothing ──────────────────────────────────
+// Somebody who came in through the Guest button has no account, so every write
+// below would be refused by firestore.rules anyway. What this stops is the
+// refusal being INVISIBLE and slow: a write handed to Firestore by a client
+// with no auth does not come back as an error a tester can see, it goes into
+// the offline queue and sits there — and `writes` above counts exactly that,
+// so the sync banner would tell somebody tapping around that their phone had
+// lost the network.
+//
+// So a guest's writes stop here, at the one door they all go through. Their
+// taps still land in local React state, which is what makes the tour feel like
+// the app rather than a screenshot; nothing is handed to the server.
+//
+// The condition is deliberately an AND with "nobody is signed in" — see
+// lib/guestMode for why a latch that can swallow a real player's scores is the
+// most dangerous thing this file could contain.
+//
+// Returns the same shape a successful write returns, because a caller that
+// checked would be checking whether the server took it, and no caller should
+// learn "you are a guest" from a write result.
+const refuseGuestWrite = () => writesBlocked(!!_auth?.currentUser);
 
 // ── db: Firestore data layer ──
 export const db = {
@@ -82,6 +105,7 @@ export const db = {
   },
   upsert: async (col, data) => {
     if (!data.id) { console.error("db.upsert: missing id", col, data); return null; }
+    if (refuseGuestWrite()) return data;
     try {
       await writes.track(setDoc(doc(_db, col, String(data.id)), data, { merge: true }), col);
       return data;
@@ -96,6 +120,7 @@ export const db = {
   upsertMany: async (col, rows) => {
     const valid = (rows || []).filter(r => r && r.id);
     if (!valid.length) return true;
+    if (refuseGuestWrite()) return true;
     try {
       // 500 is Firestore's hard cap on writes per batch; 490 leaves room.
       for (let i = 0; i < valid.length; i += 490) {
@@ -114,6 +139,7 @@ export const db = {
     const valid = (rows || []).filter(r => r && r.id);
     const gone = (deleteIds || []).filter(Boolean);
     if (!valid.length && !gone.length) return true;
+    if (refuseGuestWrite()) return true;
     try {
       // 500 writes per batch is Firestore's cap; 490 leaves room. Deletes ride
       // in the first batch so the replacement lands with them.
@@ -133,6 +159,7 @@ export const db = {
     } catch(e) { console.error("db.replaceMany error:", col, e); return null; }
   },
   delete: async (col, filters = []) => {
+    if (refuseGuestWrite()) return true;
     try {
       const snap = await getDocs(db._q(col, filters));
       if (snap.empty) return true;
@@ -146,6 +173,7 @@ export const db = {
     } catch(e) { console.error("db.delete error:", col, e); return null; }
   },
   deleteDoc: async (col, id) => {
+    if (refuseGuestWrite()) return true;
     try { await writes.track(deleteDoc(doc(_db, col, String(id))), col); return true; }
     catch(e) { console.error("db.deleteDoc error:", col, e); return null; }
   },

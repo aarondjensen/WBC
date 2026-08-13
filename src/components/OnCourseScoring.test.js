@@ -178,6 +178,44 @@ describe("OnCourseScoring renders", () => {
   });
 });
 
+// ── A guest, looking around ────────────────────────────────────────
+// Somebody who came in through the Guest button has no account and no name in
+// the draw, so this screen resolves no group for them. It offers the picker
+// instead — the same one a director gets, minus the button that finalizes a
+// card — because the alternative is a permanent "waiting for pairings" on the
+// one tab a tester most wants to open. Nothing they tap here is written: see
+// lib/guestMode and the latch on the data layer.
+describe("OnCourseScoring for a guest", () => {
+  const GUEST = { id: "guest", name: "Guest", isDirector: false, isGuest: true };
+
+  it("offers the draw to watch rather than a wait", () => {
+    render(h(OnCourseScoring, { ...baseProps, user: GUEST }));
+    expect(screen.getByText("Select Group to Watch")).toBeTruthy();
+    expect(screen.getByText("Group 1")).toBeTruthy();
+    expect(screen.getByText(/Thru 4/)).toBeTruthy();
+  });
+
+  it("opens a group's card when one is picked", () => {
+    render(h(OnCourseScoring, { ...baseProps, user: GUEST }));
+    fireEvent.click(screen.getByText("Group 1"));
+    expect(document.body.textContent.length).toBeGreaterThan(0);
+  });
+
+  // The picker's one write. A finished card shows a director a Finalize
+  // button beside the group; a guest must not be offered one, because the
+  // write behind it would be swallowed and the tap would look broken.
+  it("does not offer to finalize a completed card", () => {
+    render(h(OnCourseScoring, { ...baseProps, user: GUEST, holeData: cards(18) }));
+    expect(screen.queryByText("✓ Finalize")).toBeNull();
+    expect(screen.getByText("18 ✓ Ready")).toBeTruthy();
+  });
+
+  it("renders on a round nobody has drawn", () => {
+    render(h(OnCourseScoring, { ...baseProps, user: GUEST, pairingsData: {}, holeData: {} }));
+    expect(document.body.textContent.length).toBeGreaterThan(0);
+  });
+});
+
 // ── Somebody who is not playing ────────────────────────────────────
 // The market takes people who are not in this year's field — see lib/market
 // marketOutsiders — and they sign in as themselves, which means this screen
