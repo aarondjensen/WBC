@@ -14,7 +14,7 @@
 // gate opens, mid-round, on a completed card, on a round nobody has drawn, and
 // with no course assigned at all.
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { render, screen, cleanup, fireEvent } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, act } from "@testing-library/react";
 import { createElement as h } from "react";
 import { OnCourseScoring } from "./OnCourseScoring";
 import { localDateISO } from "../lib/format";
@@ -225,5 +225,118 @@ describe("OnCourseScoring for a player who is not in the field", () => {
   it("renders for a signed-in man with no roster row and no group", () => {
     render(h(OnCourseScoring, { ...baseProps, user: { id: "gus_p", name: "Gus P", isDirector: false } }));
     expect(document.body.textContent.length).toBeGreaterThan(0);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════
+//  A round nobody has played is not a finished round
+// ══════════════════════════════════════════════════════════════════
+//
+// The bug this is written for: a director opened Scoring on a freshly cut
+// edition and was handed the sign-your-scorecard prompt over a card with no
+// scores in it, warning that every player was missing all eighteen holes.
+//
+// `allRoundComplete` asked `gPlayers.every(everyHoleScored)` — and [].every()
+// is TRUE. `group` comes from the pairings and `players` comes from the
+// roster: two loads, arriving in either order. In the window where the draw
+// has landed and the roster has not, every `players.find` answers undefined,
+// `.filter(Boolean)` empties the list, and an empty list satisfies `.every`.
+// The round read as finished, the effect jumped to hole 18 and scheduled the
+// prompt, and by the time the 400ms timer fired the roster HAD arrived — so
+// the card it opened over was fully populated and entirely blank.
+//
+// This is the shape CLAUDE.md names: a value derived from two things that load
+// separately, and a test that lands them the slow way round.
+//
+// ── Two things these tests have to get right to be worth anything ──
+// The prompt is a MODAL titled "Sign Scorecard — Round N". There is also a
+// "✍️ Sign Scorecard" BUTTON on the screen all round, which is a legitimate
+// manual affordance — asserting on /sign/i matches the button and can never
+// fail. And the modal opens on a 400ms timer, so the timers must be advanced
+// INSIDE act() or React never flushes the state change and the DOM read is
+// stale. An earlier draft of this suite got both wrong and passed against the
+// unfixed code.
+const advance = async (ms = 1200) => {
+  await act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+};
+// The modal, never the button.
+const signPrompt = () => screen.queryByText(/Sign Scorecard — Round/);
+
+describe("the finish prompt and a half-loaded round", () => {
+  // The exact mid-load state: the draw knows who is in the group, the roster
+  // has not answered yet.
+  it("does not call a round complete when the roster has not loaded", async () => {
+    vi.useFakeTimers();
+    try {
+      mount({ players: [], tPlayers: [], holeData: {} });
+      await advance();
+      expect(signPrompt()).toBeNull();
+    } finally { vi.useRealTimers(); }
+  });
+
+  // Partly loaded is the same answer. One unresolved id might be a man with an
+  // empty card, and "complete" is the guess that ends in a signed scorecard
+  // nobody played.
+  it("does not call it complete when only some of the group resolves", async () => {
+    vi.useFakeTimers();
+    try {
+      mount({
+        players: [PLAYERS[0]],
+        tPlayers: [{ player_id: "aaron_j", handicap_index: 12, status: "active" }],
+        holeData: { aaron_j_1: Object.fromEntries(Array.from({ length: 18 }, (_, i) => [i, 4])) },
+      });
+      await advance();
+      expect(signPrompt()).toBeNull();
+    } finally { vi.useRealTimers(); }
+  });
+
+  // ── The full outage, in order ──
+  // Roster absent, prompt scheduled, roster arrives, prompt must not open. The
+  // ref that guards the prompt is reset when completion goes false, but a ref
+  // cannot recall a timeout already in flight — only the effect's cleanup can.
+  it("cancels a scheduled prompt when the roster lands mid-delay", async () => {
+    vi.useFakeTimers();
+    try {
+      const { rerender } = render(h(OnCourseScoring, {
+        ...baseProps, players: [], tPlayers: [], holeData: {},
+      }));
+      await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+      rerender(h(OnCourseScoring, { ...baseProps, holeData: {} }));
+      await advance();
+      expect(signPrompt()).toBeNull();
+      // And no warning listing everybody as missing everything.
+      expect(screen.queryByText(/Missing scores/i)).toBeNull();
+    } finally { vi.useRealTimers(); }
+  });
+
+  // ── The timer cleanup, on its own ──
+  // The guard above stops the half-loaded case ever scheduling a prompt, so it
+  // masks the second half of the fix. This exercises it directly: a card that
+  // IS complete schedules the prompt, and something changes inside the 400ms
+  // that makes it incomplete again — a score edited or discarded, a group
+  // switched. Without the cleanup the prompt still opens, over a card that is
+  // no longer finished.
+  it("cancels the prompt when the card stops being complete inside the delay", async () => {
+    vi.useFakeTimers();
+    try {
+      const { rerender } = render(h(OnCourseScoring, { ...baseProps, holeData: cards(18) }));
+      await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+      // A hole goes away before the prompt lands.
+      rerender(h(OnCourseScoring, { ...baseProps, holeData: cards(17) }));
+      await advance();
+      expect(signPrompt()).toBeNull();
+    } finally { vi.useRealTimers(); }
+  });
+
+  // The other direction still has to work: a genuinely finished card is what
+  // the prompt exists for, and a guard that suppressed it would be the worse
+  // bug — a group that cannot sign off.
+  it("still opens the prompt on a card that really is complete", async () => {
+    vi.useFakeTimers();
+    try {
+      mount({ holeData: cards(18) });
+      await advance();
+      expect(signPrompt()).toBeTruthy();
+    } finally { vi.useRealTimers(); }
   });
 });
