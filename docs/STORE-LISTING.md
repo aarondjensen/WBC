@@ -200,15 +200,27 @@ npx playwright install chromium
 npm run shots -- --edition wbc_2025
 ```
 
-`scripts/screenshots.mjs`. It opens a real browser, waits while you sign in
-once, then writes **both** sets — `store/screenshots/apple` at 1290 x 2796 and
+`scripts/screenshots.mjs`. It captures as a **guest** with the guest banner
+hidden, and writes **both** sets — `store/screenshots/apple` at 1290 x 2796 and
 `store/screenshots/play` at 1080 x 1920 with the alpha flattened — and names
-the shots that did not land rather than reporting a half set as finished. The
-signed-in profile is kept in `.screenshot-profile/`, so later runs go straight
-to capturing and can take `--headless`.
+the shots that did not land rather than reporting a half set as finished. It needs no
+sign-in at all, so `--headless` works from the first run.
 
-Both directories are gitignored: the images are regenerable from the app, and
-the profile holds a real Google session.
+**Why a guest, and why that is honest.** Google refuses OAuth inside an
+automation-controlled browser — it detects the DevTools protocol connection
+Playwright rides on and answers *"Couldn't sign you in — this browser or app
+may not be secure"*, whatever the account. There is no flag for it. So the
+script uses the front door the app already has. Guest mode reads the same live
+tournament every player reads and changes exactly two things on screen: the
+banner, and the Photos row in More. Hiding the banner makes the screenshot
+*more* accurate, not less — it is an artifact of how the picture was taken, and
+no signed-in player ever sees it.
+
+The cost is the photo gallery, which guest mode withholds deliberately. If you
+want that shot, take it by hand; the script says so rather than quietly
+shipping five where you asked for six.
+
+`store/screenshots/` and `.screenshot-profile/` are both gitignored.
 
 Look at every image before uploading. The script drives the app; it has no idea
 whether the screen it caught was worth catching.

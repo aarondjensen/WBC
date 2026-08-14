@@ -2686,7 +2686,14 @@ export default function WBCApp() {
           screen can leave to be inferred. It carries the way out too, since a
           guest has no account sheet worth opening for one button. */}
       {isGuest(user) && (
-        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 20px", background: K.warn + ALPHA.wash, borderBottom: `1px solid ${K.warn}${ALPHA.hair}` }}>
+        /* `data-guest-strip` is a handle, not a style. scripts/screenshots.mjs
+           captures in guest mode — Google refuses OAuth inside an
+           automation-controlled browser, so signing the script in is not
+           available — and this banner is the one thing on screen a real player
+           never sees. Hiding it by a stable attribute is honest and durable;
+           hunting for the element by its own text would break the day the
+           wording changes, and silently. */
+        <div data-guest-strip style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 20px", background: K.warn + ALPHA.wash, borderBottom: `1px solid ${K.warn}${ALPHA.hair}` }}>
           <span style={{ flex: 1, minWidth: 0, fontSize: FS.label, fontWeight: 600, color: K.warn, lineHeight: 1.4 }}>{GUEST_NOTICE}</span>
           <button onClick={handleLogout} style={{ flexShrink: 0, background: "transparent", border: `1px solid ${K.warn}${ALPHA.line}`, borderRadius: R.sm, color: K.warn, fontSize: FS.label, fontWeight: 700, padding: "4px 12px", cursor: "pointer" }}>Exit</button>
         </div>
