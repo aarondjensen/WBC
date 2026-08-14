@@ -230,4 +230,62 @@ describe("EditionSwitcher", () => {
       expect(screen.getByText(/directors are exempt/i)).toBeTruthy();
     });
   });
+
+  // ── Every year at once ───────────────────────────────────────────
+  // Seventeen taps is the chore this button removes, and the one thing it
+  // must never do is take the tournament being played down with the history.
+  // 2026 is the active edition here (see the firebase mock); 2015 arrives
+  // already locked, so only 2025 is left to freeze.
+  describe("locking every year at once", () => {
+    const bulk = () => screen.getByText(/Lock all but|Unlock all|Lock every other/);
+
+    it("offers to lock everything except the active year", async () => {
+      open();
+      await screen.findByText("2026");
+      expect(bulk().textContent).toContain("Lock all but 2026");
+    });
+
+    it("is not offered to a member", async () => {
+      open({ canManage: false });
+      await screen.findByText("2026");
+      expect(screen.queryByText(/Lock all but|Unlock all/)).toBeNull();
+    });
+
+    it("locks only the open years, sparing the active one", async () => {
+      open();
+      await screen.findByText("2026");
+      fireEvent.click(bulk());
+      // Only 2025 is both open and inactive — 2015 is already locked, 2026 is
+      // the tournament being played.
+      expect(screen.getByText("Lock 1 year?")).toBeTruthy();
+      fireEvent.click(screen.getByText("Lock 1 year"));
+      await waitFor(() => expect(locks).toEqual([["wbc_2025", true]]));
+    });
+
+    it("writes nothing if the confirm is cancelled", async () => {
+      open();
+      await screen.findByText("2026");
+      fireEvent.click(bulk());
+      fireEvent.click(screen.getByText("Cancel"));
+      expect(locks).toEqual([]);
+    });
+
+    // Once there is nothing left to lock the slot has to turn into something
+    // useful, or a director who just locked everything is back to seventeen
+    // taps to undo it.
+    it("becomes Unlock all once nothing else is open", async () => {
+      open();
+      await screen.findByText("2026");
+      fireEvent.click(bulk());
+      fireEvent.click(screen.getByText("Lock 1 year"));
+      await waitFor(() => expect(bulk().textContent).toContain("Unlock all"));
+
+      locks.length = 0;
+      fireEvent.click(bulk());
+      fireEvent.click(screen.getByText("Unlock 2 years"));
+      // Both frozen years come back, and the active one was never in it.
+      await waitFor(() => expect(locks.map(l => l[0]).sort()).toEqual(["wbc_2015", "wbc_2025"]));
+      expect(locks.every(l => l[1] === false)).toBe(true);
+    });
+  });
 });
