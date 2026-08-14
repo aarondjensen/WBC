@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { groupsForRound, assignToGroup, removeFromGroup, clearGroup, swapIntoGroup } from "./pairings";
+import { groupsForRound, assignToGroup, removeFromGroup, clearGroup, swapIntoGroup, dedupeGroups, duplicateSeats, rowsToPairings } from "./pairings";
 
 // These transforms replaced logic that used to live inline in PairingsEditor,
 // spread across a prop-syncing effect and a pair of setState updaters that had
@@ -164,5 +164,106 @@ describe("swapIntoGroup", () => {
         }
       }
     }
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════
+//  Nobody is in two groups
+// ══════════════════════════════════════════════════════════════════
+//
+// A real corruption, found by a director whose round would not go green with
+// every player visibly in a group and every group visibly timed. A player was
+// seated TWICE, so the seat count exceeded the roster and the setup check
+// failed — and nothing on the screen said so, because counting thirteen names
+// across four groups by eye is precisely the check a person does not perform.
+//
+// How it got there: a pairing's document id carries its group number
+// (pr_demo_r1_g2_aaron_j), so MOVING a player writes a new document and leaves
+// the old one to be deleted separately. The delete list comes from a read of
+// the server, and a FAILED read used to collapse to "nothing stored, nothing
+// to delete" — so both rows survived and the fold placed the man in both.
+//
+// Fixed at the source (App.jsx aborts the save when that read fails), and
+// guarded here in both directions, because rows written before the fix are
+// still in the database.
+describe("dedupeGroups", () => {
+  it("leaves a sound draw exactly as it is", () => {
+    const g = [["a", "b", "c", "d"], ["e", "f", "g"], ["h", "i", "j"]];
+    expect(dedupeGroups(g)).toEqual(g);
+  });
+
+  // First seating wins. The caller sorts by group number then player id before
+  // folding, so "first" is the lower group — deterministic, and the same
+  // answer on every phone rather than whichever row Firestore returned first.
+  it("keeps the earlier group when a player is seated twice", () => {
+    expect(dedupeGroups([["a", "b"], ["c", "a"]])).toEqual([["a", "b"], ["c"]]);
+  });
+
+  it("handles a player seated three times", () => {
+    expect(dedupeGroups([["a"], ["a"], ["a", "b"]])).toEqual([["a"], [], ["b"]]);
+  });
+
+  // An emptied group stays in place rather than collapsing: the tee sheet is
+  // matched to groups BY INDEX, so removing an element would slide every later
+  // group's time onto the wrong foursome.
+  it("does not re-index the groups it empties", () => {
+    expect(dedupeGroups([["a", "b"], ["a"], ["c"]])).toEqual([["a", "b"], [], ["c"]]);
+  });
+
+  it("drops blanks without disturbing anything else", () => {
+    expect(dedupeGroups([["a", null, "b"], [undefined, "c"]])).toEqual([["a", "b"], ["c"]]);
+  });
+
+  it("survives the shapes a cold load hands it", () => {
+    expect(dedupeGroups([])).toEqual([]);
+    expect(dedupeGroups(null)).toEqual([]);
+    expect(dedupeGroups(undefined)).toEqual([]);
+    expect(dedupeGroups([null, ["a"]])).toEqual([[], ["a"]]);
+  });
+});
+
+describe("duplicateSeats", () => {
+  it("says nothing about a sound draw", () => {
+    expect(duplicateSeats([["a", "b"], ["c"]])).toEqual([]);
+  });
+
+  it("names everybody seated more than once, once each", () => {
+    expect(duplicateSeats([["a", "b"], ["a", "c"], ["a"]]).sort()).toEqual(["a"]);
+    expect(duplicateSeats([["a", "b"], ["a", "b"]]).sort()).toEqual(["a", "b"]);
+  });
+});
+
+// ── The fold heals what is already stored ──
+// The rows below are exactly what the database holds after a move whose
+// delete never landed: the same player filed under two group numbers.
+describe("rowsToPairings and a stale row", () => {
+  const row = (rnd, grp, pid) => ({ round_number: rnd, group_number: grp, player_id: pid });
+
+  it("does not seat a player twice from two rows", () => {
+    const pd = rowsToPairings([
+      row(1, 1, "aaron_j"), row(1, 1, "mike_d"),
+      row(1, 2, "aaron_j"), row(1, 2, "carl_x"),
+    ]);
+    expect(pd[1]).toEqual([["aaron_j", "mike_d"], ["carl_x"]]);
+    expect(pd[1].flat().filter(p => p === "aaron_j").length).toBe(1);
+  });
+
+  // The seat count is what the setup check compares against the roster, and it
+  // exceeding the roster is the symptom that has no explanation on screen.
+  it("brings the seat count back to the roster size", () => {
+    const pd = rowsToPairings([
+      row(1, 1, "a"), row(1, 1, "b"), row(1, 1, "c"),
+      row(1, 2, "a"), row(1, 2, "d"), row(1, 2, "e"),
+    ]);
+    expect(pd[1].flat().length).toBe(5);
+  });
+
+  // Per round. Being in group 1 on Friday and group 3 on Saturday is a draw,
+  // not a duplicate, and a dedupe that spanned rounds would delete the
+  // tournament.
+  it("lets a player be in a different group in a different round", () => {
+    const pd = rowsToPairings([row(1, 1, "a"), row(2, 3, "a")]);
+    expect(pd[1]).toEqual([["a"]]);
+    expect(pd[2]).toEqual([[], [], ["a"]]);
   });
 });

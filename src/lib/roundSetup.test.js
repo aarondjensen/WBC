@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { groupTrouble, roundTrouble, describeTrouble, blocksScoring, missingTees, describeMissingTees, GROUP_MAX } from "./roundSetup";
+import { groupTrouble, roundTrouble, describeTrouble, blocksScoring, missingTees, describeMissingTees, GROUP_MAX, pairingsTrouble } from "./roundSetup";
 
 const roster = ["a", "b", "c", "d", "e", "f", "g", "h"];
 
@@ -226,5 +226,106 @@ describe("describeMissingTees", () => {
 
   it("is empty when nobody is missing one", () => {
     expect(describeMissingTees([], nameOf)).toBe("");
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════
+//  Why the round's P is red
+// ══════════════════════════════════════════════════════════════════
+//
+// Written after a director lost an evening to a red badge on a round where
+// every player was visibly in a group and every group visibly had a time. One
+// player was seated twice, so the seat count exceeded the roster and the
+// check failed — and the badge, which collapses three conditions into one
+// dot, said nothing about which.
+//
+// Every branch below is a sentence somebody reads standing up, so they are
+// asserted as text rather than as codes.
+describe("pairingsTrouble", () => {
+  const sound = {
+    hasCourse: true,
+    groups: [["a", "b", "c", "d"], ["e", "f", "g"], ["h", "i", "j"]],
+    teeTimes: ["8:00", "8:10", "8:20"],
+    rosterCount: 10,
+  };
+
+  it("says nothing about a round that is ready", () => {
+    expect(pairingsTrouble(sound)).toBeNull();
+  });
+
+  // Named before anything about groups: without a course the round has no
+  // holes to draw against, so the draw is not the thing to fix first.
+  it("names a missing course ahead of everything else", () => {
+    expect(pairingsTrouble({ ...sound, hasCourse: false, groups: [], rosterCount: 10 }))
+      .toMatch(/no course/i);
+  });
+
+  // ── The one this exists for ──
+  it("says a player is in two groups", () => {
+    const why = pairingsTrouble({
+      ...sound,
+      groups: [["a", "b", "c", "d"], ["e", "f", "a"], ["h", "i", "j"]],
+    });
+    expect(why).toMatch(/two groups/i);
+  });
+
+  it("counts them when several are doubled up", () => {
+    const why = pairingsTrouble({
+      ...sound,
+      groups: [["a", "b"], ["a", "b"], ["c"]],
+      rosterCount: 3,
+    });
+    expect(why).toMatch(/^2 players/);
+  });
+
+  // A duplicate is reported ahead of the shortfall it causes. Both are true —
+  // seating someone twice leaves somebody else undrawn — but "11 of 12 drawn"
+  // sends a director looking for a missing man who is not missing.
+  it("blames the duplicate, not the shortfall it creates", () => {
+    const why = pairingsTrouble({
+      ...sound,
+      groups: [["a", "b", "c", "d"], ["e", "f", "a"]],
+      rosterCount: 10,
+    });
+    expect(why).toMatch(/two groups/i);
+    expect(why).not.toMatch(/of 10/);
+  });
+
+  it("counts an incomplete draw", () => {
+    expect(pairingsTrouble({ ...sound, groups: [["a", "b"]], rosterCount: 10 }))
+      .toBe("2 of 10 players drawn");
+  });
+
+  it("says when nothing has been drawn at all", () => {
+    expect(pairingsTrouble({ ...sound, groups: [], rosterCount: 10 })).toMatch(/no groups/i);
+    expect(pairingsTrouble({ ...sound, groups: [[], []], rosterCount: 10 })).toMatch(/no groups/i);
+  });
+
+  // Seats outnumber the roster with nobody doubled up — somebody in a group
+  // has been taken off the roster since the draw was made.
+  it("spots a seated player who is no longer on the roster", () => {
+    expect(pairingsTrouble({ ...sound, rosterCount: 9 })).toMatch(/not on the roster/i);
+  });
+
+  it("names the group with no tee time", () => {
+    expect(pairingsTrouble({ ...sound, teeTimes: ["8:00", "", "8:20"] })).toBe("Group 2 has no tee time");
+    expect(pairingsTrouble({ ...sound, teeTimes: ["8:00", "   ", ""] })).toMatch(/^2 groups/);
+  });
+
+  // An EMPTY group needs no tee time — dedupeGroups leaves emptied groups in
+  // place so the tee sheet keeps its indices, and demanding a time for one
+  // would make a healed draw permanently red.
+  it("does not demand a tee time for an empty group", () => {
+    expect(pairingsTrouble({
+      hasCourse: true,
+      groups: [["a", "b"], [], ["c", "d"]],
+      teeTimes: ["8:00", "", "8:20"],
+      rosterCount: 4,
+    })).toBeNull();
+  });
+
+  it("survives being called with nothing", () => {
+    expect(() => pairingsTrouble()).not.toThrow();
+    expect(pairingsTrouble()).toMatch(/no course/i);
   });
 });

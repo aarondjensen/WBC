@@ -37,6 +37,47 @@
 // get drawn.
 export const GROUP_MAX = 4;
 
+// ── Why the round's P is red ───────────────────────────────────────
+// The badge had three ways to be red and said the same thing for all of them,
+// which cost a director an evening: a draw that looked complete on screen —
+// every player in a group, every group with a time — stayed red because a
+// player was seated TWICE, so the seat count exceeded the roster. Nothing on
+// the screen could have told them that, and counting thirteen names across
+// four groups by eye is exactly the check a person does not do.
+//
+// Returns null when the round is ready, else a sentence naming the one thing
+// to fix. Ordered by what blocks what: no course means the round has no holes
+// to draw against, so it is named before anything about groups.
+export function pairingsTrouble({ hasCourse, groups = [], teeTimes = [], rosterCount = 0 } = {}) {
+  if (!hasCourse) return "No course set for this round";
+
+  const seated = groups.flat().filter(Boolean);
+  const dupes = [...new Set(seated.filter((pid, i) => seated.indexOf(pid) !== i))];
+  // Named first among the group problems: it is the only one that looks
+  // finished. Every other shortfall shows as an obviously empty seat.
+  if (dupes.length) {
+    return dupes.length === 1
+      ? "One player is in two groups"
+      : `${dupes.length} players are in two groups`;
+  }
+
+  if (!groups.length || seated.length === 0) return "No groups drawn yet";
+  if (seated.length < rosterCount) return `${seated.length} of ${rosterCount} players drawn`;
+  // Seats outnumber the roster with nobody doubled up: somebody in a group is
+  // no longer on it.
+  if (seated.length > rosterCount) return "A player in a group is not on the roster";
+
+  const noTime = groups
+    .map((g, gi) => ((g || []).length && !(teeTimes[gi] || "").trim() ? gi + 1 : null))
+    .filter(Boolean);
+  if (noTime.length) {
+    return noTime.length === 1
+      ? `Group ${noTime[0]} has no tee time`
+      : `${noTime.length} groups have no tee time`;
+  }
+  return null;
+}
+
 // What is wrong with ONE group's roster — the first problem found, or null.
 // Ordered worst-first: a group holding the whole field is a different kind of
 // broken from one sharing a player with the next group, and the message the
