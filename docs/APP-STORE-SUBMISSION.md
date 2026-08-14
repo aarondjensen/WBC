@@ -289,11 +289,19 @@ The 12-testers/14-days rule applies to **personal developer accounts created
 after 13 November 2023**. Organization accounts and personal accounts older
 than that are exempt outright.
 
-**Whether production access, once granted, covers the whole account or has to
-be re-earned for each new app is not settled here — check it, don't assume it.**
-Google's own wording is app-scoped ("run a closed test *for your app*"), it has
-been widely reported as account-level once granted, and there have been
-reports of it tightening. Two minutes in your own console beats any blog:
+**It is re-earned for each app.** This paragraph used to leave the question
+open. The answer: the ELIGIBILITY is account-scoped — whether the rule applies
+to you at all depends on when the account was created — but the TEST is per
+app. A personal account created after 13 November 2023 runs a fresh 12-tester,
+14-day closed test for every new app it wants in production, and access earned
+by one does not carry to the next.
+
+Worth knowing in both directions. WBC gets no free ride off The Bourbon Cup —
+and the two clocks are independent, so both can run at the same time, with the
+same twelve people, rather than one queueing behind the other.
+
+The numbers and the scope have both moved more than once, so confirm rather
+than trusting this paragraph. Two minutes in your own console beats any blog:
 
 > Create the WBC app record in Play Console (free, no commitment, doesn't
 > publish anything) and open its **Dashboard**. If a "Complete testing
