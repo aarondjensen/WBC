@@ -27,10 +27,10 @@
 import { collection, doc, getDocs, setDoc, deleteDoc, query, where, getCountFromServer } from "firebase/firestore";
 import { _db, getActiveTournamentId, setActiveTournamentId, getEditionSlug } from "../firebase";
 import {
-  editionDoc, cloneMeta, cloneSideGames, cloneRosterRow, cloneRoundRow,
+  editionDoc, cloneMeta, cloneSideGames, cloneRosterRow, cloneRoundRow, SANDBOX_NAME,
 } from "./editionClone";
 import { editionRounds, indexFor, matchHistoryName } from "./handicap";
-import { editionYear } from "./editionId";
+import { editionYear, SANDBOX_EDITION_ID, isSandboxEdition } from "./editionId";
 import { editionState, deleteVerdict } from "./editionLifecycle";
 import {
   firstByTournament, needsPairings,
@@ -457,7 +457,13 @@ const EDITION_DATA_COLS = [
 export const deleteEdition = async (id) => {
   if (!id) return false;
   const summary = (await loadEditionSummaries([id]))[id];
-  const verdict = deleteVerdict(editionState(summary), { isActive: id === getActiveTournamentId() });
+  const verdict = deleteVerdict(editionState(summary), {
+    isActive: id === getActiveTournamentId(),
+    // Or a sandbox that testers filled with four finished rounds — which is
+    // what a good beta test looks like — reads "complete" and becomes
+    // permanent, with the Firestore console the only way out.
+    isSandbox: isSandboxEdition(id),
+  });
   if (!verdict.allowed) {
     const e = new Error(verdict.why || "That tournament can't be deleted.");
     e.code = `edition-delete/${verdict.reason}`;
@@ -471,6 +477,39 @@ export const deleteEdition = async (id) => {
   // Or the picker paints a row for it from the cache the next time it opens.
   forgetSummary(id);
   return true;
+};
+
+// ── Cut a fresh sandbox ─────────────────────────────────────────────
+// WIPE, then clone — not a clone on top of what is there. Every other clone in
+// this app lands in a year a director is building and merges into it, because
+// dates they have already typed and a roster they have already edited are
+// worth keeping. A sandbox is the opposite: its whole value is that it looks
+// like a tournament nobody has played yet, and a re-cut that left last week's
+// testing scores in place would hand the next tester a half-finished event and
+// a leaderboard full of strangers' numbers.
+//
+// So this is destructive on purpose, and the caller is expected to have said
+// so. Nothing it destroys is a record of anything — see deleteVerdict, which
+// exempts the sandbox from every "this is the event" refusal for the same
+// reason.
+//
+// deleteEdition first, which also removes the wbc_editions row; cloneEdition
+// writes it back. A sandbox that does not exist yet simply skips the delete —
+// deleteEdition returns false for an id with nothing behind it rather than
+// throwing, so first cut and re-cut are the same call.
+export const resetSandbox = async (sourceId, options = {}) => {
+  if (!sourceId) throw new Error("Pick a year to build the sandbox from.");
+  if (isSandboxEdition(sourceId)) throw new Error("The sandbox can't be built from itself.");
+  try {
+    await deleteEdition(SANDBOX_EDITION_ID);
+  } catch (e) {
+    // The only refusal that can reach here is "it is the active edition", and
+    // that one is worth passing on: re-cutting the sandbox out from under the
+    // phone currently showing it would leave the app pointed at nothing.
+    if (e?.code !== "edition-delete/active") throw e;
+    throw new Error("Switch to another year before rebuilding the sandbox.");
+  }
+  return cloneEdition(sourceId, { year: null, name: SANDBOX_NAME, id: SANDBOX_EDITION_ID }, options);
 };
 
 // Flip the active pointer, then hard-reload — see the header for why a reload

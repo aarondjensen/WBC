@@ -341,3 +341,74 @@ describe("rosterHandicap", () => {
     expect(rosterHandicap({ handicap_index: "" }, {})).toBe(0);
   });
 });
+
+// ── The sandbox stays out of the year arithmetic ───────────────────
+// It is an edition in the list and a row in the picker, but it is not a year,
+// and every function here answers a question about years: which one to build
+// next, which one to copy from, which one is the newest tournament. A sandbox
+// that got into any of them would answer one of those questions with a scratch
+// copy — offering to clone next year's tournament from the testers' data, or
+// deciding the newest built edition is the one nobody played.
+//
+// The exclusion is in `dated()`, once, which is what all three run through.
+describe("the sandbox is not a year", () => {
+  const YEARS = [
+    { id: "wbc_2026", year: 2026, name: "WBC 2026" },
+    { id: "wbc_2025", year: 2025, name: "WBC 2025" },
+  ];
+  // Cut from 2026, so it is FULL — this is what a sandbox looks like after a
+  // fortnight of beta testing, and content is exactly what the year math
+  // looks for.
+  const SANDBOX = { id: "wbc_demo", year: null, name: "Demo Sandbox" };
+  const WITH_SANDBOX = [SANDBOX, ...YEARS];
+  const FULL = {
+    wbc_2026: { players: 16, rounds: 4, scores: 1152 },
+    wbc_2025: { players: 16, rounds: 4, scores: 1152 },
+    wbc_demo: { players: 16, rounds: 4, scores: 1152 },
+  };
+
+  it("is not the newest built edition", () => {
+    expect(newestBuiltEdition(WITH_SANDBOX, FULL)?.id).toBe("wbc_2026");
+  });
+
+  it("does not move the year being planned", () => {
+    expect(plannedYear(WITH_SANDBOX, FULL, 2026)).toBe(plannedYear(YEARS, FULL, 2026));
+    expect(plannedYear(WITH_SANDBOX, FULL, 2026)).toBe(2027);
+  });
+
+  // The one that would actually corrupt a tournament: cloning 2027's roster
+  // and buy-ins out of a sandbox full of testers' scribbles.
+  it("is never offered as the year to copy from", () => {
+    expect(plannedSource(WITH_SANDBOX, FULL, 2027)).toBe("wbc_2026");
+  });
+
+  // With nothing else in the list at all, the answers must still be about
+  // years — not "the sandbox" and not a crash.
+  it("leaves the arithmetic alone when it is the ONLY edition", () => {
+    const only = [SANDBOX];
+    expect(newestBuiltEdition(only, FULL)).toBeNull();
+    expect(plannedSource(only, FULL, 2027)).toBe("");
+    expect(plannedYear(only, FULL, 2026)).toBe(2026);
+  });
+});
+
+// The row itself, which does carry a null year rather than a 0 or a NaN.
+describe("editionDoc for the sandbox", () => {
+  it("writes a null year, not a zero", () => {
+    const d = editionDoc({ year: null, id: "wbc_demo", name: "Demo Sandbox" });
+    expect(d.year).toBeNull();
+    expect(d.id).toBe("wbc_demo");
+    expect(d.name).toBe("Demo Sandbox");
+  });
+
+  // Even handed a real-looking year, because the id is what decides. A 2026
+  // sitting in the sandbox's year field would sort it against tournaments the
+  // first time somebody forgot the exclusion above.
+  it("refuses a year even when one is passed", () => {
+    expect(editionDoc({ year: 2026, id: "wbc_demo", name: "Demo Sandbox" }).year).toBeNull();
+  });
+
+  it("still dates a real edition normally", () => {
+    expect(editionDoc({ year: 2026, id: "wbc_2026", name: "" }).year).toBe(2026);
+  });
+});

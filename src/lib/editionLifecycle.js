@@ -89,8 +89,19 @@ export const STATE_LABEL = {
 //              going to be read. The caller is expected to name the count.
 //   setup      yes. A roster and a draw, both re-creatable in minutes.
 //   empty      yes. Nothing is lost.
-export const deleteVerdict = (state, { isActive = false } = {}) => {
+export const deleteVerdict = (state, { isActive = false, isSandbox = false } = {}) => {
   if (isActive) return { allowed: false, reason: "active", why: "This is the tournament the app is showing. Open another year first." };
+  // ── The sandbox is disposable by definition ──
+  // Every refusal below is about a RECORD: a finished tournament is the record
+  // of the event, and a year we could not read might be one. The sandbox is
+  // neither. It is a scratch copy that exists to be played with and thrown
+  // away, and testers filling it with four finished rounds — which is exactly
+  // what a good beta test looks like — would otherwise make it permanent, in
+  // the app, with the only way out being the Firestore console.
+  //
+  // Still refused while it is ACTIVE, above: deleting the edition the app is
+  // currently showing is a different bug and the sandbox is not exempt from it.
+  if (isSandbox) return { allowed: true, reason: "sandbox", grave: false };
   if (state === "complete") return { allowed: false, reason: "complete", why: "Finished tournaments can't be deleted — this is the record of the event." };
   if (state === "unknown") return { allowed: false, reason: "unknown", why: "Couldn't read what's in this year, so it won't be deleted." };
   if (state === "live") return { allowed: true, reason: "live", grave: true };

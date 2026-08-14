@@ -41,6 +41,8 @@
 // a locked year, and the alternative is a flag that can strand a tournament
 // nobody can correct.
 
+import { isSandboxEdition } from "./editionId";
+
 // Missing, false, null and "not an edition at all" are all UNLOCKED. The
 // default has to fall that way: every edition document written before this
 // field existed has no `locked` on it, and a default of true would freeze
@@ -117,7 +119,15 @@ export const lockVerdict = (edition, { isActive = false } = {}) => {
 // Null when there is nothing to offer — one edition, or none — so the caller
 // renders no button rather than a disabled one.
 export const bulkLockVerdict = (editions = [], activeId = null) => {
-  const others = (editions || []).filter(e => e?.id && e.id !== activeId);
+  // THE SANDBOX IS NEVER IN IT, in either direction, and this is the exclusion
+  // the whole workflow turns on. The sequence a director actually runs is
+  // "cut a sandbox, lock the history, hand out the link" — and if the sandbox
+  // were swept up by "lock all but the active year" while they happened to be
+  // standing on 2026, the testers would be handed a tournament that refuses
+  // every tap. It is a scratch copy; freezing it is not a thing that means
+  // anything. The padlock on its own row still works if somebody wants it.
+  const others = (editions || [])
+    .filter(e => e?.id && e.id !== activeId && !isSandboxEdition(e.id));
   if (!others.length) return null;
 
   const active = (editions || []).find(e => e?.id === activeId) || null;

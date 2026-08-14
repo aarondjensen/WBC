@@ -20,7 +20,11 @@
 // end dates are setup — and they are August 2025, and cloning them into 2026
 // would open the new tournament already over. Same for who bought into skins.
 // Each one is dropped deliberately below, next to why.
-import { docIds } from "./editionId";
+import { docIds, isSandboxEdition } from "./editionId";
+
+// What the sandbox row calls itself. Not "WBC 2026 Demo" — it outlives 2026,
+// and a name carrying a year would have to be re-cut every January.
+export const SANDBOX_NAME = "Demo Sandbox";
 
 // ── Which years actually happened ──────────────────────────────────
 // Everything below decides what the New-year form opens pointed at, and all
@@ -42,7 +46,17 @@ import { docIds } from "./editionId";
 // counts could not be read — every function here degrades to the old
 // newest-row behaviour rather than guessing.
 const yearOf = (e) => Number(e?.year);
-const dated = (editions) => (editions || []).filter(e => e?.id && Number.isFinite(yearOf(e)));
+// The sandbox is excluded HERE, once, rather than at each of the three call
+// sites below — this is the funnel every piece of year arithmetic in this file
+// runs through, so a sandbox that gets past it would turn up as the year to
+// build next, or as the year to copy from.
+//
+// By id, not by "has no usable year". A row whose year failed to load is not a
+// sandbox; it is a tournament we could not read, and quietly treating the two
+// the same is how a real edition gets left out of the arithmetic that decides
+// what to clone.
+const dated = (editions) => (editions || [])
+  .filter(e => e?.id && !isSandboxEdition(e.id) && Number.isFinite(yearOf(e)));
 const newestFirst = (rows) => [...rows].sort((a, b) => yearOf(b) - yearOf(a));
 
 export const editionHasContent = (s) =>
@@ -223,7 +237,12 @@ export const cloneRoundRow = (r, { slug, tournamentId } = {}) => {
 // standing in this edition actually came from.
 export const editionDoc = ({ year, id, name, sourceId = null, existing = null }) => ({
   id,
-  year: Number(year),
+  // NULL for the sandbox, and null rather than 0 or NaN on purpose: it is the
+  // one edition that is not a year, `dated()` above drops it from every piece
+  // of year arithmetic, and a 0 sitting in the field would sort it against
+  // real tournaments the first time somebody forgot the exclusion. Firestore
+  // stores null cleanly; NaN it does not.
+  year: isSandboxEdition(id) ? null : Number(year),
   name: String(name ?? "").trim() || existing?.name || `WBC ${year}`,
   status: existing?.status || "draft",
   created_from: sourceId ?? existing?.created_from ?? null,
