@@ -16,6 +16,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { initializeApp } from "firebase/app";
+import { resolveFirebaseConfig } from "./lib/firebaseConfig";
 import { FirebaseAuthentication } from "@capacitor-firebase/authentication";
 import {
   getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
@@ -80,7 +81,7 @@ export const APPLE_PROVIDER_ENABLED = true;
 //      URIs → add https://wannabecup.com/__/auth/handler
 //   4. Ensure vercel.json's /__/auth/* + /__/firebase/* rewrites are deployed
 // Firestore and FCM never use authDomain, so this switch is invisible to them.
-const FIREBASE_CONFIG = {
+const PROD_FIREBASE_CONFIG = {
   apiKey: "AIzaSyBcS6KphgfN15xwfCcmLXx3YMIMUeYuhfc",
   authDomain: AUTH_PROVIDERS_ENABLED ? "wannabecup.com" : "wannabecup-c5aab.firebaseapp.com",
   projectId: "wannabecup-c5aab",
@@ -88,6 +89,45 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "281900029443",
   appId: "1:281900029443:web:68da433d8ec5a16b74a036",
 };
+
+// ── Pointing a dev server at a different project ────────────────────
+// There is one Firebase project behind this app and it holds the real
+// tournament. The admin console writes on edit, so a dev server aimed at
+// production can corrupt a live round with one stray click. Copy .env.example
+// to .env.local and fill in every VITE_FIREBASE_* var to aim that machine at a
+// scratch Firebase project instead.
+//
+// The override is deliberately ALL-OR-NOTHING: a partial set throws at startup
+// rather than silently pairing a dev project id with the prod API key, which
+// would look like it worked and write to production anyway. That failure is the
+// entire reason the mechanism is shaped this way — a half-applied override is
+// worse than no override, because it reports success.
+//
+// Ported from Bourbon Cup, which has had this for a while. WBC and MnQ were
+// both hardcoded to their live projects, so neither had any way to work against
+// scratch data at all.
+//
+// Note this replaces authDomain along with everything else, so a scratch
+// project does NOT inherit the wannabecup.com switch above — which is correct:
+// that domain only resolves because of this project's Vercel rewrites, and
+// pointing a scratch project at it would send sign-in to the wrong place.
+const _resolveFirebaseConfig = () => {
+  let verdict;
+  try {
+    verdict = resolveFirebaseConfig(import.meta.env, PROD_FIREBASE_CONFIG, "real tournament data");
+  } catch (e) {
+    // Logged as well as re-thrown: this throws during module evaluation, before
+    // React (and main.jsx's root error boundary) exists, so the only symptom on
+    // screen is a blank page.
+    console.error(e.message);
+    throw e;
+  }
+  if (verdict.warn) console.warn(verdict.warn);
+  if (verdict.source === "env") console.info(`[firebase] Using project "${verdict.config.projectId}" from env.`);
+  return verdict.config;
+};
+
+const FIREBASE_CONFIG = _resolveFirebaseConfig();
 
 export const _app = initializeApp(FIREBASE_CONFIG);
 

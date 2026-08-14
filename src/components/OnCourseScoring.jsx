@@ -1298,7 +1298,7 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
         const gridCols = "58px repeat(9, minmax(0,1fr)) 34px";
         const jump = (h) => { setShowFront9(false); goToHole(h); };
         return (
-          <Popup onClose={() => setShowFront9(false)} maxWidth={420} dismissOnBackdrop={false} background={K.card} borderColor={K.acc + ALPHA.hair} padding={0} zIndex={340}>
+          <Popup onClose={() => setShowFront9(false)} maxWidth={420} noBackdropClose innerStyle={{ background: K.card, border: `1px solid ${K.acc + ALPHA.hair}` }} padding={0} zIndex={340}>
             <div style={{ background: K.acc + ALPHA.wash, borderBottom: `1px solid ${K.acc}${ALPHA.hair}`, padding: "14px 20px", textAlign: "center" }}>
               <div style={{ fontSize: FS.body, fontWeight: 800, color: K.acc, letterSpacing: 0.3 }}>At the Turn</div>
             </div>
@@ -1402,7 +1402,7 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
           setCtpFeet(prev => (prev === v ? prev : v));
         };
         return (
-          <Popup onClose={closeAndAdvance} maxWidth={360} dismissOnBackdrop={false} background={K.card} borderColor={K.acc + ALPHA.hair} padding={0} zIndex={350}>
+          <Popup onClose={closeAndAdvance} maxWidth={360} noBackdropClose innerStyle={{ background: K.card, border: `1px solid ${K.acc + ALPHA.hair}` }} padding={0} zIndex={350}>
             <div style={{ background: K.acc + ALPHA.wash, borderBottom: `1px solid ${K.acc}${ALPHA.hair}`, padding: "14px 20px", textAlign: "center" }}>
               <div style={{ fontSize: FS.hero, marginBottom: 4 }}>🎯</div>
               <div style={{ fontSize: FS.body, fontWeight: 800, color: K.acc, letterSpacing: 0.3 }}>Closest to Pin</div>
@@ -1551,7 +1551,7 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
 
       {/* WD confirmation modal */}
       {wdConfirm && (
-        <Popup onClose={() => setWdConfirm(null)} maxWidth={340} dismissOnBackdrop={false} background={K.card} borderColor={K.danger + ALPHA.line} padding={0} overlayPadding={24} zIndex={400}>
+        <Popup onClose={() => setWdConfirm(null)} maxWidth={340} noBackdropClose innerStyle={{ background: K.card, border: `1px solid ${K.danger + ALPHA.line}` }} padding={0} outerPadding={24} zIndex={400}>
               <div style={{ background: K.danger + ALPHA.wash, borderBottom: `1px solid ${K.danger}${ALPHA.hair}`, padding: "16px 20px", textAlign: "center" }}>
                 <div style={{ fontSize: FS.hero, marginBottom: 6 }}>⛳</div>
                 <div style={{ fontSize: FS.body, fontWeight: 800, color: K.danger }}>Withdraw Player</div>
@@ -1581,7 +1581,7 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
           if (missingHoles.length > 0) finalizeMissing.push({ name: p.name, holes: missingHoles });
         });
         return (
-          <Popup onClose={() => setShowFinalize(false)} maxWidth={400} background={K.card} zIndex={1000}>
+          <Popup onClose={() => setShowFinalize(false)} maxWidth={400} innerStyle={{ background: K.card }} zIndex={1000}>
               <div style={{ textAlign: "center", marginBottom: 10 }}>
                 <div style={{ fontSize: FS.body, fontWeight: 800, color: K.t1 }}>Sign Scorecard — Round {round}</div>
                 {course && <div style={{ fontSize: FS.label, color: K.acc, fontWeight: 600, marginTop: 2 }}>{course.name}</div>}

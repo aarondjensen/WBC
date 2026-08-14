@@ -41,3 +41,9 @@ build/
 *serviceAccount*.json
 *service-account*.json
 *serviceAccountKey*.json
+
+# ── Local Firebase project override (see .env.example) ──────────────────
+# `*.local` above already covers .env.local; this catches a bare .env too.
+# These files point a dev server at a scratch Firebase project, and a
+# committed one would silently redirect every other machine's writes.
+.env
