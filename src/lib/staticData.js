@@ -48,6 +48,12 @@ export const registryRows = (rows = []) =>
         first_name: full.first_name || "",
         last_name: full.last_name || "",
         index_override: r.index_override ?? null,
+        // Which edition owns this record, for the rows that are owned by one —
+        // the sandbox's. Absent on every career record, which is what makes
+        // them global. Carried through here rather than dropped with the rest
+        // of the stored document because the filter that acts on it runs on
+        // THIS shape; see lib/playerScope.
+        edition_id: r.edition_id || null,
       };
     })
     .sort((a, b) => a.name.localeCompare(b.name));
