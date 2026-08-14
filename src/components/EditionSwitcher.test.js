@@ -246,7 +246,7 @@ describe("EditionSwitcher", () => {
   // 2026 is the active edition here (see the firebase mock); 2015 arrives
   // already locked, so only 2025 is left to freeze.
   describe("locking every year at once", () => {
-    const bulk = () => screen.getByText(/Lock all but|Unlock all|Lock every other/);
+    const bulk = () => screen.getByText(/Lock all but|Unlock all|Lock every tournament/);
 
     it("offers to lock everything except the active year", async () => {
       open();

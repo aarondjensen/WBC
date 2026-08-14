@@ -152,10 +152,13 @@ describe("bulkLockVerdict", () => {
   // No active edition resolved yet — the picker can render before
   // getActiveTournamentId has anything to say. Every year is fair game then,
   // and the label cannot promise to spare one.
+  // Also the label the SANDBOX gets whenever it is the active edition, since
+  // it has no year to name — so this is the common case, not an edge one.
+  // "Lock every other year" read as alternating years on a phone.
   it("copes with no active year at all", () => {
     const v = bulkLockVerdict(YEARS, null);
     expect(v.ids.length).toBe(3);
-    expect(v.label).toBe("Lock every other year");
+    expect(v.label).toBe("Lock every tournament year");
   });
 
   // ── The sandbox is never swept up ──

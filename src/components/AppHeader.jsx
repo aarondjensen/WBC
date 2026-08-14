@@ -48,7 +48,8 @@
 //  its alpha channel is what gets masked.
 import { K, FONT, FS } from "../theme";
 import { WBC_LOGO } from "../constants";
-import { getTournamentYear } from "../firebase";
+import { getTournamentYear, getActiveTournamentId } from "../firebase";
+import { isSandboxEdition } from "../lib/editionId";
 import { locationForYear } from "../lib/editionLocation";
 import { BellCountdown } from "./BellCountdown";
 
@@ -69,10 +70,28 @@ export const HEADER_SAFE_PAD = "calc(env(safe-area-inset-top, 0px) + 5px)";
 // the header it has always been.
 export function AppHeader({ location, right, countdownAt = null }) {
   const year = getTournamentYear();
+  // ── The sandbox says DEMO where a year would be ──
+  // This header is the ONLY thing on screen that names the edition you are in,
+  // and it names it by YEAR — not by the tournament's name, which appears
+  // nowhere here. So renaming the sandbox does not change a pixel of it.
+  //
+  // Worse, the year it shows is a lie in the one case it most matters:
+  // getTournamentYear is editionYear(TOURNAMENT_ID), which parses the digits
+  // out of the edition id, and "wbc_demo" has none — so it falls back to the
+  // CURRENT year and the sandbox header reads "2026 · Gaylord, MI", identical
+  // to the live tournament. That fallback is right for a named edition nobody
+  // wants a date on; it is exactly wrong for the one edition whose entire
+  // purpose is being unmistakable.
+  //
+  // The picker already labels the row DEMO. This is the same label one tap
+  // deeper, which is where somebody actually needs it — the picker is a screen
+  // you leave, and the header is the one you stay on.
+  const sandbox = isSandboxEdition(getActiveTournamentId());
   // The director's answer first, then the year's own. A year with neither
   // shows the bare year rather than a dangling separator — which is what an
   // edition nobody has set a location on honestly is.
-  const where = location || locationForYear(year);
+  const where = location || (sandbox ? "" : locationForYear(year));
+  const label = sandbox ? "DEMO Sandbox" : year;
   const mark = (
     <div style={{
       width: 30, height: 30, background: K.acc, flexShrink: 0,
@@ -122,7 +141,7 @@ export function AppHeader({ location, right, countdownAt = null }) {
         display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 2,
         overflow: "hidden",
       }}>
-        {where ? `${year} · ${where}` : year}
+        {where ? `${label} · ${where}` : label}
       </div>
 
       {right && (
