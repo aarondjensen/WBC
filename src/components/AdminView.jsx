@@ -1627,14 +1627,21 @@ export function AdminView({ registry, activePlayers, marketPool, sideGames, onUp
   const [coursePreview, setCoursePreview] = useState(null); // course to preview before confirming add
   const [localDbPrompt, setLocalDbPrompt] = useState(null); // { sbCourse, query } — prompt user to use local or fetch fresh
   const [editRound, setEditRound] = useState(() => { for (let r = 1; r <= NUM_ROUNDS; r++) { if (!finalizedRounds[r]) return r; } return NUM_ROUNDS; });
-  // Keep editRound pointing at the active round when finalization state changes
+  // Keep editRound pointing at the active round when finalization state changes.
+  // The key is extracted rather than inlined so it is a plain value React can
+  // compare — a call expression in a dependency array is re-evaluated but never
+  // memoised.
+  const finalizedRoundsKey = JSON.stringify(finalizedRounds);
   useEffect(() => {
     setEditRound(r => {
       if (!finalizedRounds[r]) return r;
       for (let i = 1; i <= NUM_ROUNDS; i++) { if (!finalizedRounds[i]) return i; }
       return NUM_ROUNDS;
     });
-  }, [JSON.stringify(finalizedRounds)]);
+    // Deep-compared on purpose: finalizedRounds is a new object on every
+    // snapshot, so depending on it directly would re-run this constantly.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [finalizedRoundsKey]);
   // Keep the selected round on screen when something OTHER than a tap moves it
   // — finalizing advances the round, and scoring's "no course" link jumps to
   // one — which matters once the strip is wide enough to scroll sideways.
@@ -1650,6 +1657,10 @@ export function AdminView({ registry, activePlayers, marketPool, sideGames, onUp
     // you on Round 1's setup and the fix looks like it did nothing.
     if (externalSettingsRound) setEditRound(externalSettingsRound);
     if (onExternalSettingsHandled) onExternalSettingsHandled();
+    // Keyed on the OPEN flag alone. This consumes a one-shot deep link, and
+    // depending on what it reads would re-apply that link on every unrelated
+    // change — dragging the director back to the round it named.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [externalSettingsOpen]);
   const [finalizeModal, setFinalizeModal] = useState(null); // { round, scores[], missing[] }
 
@@ -1706,6 +1717,11 @@ export function AdminView({ registry, activePlayers, marketPool, sideGames, onUp
         break;
       }
     }
+    // ON MOUNT ONLY, deliberately. This raises the finalize prompt for a round
+    // that is already complete when the director opens the tab. Re-running it on
+    // every change to the data it reads would re-raise that prompt over whatever
+    // they were doing, every time a score landed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const ac = K.acc;

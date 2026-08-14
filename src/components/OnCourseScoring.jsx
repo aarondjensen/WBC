@@ -215,6 +215,7 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
   const myPresetGroup = presetGroups.find(g => g.includes(user.id));
 
   // Auto-assign group from pairings if available and not manually overridden
+  const myPresetGroupKey = JSON.stringify(myPresetGroup);
   useEffect(() => {
     // Always reset editing state when round changes
     setEditingCompleted(false);
@@ -236,7 +237,12 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
       setGroup(null);
       setCurrentHole(0);
     }
-  }, [round, JSON.stringify(myPresetGroup)]);
+    // Keyed on the round and on WHICH PAIRING is mine, deep-compared because
+    // myPresetGroup is rebuilt on every pairings snapshot. Depending on `group`
+    // as well would fight the setGroup above; depending on presetGroups or
+    // manualOverride would reset the group out from under somebody mid-round.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [round, myPresetGroupKey]);
 
   // ── The director's crown, landing ──
   // A pick made in the app header (components/GroupSwitcher) arrives as
@@ -321,6 +327,10 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
     // edit mode suppresses both the CTP prompt and auto-advance. Second path
     // to the "later groups get no CTP popup" bug.
     setEditingCompleted(allComplete);
+    // positionKey and groupScoreSig ARE the derived dependencies — they are
+    // computed from group, holeData, players and round precisely so this fires
+    // when the landing position changes rather than on every score that lands.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [positionKey, groupScoreSig, course]);
 
   // Note: round changes from other tabs should NOT reset scoring state
@@ -422,6 +432,7 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
 
   // When all 18 complete and not finalized, auto-show finalize prompt (only once)
   const shownFinalizeRef = useRef(false);
+  const groupKeySig = JSON.stringify(group);
   useEffect(() => {
     if (!group) return;
     const groupKey = `${round}_${group.slice().sort().join(",")}`;
@@ -434,7 +445,13 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
       setTimeout(() => setShowFinalize(true), 400);
     }
     if (!allRoundComplete) shownFinalizeRef.current = false;
-  }, [allRoundComplete, JSON.stringify(group), round]);
+    // Keyed on completion, which group, and which round — deep-compared because
+    // group is rebuilt on every pairings snapshot. Depending on scorecardSigs or
+    // finalizedRounds would re-evaluate this every time anybody signed anything,
+    // and the ref guard is what stops the prompt reappearing rather than the
+    // dependency list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allRoundComplete, groupKeySig, round]);
 
   // Prompt for CTP when a par-3 completes for THIS group. Blocks the auto-advance
   // below until the group tags a winner or passes. Only prompts during fresh scoring —
@@ -518,6 +535,10 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
       }, 1500);
       return () => clearTimeout(timer);
     }
+    // Keyed on "this hole is fully scored" and where we are. Adding holeData or
+    // groupPlayers would restart the advance timer on every keystroke of the
+    // group's scoring, which is the one thing this must not do.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allScored, currentHole, editingCompleted, showCtpForHole]);
 
   // ── The scorecard's three numbers, off the board's own math ──
