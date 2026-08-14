@@ -27,13 +27,15 @@ import { getActiveTournamentId } from "../firebase";
 import {
   loadEditions, loadEditionSummaries, cachedEditionSummaries, cachedEditions,
   createEdition, cloneEdition, deleteEdition, switchEdition, ensureActiveEditionDoc,
-  setEditionLocked,
+  setEditionLocked, resetSandbox,
 } from "../lib/editions";
 import {
   plannedYear, plannedSource, summaryLine, editionHasContent, overwriteWarning,
+  newestBuiltEdition,
 } from "../lib/editionClone";
 import { editionState, deleteVerdict, STATE_LABEL } from "../lib/editionLifecycle";
 import { isEditionLocked, lockVerdict, bulkLockVerdict } from "../lib/editionLock";
+import { isSandboxEdition } from "../lib/editionId";
 
 // The gutter label on each form row — a fixed width so the two controls
 // below share a left edge.
@@ -114,6 +116,9 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
   // The whole-list version, which asks in BOTH directions because neither one
   // is a tap-again undo. See bulkLockVerdict.
   const [pendingBulkLock, setPendingBulkLock] = useState(null);
+  // { src, existing } — the year the sandbox is about to be cut from, and the
+  // sandbox it would replace. Always confirmed: a rebuild wipes.
+  const [pendingSandbox, setPendingSandbox] = useState(null);
   const [pendingClone, setPendingClone] = useState(null);
   const [createdEdition, setCreatedEdition] = useState(null);
   const activeId = getActiveTournamentId();
@@ -215,7 +220,12 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
   // itself is what produced "Clone 2026 into 2026" — a self-clone the form
   // then had to talk the director back out of. A source that cannot be
   // chosen needs no warning about having chosen it.
+  // The sandbox is excluded by ID and not by its year, which reads 0 here and
+  // would otherwise sail through the `< targetYear` test below and offer to
+  // build next year's tournament out of a fortnight of testers' scribbles.
+  // That is the one way this row could corrupt a real edition.
   const sourceOptions = editions
+    .filter(e => !isSandboxEdition(e.id))
     .filter(e => !targetYear || Number(e.year) < Number(targetYear))
     .sort((a, b) => Number(b.year) - Number(a.year));
 
@@ -297,6 +307,28 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
     } finally { setBusy(false); }
   };
 
+  // ── Cut a fresh sandbox ──────────────────────────────────────────
+  // The counts ARE re-read here, unlike the padlock: resetSandbox deletes an
+  // edition and writes a roster, four rounds of setup and a buy-in sheet, so
+  // the summary on that row is wrong the instant it returns and every guard
+  // reading it — the delete verdict, the state dot — would be answering about
+  // the sandbox that just stopped existing.
+  const runSandbox = async (sourceId) => {
+    if (!sourceId || busy) return;
+    setBusy(true);
+    setErr("");
+    try {
+      await resetSandbox(sourceId, DEFAULT_CLONE_OPTS);
+      const rows = await loadEditions();
+      setEditions(rows);
+      setSummaries(await loadEditionSummaries(rows.map(r => r.id)));
+      setSummariesFresh(true);
+      notify?.("Sandbox rebuilt");
+    } catch (e) {
+      setErr(e?.message || "Couldn't build the sandbox");
+    } finally { setBusy(false); }
+  };
+
   // ── The same thing to every year at once ─────────────────────────
   // allSettled, not all: seventeen independent writes, and one of them failing
   // is not a reason to leave the other sixteen unreported. What actually
@@ -360,7 +392,8 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
             {editions.map((e) => {
               const isActive = e.id === activeId;
               const state = stateOf(e);
-              const verdict = deleteVerdict(state, { isActive });
+              const sandbox = isSandboxEdition(e.id);
+              const verdict = deleteVerdict(state, { isActive, isSandbox: sandbox });
               // Three answers, not two. The counts arrive a year at a time, so
               // a year MISSING from the map is either one still being counted
               // or one that could not be read — and those are opposite
@@ -372,7 +405,10 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
               // "WBC 2015" beside a bold 2015 is the same word seventeen times.
               // A name that ISN'T the default is worth the space; the default
               // is not.
-              const customName = e.name && e.name !== `WBC ${e.year}` ? e.name : null;
+              // Suppressed for the sandbox: the badge beside it already says
+              // DEMO, and "DEMO · Demo Sandbox · 16 players" is the word twice
+              // in a row that has to fit a phone.
+              const customName = !sandbox && e.name && e.name !== `WBC ${e.year}` ? e.name : null;
               const locked = isEditionLocked(e);
               return (
                 <div key={e.id} style={{
@@ -396,7 +432,21 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
                       width: 7, height: 7, borderRadius: "50%", flexShrink: 0,
                       background: stateColor(state),
                     }} />
-                    <span style={{ fontSize: FS.body, fontWeight: 800, flexShrink: 0 }}>{e.year}</span>
+                    {/* A BADGE where a year would be, because the sandbox has
+                        no year and must not look like it does. This is the
+                        whole reason it is `wbc_demo` and not `wbc_2026_demo`:
+                        tapping a row reloads the app into that edition, and
+                        two rows both reading "2026" is a director in a hurry
+                        opening the wrong one mid-tournament. */}
+                    {sandbox ? (
+                      <span style={{
+                        fontSize: FS.micro, fontWeight: 800, flexShrink: 0, letterSpacing: 0.5,
+                        color: K.tourn, border: `1px solid ${K.tourn}${ALPHA.line}`,
+                        background: `${K.tourn}${ALPHA.wash}`, padding: "2px 6px", borderRadius: R.xs,
+                      }}>DEMO</span>
+                    ) : (
+                      <span style={{ fontSize: FS.body, fontWeight: 800, flexShrink: 0 }}>{e.year}</span>
+                    )}
                     <span style={{
                       flex: 1, minWidth: 0, fontSize: FS.label, fontWeight: 600, color: K.t3,
                       overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
@@ -494,6 +544,39 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
                 justifyContent: "center", gap: 7,
               }}>
               <span aria-hidden>{v.next ? "🔒" : "🔓"}</span>{v.label}
+            </button>
+          );
+        })()}
+
+        {/* ── The sandbox ───────────────────────────────────────────
+            Cut from the newest year that actually holds a tournament, so a
+            tester opens something that looks like the real event — a full
+            roster on real courses — with nobody having played a hole.
+
+            Deliberately NOT part of the create-a-year form below. That form
+            is for building next year's tournament and its whole shape is a
+            year; the sandbox has no year, is rebuilt rather than created, and
+            wipes what was there. Sharing the form would mean explaining both. */}
+        {canManage && !loading && (() => {
+          const src = newestBuiltEdition(editions, summaries);
+          const existing = editions.find(e => isSandboxEdition(e.id)) || null;
+          // No year worth copying yet: a sandbox cloned from an empty edition
+          // is an empty sandbox, and that failure is silent — it looks exactly
+          // like a sandbox that worked until a tester finds no roster.
+          if (!src) return null;
+          return (
+            <button
+              onClick={() => setPendingSandbox({ src, existing })}
+              disabled={busy}
+              style={{
+                width: "100%", marginBottom: 10, padding: "9px 0", borderRadius: R.sm,
+                background: "transparent", border: `1px solid ${K.bdr}`, color: K.t2,
+                fontSize: FS.label, fontWeight: 700, cursor: busy ? "default" : "pointer",
+                opacity: busy ? 0.5 : 1, display: "flex", alignItems: "center",
+                justifyContent: "center", gap: 7,
+              }}>
+              <span aria-hidden>🧪</span>
+              {existing ? `Rebuild sandbox from ${src.year}` : `Create sandbox from ${src.year}`}
             </button>
           );
         })()}
@@ -714,6 +797,34 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
           onCancel={() => setPendingBulkLock(null)}
         />
       )}
+
+      {/* A rebuild WIPES, and says so in the count. Everything else in this
+          app that destroys scores names how many, because "are you sure?" is
+          the dialog everybody has learned to tap through. */}
+      {pendingSandbox && (() => {
+        const { src, existing } = pendingSandbox;
+        const held = existing ? summaryLine(summaries?.[existing.id]) : "";
+        return (
+          <ConfirmModal
+            eyebrow={existing ? "Rebuild the sandbox" : "Create the sandbox"}
+            title={existing ? "Throw away the sandbox and re-cut it?" : `Create a sandbox from ${src.year}?`}
+            message={
+              (existing
+                ? `Everything in the current sandbox${held && held !== "Empty" ? ` — ${held} —` : ""} is deleted first. `
+                  + `That data is nobody's round: it is whatever testers typed into it.\n\n`
+                : "")
+              + `The new one copies ${src.year}'s roster, handicaps, round setup and buy-in amounts. `
+              + `No scores, no pairings, no bets — it opens as a tournament nobody has played.\n\n`
+              + `It has no year of its own, so it can never be confused with a real tournament `
+              + `and never needs replacing when the calendar moves on.`
+            }
+            confirmLabel={existing ? "Rebuild it" : "Create it"}
+            destructive={!!existing}
+            onConfirm={() => { const s = src.id; setPendingSandbox(null); runSandbox(s); }}
+            onCancel={() => setPendingSandbox(null)}
+          />
+        );
+      })()}
     </>
   );
 }

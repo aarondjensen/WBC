@@ -28,17 +28,25 @@ const EDITIONS = [
   // Frozen: the finished year a director locked so a beta tester with the
   // event password cannot post a score into it.
   { id: "wbc_2015", year: 2015, name: "WBC 2015", locked: true },
+  // The sandbox: an edition with no year, sorted last the way loadEditions
+  // leaves it. In the shared list rather than a special case, because every
+  // assertion about the rows has to hold with one present — that is the state
+  // the app is in for the whole beta test.
+  { id: "wbc_demo", year: null, name: "Demo Sandbox" },
 ];
 const SUMMARIES = {
   wbc_2026: { players: 0, rounds: 0, scores: 0 },
   wbc_2025: { players: 16, rounds: 4, scores: 1152, roundCount: 4, finalizedRounds: { 1: true, 2: true, 3: true, 4: true }, pairings: {} },
   wbc_2015: { players: 12, rounds: 4, scores: 864, roundCount: 4, finalizedRounds: { 1: true, 2: true, 3: true, 4: true }, pairings: {} },
+  wbc_demo: { players: 16, rounds: 4, scores: 900 },
 };
 
 // Every (id, locked) the picker asked lib/editions to write. vi.hoisted, and
 // declared up here, because the mock factory below is lifted over the imports
 // and closes over it.
 const locks = vi.hoisted(() => []);
+// Every (sourceId, options) the picker asked for a sandbox rebuild with.
+const sandboxes = vi.hoisted(() => []);
 
 // firebase.js initializes an app at import time, and lib/editions is the
 // module that talks to Firestore — both are mocked, so this is a render test
@@ -65,11 +73,12 @@ vi.mock("../lib/editions", () => ({
   deleteEdition: async () => true,
   switchEdition: () => {},
   setEditionLocked: (...a) => { locks.push(a); return Promise.resolve({ id: a[0], locked: a[1] }); },
+  resetSandbox: (...a) => { sandboxes.push(a); return Promise.resolve({ id: "wbc_demo" }); },
 }));
 
 const { EditionSwitcher } = await import("./EditionSwitcher");
 
-afterEach(() => { cleanup(); locks.length = 0; });
+afterEach(() => { cleanup(); locks.length = 0; sandboxes.length = 0; });
 
 const open = (props = {}) =>
   render(h(EditionSwitcher, { open: true, onClose: () => {}, canManage: true, ...props }));
@@ -286,6 +295,105 @@ describe("EditionSwitcher", () => {
       // Both frozen years come back, and the active one was never in it.
       await waitFor(() => expect(locks.map(l => l[0]).sort()).toEqual(["wbc_2015", "wbc_2025"]));
       expect(locks.every(l => l[1] === false)).toBe(true);
+    });
+  });
+
+  // ── The sandbox ──────────────────────────────────────────────────
+  // A permanent edition with no year, so testers have somewhere to play that
+  // is not a tournament. What is pinned here is the picker's half: that it is
+  // labelled so it cannot be mistaken for a year, that it can never be picked
+  // as the year to clone NEXT year's tournament from, and that rebuilding it
+  // says out loud that it wipes.
+  describe("the sandbox", () => {
+    const settled = async () => {
+      open();
+      await screen.findByText("2026");
+      await act(async () => { releaseSummaries(); });
+    };
+
+    // One already exists in the shared list, so the control offers a REBUILD.
+    // 2026 is empty; 2025 is the newest year actually played, and the sandbox
+    // itself is never the source.
+    it("offers to rebuild from the newest year that holds a tournament", async () => {
+      await settled();
+      expect(screen.getByText("Rebuild sandbox from 2025")).toBeTruthy();
+    });
+
+    it("is not offered to a member", async () => {
+      open({ canManage: false });
+      await screen.findByText("2026");
+      await act(async () => { releaseSummaries(); });
+      expect(screen.queryByText(/sandbox from/i)).toBeNull();
+      // The row is still THERE for them, just not the control — a member who
+      // cannot tell the sandbox from a tournament is the whole failure mode.
+      expect(screen.getByText("DEMO")).toBeTruthy();
+    });
+
+    // A sandbox cloned from an empty year is an empty sandbox, and that
+    // failure is silent — it looks like one that worked until a tester finds
+    // no roster on the first tee.
+    it("is not offered while no year holds a tournament", async () => {
+      open();
+      await screen.findByText("2026");
+      await act(async () => {
+        load.resolve({ wbc_2026: { players: 0, rounds: 0, scores: 0 },
+                       wbc_2025: { players: 0, rounds: 0, scores: 0 },
+                       wbc_2015: { players: 0, rounds: 0, scores: 0 },
+                       wbc_demo: { players: 0, rounds: 0, scores: 0 } });
+      });
+      expect(screen.queryByText(/sandbox from/i)).toBeNull();
+    });
+
+    it("says the rebuild wipes, and only builds once confirmed", async () => {
+      await settled();
+      fireEvent.click(screen.getByText("Rebuild sandbox from 2025"));
+      // Names what is about to be thrown away, in a count — "are you sure?"
+      // is the dialog everybody taps through. Scoped to the modal's own
+      // paragraph: the row behind it says "900 scores" too.
+      const body = screen.getByText(/Everything in the current sandbox/);
+      expect(body.textContent).toMatch(/900 scores/);
+      expect(body.textContent).toMatch(/opens as a tournament nobody has played/i);
+      fireEvent.click(screen.getByText("Cancel"));
+      expect(sandboxes).toEqual([]);
+
+      fireEvent.click(screen.getByText("Rebuild sandbox from 2025"));
+      fireEvent.click(screen.getByText("Rebuild it"));
+      await waitFor(() => expect(sandboxes.length).toBe(1));
+      expect(sandboxes[0][0]).toBe("wbc_2025");
+    });
+
+    // The row itself, once one exists. `openWithSandbox` swaps the summaries
+    // only — the rows come from the module mock — so this asserts against the
+    // list the picker was handed.
+    // The reason it is `wbc_demo` and not `wbc_2026_demo`: tapping a row
+    // reloads the app into that edition, and two rows both reading a year is
+    // a director in a hurry opening the wrong one mid-tournament.
+    it("labels the row DEMO, and never as a year", async () => {
+      await settled();
+      expect(screen.getByText("DEMO")).toBeTruthy();
+      // Not a year, not a stringified null, not a zero.
+      for (const bad of ["null", "0", "NaN", "undefined"]) {
+        expect(screen.queryByText(bad)).toBeNull();
+      }
+      // Exactly one row per edition, and the real years are all still years.
+      for (const y of ["2026", "2025", "2015"]) expect(screen.getByText(y)).toBeTruthy();
+    });
+
+    it("still shows what the sandbox holds", async () => {
+      await settled();
+      expect(screen.getByText("16 players · 4 rounds · 900 scores")).toBeTruthy();
+    });
+
+    // The one path that could corrupt a real tournament: building next year's
+    // roster and buy-ins out of a fortnight of testers' scribbles. The
+    // sandbox's year reads 0, which would sail through the "earlier than the
+    // target" filter if it were not excluded by id.
+    it("is never in the Copy-from list", async () => {
+      await settled();
+      fireEvent.click(screen.getByText("Create new tournament"));
+      const options = Array.from(document.querySelectorAll("option")).map(o => o.textContent);
+      expect(options.some(t => /demo|sandbox/i.test(t))).toBe(false);
+      expect(options.some(t => t.includes("2025"))).toBe(true);
     });
   });
 });

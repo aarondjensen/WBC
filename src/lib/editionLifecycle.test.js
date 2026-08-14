@@ -110,3 +110,39 @@ describe("deleteVerdict", () => {
     expect(deleteVerdict("setup")).toMatchObject({ allowed: true, grave: false });
   });
 });
+
+// ── The sandbox is disposable by definition ────────────────────────
+// Every refusal in deleteVerdict is about protecting a RECORD. The sandbox is
+// not one — it exists to be played with and thrown away — and a good beta test
+// leaves it looking exactly like the thing the guard refuses to delete: four
+// finished rounds, sixteen players, a full leaderboard. Without the exemption
+// the sandbox becomes permanent the first time somebody tests properly, and
+// the only way out is the Firestore console.
+describe("deleteVerdict and the sandbox", () => {
+  it("lets a finished sandbox go, where a finished YEAR is protected", () => {
+    expect(deleteVerdict("complete", { isSandbox: true }).allowed).toBe(true);
+    expect(deleteVerdict("complete").allowed).toBe(false);
+  });
+
+  it("lets an unreadable sandbox go too", () => {
+    // "Couldn't check" refuses a real year on purpose. There is nothing in the
+    // sandbox worth being careful about.
+    expect(deleteVerdict("unknown", { isSandbox: true }).allowed).toBe(true);
+    expect(deleteVerdict("unknown").allowed).toBe(false);
+  });
+
+  it("never calls deleting the sandbox grave", () => {
+    // A live YEAR is grave — the caller is expected to name the score count in
+    // the confirm. Scores in the sandbox are nobody's round.
+    expect(deleteVerdict("live", { isSandbox: true }).grave).toBe(false);
+    expect(deleteVerdict("live").grave).toBe(true);
+  });
+
+  // The one refusal it does NOT escape. Deleting the edition the app is
+  // currently showing is a different bug and the sandbox is not exempt.
+  it("still refuses while it is the active edition", () => {
+    const v = deleteVerdict("empty", { isSandbox: true, isActive: true });
+    expect(v.allowed).toBe(false);
+    expect(v.reason).toBe("active");
+  });
+});

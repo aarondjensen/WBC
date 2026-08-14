@@ -435,6 +435,26 @@ await env.withSecurityRulesDisabled(async (ctx) => {
 await check("unlocked again: the member's write lands", () =>
   assertSucceeds(setDoc(doc(carl, "hole_scores/hs_thawed"), { tournament_id: "wbc_2019", score: 4 })));
 
+// ── The sandbox is an edition like any other, to the rules ───────
+// `wbc_demo` is special only in the APP — excluded from the year arithmetic,
+// from the clone-source list and from bulk locking. firestore.rules knows
+// nothing about it and must not: it is still behind the membership gate (a
+// tester needs the event password to reach it, which is the whole reason the
+// lock exists) and it is still lockable, so a director can freeze it when the
+// beta is over without a second mechanism.
+await env.withSecurityRulesDisabled(async (ctx) => {
+  await setDoc(doc(ctx.firestore(), "wbc_editions/wbc_demo"), { id: "wbc_demo", year: null });
+});
+await check("member can write in the sandbox", () =>
+  assertSucceeds(setDoc(doc(carl, "hole_scores/hs_demo_1"), { tournament_id: "wbc_demo", score: 4 })));
+await check("anon still CANNOT write in the sandbox", () =>
+  assertFails(setDoc(doc(anon, "hole_scores/hs_demo_2"), { tournament_id: "wbc_demo", score: 4 })));
+await env.withSecurityRulesDisabled(async (ctx) => {
+  await setDoc(doc(ctx.firestore(), "wbc_editions/wbc_demo"), { locked: true }, { merge: true });
+});
+await check("a locked sandbox refuses a member, like any other edition", () =>
+  assertFails(setDoc(doc(carl, "hole_scores/hs_demo_3"), { tournament_id: "wbc_demo", score: 4 })));
+
 // ── The escape hatch still opens everything ──────────────────────
 // enforcing() is documented above as the ONLY way back from a field that has
 // been locked out: publish with `return false` and every phone can write again

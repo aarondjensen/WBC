@@ -158,6 +158,40 @@ describe("bulkLockVerdict", () => {
     expect(v.label).toBe("Lock every other year");
   });
 
+  // ── The sandbox is never swept up ──
+  // This is the exclusion the whole workflow turns on. The sequence a director
+  // runs is "cut a sandbox, lock the history, hand out the link" — and they
+  // will usually still be standing on the real tournament when they tap it.
+  // A sandbox caught by "lock all but 2026" hands twelve testers an app that
+  // refuses every tap, which is the exact failure the lock was built to
+  // prevent, pointed at the wrong people.
+  it("never locks the sandbox, even when it is not the active edition", () => {
+    const withSandbox = [...YEARS, { id: "wbc_demo", year: null, name: "Demo Sandbox" }];
+    const v = bulkLockVerdict(withSandbox, "wbc_2026");
+    expect(v.ids).not.toContain("wbc_demo");
+    expect(v.ids.sort()).toEqual(["wbc_2025", "wbc_2027"]);
+  });
+
+  it("never unlocks the sandbox either", () => {
+    const allShut = [
+      { id: "wbc_2027", year: 2027, locked: true },
+      { id: "wbc_2026", year: 2026 },
+      { id: "wbc_demo", year: null, locked: true },
+    ];
+    const v = bulkLockVerdict(allShut, "wbc_2026");
+    expect(v.next).toBe(false);
+    expect(v.ids).toEqual(["wbc_2027"]);
+  });
+
+  // Nothing to offer when the sandbox is the only other edition — the button
+  // should not appear at all rather than appear and do nothing.
+  it("says nothing when the sandbox is the only other edition", () => {
+    expect(bulkLockVerdict(
+      [{ id: "wbc_2026", year: 2026 }, { id: "wbc_demo", year: null }],
+      "wbc_2026",
+    )).toBeNull();
+  });
+
   it("counts in plain language", () => {
     expect(bulkLockVerdict(YEARS, "wbc_2027").confirm.confirmLabel).toBe("Lock 2 years");
     expect(bulkLockVerdict(YEARS.slice(0, 2), "wbc_2027").confirm.confirmLabel).toBe("Lock 1 year");

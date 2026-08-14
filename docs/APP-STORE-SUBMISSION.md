@@ -308,6 +308,28 @@ If the honest answer is "the sixteen guys just need to install it", use internal
 testing and skip the rest of this section. Only pursue production — and only
 then care about the per-app question — if you want WBC publicly listed on Play.
 
+### Set the testers up first, whichever track you use
+
+A tester needs the event password to exercise anything, and a membership is not
+edition-scoped — being in the tournament means being able to write to *every*
+year of it. Two controls exist for that, both in **Admin → Tournaments**, and
+they take about four taps:
+
+1. **"Create sandbox from 2026"** cuts `wbc_demo` — a permanent edition with no
+   year of its own, carrying the roster, handicaps and buy-in amounts but no
+   scores, pairings or bets. It opens as a tournament nobody has played. It is
+   labelled **DEMO** in the picker rather than a year, so it can never be
+   confused with a real tournament, and it never needs replacing when the
+   calendar moves on. "Rebuild sandbox" wipes and re-cuts it — do that between
+   testing rounds.
+2. **"Lock all but …"** freezes every real year against everyone but a
+   director. The sandbox is deliberately never swept up by it; testers keep
+   full write access to the one edition that does not matter.
+
+Then switch to the sandbox and hand out the link. A tester who wanders into
+2026 sees everything and can change nothing — enforced in `firestore.rules`,
+not in the UI, so it holds against someone talking to Firestore directly.
+
 ### The 12 testers, properly
 
 If you do need production access: **Google does not count downloads.** This is

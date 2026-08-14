@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { editionSlug, editionIdForYear, editionYear, docIds } from "./editionId";
+import {
+  editionSlug, editionIdForYear, editionYear, docIds,
+  SANDBOX_EDITION_ID, isSandboxEdition,
+} from "./editionId";
 
 describe("editionSlug", () => {
   it("strips the wbc_ prefix", () => {
@@ -168,5 +171,35 @@ describe("docIds — edition isolation", () => {
       docIds.pairing(A, 1, 2, "p"),
     ];
     expect(new Set(ids).size).toBe(ids.length);
+  });
+});
+
+// ── The sandbox ────────────────────────────────────────────────────
+// One edition that is not a year, so testers have somewhere to play that is
+// not a tournament. What has to hold is that its namespace cannot collide with
+// a real year's — which is what makes it safe to wipe and re-cut at any time,
+// including in the middle of a live tournament.
+describe("the sandbox edition", () => {
+  it("is identified by its id, never inferred", () => {
+    expect(isSandboxEdition(SANDBOX_EDITION_ID)).toBe(true);
+    expect(isSandboxEdition("wbc_2026")).toBe(false);
+    // A row whose year failed to load is a tournament we could not read, not a
+    // sandbox. Confusing the two makes a real edition disposable.
+    expect(isSandboxEdition("")).toBe(false);
+    expect(isSandboxEdition(null)).toBe(false);
+    expect(isSandboxEdition(undefined)).toBe(false);
+  });
+
+  // The property everything else rests on. A year is four digits, so "demo"
+  // is a prefix no tournament can ever produce.
+  it("builds document ids that no year could collide with", () => {
+    const slug = editionSlug(SANDBOX_EDITION_ID);
+    expect(slug).toBe("demo");
+    expect(docIds.holeScore(slug, 1, "aaron_j", 3)).toBe("hs_demo_r1_aaron_j_h4");
+    for (const year of [2026, 2027, 1999, 9999]) {
+      const real = editionSlug(`wbc_${year}`);
+      expect(docIds.holeScore(real, 1, "aaron_j", 3)).not.toBe(docIds.holeScore(slug, 1, "aaron_j", 3));
+      expect(docIds.tournamentPlayer(real, "aaron_j")).not.toBe(docIds.tournamentPlayer(slug, "aaron_j"));
+    }
   });
 });
