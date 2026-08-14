@@ -23,45 +23,128 @@ import { createPortal } from "react-dom";
 import { K, FS, R, SCRIM } from "../theme";
 import { Btn } from "./ui";
 
-// Backdrop dismisses by default; opt out with dismissOnBackdrop={false} for
-// destructive/blocking modals. Card height caps at (--app-height - 90px) so
-// long content scrolls without pushing the modal off-screen on iOS PWA.
+// ── One Popup API across the three apps ──
+// This used to spell its props its own way — `dismissOnBackdrop` where Bourbon
+// Cup and MnQ say `noBackdropClose`, `overlayPadding` where they say
+// `outerPadding`, and `background`/`borderColor` where they pass `innerStyle`.
+// Three modals with the same job and three vocabularies meant a fix written
+// against one could not be pasted into the others, which is most of how they
+// drifted in the first place. WBC was the odd one out, so WBC moved.
+//
+// zIndex takes a number OR one of the two names in Z_MAP. WBC's call sites use
+// real numbers on a deliberate ladder (a confirm at 4000 over an admin sheet at
+// 3000 over a scorecard at 350), so the numbers stay — the names are for new
+// code that just wants "above the page" or "above everything".
+const Z_MAP = { content: 500, modal: 900 };
+
 export function Popup({
-  children, onClose, maxWidth = 420, background, borderColor,
-  padding = 14, dismissOnBackdrop = true, zIndex = 300, overlayPadding = 12,
+  children,
+  onClose,
+  maxWidth = 420,
+  zIndex = 300,
+  showClose = false,
+  noBackdropClose = false,
+  noEscClose = false,
+  padding = 14,
+  outerPadding = 12,
+  innerStyle,
   portal = false,
 }) {
-  // ESC closes, which is what Bourbon Cup and MNQ have always done and WBC
-  // had nowhere in the app — on a desktop browser a popup here could only be
-  // dismissed by finding its Cancel button or hitting the backdrop.
+  const z = typeof zIndex === "number" ? zIndex : (Z_MAP[zIndex] || 500);
+
+  // ESC closes unless disabled. Only registers when there is an onClose to call.
   //
-  // Gated on dismissOnBackdrop rather than on a second opt-out prop: the
-  // modals that turn backdrop-dismiss off are the destructive and blocking
-  // ones (the WD confirm, the scorecard sheet), and those are exactly the
-  // ones that should not vanish on a stray keypress either. One switch, and
-  // no call site has to remember to set two.
+  // `noBackdropClose` implies it. A modal that refuses a stray click outside
+  // itself is a blocking or destructive one — the withdrawal confirm, the
+  // scorecard sheet, a prompt that has to be answered — and every reason it
+  // refuses the click applies to a stray keypress. Both flags exist because the
+  // reverse is not true: a popup can want ESC off while still dismissing on the
+  // backdrop. All three apps share this rule.
+  const escCloses = !noEscClose && !noBackdropClose;
   useEffect(() => {
-    if (!onClose || !dismissOnBackdrop) return;
+    if (!onClose || !escCloses) return;
     const onKey = (e) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, dismissOnBackdrop]);
+  }, [onClose, escCloses]);
+
+  const handleBackdrop = () => {
+    if (!noBackdropClose && onClose) onClose();
+  };
 
   const node = (
     <div
-      onClick={dismissOnBackdrop ? onClose : undefined}
+      onClick={handleBackdrop}
       // Marks this subtree as a modal for usePullToRefresh, which bails when
       // the walk up from a touch target crosses it. That is what stops the
       // page's pull-to-refresh fighting a scrolling modal, without the app
       // having to keep a "is any popup open" ref in sync by hand.
       data-popup="1"
-      style={{ position: "fixed", inset: 0, background: SCRIM, zIndex, display: "flex", alignItems: "center", justifyContent: "center", padding: overlayPadding }}
+      style={{ position: "fixed", inset: 0, background: SCRIM, zIndex: z, display: "flex", alignItems: "center", justifyContent: "center", padding: outerPadding }}
     >
       <div
         onClick={e => e.stopPropagation()}
-        style={{ background: background || K.bg, border: `1px solid ${borderColor || K.bdr}`, borderRadius: R.xl, width: "100%", maxWidth, maxHeight: "calc(var(--app-height, 100dvh) - 90px)", overflowY: "auto", padding }}
+        style={{
+          background: K.bg,
+          border: `1px solid ${K.bdr}`,
+          borderRadius: R.xl,
+          width: "100%",
+          maxWidth,
+          // Caps at (--app-height - 90px) so long content scrolls instead of
+          // pushing the modal off-screen in the iOS PWA.
+          maxHeight: "calc(var(--app-height, 100dvh) - 90px)",
+          // ── The card is a FRAME. The scroller is inside it. ──
+          // The card used to be the scroller. That works only for as long as
+          // nothing is positioned against it: the moment a close button is
+          // added, an absolute box inside a scrolling container scrolls away
+          // with the content and leaves a tall popup with no way to shut it.
+          // Both other apps hit that and fixed it this way; taking the shape
+          // now means the first showClose here is safe rather than a bug.
+          overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
+          position: "relative",
+          ...innerStyle,
+        }}
       >
-        {children}
+        {showClose && onClose && (
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              position: "absolute", top: 8, right: 8, width: 32, height: 32,
+              borderRadius: R.md,
+              // Opaque: content scrolls underneath this rather than carrying it
+              // away, and a transparent button lets rows slide through the glyph.
+              background: K.bg,
+              border: "none", color: K.t3, fontSize: FS.lead, fontWeight: 600,
+              cursor: "pointer", display: "flex", alignItems: "center",
+              justifyContent: "center", zIndex: 2, lineHeight: 1,
+            }}
+          >
+            ✕
+          </button>
+        )}
+        {/* Scrolling happens HERE, not on the card. position:relative + zIndex:0
+            makes this its own stacking context, so content that sticks a header
+            at a high z-index cannot paint over the close button.
+
+            Layout intent from innerStyle is carried through, since callers that
+            pass display:flex are sizing their CHILDREN, and the children now sit
+            a level deeper. Everything else in innerStyle dresses the frame. */}
+        <div style={{
+          padding,
+          overflowY: "auto",
+          overscrollBehavior: "contain",
+          flex: 1,
+          minHeight: 0,
+          position: "relative",
+          zIndex: 0,
+          ...(innerStyle?.display ? { display: innerStyle.display } : null),
+          ...(innerStyle?.flexDirection ? { flexDirection: innerStyle.flexDirection } : null),
+        }}>
+          {children}
+        </div>
       </div>
     </div>
   );
