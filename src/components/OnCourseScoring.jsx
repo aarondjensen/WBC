@@ -422,13 +422,35 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
   };
 
   // All 18 holes complete for the group
-  const allRoundComplete = group ? (() => {
+  // ── "Everybody has finished" must never be true of nobody ──────────
+  // This was `gPlayers.every(...)`, and [].every() is TRUE — so a group with
+  // no resolvable players read as a completed round with no scores in it. That
+  // is not a hypothetical: `group` comes from the pairings and `players` comes
+  // from the roster, and they are two loads that arrive in either order. In
+  // the window where the draw has landed and the roster has not, every
+  // `players.find` answers undefined, `.filter(Boolean)` empties the list, and
+  // this says the round is done.
+  //
+  // What it did next was worse than a wrong badge: the effect below jumped to
+  // hole 18 and opened the sign-the-card prompt, which then rendered against
+  // the roster once it DID arrive — so a director tapping Scoring on a fresh
+  // edition got a scorecard to sign listing every player as missing all
+  // eighteen holes.
+  //
+  // Two conditions now, and both are needed. A group with nobody in it is not
+  // finished, and a group whose ids do not all resolve is not KNOWN to be
+  // finished — an unresolved id might be a man with an empty card, and
+  // guessing "complete" is the one direction that ends in a signed scorecard
+  // nobody played.
+  const allRoundComplete = (() => {
+    if (!group || group.length === 0) return false;
     const gPlayers = group.map(id => players.find(p => p.id === id)).filter(Boolean);
+    if (gPlayers.length !== group.length) return false;
     return gPlayers.every(p => {
       for (let h = 0; h < 18; h++) { if (!((holeData[`${p.id}_${round}`] || {})[h] > 0)) return false; }
       return true;
     });
-  })() : false;
+  })();
 
   // When all 18 complete and not finalized, auto-show finalize prompt (only once)
   const shownFinalizeRef = useRef(false);
@@ -442,7 +464,15 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
       shownFinalizeRef.current = true;
       setCurrentHole(17);
       setNavSourceSynced("manual");
-      setTimeout(() => setShowFinalize(true), 400);
+      // CANCELLED if this stops being true before it fires. The 400ms is there
+      // so the last score settles on screen before the prompt covers it, and
+      // an uncancelled timer turns that courtesy into a bug: the roster
+      // landing mid-delay flips allRoundComplete back to false and clears the
+      // ref below, but the prompt still opens — against a card that is now
+      // visibly empty. Returning the clear is what makes the guard above mean
+      // anything, since a ref reset cannot recall a timeout already in flight.
+      const t = setTimeout(() => setShowFinalize(true), 400);
+      return () => clearTimeout(t);
     }
     if (!allRoundComplete) shownFinalizeRef.current = false;
     // Keyed on completion, which group, and which round — deep-compared because
