@@ -109,6 +109,9 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
   // Track previous positions for movement arrows
   const prevPositions = useRef({});
   const [movements, setMovements] = useState({});
+  // Extracted rather than inlined in the dependency array so it is a plain value
+  // React can compare — an expression in there is re-evaluated but never memoised.
+  const lbOrderKey = lb.map(p => p.id).join(",");
   useEffect(() => {
     const newMov = {};
     lb.forEach((p, idx) => {
@@ -119,7 +122,10 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
     const newPos = {};
     lb.forEach((p, idx) => { newPos[p.id] = idx; });
     prevPositions.current = newPos;
-  }, [lb.map(p => p.id).join(",")]);
+    // Keyed on the ORDER of the board, not the board itself: this exists to spot
+    // a position change, and lb is a fresh array on every score that lands.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lbOrderKey]);
 
   // Every row is MEASURED to one height and then held there, rather than each
   // row flexing to fill what is left. The rows divide the board's height evenly

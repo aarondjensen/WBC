@@ -588,7 +588,7 @@ export default function WBCApp() {
   const [notif, setNotif] = useState(null);
   // Kept next to the state it drives, and above every caller: several hook
   // dependency arrays name `notify`, and those are evaluated during render.
-  const notify = m => { setNotif(m); setTimeout(() => setNotif(null), 2500); };
+  const notify = useCallback(m => { setNotif(m); setTimeout(() => setNotif(null), 2500); }, []);
 
   // Set favicon. The APP MARK, matching index.html, the header and the
   // pull-to-refresh spinner — the trophy is the award, not the identity.
@@ -738,14 +738,21 @@ export default function WBCApp() {
     });
     return m;
   };
-  // Auto-advance round when finalization changes
+  // Auto-advance round when finalization changes. The key is extracted rather
+  // than inlined in the dependency array so it is a plain value React can
+  // compare — a call expression in there is re-evaluated but never memoised.
+  const finalizedRoundsKey = JSON.stringify(finalizedRounds);
   useEffect(() => {
     setRound(r => {
       if (!finalizedRounds[r]) return r;
       for (let i = 1; i <= NUM_ROUNDS; i++) { if (!finalizedRounds[i]) return i; }
       return NUM_ROUNDS;
     });
-  }, [JSON.stringify(finalizedRounds)]);
+    // Deep-compared on purpose: `finalizedRounds` is rebuilt as a new object
+    // on every snapshot, so depending on it directly would re-run this
+    // constantly. The stringified key IS the dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [finalizedRoundsKey]);
   const [adminSettingsOpen, setAdminSettingsOpen] = useState(false);
   const [adminSettingsTab, setAdminSettingsTab] = useState("players");
   // Which round the deep link is about, when it is about one (scoring's "no
@@ -1365,6 +1372,9 @@ export default function WBCApp() {
       } catch {}
     })();
     return () => { if (unsub) unsub(); };
+    // Keyed on the logged-in user: this subscribes once per session, and notify
+    // is a stable useCallback that never needs to re-establish it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
   // Keep this device's token fresh + mapped to the logged-in player when
@@ -1627,12 +1637,15 @@ export default function WBCApp() {
 
   // Get a player's tee box for a round (returns tee object or null)
   // Null for the running tournament, which is what sends the board to calcCH.
-  const getPlayerCH = (rnd, pid) => {
+  // Both wrapped so the memo below can depend on the FUNCTIONS rather than on a
+  // hand-copied list of what they happen to read — which is how such a list goes
+  // stale the moment the function changes.
+  const getPlayerCH = useCallback((rnd, pid) => {
     const ch = courseHandicaps[rnd]?.[pid];
     return Number.isFinite(ch) ? ch : null;
-  };
+  }, [courseHandicaps]);
 
-  const getPlayerTee = (rnd, pid, course) => {
+  const getPlayerTee = useCallback((rnd, pid, course) => {
     if (!course || !course.tee_boxes || course.tee_boxes.length === 0) return null;
     const assigned = (teeData[rnd] || {})[pid];
     if (assigned) {
@@ -1640,7 +1653,7 @@ export default function WBCApp() {
       if (tee) return tee;
     }
     return getDefaultTee(course.tee_boxes) || course.tee_boxes[0];
-  };
+  }, [teeData]);
 
   // The board, ranked best → worst. Both halves come from lib/individualBoard
   // so the standings players read and the order the `leaderboard` pairing mode
@@ -1666,7 +1679,9 @@ export default function WBCApp() {
       getPlayerTee,
       getPlayerCH,
     })),
-  [allPlayers, tRounds, courseList, holeData, teeData, courseHandicaps, numRounds]);
+  // teeData and courseHandicaps are covered transitively now — they are the
+  // deps of getPlayerTee and getPlayerCH, which this depends on directly.
+  [allPlayers, tRounds, courseList, holeData, numRounds, getPlayerCH, getPlayerTee]);
 
   const onSaveHole = async (pid, rnd, holeIdx, score) => {
     // Optimistic update
