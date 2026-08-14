@@ -547,11 +547,19 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
           // rounds off the right edge.
           const gridStyle = { display: "grid", gridTemplateColumns: gridCols, alignItems: "center" };
           const roundGrid = { display: "grid", gridTemplateColumns: `repeat(${shownRounds.length}, 1fr)`, alignItems: "center" };
-          // Right-aligned, both of them: a column of numbers reads as a column
-          // when its digits line up on the same edge, and these are the two
-          // that change width — "E" against "+11", "9" against "18".
+          // TOTAL is right-aligned: a column of numbers reads as a column when
+          // its digits line up on the same edge, and it is the one that
+          // changes width most — "E" against "+11".
           const totalCell = { textAlign: "right", fontVariantNumeric: "tabular-nums" };
-          const thruCell = { textAlign: "right", color: K.t3, fontVariantNumeric: "tabular-nums" };
+          // THRU is CENTRED, and it is the exception on purpose. The argument
+          // above is about a column of numbers, and this is not one: it holds
+          // a hole count, a tee time, an F and a WD — "18", "10:24a", "F" —
+          // so there is no shared edge for digits to line up on and
+          // right-alignment just pushed a short value away from its heading.
+          // Centred, it also matches R1–R4 immediately to its right, which are
+          // centred too, so the whole right-hand half of the board reads as
+          // one block instead of one ragged column against four tidy ones.
+          const thruCell = { textAlign: "center", color: K.t3, fontVariantNumeric: "tabular-nums" };
           return (
             <>
               {/* Eyebrows, not data, and they say so: the smallest thing on
@@ -576,7 +584,8 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
                   // word only one of the three toggle states ever shows.
                   return <span style={{ textAlign: "right", letterSpacing: label.length > 5 ? 0 : undefined }}>{label}</span>;
                 })()}
-                <span style={{ textAlign: "right" }}>Thru</span>
+                {/* Centred to sit over its own column — see thruCell. */}
+                <span style={{ textAlign: "center" }}>Thru</span>
                 <div style={roundGrid}>
                   {shownRounds.map(r => <span key={r} style={{ textAlign: "center" }}>R{r}</span>)}
                 </div>
