@@ -27,7 +27,8 @@
 import { collection, doc, getDocs, setDoc, deleteDoc, query, where, getCountFromServer } from "firebase/firestore";
 import { _db, getActiveTournamentId, setActiveTournamentId, getEditionSlug } from "../firebase";
 import {
-  editionDoc, cloneMeta, cloneSideGames, cloneRosterRow, cloneRoundRow, SANDBOX_NAME,
+  editionDoc, cloneMeta, cloneSideGames, cloneRosterRow, cloneRoundRow,
+  SANDBOX_NAME, sandboxScoringOpen,
 } from "./editionClone";
 import { editionRounds, indexFor, matchHistoryName } from "./handicap";
 import { editionYear, SANDBOX_EDITION_ID, isSandboxEdition } from "./editionId";
@@ -509,7 +510,43 @@ export const resetSandbox = async (sourceId, options = {}) => {
     if (e?.code !== "edition-delete/active") throw e;
     throw new Error("Switch to another year before rebuilding the sandbox.");
   }
-  return cloneEdition(sourceId, { year: null, name: SANDBOX_NAME, id: SANDBOX_EDITION_ID }, options);
+
+  // ── ROUND SETUP IS FORCED ON, whatever the caller asked for ──
+  // It is OFF by default everywhere else, and rightly: WBC plays somewhere new
+  // nearly every year, so carrying last year's courses into next year's
+  // tournament seeds four rounds that all have to be re-picked, each arriving
+  // with a rating and a slope and nothing saying it is stale.
+  //
+  // A sandbox is the opposite case. Without a course there are no holes, no
+  // pars and nothing to score against, so the one screen a tester most needs
+  // to exercise cannot be opened at all — and a stale course is exactly what a
+  // sandbox wants, because it is not measuring anybody.
+  const made = await cloneEdition(
+    sourceId,
+    { year: null, name: SANDBOX_NAME, id: SANDBOX_EDITION_ID },
+    { ...options, rounds: true },
+  );
+
+  // ── AND SCORING IS FORCED OPEN ON EVERY ROUND ──
+  // lib/scoringGate closes the scoring screen for anybody who is not a
+  // director unless the round's date is TODAY and their tee time is within
+  // half an hour. A freshly cut sandbox has no dates (cloneMeta drops them on
+  // purpose), no pairings and no tee times, so every one of those checks fails
+  // and a tester gets a closed door where the app's main screen should be.
+  //
+  // That gate exists to stop Round 3 scores landing in Round 1 on a real
+  // leaderboard somebody has to go and repair. In the sandbox there is no
+  // wrong round to file against and no leaderboard that matters, so the reason
+  // for the gate is absent and the gate is pure obstruction. `scoring_open` is
+  // the director's own force-open switch — the same one Admin writes — so this
+  // is not a new mechanism, just the switch already thrown.
+  const rounds = clampRounds((await _get("tournament_state", _tidFilter(sourceId)))[0]?.meta?.rounds);
+  await _upsert("tournament_state", {
+    id: `ts_${SANDBOX_EDITION_ID}`, tournament_id: SANDBOX_EDITION_ID,
+    scoring_open: sandboxScoringOpen(rounds),
+  });
+
+  return made;
 };
 
 // Flip the active pointer, then hard-reload — see the header for why a reload
