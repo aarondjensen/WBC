@@ -26,9 +26,33 @@
 // browser grant, so permission stays "granted" forever while the honest
 // answer is "off". Only the presence of a token says whether anything will
 // actually arrive.
+//
+// ── AND A FIFTH CONVERSATION: THE NATIVE SHELLS ──
+// Everything above is web push — a service worker, the Push API, an FCM token
+// for a BROWSER. Neither Capacitor shell has any of that. iOS runs a WKWebView,
+// which exposes no Notification API and no service worker at all; Android's
+// WebView has service workers but not the Push API. So `permission` reads
+// "unsupported" inside both apps, and the two cards that state was written for
+// are addressed to somebody in a browser:
+//
+//   on iOS the app told you to tap Share → Add to Home Screen, in an app that
+//   is already on the home screen and has no Share button to tap;
+//   on Android it told you to go and use Chrome.
+//
+// Instructions that cannot be followed are what App Review's Guideline 2.1
+// rejections are made of, and a tester who follows them ends up somewhere the
+// tournament isn't. So a native shell gets its own card that says the true
+// thing, and no toggle — a switch that cannot come on is worse than no switch.
+//
+// This is a STOPGAP, and the honest version of one. Native push needs
+// @capacitor/push-notifications, an APNs key, the aps-environment entitlement
+// and a token path that registers against the player id the way the web one
+// does; until that exists the notifications are real and they arrive on the
+// web app, which is what the card points at.
 import { useState, useEffect } from "react";
 import { K, FONT, FS, R, ALPHA, MOTION } from "../theme";
 import { Card, SectionLabel, Toggle} from "./ui";
+import { isNativePlatform } from "../firebase";
 import {
   registerForPush, unsubscribeFromPush, getNotificationPermissionState,
   isStandalonePWA, isIOSPushCapable, checkSubscriptionStatus,
@@ -101,6 +125,21 @@ export function NotificationSettings({ user, notify, onPermissionChange }) {
       <SectionLabel>Notifications</SectionLabel>
       {children}
     </div>
+  );
+
+  // ── Inside the App Store / Play build ──
+  // Checked FIRST, ahead of every browser branch, because a native shell also
+  // matches "iOS" and "unsupported" and would otherwise fall into the Add to
+  // Home Screen card. See the note at the top of this file.
+  if (isNativePlatform()) return wrap(
+    <Card>
+      <div style={{ fontSize: FS.body, fontWeight: 800, color: K.t1, marginBottom: 6 }}>Not in the app yet</div>
+      <div style={{ fontSize: FS.small, color: K.t2, lineHeight: 1.5 }}>
+        Tee time and scoring alerts currently go to the web app. Open{" "}
+        <strong style={{ color: K.t1 }}>wannabecup.com</strong> in your browser, add it to your home
+        screen, and turn notifications on there — they&apos;ll reach the same phone.
+      </div>
+    </Card>
   );
 
   // ── iOS, too old ──

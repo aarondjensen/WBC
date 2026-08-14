@@ -33,15 +33,29 @@
 	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<!-- Export compliance, answered once here instead of once per upload.
+	     WBC's only encryption is HTTPS to Firebase and the platform's own
+	     keychain — both exempt under category 5 part 2 — so the honest answer
+	     is "no non-exempt encryption". Without this key App Store Connect
+	     stops every single build at a manual questionnaire before it will let
+	     TestFlight or review see it. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
 	<string>Main</string>
+	<!-- arm64, not the armv7 Capacitor's template still ships. armv7 is 32-bit
+	     hardware that stopped being supported at iOS 11; declaring it as a
+	     REQUIRED capability on an iOS 15 minimum is a requirement no device
+	     that can install this app actually meets, and it is the sort of thing
+	     that surfaces as an unexplained "compatible with 0 devices" on the
+	     App Store listing rather than as a build error. -->
 	<key>UIRequiredDeviceCapabilities</key>
 	<array>
-		<string>armv7</string>
+		<string>arm64</string>
 	</array>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
