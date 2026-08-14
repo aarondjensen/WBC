@@ -890,8 +890,15 @@ export function BettingView({
                     return (
                       <td key={i} style={{ textAlign: "center", padding: "2px 1px", borderLeft: cellBdr }}>
                         <div style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 18, height: 18, position: "relative" }}>
-                          {s && (isUnder || isSkinWinner) && <div style={{ position: "absolute", inset: 0, borderRadius: "50%", border: `1.5px solid ${circleClr}` }} />}
-                          {s && isDouble && <div style={{ position: "absolute", inset: 3, borderRadius: "50%", border: `1px solid ${circleClr}` }} />}
+                          {/* `s > 0`, not `s`. An unplayed hole normalises to
+                              the NUMBER 0 above, and `0 && <div/>` evaluates
+                              to 0 — which React renders as a literal "0"
+                              rather than nothing, the way false and undefined
+                              do. Two of these lines per cell put "00" in front
+                              of the dash on every hole the field had not
+                              reached, right across the skins card. */}
+                          {s > 0 && (isUnder || isSkinWinner) && <div style={{ position: "absolute", inset: 0, borderRadius: "50%", border: `1.5px solid ${circleClr}` }} />}
+                          {s > 0 && isDouble && <div style={{ position: "absolute", inset: 3, borderRadius: "50%", border: `1px solid ${circleClr}` }} />}
                           <span style={{ fontSize: FS.label, fontWeight: 600, color: s ? (isSkinWinner ? K.gold : K.t2) : K.t3, position: "relative", zIndex: 1 }}>{s || "–"}</span>
                         </div>
                       </td>

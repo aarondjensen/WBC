@@ -1681,7 +1681,13 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
                       const d = s ? s - holePars[h] : null;
                       return (
                         <div key={`s${h}`} style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "center", borderRight: cellBorder, height: 26 }}>
-                          {s && d != null && d !== 0 && (
+                          {/* `s > 0` rather than `s`: an unscored hole is
+                              undefined here and renders nothing, but a stored
+                              0 would render the digit — `0 && <x/>` is 0, and
+                              React prints that. The same line spelled with a
+                              bare `s` put "00" on every unplayed hole of the
+                              skins card. */}
+                          {s > 0 && d != null && d !== 0 && (
                             <>
                               <div style={{
                                 position: "absolute",
