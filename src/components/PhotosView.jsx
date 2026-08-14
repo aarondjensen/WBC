@@ -34,6 +34,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { K, FONT, FS, R, ALPHA, MOTION } from "../theme";
 import { Btn, Card, SectionLabel } from "./ui";
+import { useStableCallback } from "../lib/useStableCallback";
 import { Popup } from "./Popup";
 import { groupByRound, canDelete, validateSource, uploadFailureMessage } from "../lib/media";
 
@@ -141,20 +142,24 @@ function PendingTile({ item }) {
 function Lightbox({ item, items, onClose, onStep, onDelete, onSave, canRemove, busy, saving }) {
   const idx = items.findIndex(i => i.id === item.id);
   // The key handler is bound once, but `onStep` closes over the current photo
-  // and changes every time one is opened. Held in a ref — updated in an effect,
-  // never during render — so the listener always calls the live one without
-  // being torn down and re-added on each step.
-  const stepRef = useRef(onStep);
-  useEffect(() => { stepRef.current = onStep; }, [onStep]);
+  // and changes every time one is opened. useStableCallback gives a callable
+  // whose identity never changes but which always forwards to the live one, so
+  // the listener is never torn down and re-added on each step.
+  //
+  // This was the hand-rolled version of exactly that — a ref plus an effect to
+  // keep it current — which is the pattern the hook exists to replace. It also
+  // mirrors on a LAYOUT effect rather than a regular one, so the ref is current
+  // from the moment of commit rather than one tick later.
+  const step = useStableCallback(onStep);
 
   useEffect(() => {
     const onKey = (e) => {
-      if (e.key === "ArrowLeft") stepRef.current(-1);
-      if (e.key === "ArrowRight") stepRef.current(1);
+      if (e.key === "ArrowLeft") step(-1);
+      if (e.key === "ArrowRight") step(1);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [step]);
 
   return (
     <Popup onClose={onClose} maxWidth={640} padding={0} portal>
