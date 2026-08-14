@@ -26,6 +26,7 @@
 // with the same parsing. Refetching a course's tees and searching for a new
 // course have to agree about what a tee box is, and the only way to be sure of
 // that is for them to run the same code.
+import { apiUrl } from "./apiBase";
 import { resolveTeeColor } from "./teeColors.js";
 
 export const STATE_NAMES = { AL:"Alabama",AK:"Alaska",AZ:"Arizona",AR:"Arkansas",CA:"California",CO:"Colorado",CT:"Connecticut",DE:"Delaware",FL:"Florida",GA:"Georgia",HI:"Hawaii",ID:"Idaho",IL:"Illinois",IN:"Indiana",IA:"Iowa",KS:"Kansas",KY:"Kentucky",LA:"Louisiana",ME:"Maine",MD:"Maryland",MA:"Massachusetts",MI:"Michigan",MN:"Minnesota",MS:"Mississippi",MO:"Missouri",MT:"Montana",NE:"Nebraska",NV:"Nevada",NH:"New Hampshire",NJ:"New Jersey",NM:"New Mexico",NY:"New York",NC:"North Carolina",ND:"North Dakota",OH:"Ohio",OK:"Oklahoma",OR:"Oregon",PA:"Pennsylvania",RI:"Rhode Island",SC:"South Carolina",SD:"South Dakota",TN:"Tennessee",TX:"Texas",UT:"Utah",VT:"Vermont",VA:"Virginia",WA:"Washington",WV:"West Virginia",WI:"Wisconsin",WY:"Wyoming" };
@@ -108,7 +109,7 @@ export const fetchCourseTees = async (name, state) => {
   const stateParam = state ? `&state=${encodeURIComponent(state)}` : "";
   const found = [];
   try {
-    const r = await fetch(`/api/courses2?search=${encodeURIComponent(q)}${stateParam}`);
+    const r = await fetch(apiUrl(`/api/courses2?search=${encodeURIComponent(q)}${stateParam}`));
     if (r.ok) {
       const raw = await r.json();
       found.push(...parseRapidAPI(Array.isArray(raw) ? raw : (raw.courses || []), state));
