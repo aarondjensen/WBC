@@ -184,6 +184,77 @@ service cloud.firestore {
       return !enforcing() || isDirector();
     }
 
+    // ── A LOCKED EDITION ───────────────────────────────────────────
+    // `locked: true` on wbc_editions/{id} freezes that tournament against
+    // everybody but a director. See src/lib/editionLock.js for what it means;
+    // this is what makes it true.
+    //
+    // Why it has to live HERE and not in the app: a membership is not
+    // edition-scoped. `isMember()` asks whether you presented the tournament
+    // password, full stop — it does not ask which year you are looking at, and
+    // the Tournaments picker is offered to every member, not just directors.
+    // So any member can switch to any edition and write to it. During a beta
+    // test that is twelve strangers-to-the-data with a live tournament one tap
+    // away, and hiding the picker would not help: the app's Firebase config
+    // ships in the bundle, so anybody can talk to Firestore directly.
+    //
+    // Default UNLOCKED, three times over — a missing edition document, a
+    // missing `locked` field, and a document that cannot be read all evaluate
+    // to writable. That direction is deliberate. Seventeen years of edition
+    // rows predate this field, and a default of "locked" would freeze every
+    // one of them on deploy; worse, `ensureActiveEditionDoc` seeds the row for
+    // a new year lazily, so there is a real window in which a phone is
+    // pointed at an edition whose index document does not exist yet. Failing
+    // open there means a new tournament starts; failing closed means it
+    // cannot.
+    function editionLocked(tid) {
+      return tid != ''
+        && exists(/databases/$(database)/documents/wbc_editions/$(tid))
+        && get(/databases/$(database)/documents/wbc_editions/$(tid))
+             .data.get('locked', false) == true;
+    }
+
+    // BOTH ends of the write are checked, which matters on update: without the
+    // `request.resource` half a member could take a document that lives in a
+    // locked year and rewrite it — tournament_id included — into an unlocked
+    // one, which is an edit to the frozen tournament by another name.
+    //
+    // `resource` is null on create and `request.resource` is null on delete,
+    // so each side is guarded before its data is touched. Rules have no
+    // short-circuit surprises here: `a != null && f(a)` never evaluates f on
+    // null.
+    function editionOpen() {
+      return !(resource != null && editionLocked(resource.data.get('tournament_id', '')))
+          && !(request.resource != null && editionLocked(request.resource.data.get('tournament_id', '')));
+    }
+
+    // What every edition-scoped MEMBER write is gated on. Directors are exempt
+    // — somebody has to be able to correct a locked year, and a flag that can
+    // strand a tournament beyond repair is a worse bug than the one it fixes.
+    //
+    // Costs one document read per write, on top of the one `isMember()`
+    // already does. The note above photoUploadsOn() calls that the wrong trade
+    // on hole_scores, and for a BUDGET breaker it is — this is a different
+    // bargain: it is the only thing standing between a beta tester and a live
+    // tournament's scorecards, `exists` and `get` on the same path inside one
+    // evaluation are billed once, and a tournament's thirteen hundred scores
+    // make thirteen hundred extra reads a weekend.
+    //
+    // Order matters for that cost: editionOpen() is checked first so the
+    // common case — an unlocked year — never pays for the isDirector() read.
+    //
+    // `!enforcing()` is in here for a reason that is easy to leave out and
+    // expensive to leave out. The note on enforcing() above calls it the ONLY
+    // way back from a field that has been locked out — publish with `return
+    // false` and everybody can write again while you diagnose. A lock that
+    // survived that lever would make the escape hatch a partial one: the
+    // rules would be off and a frozen year would still be refusing scores,
+    // with the fix being a second deploy nobody mid-round would think to make.
+    // Whatever turns enforcement off turns ALL of it off.
+    function canWriteEdition() {
+      return canWrite() && (!enforcing() || editionOpen() || isDirector());
+    }
+
     // ── Which PLAYER is holding this phone ────────────────────────
     // The uid identifies an account; the tournament is played by a player_id,
     // and wbc_users/{uid} is the map between them (written at the claim
@@ -340,16 +411,20 @@ service cloud.firestore {
     //   hole_scores         scoring, obviously
     //   skins               skins and CTPs
     //   wbc_scorecard_sigs  sign, attest and unsign
+    //
+    // All of them go through canWriteEdition() rather than canWrite(): member
+    // writes, unless the edition they land in is locked, in which case only a
+    // director. See the note on editionLocked above.
     match /tournament_players/{doc} { allow read: if isOpen();
-                                      allow write: if canWrite(); }
+                                      allow write: if canWriteEdition(); }
     match /tee_assignments/{doc}    { allow read: if isOpen();
-                                      allow write: if canWrite(); }
+                                      allow write: if canWriteEdition(); }
     match /tournament_state/{doc}   { allow read: if isOpen();
-                                      allow write: if canWrite(); }
+                                      allow write: if canWriteEdition(); }
     match /wbc_rounds_state/{doc}   { allow read: if isOpen();
-                                      allow write: if canWrite(); }
+                                      allow write: if canWriteEdition(); }
     match /hole_scores/{doc}        { allow read: if isOpen();
-                                      allow write: if canWrite(); }
+                                      allow write: if canWriteEdition(); }
     // ── skins: three kinds of document, one of which is money ──────
     // This collection holds the CTP tags and the market's bets (skins
     // themselves are derived from the cards and never stored — see
@@ -400,7 +475,7 @@ service cloud.firestore {
       allow read: if !isMarketBet(resource.data)
                   || isDirector()
                   || resource.data.get('player_id', '') == myPlayerId();
-      allow create, update: if canWrite()
+      allow create, update: if canWriteEdition()
                             && (!isMarketBet(request.resource.data)
                                 || isDirector()
                                 || request.resource.data.get('player_id', '') == myPlayerId());
@@ -409,7 +484,7 @@ service cloud.firestore {
       allow delete: if canAdmin();
     }
     match /wbc_scorecard_sigs/{doc} { allow read: if isOpen();
-                                      allow write: if canWrite(); }
+                                      allow write: if canWriteEdition(); }
 
     // ── The photo library ─────────────────────────────────────────
     // One document per photo. Not the photo — the INDEX of it: where the

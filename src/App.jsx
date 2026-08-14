@@ -41,6 +41,7 @@ import { PAIRING_MODES, PAIRING_MODE_LABEL } from "./lib/pairingDraw";
 import { Popup, ConfirmModal } from "./components/Popup";
 import { EditionSwitcher } from "./components/EditionSwitcher";
 import { warmEditions } from "./lib/editions";
+import { lockNotice } from "./lib/editionLock";
 import { docIds } from "./lib/editionId";
 // The small conversions every screen does — see lib/format.
 import { teeTimeToMinutes } from "./lib/format";
@@ -661,6 +662,11 @@ export default function WBCApp() {
   // useless for anything a screen has to react to. The Players tab reads
   // `index_override` off here and writes it back, so it needs the real thing.
   const [registry, setRegistry] = useState([]);
+  // The active edition's index row. Read for one field — `locked` — see the
+  // subscription and lib/editionLock. Null until it lands, and null is
+  // UNLOCKED: a year whose row cannot be read is one the rules will let a
+  // member write to, so a banner claiming otherwise would be the lie.
+  const [activeEdition, setActiveEdition] = useState(null);
   const [holeData, setHoleData] = useState({});
   const [ctpData, setCtpData] = useState({});
   // ── The market's books, and which of them this phone may hold ──
@@ -943,6 +949,20 @@ export default function WBCApp() {
     unsubs.push(db.subscribe("hole_scores", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs, changes) => {
       const normalized = (changes || []).map(c => ({ type: c.type, row: c.doc.data() }));
       setHoleData(prev => applyScoreChanges(prev, normalized));
+    }));
+
+    // The active edition's own index row, for one field on it: `locked`. A
+    // frozen year refuses every member write in firestore.rules, and without
+    // this the refusal has no voice — scores would stop saving on a tee box
+    // with nothing on screen saying why, which is the exact failure this app
+    // has a banner for everywhere else it can happen.
+    //
+    // Subscribed rather than read once because the freeze can be thrown from
+    // another phone mid-round: a director locking the year is precisely when
+    // everybody else needs to be told, and a value read at launch would say
+    // "open" until the app was relaunched.
+    unsubs.push(db.subscribe("wbc_editions", [{ field: "id", op: "==", value: TOURNAMENT_ID }], (docs) => {
+      setActiveEdition(docs[0] || null);
     }));
 
     unsubs.push(db.subscribe("pairings", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
@@ -2515,6 +2535,25 @@ export default function WBCApp() {
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 20px", background: K.warn + ALPHA.wash, borderBottom: `1px solid ${K.warn}${ALPHA.hair}` }}>
           <span style={{ flex: 1, minWidth: 0, fontSize: FS.label, fontWeight: 600, color: K.warn, lineHeight: 1.4 }}>{GUEST_NOTICE}</span>
           <button onClick={handleLogout} style={{ flexShrink: 0, background: "transparent", border: `1px solid ${K.warn}${ALPHA.line}`, borderRadius: R.sm, color: K.warn, fontSize: FS.label, fontWeight: 700, padding: "4px 12px", cursor: "pointer" }}>Exit</button>
+        </div>
+      )}
+
+      {/* ── The frozen-year strip ──
+          Same reasoning as the guest strip above it, and the same failure it
+          prevents: a write that will never land has to say so BEFORE somebody
+          spends a round typing into it. A locked edition refuses members in
+          firestore.rules, so this is not the enforcement — it is the only
+          place the enforcement is visible.
+
+          Not shown to a director, who is exempt and would be reading a wall
+          that is not there for them, and not to a guest, who already has a
+          louder strip saying nothing they do is saved. */}
+      {!isGuest(user) && lockNotice(activeEdition, { isDirector: !!user.isDirector }) && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 20px", background: K.t3 + ALPHA.wash, borderBottom: `1px solid ${K.t3}${ALPHA.hair}` }}>
+          <span aria-hidden style={{ flexShrink: 0, fontSize: FS.label }}>🔒</span>
+          <span style={{ flex: 1, minWidth: 0, fontSize: FS.label, fontWeight: 600, color: K.t2, lineHeight: 1.4 }}>
+            {lockNotice(activeEdition, { isDirector: !!user.isDirector })}
+          </span>
         </div>
       )}
 

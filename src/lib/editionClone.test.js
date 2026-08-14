@@ -245,8 +245,31 @@ describe("editionDoc", () => {
     const d = editionDoc({ year: 2026, id: "wbc_2026", name: "", sourceId: "wbc_2025" });
     expect(d).toEqual({
       id: "wbc_2026", year: 2026, name: "WBC 2026",
-      status: "draft", created_from: "wbc_2025",
+      status: "draft", created_from: "wbc_2025", locked: false,
     });
+  });
+
+  // A year is born writable. The alternative — inheriting the source's lock —
+  // would mean every year cloned from a finished tournament starts frozen,
+  // and the director would have to unlock the thing they just asked for.
+  it("does not carry the SOURCE's lock into the new year", () => {
+    const d = editionDoc({
+      year: 2027, id: "wbc_2027", name: "", sourceId: "wbc_2026",
+      existing: null,
+    });
+    expect(d.locked).toBe(false);
+  });
+
+  // The other direction, which is the one that could lose data: cloning into
+  // a year somebody has deliberately frozen must not thaw it. The write is a
+  // merge and a director is exempt from the lock, so nothing else would have
+  // stopped it.
+  it("leaves a locked target locked", () => {
+    const d = editionDoc({
+      year: 2026, id: "wbc_2026", name: "", sourceId: "wbc_2025",
+      existing: { id: "wbc_2026", name: "The Big One", status: "published", locked: true },
+    });
+    expect(d.locked).toBe(true);
   });
 
   it("does not demote an edition that already exists", () => {

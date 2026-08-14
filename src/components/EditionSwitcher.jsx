@@ -27,11 +27,13 @@ import { getActiveTournamentId } from "../firebase";
 import {
   loadEditions, loadEditionSummaries, cachedEditionSummaries, cachedEditions,
   createEdition, cloneEdition, deleteEdition, switchEdition, ensureActiveEditionDoc,
+  setEditionLocked,
 } from "../lib/editions";
 import {
   plannedYear, plannedSource, summaryLine, editionHasContent, overwriteWarning,
 } from "../lib/editionClone";
 import { editionState, deleteVerdict, STATE_LABEL } from "../lib/editionLifecycle";
+import { isEditionLocked, lockVerdict } from "../lib/editionLock";
 
 // The gutter label on each form row — a fixed width so the two controls
 // below share a left edge.
@@ -106,6 +108,9 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
   const [createErr, setCreateErr] = useState("");
   const [pending, setPending] = useState(null);
   const [pendingDelete, setPendingDelete] = useState(null);
+  // The year a director is about to FREEZE. Unlocking never lands here — it
+  // widens what is possible and asks nothing, see lockVerdict.
+  const [pendingLock, setPendingLock] = useState(null);
   const [pendingClone, setPendingClone] = useState(null);
   const [createdEdition, setCreatedEdition] = useState(null);
   const activeId = getActiveTournamentId();
@@ -267,6 +272,27 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
   // permission.
   const stateOf = (e) => editionState(summaries?.[e.id]);
   const stateColor = (s) => s === "complete" ? K.acc : s === "live" ? K.warn : K.t3;
+
+  // ── Freeze or thaw a year ────────────────────────────────────────
+  // The row is repainted from the RETURNED value rather than re-read from
+  // Firestore: this is a single boolean the caller just set, and a full
+  // loadEditions() here would drop the summary counts on the floor and put
+  // "Counting…" back on seventeen rows for the sake of one padlock.
+  const applyLock = async (edition, next) => {
+    if (!edition?.id || busy) return;
+    setBusy(true);
+    setErr("");
+    try {
+      await setEditionLocked(edition.id, next);
+      setEditions(rows => rows.map(r => (r.id === edition.id ? { ...r, locked: next } : r)));
+      notify?.(`${edition.name || edition.year} ${next ? "locked" : "unlocked"}`);
+    } catch (e) {
+      // Says which way it failed. "Couldn't lock" on a row still showing an
+      // open padlock is the one message that leaves somebody unsure whether
+      // the tournament is protected.
+      setErr(e?.message || `Couldn't ${next ? "lock" : "unlock"} that year`);
+    } finally { setBusy(false); }
+  };
   const cloneSource = editions.find(e => e.id === cloneFrom) || null;
   // The label on a source option: the year, and what is in it. "2025 · 16
   // players · 1,368 scores" is what makes it obvious which year is worth
@@ -321,6 +347,7 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
               // A name that ISN'T the default is worth the space; the default
               // is not.
               const customName = e.name && e.name !== `WBC ${e.year}` ? e.name : null;
+              const locked = isEditionLocked(e);
               return (
                 <div key={e.id} style={{
                   display: "flex", alignItems: "center", gap: 8, borderRadius: R.sm,
@@ -349,6 +376,33 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
                       overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                     }}>{customName ? `${customName} · ${summary}` : summary}</span>
                   </button>
+                  {/* ── The padlock ──────────────────────────────────
+                      Shown to a DIRECTOR as a control and to everybody else
+                      as a fact, because a member who cannot post a score into
+                      a year is owed the reason. It sits before the ACTIVE
+                      badge and the bin so its position does not move between
+                      rows — a control that lands under your thumb in a
+                      different place on every line is one that gets tapped by
+                      accident, and this one stops a tournament. */}
+                  {canManage ? (
+                    <button
+                      onClick={() => {
+                        const v = lockVerdict(e, { isActive });
+                        if (v.confirm) setPendingLock(e);
+                        else applyLock(e, v.next);
+                      }}
+                      disabled={busy}
+                      title={lockVerdict(e, { isActive }).title}
+                      style={{
+                        flexShrink: 0, background: "transparent", border: "none",
+                        padding: "4px 6px", cursor: busy ? "default" : "pointer",
+                        fontSize: FS.body, lineHeight: 1,
+                        opacity: locked ? 1 : 0.35,
+                      }}>{locked ? "🔒" : "🔓"}</button>
+                  ) : locked ? (
+                    <span aria-label="Locked" title="Locked — only a director can change this year"
+                      style={{ flexShrink: 0, padding: "4px 6px", fontSize: FS.body, lineHeight: 1 }}>🔒</span>
+                  ) : null}
                   {isActive ? (
                     <span style={{
                       flexShrink: 0, marginRight: 8, fontSize: FS.micro, fontWeight: 800,
@@ -565,6 +619,24 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
               } finally { setBusy(false); }
             }}
             onCancel={() => setPendingDelete(null)}
+          />
+        );
+      })()}
+
+      {/* Locking asks; unlocking does not. See lockVerdict — the confirm text
+          is built there rather than here so the dangerous case (freezing the
+          year every phone in the field is currently pointed at) can be tested
+          without rendering this popup. */}
+      {pendingLock && (() => {
+        const v = lockVerdict(pendingLock, { isActive: pendingLock.id === activeId });
+        return (
+          <ConfirmModal
+            eyebrow="Freeze a year"
+            title={v.confirm.title}
+            message={v.confirm.body}
+            confirmLabel={v.confirm.confirmLabel}
+            onConfirm={() => { const t = pendingLock; setPendingLock(null); applyLock(t, v.next); }}
+            onCancel={() => setPendingLock(null)}
           />
         );
       })()}
