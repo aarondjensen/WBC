@@ -18,11 +18,15 @@ import { render, screen, cleanup } from "@testing-library/react";
 import { createElement as h } from "react";
 
 let year = 2026;
-vi.mock("../firebase", () => ({ getTournamentYear: () => year }));
+let activeId = "wbc_2026";
+vi.mock("../firebase", () => ({
+  getTournamentYear: () => year,
+  getActiveTournamentId: () => activeId,
+}));
 
 import { AppHeader } from "./AppHeader";
 
-afterEach(() => { cleanup(); year = 2026; });
+afterEach(() => { cleanup(); year = 2026; activeId = "wbc_2026"; });
 
 describe("AppHeader", () => {
   it("shows the director's location when the edition has one", () => {
@@ -71,5 +75,47 @@ describe("AppHeader", () => {
       right: h("button", null, "Account"),
     }));
     expect(screen.getByText("Account")).toBeTruthy();
+  });
+});
+
+// ── The sandbox, one tap deeper than the picker ────────────────────
+// This header is the only thing on screen that names the edition you are in,
+// and it names it by YEAR — the tournament's NAME appears nowhere in it. So
+// renaming the sandbox in Admin changed nothing, which is how the bug was
+// found: the sandbox header read "2026 · Gaylord, MI", identical to the live
+// tournament, because editionYear finds no digits in "wbc_demo" and falls back
+// to the current year.
+//
+// The DEMO badge in the Tournaments picker did not help. That is a screen you
+// leave; this is the one you stay on.
+describe("AppHeader and the sandbox", () => {
+  it("says DEMO Sandbox instead of a year", () => {
+    activeId = "wbc_demo";
+    render(h(AppHeader, { location: "" }));
+    expect(screen.getByText("DEMO Sandbox")).toBeTruthy();
+  });
+
+  // The location came across in the clone, so without this the sandbox reads
+  // "DEMO Sandbox · Gaylord, MI" — which is better, but still dresses a
+  // scratch copy in the live tournament's town.
+  it("does not borrow the live tournament's town", () => {
+    activeId = "wbc_demo";
+    render(h(AppHeader, { location: "" }));
+    expect(screen.queryByText(/Gaylord/)).toBeNull();
+  });
+
+  // A director who has typed a location into the sandbox on purpose still gets
+  // it — the fallback is what is suppressed, not the answer.
+  it("still honours a location set by hand", () => {
+    activeId = "wbc_demo";
+    render(h(AppHeader, { location: "Test Course" }));
+    expect(screen.getByText("DEMO Sandbox · Test Course")).toBeTruthy();
+  });
+
+  it("leaves a real year alone", () => {
+    activeId = "wbc_2015";
+    year = 2015;
+    render(h(AppHeader, { location: "" }));
+    expect(screen.getByText("2015 · Gull Lake View, MI")).toBeTruthy();
   });
 });

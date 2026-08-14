@@ -139,7 +139,13 @@ export const bulkLockVerdict = (editions = [], activeId = null) => {
     return {
       next: true,
       ids: open.map(e => e.id),
-      label: activeYear ? `Lock all but ${activeYear}` : "Lock every other year",
+      // "Lock every other year" was the fallback here, and on a phone it reads
+      // as ALTERNATING years rather than "all the others" — which is the one
+      // reading that would make a director hesitate over a button that locks
+      // sixteen tournaments. It is also the label the sandbox always gets,
+      // since the sandbox has no year to name: the common case, not the rare
+      // one.
+      label: activeYear ? `Lock all but ${activeYear}` : "Lock every tournament year",
       confirm: {
         title: `Lock ${n(open.length)}?`,
         body: `Only a director will be able to change ${open.length === 1 ? "it" : "them"}.`
