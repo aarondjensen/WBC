@@ -410,7 +410,7 @@ export function BuyInTracker({ players, games, onChange, outsideCandidates = [],
       )}
 
       {adding && (
-        <Popup onClose={() => setAdding(false)} maxWidth={340} padding={0} portal background={K.card} zIndex={3200}>
+        <Popup onClose={() => setAdding(false)} maxWidth={340} padding={0} portal innerStyle={{ background: K.card }} zIndex={3200}>
           <div style={{ padding: "13px 16px", borderBottom: `1px solid ${K.bdr}` }}>
             <div style={{ fontSize: FS.body, fontWeight: 800, color: K.t1 }}>Not playing this year</div>
             {/* What they are being added TO, said before the tap rather than

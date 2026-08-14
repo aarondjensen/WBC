@@ -977,7 +977,7 @@ function PlayerEditor({ editing, set, onClose, tPlayers, players, memberships, c
   };
 
   return (
-    <Popup onClose={onClose} maxWidth={420} padding={0} portal background={K.card} zIndex={3000} dismissOnBackdrop={false}>
+    <Popup onClose={onClose} maxWidth={420} padding={0} portal innerStyle={{ background: K.card }} zIndex={3000} noBackdropClose>
       <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "13px 16px", borderBottom: `1px solid ${K.bdr}` }}>
         <div style={{ flex: 1, fontSize: FS.body, fontWeight: 800, color: K.t1 }}>{isNew ? "Add Player" : "Edit Player"}</div>
         <button onClick={onClose} aria-label="Close" style={{ width: 32, height: 32, borderRadius: R.sm, border: `1px solid ${K.bdr}`, background: "transparent", color: K.t2, fontSize: FS.lead, cursor: "pointer", lineHeight: 1 }}>✕</button>

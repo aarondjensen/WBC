@@ -71,9 +71,17 @@ export function MoreMenu({ open, onClose, onSelect, isDirector, isGuest, adminFl
       {/* Full-screen catcher rather than a dimmed scrim: this menu is small
           and anchored, and darkening the whole board behind it would read as
           a modal taking over the app rather than a bar opening. */}
-      <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 200 }} />
+      <div onClick={onClose} data-popup style={{ position: "fixed", inset: 0, zIndex: 200 }} />
       <div
         {...handlers}
+        // Both halves carry the marker, and the marker is why: usePullToRefresh
+        // walks up from the touch target and bails when it crosses one, so
+        // whichever of the two the finger actually lands on has to have it.
+        // Without it a downward drag inside the open menu reached the page
+        // behind and started a refresh under it. <Popup> stamps this on its own
+        // backdrop, but this menu is not a Popup — it is an anchored bar rather
+        // than a modal — so it has to say so itself.
+        data-popup
         style={{
           position: "fixed",
           // Flush with the top of the bar: -1px so the menu's bottom border and

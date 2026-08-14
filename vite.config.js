@@ -47,6 +47,16 @@ export default defineConfig({
       },
     },
   },
+  // Force the automatic JSX runtime for the TEST transform. Without it the
+  // component tests compile to classic `React.createElement` and every one of
+  // them dies with "React is not defined", since no source file imports React
+  // by name. The production build already uses the automatic runtime; this
+  // makes the test transform agree with it.
+  //
+  // MnQ hit this first and carries the same three lines — worth knowing before
+  // anybody deletes them as redundant, because the build stays green either way
+  // and only the tests fall over.
+  esbuild: { jsx: 'automatic', jsxImportSource: 'react' },
   test: {
     // Unit tests only. firestore.rules.test.mjs is an INTEGRATION test — it
     // needs the Firestore emulator listening on 127.0.0.1:8080 and fails with
