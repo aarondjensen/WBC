@@ -6,11 +6,11 @@
 //   npm run shots -- --local         # against `npm run dev` instead
 //   npm run shots -- --edition wbc_2024
 //   npm run shots -- --only apple
-//   npm run shots -- --headless     # once the profile is already signed in
+//   npm run shots -- --headless      # no window; fine, nothing to sign in to
+//   npm run shots -- --signed-in     # if you would rather sign in by hand
 //
-// First run opens a real browser window and waits for you to sign in. The
-// profile is kept in .screenshot-profile/, so every run after that goes
-// straight to capturing.
+// It signs itself in as a GUEST and hides the guest banner. That is not a
+// dodge — see below.
 //
 // ── Why this is a script and not six taps on a phone ──────────────
 // Three details are easy to get wrong by hand, and two of them fail at the
@@ -28,8 +28,28 @@
 //
 //   AND GUEST MODE PUTS A BANNER ON EVERY SCREEN. "GUEST PREVIEW — NOTHING YOU
 //   TAP IS SAVED" is the right answer for an App Review reviewer and the wrong
-//   one for a store page. Hence the signed-in profile: it is the only reason
-//   this needs a browser it can keep.
+//   one for a store page.
+//
+// ── Why it shoots as a guest, and why that is honest ──────────────
+// This began by signing in with a kept browser profile. That does not work and
+// cannot be made to: GOOGLE REFUSES OAUTH INSIDE AN AUTOMATION-CONTROLLED
+// BROWSER. It detects the DevTools protocol connection Playwright rides on and
+// answers "Couldn't sign you in — this browser or app may not be secure",
+// whatever the account. There is no flag for it, and working around it would
+// mean defeating a security check on purpose.
+//
+// So it goes in through the front door the app already has: the guest button,
+// which reads the same live tournament every player reads. Guest mode changes
+// exactly two things on screen — the banner, and the Photos row in More — and
+// the banner is hidden for the capture via `data-guest-strip` in App.jsx.
+//
+// Hiding it makes the screenshot MORE accurate, not less: the strip is an
+// artifact of how the picture was taken, and no player signing in ever sees
+// it. Every number, name and board behind it is the real tournament.
+//
+// The one thing it costs is the photo gallery, which guest mode hides
+// deliberately. If you want that shot, take it by hand — the script says so
+// rather than quietly shipping five where you asked for six.
 //
 // ── Which edition ─────────────────────────────────────────────────
 // A FINISHED one, by default the newest that has actually been played. The
@@ -55,6 +75,7 @@ const flag = (name, fallback = null) => {
 const BASE = args.includes("--local") ? "http://localhost:5173/" : "https://wannabecup.com/";
 const EDITION = flag("edition");
 const ONLY = flag("only");
+const SIGNED_IN = args.includes("--signed-in");
 const PROFILE = path.resolve(".screenshot-profile");
 const OUT = path.resolve("store/screenshots");
 
@@ -127,11 +148,25 @@ const ask = (q) => new Promise(res => {
   rl.question(q, a => { rl.close(); res(a); });
 });
 
-// Signed in, or still looking at the door? The sign-in screen is the one place
-// the guest button lives, so its absence is the signal — and it is a more
-// honest check than looking for a tab, which a half-loaded app also lacks.
-const signedIn = async (page) =>
+// Past the door? The guest button lives on the sign-in screen and nowhere
+// else, so its absence is the signal — a more honest check than looking for a
+// tab, which a half-loaded app also lacks.
+const inside = async (page) =>
   (await page.getByText("No account needed", { exact: false }).count()) === 0;
+
+// In as a guest, with the banner taken off the picture. See the note at the
+// top for why this is the front door rather than a shortcut past one.
+const enterAsGuest = async (page) => {
+  if (await inside(page)) return;
+  await page.getByText("Live Leaderboard", { exact: false }).first().click({ timeout: 15000 });
+  await page.waitForTimeout(2500);
+};
+
+// Re-applied after every navigation: the app re-renders the strip on each
+// screen, so hiding it once would only clean up the first shot.
+const hideGuestStrip = (page) => page.addStyleTag({
+  content: "[data-guest-strip]{display:none !important}",
+}).catch(() => {});
 
 // Every shot that did not land. Counted rather than shrugged off: a run that
 // captures two of five and prints "Done" is the shape of a store upload with
@@ -166,28 +201,33 @@ async function capture(target) {
   await page.goto(BASE, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(3500);
 
-  if (!await signedIn(page) && !process.stdin.isTTY) {
-    await ctx.close();
-    throw new Error(
-      "Not signed in, and nothing here can ask. Run it once from a terminal, " +
-      "headed, and sign in — the profile is reused after that.");
+  if (SIGNED_IN) {
+    if (!await inside(page) && !process.stdin.isTTY) {
+      await ctx.close();
+      throw new Error("--signed-in needs a terminal to ask in, and there is none.");
+    }
+    if (!await inside(page)) {
+      console.log(`\n  Sign in in the window that opened, then come back here.`);
+      console.log(`  If Google refuses ("this browser may not be secure"), that is`);
+      console.log(`  automation detection and it cannot be argued with — drop the`);
+      console.log(`  --signed-in flag and let it shoot as a guest instead.`);
+      await ask("  Press Enter once you are looking at the leaderboard… ");
+    }
+  } else {
+    await enterAsGuest(page);
   }
-  if (!await signedIn(page)) {
-    console.log(`\n  Sign in in the browser window that just opened, then come back here.`);
-    console.log(`  Shoot signed in, not as a guest: guest mode banners every screen.`);
-    await ask("  Press Enter once you are looking at the leaderboard… ");
-    await page.waitForTimeout(1500);
-  }
-  if (!await signedIn(page)) {
+  if (!await inside(page)) {
     await ctx.close();
-    throw new Error("Still on the sign-in screen — nothing captured.");
+    throw new Error("Never got past the sign-in screen — nothing captured.");
   }
 
   for (const shot of SHOTS) {
     try {
       await page.goto(BASE, { waitUntil: "domcontentloaded" });
       await page.waitForTimeout(2500);
+      if (!SIGNED_IN) await enterAsGuest(page);
       await shot.go(page);
+      await hideGuestStrip(page);
       const png = await page.screenshot();
       const out = path.join(dir, `${shot.file}.png`);
       // Flattened for Play, and only for Play: it is the store that refuses an
@@ -209,7 +249,13 @@ console.log(`  from   ${BASE}`);
 console.log(`  into   ${OUT}`);
 if (EDITION) console.log(`  edition ${EDITION}`);
 console.log(`\n  Shoot a FINISHED edition — an upcoming year's boards are empty.`);
-console.log(`  Never the sandbox: its header says DEMO Sandbox.\n`);
+console.log(`  Never the sandbox: its header says DEMO Sandbox.`);
+if (!SIGNED_IN) {
+  console.log(`\n  Capturing as a guest, banner hidden. Same live tournament, same`);
+  console.log(`  boards. The photo gallery is the one screen guest mode withholds —`);
+  console.log(`  take that one by hand if you want it.`);
+}
+console.log("");
 
 for (const t of TARGETS) {
   if (ONLY && ONLY !== t.name) continue;
