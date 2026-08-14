@@ -33,16 +33,16 @@
 	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Choose photos from your library to add to the tournament gallery.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Take photos during the tournament to add to the shared gallery.</string>
 	<!-- Export compliance, answered once here instead of once per upload.
 	     WBC's only encryption is HTTPS to Firebase and the platform's own
 	     keychain — both exempt under category 5 part 2 — so the honest answer
 	     is "no non-exempt encryption". Without this key App Store Connect
 	     stops every single build at a manual questionnaire before it will let
 	     TestFlight or review see it. -->
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Choose photos from your library to add to the tournament gallery.</string>
-	<key>NSCameraUsageDescription</key>
-	<string>Take photos during the tournament to add to the shared gallery.</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
