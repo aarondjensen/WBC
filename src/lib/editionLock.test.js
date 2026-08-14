@@ -20,7 +20,7 @@
 // to be in front of them before they tap, and it is the assertion most likely
 // to be lost in a refactor of the copy.
 import { describe, it, expect } from "vitest";
-import { isEditionLocked, lockVerdict, lockBadge, lockNotice } from "./editionLock";
+import { isEditionLocked, lockVerdict, bulkLockVerdict, lockBadge, lockNotice } from "./editionLock";
 
 describe("isEditionLocked", () => {
   it("is true only for an explicit true", () => {
@@ -86,6 +86,81 @@ describe("lockVerdict", () => {
   it("survives an edition with no year at all", () => {
     expect(() => lockVerdict({ id: "wbc_masters" })).not.toThrow();
     expect(lockVerdict({}).confirm.title).toContain("this year");
+  });
+});
+
+describe("bulkLockVerdict", () => {
+  const YEARS = [
+    { id: "wbc_2027", year: 2027 },
+    { id: "wbc_2026", year: 2026 },
+    { id: "wbc_2025", year: 2025 },
+  ];
+
+  it("offers to lock every year but the active one", () => {
+    const v = bulkLockVerdict(YEARS, "wbc_2027");
+    expect(v.next).toBe(true);
+    expect(v.ids.sort()).toEqual(["wbc_2025", "wbc_2026"]);
+    expect(v.label).toBe("Lock all but 2027");
+  });
+
+  // The one guarantee this control makes. The active year is the tournament
+  // being played, and freezing it is a decision with its own warning on its
+  // own row — never a side effect of tidying the other sixteen.
+  it("never touches the active year, in either direction", () => {
+    expect(bulkLockVerdict(YEARS, "wbc_2027").ids).not.toContain("wbc_2027");
+    const allShut = YEARS.map(e => (e.id === "wbc_2027" ? e : { ...e, locked: true }));
+    expect(bulkLockVerdict(allShut, "wbc_2027").ids).not.toContain("wbc_2027");
+  });
+
+  it("only names the years that are actually open", () => {
+    const half = [
+      { id: "wbc_2027", year: 2027 },
+      { id: "wbc_2026", year: 2026, locked: true },
+      { id: "wbc_2025", year: 2025 },
+    ];
+    const v = bulkLockVerdict(half, "wbc_2027");
+    expect(v.ids).toEqual(["wbc_2025"]);
+    expect(v.confirm.title).toBe("Lock 1 year?");
+  });
+
+  // Once there is nothing left to lock the same slot has to do something
+  // useful, or a director who locked everything is back to seventeen taps to
+  // undo it.
+  it("turns into Unlock all once everything else is shut", () => {
+    const allShut = YEARS.map(e => (e.id === "wbc_2027" ? e : { ...e, locked: true }));
+    const v = bulkLockVerdict(allShut, "wbc_2027");
+    expect(v.next).toBe(false);
+    expect(v.label).toBe("Unlock all");
+    expect(v.ids.sort()).toEqual(["wbc_2025", "wbc_2026"]);
+  });
+
+  // Unlike the single toggle, which lets an unlock through unasked. A bulk
+  // action flattens whatever pattern of locks was there and nothing remembers
+  // it, so neither direction is a tap-again undo.
+  it("asks in both directions, and says the unlock cannot be undone", () => {
+    expect(bulkLockVerdict(YEARS, "wbc_2027").confirm).toBeTruthy();
+    const allShut = YEARS.map(e => (e.id === "wbc_2027" ? e : { ...e, locked: true }));
+    expect(bulkLockVerdict(allShut, "wbc_2027").confirm.body).toMatch(/cannot be undone/i);
+  });
+
+  it("says nothing when there is no other year to act on", () => {
+    expect(bulkLockVerdict([{ id: "wbc_2027", year: 2027 }], "wbc_2027")).toBeNull();
+    expect(bulkLockVerdict([], "wbc_2027")).toBeNull();
+    expect(bulkLockVerdict()).toBeNull();
+  });
+
+  // No active edition resolved yet — the picker can render before
+  // getActiveTournamentId has anything to say. Every year is fair game then,
+  // and the label cannot promise to spare one.
+  it("copes with no active year at all", () => {
+    const v = bulkLockVerdict(YEARS, null);
+    expect(v.ids.length).toBe(3);
+    expect(v.label).toBe("Lock every other year");
+  });
+
+  it("counts in plain language", () => {
+    expect(bulkLockVerdict(YEARS, "wbc_2027").confirm.confirmLabel).toBe("Lock 2 years");
+    expect(bulkLockVerdict(YEARS.slice(0, 2), "wbc_2027").confirm.confirmLabel).toBe("Lock 1 year");
   });
 });
 

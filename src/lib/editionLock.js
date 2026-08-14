@@ -89,6 +89,71 @@ export const lockVerdict = (edition, { isActive = false } = {}) => {
   };
 };
 
+// ── Every year at once ─────────────────────────────────────────────
+// Seventeen editions is seventeen taps, and the whole point of the padlock is
+// a setup a director does once before handing the app to testers: freeze the
+// history, leave the sandbox open. Doing that one row at a time is the kind of
+// chore that gets abandoned halfway, which leaves exactly the hole the lock
+// was for.
+//
+// ONE BUTTON, and what it offers depends on where things stand: while any
+// other year is open it locks them, and once they are all shut the same slot
+// unlocks everything — because "lock all but the active year" with nothing
+// left to lock is a dead control, and a dead control is worse than a different
+// one.
+//
+// THE ACTIVE YEAR IS NEVER TOUCHED, in either direction. It is the tournament
+// being played; freezing it is a thing a director might well want, but never
+// as a side effect of tidying up the other sixteen. The single padlock on its
+// own row is where that decision belongs, and it asks first.
+//
+// BOTH DIRECTIONS ASK HERE, which is where this parts company with the single
+// toggle above. That one lets an unlock through without a question because
+// tapping it again puts the year back exactly as it was. A bulk action has no
+// such undo: it flattens whatever pattern of locks was there, and once
+// "unlock all" has run, nothing remembers which years were frozen a moment
+// ago. Re-locking is not an undo, it is a different arrangement.
+//
+// Null when there is nothing to offer — one edition, or none — so the caller
+// renders no button rather than a disabled one.
+export const bulkLockVerdict = (editions = [], activeId = null) => {
+  const others = (editions || []).filter(e => e?.id && e.id !== activeId);
+  if (!others.length) return null;
+
+  const active = (editions || []).find(e => e?.id === activeId) || null;
+  const activeYear = active?.year ?? null;
+  const open = others.filter(e => !isEditionLocked(e));
+  const n = (c) => `${c} ${c === 1 ? "year" : "years"}`;
+
+  if (open.length) {
+    return {
+      next: true,
+      ids: open.map(e => e.id),
+      label: activeYear ? `Lock all but ${activeYear}` : "Lock every other year",
+      confirm: {
+        title: `Lock ${n(open.length)}?`,
+        body: `Only a director will be able to change ${open.length === 1 ? "it" : "them"}.`
+          + (activeYear ? ` ${activeYear} stays open — it is the tournament being played.` : "")
+          + ` Reading is unaffected: every leaderboard, card and photo stays visible to everyone.`,
+        confirmLabel: `Lock ${n(open.length)}`,
+      },
+    };
+  }
+
+  return {
+    next: false,
+    ids: others.map(e => e.id),
+    label: "Unlock all",
+    confirm: {
+      title: `Unlock ${n(others.length)}?`,
+      body: `Every member will be able to post scores, sign cards and place bets in `
+        + `${others.length === 1 ? "it" : "all of them"} again. Nothing remembers which years `
+        + `were locked, so this cannot be undone by locking them back.`,
+      confirmLabel: `Unlock ${n(others.length)}`,
+    },
+  };
+};
+
 // The one-word state for a row in the list. Null when there is nothing to say,
 // so a caller can render nothing rather than an empty badge.
 export const lockBadge = (edition) => (isEditionLocked(edition) ? "LOCKED" : null);
