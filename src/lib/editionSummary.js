@@ -135,11 +135,17 @@ export const writeSummaryCache = (byId = {}) => {
 // grows from a strip to its full height. Remembering the rows means the years
 // are drawn on the frame it opens, and the read that follows corrects them.
 //
-// Only what a row is DRAWN from is kept — id, year, name. Nothing decides
-// anything off this: the delete guard re-reads the year's counts itself, and a
-// year deleted from another phone disappears the moment the real list lands.
+// Only what a row is DRAWN from is kept — id, year, name, locked. Nothing
+// decides anything off this: the delete guard re-reads the year's counts
+// itself, the LOCK is enforced in firestore.rules rather than from this
+// padlock, and a year deleted from another phone disappears the moment the
+// real list lands.
 export const EDITIONS_CACHE_KEY = "wbc_edition_list";
-export const EDITIONS_CACHE_VERSION = 1;
+// 2: `locked` joined the slim row. A version-1 cache has no such field, and
+// every row read out of one would paint as unlocked — a padlock missing from a
+// frozen year is the wrong direction to be wrong in, so the old shape is
+// discarded rather than read.
+export const EDITIONS_CACHE_VERSION = 2;
 
 // Null rather than [] when there is nothing cached, so the picker can tell
 // "we don't know the years yet" (show "Loading…") from "we know, and there are
@@ -163,7 +169,7 @@ export const writeEditionsCache = (rows = []) => {
   try {
     const slim = (rows || [])
       .filter(e => e?.id)
-      .map(e => ({ id: e.id, year: Number(e.year) || 0, name: e.name || "" }));
+      .map(e => ({ id: e.id, year: Number(e.year) || 0, name: e.name || "", locked: e.locked === true }));
     s.setItem(EDITIONS_CACHE_KEY, JSON.stringify({ v: EDITIONS_CACHE_VERSION, rows: slim }));
     return true;
   } catch { return false; }

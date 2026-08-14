@@ -144,8 +144,8 @@ describe("the years cache", () => {
   it("hands the years straight back, in the order they were written", () => {
     expect(writeEditionsCache(ROWS)).toBe(true);
     expect(readEditionsCache()).toEqual([
-      { id: "wbc_2026", year: 2026, name: "WBC 2026" },
-      { id: "wbc_2015", year: 2015, name: "Gull Lake View" },
+      { id: "wbc_2026", year: 2026, name: "WBC 2026", locked: false },
+      { id: "wbc_2015", year: 2015, name: "Gull Lake View", locked: false },
     ]);
   });
 
@@ -153,8 +153,21 @@ describe("the years cache", () => {
     writeEditionsCache(ROWS);
     // `status` is the field lib/editionLifecycle exists because nobody
     // maintains — a cached copy of it would be a second, staler source for
-    // something nothing here reads.
-    expect(Object.keys(readEditionsCache()[0]).sort()).toEqual(["id", "name", "year"]);
+    // something nothing here reads. `locked` is the exception and earns it:
+    // it is drawn (the padlock on the row) and it cannot be derived from
+    // anything, so leaving it out means the picker paints every frozen year
+    // as open for the length of a Firestore read.
+    expect(Object.keys(readEditionsCache()[0]).sort()).toEqual(["id", "locked", "name", "year"]);
+  });
+
+  // Cached as a real boolean, whatever the row carried. A row read out of a
+  // pre-lock edition document has no `locked` at all, and `undefined` would
+  // vanish through JSON.stringify and come back as a missing key.
+  it("caches the lock as a boolean, even when the row has no such field", () => {
+    writeEditionsCache([{ id: "wbc_2019", year: 2019, name: "WBC 2019" }]);
+    expect(readEditionsCache()[0].locked).toBe(false);
+    writeEditionsCache([{ id: "wbc_2019", year: 2019, name: "WBC 2019", locked: true }]);
+    expect(readEditionsCache()[0].locked).toBe(true);
   });
 
   it("drops a row with no id, which nothing could be keyed on", () => {

@@ -323,6 +323,155 @@ await check("director can remove a photo somebody else posted", () =>
 await check("director can clear the budget circuit breaker by hand", () =>
   assertSucceeds(setDoc(doc(aaron, "wbc_config/photos"), { uploadsDisabled: false })));
 
+// ══════════════════════════════════════════════════════════════════
+//  A LOCKED EDITION
+// ══════════════════════════════════════════════════════════════════
+//
+// `locked: true` on an edition freezes that year against everybody but a
+// director. It exists because a membership is not edition-scoped — being in
+// the tournament lets you write to EVERY tournament, and the Tournaments
+// picker is offered to every member — so twelve beta testers with the event
+// password are twelve people one tap away from the live scorecards.
+//
+// Four things have to hold, and the last two are the ones that would make this
+// a worse bug than the one it fixes:
+//
+//   • a locked year refuses a member's writes, on every collection
+//   • a DIRECTOR still gets through, or a mis-tapped padlock strands a
+//     tournament with nobody able to correct it
+//   • it fails OPEN — no edition document, or no tournament_id on the row,
+//     means writable. `ensureActiveEditionDoc` seeds the index row lazily, so
+//     there is a real window where a new year is being played before its
+//     document exists, and failing closed there means the tournament cannot
+//     start
+//   • READING is untouched. Freezing a year is not hiding it.
+//
+// `carl` is the plain member here: `mike` was appointed a director further up
+// and would pass the exemption rather than test it.
+await env.withSecurityRulesDisabled(async (ctx) => {
+  const db = ctx.firestore();
+  await setDoc(doc(db, "wbc_editions/wbc_2019"), { id: "wbc_2019", year: 2019, locked: true });
+  await setDoc(doc(db, "wbc_editions/wbc_2026"), { id: "wbc_2026", year: 2026, locked: false });
+  // The row a member will try to drag out of the frozen year, and one in the
+  // open year to drag INTO it.
+  await setDoc(doc(db, "hole_scores/hs_locked_1"), { tournament_id: "wbc_2019", score: 4 });
+  await setDoc(doc(db, "hole_scores/hs_open_1"), { tournament_id: "wbc_2026", score: 4 });
+});
+
+// The control: the same write, one year either side of the padlock.
+await check("member can write a hole score in an UNLOCKED year", () =>
+  assertSucceeds(setDoc(doc(carl, "hole_scores/hs_open_2"), { tournament_id: "wbc_2026", score: 4 })));
+await check("member CANNOT write a hole score in a LOCKED year", () =>
+  assertFails(setDoc(doc(carl, "hole_scores/hs_locked_2"), { tournament_id: "wbc_2019", score: 4 })));
+
+// Every other collection a phone writes during a round. A lock that held on
+// scores but let a card be signed, a tee changed or a man withdrawn would be
+// a lock in name only.
+await check("member CANNOT set a tee in a locked year", () =>
+  assertFails(setDoc(doc(carl, "tee_assignments/ta_locked"), { tournament_id: "wbc_2019", tee_name: "Blue" })));
+await check("member CANNOT withdraw somebody in a locked year", () =>
+  assertFails(setDoc(doc(carl, "tournament_players/tp_locked"), { tournament_id: "wbc_2019", status: "WD" })));
+await check("member CANNOT finalize in a locked year", () =>
+  assertFails(setDoc(doc(carl, "tournament_state/ts_locked"), { tournament_id: "wbc_2019", finalized: {} })));
+await check("member CANNOT write round state in a locked year", () =>
+  assertFails(setDoc(doc(carl, "wbc_rounds_state/rs_locked"), { tournament_id: "wbc_2019", round: 1 })));
+await check("member CANNOT sign a card in a locked year", () =>
+  assertFails(setDoc(doc(carl, "wbc_scorecard_sigs/sig_locked"), { tournament_id: "wbc_2019", groupKey: "g1" })));
+await check("member CANNOT tag a CTP in a locked year", () =>
+  assertFails(setDoc(doc(carl, "skins/ctp_locked"), { tournament_id: "wbc_2019", skin_type: "ctp", hole: 7 })));
+
+// Deleting out of a frozen year is an edit to it.
+await check("member CANNOT delete out of a locked year", () =>
+  assertFails(deleteDoc(doc(carl, "hole_scores/hs_locked_1"))));
+
+// ── Both ends of an update, which is the hole a naive version leaves ──
+// Checking only the incoming document would let a member take a card that
+// lives in the frozen year and rewrite it into an open one — the frozen
+// tournament edited, by relabelling rather than by writing.
+await check("member CANNOT move a row OUT of a locked year", () =>
+  assertFails(setDoc(doc(carl, "hole_scores/hs_locked_1"), { tournament_id: "wbc_2026", score: 9 }, { merge: true })));
+await check("member CANNOT move a row INTO a locked year", () =>
+  assertFails(setDoc(doc(carl, "hole_scores/hs_open_1"), { tournament_id: "wbc_2019", score: 9 }, { merge: true })));
+
+// ── The exemption, which is what keeps a mis-tap recoverable ──
+await check("director CAN write a hole score in a locked year", () =>
+  assertSucceeds(setDoc(doc(aaron, "hole_scores/hs_locked_3"), { tournament_id: "wbc_2019", score: 5 })));
+await check("director CAN delete out of a locked year", () =>
+  assertSucceeds(deleteDoc(doc(aaron, "hole_scores/hs_locked_3"))));
+await check("director CAN unlock a year", () =>
+  assertSucceeds(setDoc(doc(aaron, "wbc_editions/wbc_2019"), { locked: false }, { merge: true })));
+await check("member CANNOT unlock a year", () =>
+  assertFails(setDoc(doc(carl, "wbc_editions/wbc_2019"), { locked: false }, { merge: true })));
+
+// ── Fails OPEN, three ways ──
+// Each of these is a shape that exists in the real database right now, and
+// every one of them has to stay writable. A default of "locked" here would
+// have frozen seventeen years of tournaments on deploy and stopped the next
+// one from starting.
+await check("no edition document at all: still writable", () =>
+  assertSucceeds(setDoc(doc(carl, "hole_scores/hs_noedition"), { tournament_id: "wbc_1999", score: 4 })));
+await check("no tournament_id on the row: still writable", () =>
+  assertSucceeds(setDoc(doc(carl, "hole_scores/hs_notid"), { score: 4 })));
+await check("edition document with no locked field: still writable", async () => {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), "wbc_editions/wbc_2013"), { id: "wbc_2013", year: 2013 });
+  });
+  return assertSucceeds(setDoc(doc(carl, "hole_scores/hs_2013"), { tournament_id: "wbc_2013", score: 4 }));
+});
+
+// ── Freezing is not hiding ──
+await env.withSecurityRulesDisabled(async (ctx) => {
+  await setDoc(doc(ctx.firestore(), "wbc_editions/wbc_2019"), { locked: true }, { merge: true });
+});
+await check("a locked year is still readable by a member", () =>
+  assertSucceeds(getDoc(doc(carl, "hole_scores/hs_locked_1"))));
+await check("a locked year is still readable by a guest", () =>
+  assertSucceeds(getDoc(doc(anon, "hole_scores/hs_locked_1"))));
+
+// ── And it lifts ──
+await env.withSecurityRulesDisabled(async (ctx) => {
+  await setDoc(doc(ctx.firestore(), "wbc_editions/wbc_2019"), { locked: false }, { merge: true });
+});
+await check("unlocked again: the member's write lands", () =>
+  assertSucceeds(setDoc(doc(carl, "hole_scores/hs_thawed"), { tournament_id: "wbc_2019", score: 4 })));
+
+// ── The escape hatch still opens everything ──────────────────────
+// enforcing() is documented above as the ONLY way back from a field that has
+// been locked out: publish with `return false` and every phone can write again
+// while somebody works out what happened. A lock that survived that lever
+// would make it a partial escape — rules off, and a frozen year still refusing
+// scores on a tee box, fixable only by a second deploy nobody mid-round would
+// think to make.
+//
+// Checked against a SEPARATE environment holding a patched copy of the rules,
+// because enforcing() is a constant in the file and there is no other way to
+// ask this question. The patch is asserted to have applied: a silent no-op
+// here would leave a test that passes by testing nothing.
+{
+  const source = fs.readFileSync("firestore.rules", "utf8");
+  const patched = source.replace(
+    /function enforcing\(\) \{\s*return true;\s*\}/,
+    "function enforcing() {\n      return false;\n    }",
+  );
+  await check("the enforcing() patch actually applied", async () => {
+    if (patched === source) throw new Error("enforcing() not found — this block is testing nothing");
+  });
+
+  const off = await initializeTestEnvironment({
+    projectId: "wbc-rules-test-unenforced",
+    firestore: { host: "127.0.0.1", port: 8080, rules: patched },
+  });
+  await off.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), "wbc_editions/wbc_2019"), { id: "wbc_2019", year: 2019, locked: true });
+  });
+  // Not merely a non-member — an ANONYMOUS caller, which is the state a phone
+  // is in when the thing being escaped is the membership check itself.
+  const stranded = off.unauthenticatedContext().firestore();
+  await check("enforcement OFF: a locked year takes writes again", () =>
+    assertSucceeds(setDoc(doc(stranded, "hole_scores/hs_escape"), { tournament_id: "wbc_2019", score: 4 })));
+  await off.cleanup();
+}
+
 await env.cleanup();
 for (const [s, n, e] of results) console.log(s.padEnd(5), n, e ? `— ${e}` : "");
 const failed = results.filter(r => r[0] === "FAIL").length;

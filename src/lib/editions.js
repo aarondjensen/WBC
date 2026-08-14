@@ -254,6 +254,33 @@ export const createEdition = async ({ year, name, id }) => {
 // because every existing document carries one and dropping it mid-flight would
 // leave a half-populated collection — nothing reads it.
 
+// ── Freeze a year against everybody but a director ──────────────────
+// The one stored flag on an edition that something actually reads, and what
+// reads it is firestore.rules — see canWriteEdition() there, and
+// lib/editionLock.js for why a lock is stored when the lifecycle state is not.
+//
+// A single-field merge, deliberately: rewriting the whole document would mean
+// reading it first, and a stale read would put back a name or a year that
+// somebody else had just changed. Nothing else on the row is this caller's
+// business.
+//
+// Only a director can land this — `wbc_editions` has been director-only since
+// before the flag existed — so there is no client-side guard here. The picker
+// hides the control from a member so they are not offered a tap that comes
+// back refused, which is the same division of labour as everywhere else in
+// this app: the rules decide, the UI declines to lie about it.
+export const setEditionLocked = async (id, locked) => {
+  if (!id) return null;
+  const row = { id: String(id), locked: locked === true };
+  await _upsert(EDITIONS_COL, row);
+  // The cached index is what the picker paints from on its next open, and it
+  // is written by loadEditions. Leaving a stale `locked` in it would show the
+  // padlock back to front until something else forced a reload.
+  const cached = readEditionsCache();
+  if (cached) writeEditionsCache(cached.map(e => (e.id === row.id ? { ...e, locked: row.locked } : e)));
+  return row;
+};
+
 // ── Clone an existing edition into another year ─────────────────────
 // Copies only the STRUCTURAL setup the caller opts into. RESULTS ARE NEVER
 // CLONED — scores, pairings, tee assignments, skins/CTP, scorecard signatures

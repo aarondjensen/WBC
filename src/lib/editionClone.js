@@ -227,6 +227,14 @@ export const editionDoc = ({ year, id, name, sourceId = null, existing = null })
   name: String(name ?? "").trim() || existing?.name || `WBC ${year}`,
   status: existing?.status || "draft",
   created_from: sourceId ?? existing?.created_from ?? null,
+  // Carried from the target, never from the SOURCE. A clone copies last year's
+  // setup into this year; it does not copy last year's decision to freeze
+  // itself, or every year cloned from a finished tournament would be born
+  // locked. Carrying the target's own value is what stops a clone into a
+  // locked year quietly unlocking it — which is the direction that matters,
+  // because the write goes through setDoc with merge and a director is exempt
+  // from the lock they would be clearing. See lib/editionLock.js.
+  locked: existing?.locked === true,
 });
 
 // What the confirm has to say before a clone lands in a year that already

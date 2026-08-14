@@ -25,13 +25,20 @@ import { createElement as h } from "react";
 const EDITIONS = [
   { id: "wbc_2026", year: 2026, name: "WBC 2026" },
   { id: "wbc_2025", year: 2025, name: "WBC 2025" },
-  { id: "wbc_2015", year: 2015, name: "WBC 2015" },
+  // Frozen: the finished year a director locked so a beta tester with the
+  // event password cannot post a score into it.
+  { id: "wbc_2015", year: 2015, name: "WBC 2015", locked: true },
 ];
 const SUMMARIES = {
   wbc_2026: { players: 0, rounds: 0, scores: 0 },
   wbc_2025: { players: 16, rounds: 4, scores: 1152, roundCount: 4, finalizedRounds: { 1: true, 2: true, 3: true, 4: true }, pairings: {} },
   wbc_2015: { players: 12, rounds: 4, scores: 864, roundCount: 4, finalizedRounds: { 1: true, 2: true, 3: true, 4: true }, pairings: {} },
 };
+
+// Every (id, locked) the picker asked lib/editions to write. vi.hoisted, and
+// declared up here, because the mock factory below is lifted over the imports
+// and closes over it.
+const locks = vi.hoisted(() => []);
 
 // firebase.js initializes an app at import time, and lib/editions is the
 // module that talks to Firestore — both are mocked, so this is a render test
@@ -57,11 +64,12 @@ vi.mock("../lib/editions", () => ({
   cloneEdition: async () => ({ id: "wbc_2027" }),
   deleteEdition: async () => true,
   switchEdition: () => {},
+  setEditionLocked: (...a) => { locks.push(a); return Promise.resolve({ id: a[0], locked: a[1] }); },
 }));
 
 const { EditionSwitcher } = await import("./EditionSwitcher");
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); locks.length = 0; });
 
 const open = (props = {}) =>
   render(h(EditionSwitcher, { open: true, onClose: () => {}, canManage: true, ...props }));
@@ -154,5 +162,72 @@ describe("EditionSwitcher", () => {
     // The seeding runs until the real counts arrive; a year already typed is
     // not one of the things it may correct.
     expect(screen.getByPlaceholderText("Year").value).toBe("2030");
+  });
+
+  // ── The padlock ──────────────────────────────────────────────────
+  // firestore.rules is what a lock actually IS — firestore.rules.test.mjs
+  // proves a member's write into a frozen year is refused. What is pinned
+  // here is only the picker's half: that a director is offered the control,
+  // that a member is shown the state without it, and that the one tap which
+  // can stop a live tournament asks first.
+  describe("locking a year", () => {
+    const padlocks = () => screen.getAllByTitle(/^(Lock|Unlock) /);
+
+    it("offers a director a control on every year", async () => {
+      open();
+      await screen.findByText("2026");
+      expect(padlocks().length).toBe(EDITIONS.length);
+      // Pointed the right way round: 2015 is the locked one.
+      expect(screen.getByTitle(/^Unlock 2015/)).toBeTruthy();
+      expect(screen.getByTitle(/^Lock 2026/)).toBeTruthy();
+    });
+
+    // A member cannot write wbc_editions, so a padlock they could tap would be
+    // a control whose every use comes back refused. They still need to see
+    // WHY their scores will not save.
+    it("shows a member the state and no control", async () => {
+      open({ canManage: false });
+      await screen.findByText("2015");
+      expect(screen.queryAllByTitle(/^(Lock|Unlock) /).length).toBe(0);
+      expect(screen.getByLabelText("Locked")).toBeTruthy();
+    });
+
+    it("unlocks on one tap, without a dialog", async () => {
+      open();
+      await screen.findByText("2015");
+      fireEvent.click(screen.getByTitle(/^Unlock 2015/));
+      await waitFor(() => expect(locks).toEqual([["wbc_2015", false]]));
+    });
+
+    // Locking is the direction that takes something away, so it asks — and
+    // nothing is written until it is answered.
+    it("asks before freezing a year, and writes nothing if cancelled", async () => {
+      open();
+      await screen.findByText("2025");
+      fireEvent.click(screen.getByTitle(/^Lock 2025/));
+      expect(screen.getByText("Lock 2025?")).toBeTruthy();
+      fireEvent.click(screen.getByText("Cancel"));
+      expect(locks).toEqual([]);
+    });
+
+    it("writes the lock once the director confirms", async () => {
+      open();
+      await screen.findByText("2025");
+      fireEvent.click(screen.getByTitle(/^Lock 2025/));
+      fireEvent.click(screen.getByText("Lock it"));
+      await waitFor(() => expect(locks).toEqual([["wbc_2025", true]]));
+    });
+
+    // The dangerous one. 2026 is the ACTIVE edition here (see the firebase
+    // mock), so freezing it stops scoring for everybody currently on it —
+    // and the director doing it is exempt, so nothing on their own screen
+    // will look any different afterwards.
+    it("warns that locking the active year stops the field", async () => {
+      open();
+      await screen.findByText("2026");
+      fireEvent.click(screen.getByTitle(/^Lock 2026/));
+      expect(screen.getByText(/right now/i)).toBeTruthy();
+      expect(screen.getByText(/directors are exempt/i)).toBeTruthy();
+    });
   });
 });
