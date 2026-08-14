@@ -521,10 +521,14 @@ export const resetSandbox = async (sourceId, options = {}) => {
   // pars and nothing to score against, so the one screen a tester most needs
   // to exercise cannot be opened at all — and a stale course is exactly what a
   // sandbox wants, because it is not measuring anybody.
+  // `tournamentName` is forced on alongside it because meta carries the ROUND
+  // COUNT, and a sandbox without one falls back to a default that may not match
+  // the tournament it was cut from — four rounds of setup with three rounds of
+  // app around it.
   const made = await cloneEdition(
     sourceId,
     { year: null, name: SANDBOX_NAME, id: SANDBOX_EDITION_ID },
-    { ...options, rounds: true },
+    { ...options, rounds: true, tournamentName: true },
   );
 
   // ── AND SCORING IS FORCED OPEN ON EVERY ROUND ──
@@ -540,10 +544,24 @@ export const resetSandbox = async (sourceId, options = {}) => {
   // for the gate is absent and the gate is pure obstruction. `scoring_open` is
   // the director's own force-open switch — the same one Admin writes — so this
   // is not a new mechanism, just the switch already thrown.
+  //
+  // ── AND THE TOURNAMENT RENAMES ITSELF ──
+  // cloneEdition has just copied the source's meta wholesale, name included,
+  // and reyearName leaves that name alone for the sandbox: it re-years by
+  // string replacement and the sandbox has no year to replace 2026 WITH. So
+  // without this the app header inside the sandbox reads "WBC 2026", which is
+  // the live tournament's name exactly, and the DEMO badge in the picker stops
+  // helping the moment anybody is a tap deep.
+  //
+  // A nested map under merge is a FIELD-WISE merge in Firestore, so writing
+  // meta.name here leaves meta.location and meta.rounds exactly as the clone
+  // left them. Folded into the same upsert as scoring_open rather than a
+  // second write.
   const rounds = clampRounds((await _get("tournament_state", _tidFilter(sourceId)))[0]?.meta?.rounds);
   await _upsert("tournament_state", {
     id: `ts_${SANDBOX_EDITION_ID}`, tournament_id: SANDBOX_EDITION_ID,
     scoring_open: sandboxScoringOpen(rounds),
+    meta: { name: SANDBOX_NAME },
   });
 
   return made;

@@ -22,9 +22,22 @@
 // Each one is dropped deliberately below, next to why.
 import { docIds, isSandboxEdition } from "./editionId";
 
-// What the sandbox row calls itself. Not "WBC 2026 Demo" — it outlives 2026,
-// and a name carrying a year would have to be re-cut every January.
-export const SANDBOX_NAME = "Demo Sandbox";
+// What the sandbox calls itself, in BOTH places a name appears: the
+// wbc_editions row, and the tournament's own meta.name — which is what the app
+// header shows once somebody is inside it.
+//
+// Both, because one was not enough and the gap was the whole safety property.
+// The picker labels the sandbox with a DEMO badge instead of a year, so it
+// cannot be mistaken for a tournament in the LIST; but the tournament name was
+// cloned straight from the source and never re-yeared (reyearName treats the
+// sandbox's null year as "no target" and returns the name untouched), so the
+// header inside the sandbox read "WBC 2026" — identical to the live event.
+// Somebody a tap deep could no longer tell which edition they were in, which
+// is exactly what wbc_demo exists to make impossible.
+//
+// Shouty on purpose. This string's whole job is to be unmistakable at a glance
+// in a header, next to a real tournament's name.
+export const SANDBOX_NAME = "DEMO Sandbox";
 
 // Every round of the sandbox, force-opened for scoring.
 //
