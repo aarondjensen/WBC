@@ -192,10 +192,26 @@ magick apple/01.png -resize 1080x1920^ -gravity center -extent 1080x1920 \
 Shooting Play natively instead is fine too — an Android phone screenshot is
 usually already 1080 × 2400, which is inside Play's rules and needs nothing.
 
-A repeatable Playwright script that drives the app and writes both sets is
-possible and not written: it needs a signed-in browser profile to avoid the
-guest strip. Worth it if these get re-shot every year; overkill for one
-submission.
+### Or let the script do it
+
+```sh
+npm install                 # picks up playwright
+npx playwright install chromium
+npm run shots -- --edition wbc_2025
+```
+
+`scripts/screenshots.mjs`. It opens a real browser, waits while you sign in
+once, then writes **both** sets — `store/screenshots/apple` at 1290 x 2796 and
+`store/screenshots/play` at 1080 x 1920 with the alpha flattened — and names
+the shots that did not land rather than reporting a half set as finished. The
+signed-in profile is kept in `.screenshot-profile/`, so later runs go straight
+to capturing and can take `--headless`.
+
+Both directories are gitignored: the images are regenerable from the app, and
+the profile holds a real Google session.
+
+Look at every image before uploading. The script drives the app; it has no idea
+whether the screen it caught was worth catching.
 
 ---
 

@@ -47,3 +47,11 @@ build/
 # These files point a dev server at a scratch Firebase project, and a
 # committed one would silently redirect every other machine's writes.
 .env
+
+# ── Store screenshots and the browser profile that takes them ──
+# `npm run shots` writes both stores' image sets here, and keeps a signed-in
+# Chromium profile so it does not have to ask every run. The images are
+# regenerable from the app and the profile holds a real Google session — one
+# is bulk, the other is a credential, and neither belongs in git.
+store/screenshots/
+.screenshot-profile/

@@ -13,7 +13,8 @@
     "build:history": "node scripts/build-history.mjs",
     "import:history": "node scripts/import-history.mjs",
     "ingest:photos": "node scripts/ingest-photos.mjs",
-    "import:photos": "node scripts/import-media-index.mjs"
+    "import:photos": "node scripts/import-media-index.mjs",
+    "shots": "node scripts/screenshots.mjs"
   },
   "dependencies": {
     "@capacitor-firebase/authentication": "^8.3.0",
@@ -42,6 +43,7 @@
     "globals": "^17.11.0",
     "heic-convert": "^2.1.0",
     "jsdom": "^30.0.1",
+    "playwright": "^1.50.0",
     "sharp": "^0.35.3",
     "typescript": "^7.0.2",
     "vite": "^8.2.1",
