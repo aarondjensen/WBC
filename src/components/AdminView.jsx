@@ -40,6 +40,7 @@ import { pairingScoreImpact, orphanedScores, describeScored, totalHoles, holesEn
 import { groupsForRound, assignToGroup, removeFromGroup as removeFromGroupPure, clearGroup, swapIntoGroup } from "../lib/pairings";
 import { PAIRING_MODES, PAIRING_MODE_LABEL, resolvePairingCfg, buildPriorPartners, optimizeAvoidRepeats, groupByLeaderboard } from "../lib/pairingDraw";
 import { stateMatches, hasRealSlope, parseRapidAPI, fetchCourseTees } from "../lib/courseSearch";
+import { apiUrl } from "../lib/apiBase";
 import { Popup, ConfirmModal } from "./Popup";
 import { EditionSwitcher } from "./EditionSwitcher";
 import { isHistoryCourseId } from "../lib/historyImport";
@@ -1777,7 +1778,7 @@ export function AdminView({ registry, activePlayers, marketPool, sideGames, onUp
         // 2. RapidAPI — only for courses NOT already in local DB
         let apiResults = [];
         try {
-          const r = await fetch(`/api/courses2?search=${encodeURIComponent(q)}${stateParam}`);
+          const r = await fetch(apiUrl(`/api/courses2?search=${encodeURIComponent(q)}${stateParam}`));
           if (r.ok) {
             const data = await r.json();
             const raw = Array.isArray(data) ? data : (data.courses || data.data || []);
@@ -2862,7 +2863,7 @@ export function AdminView({ registry, activePlayers, marketPool, sideGames, onUp
                               try {
                                 const q = sbCourse.name;
                                 const stateParam = sbCourse.state ? `&state=${encodeURIComponent(sbCourse.state)}` : "";
-                                const res = await fetch(`/api/courses2?search=${encodeURIComponent(q)}${stateParam}`);
+                                const res = await fetch(apiUrl(`/api/courses2?search=${encodeURIComponent(q)}${stateParam}`));
                                 const rapidRaw = res.ok ? await res.json() : [];
                                 // Through the same parser the search uses. The raw row is
                                 // scorecard/slopeRating shaped; the preview wants tee_boxes
