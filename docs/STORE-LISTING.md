@@ -309,13 +309,24 @@ Designed for Families flow.
 
 ---
 
-## Feature graphic (Play only, required)
+## Play's two graphics — both made, both in `store/`
 
-**1024 × 500**, JPEG or 24-bit PNG, no alpha, no transparency.
+| File | Size | State |
+| --- | --- | --- |
+| `store/feature-graphic.png` | 1024 × 500 | 3-channel, no alpha |
+| `store/play-icon-512.png` | 512 × 512 | 3-channel, no alpha |
 
-Easy to forget and it blocks the release. The trophy mark on the app's dark
-background (`#080f1a`) with "Wannabe Cup" set in Montserrat is enough — Play
-crops it in several places, so keep the mark and the words well inside the
-middle.
+The feature graphic is the app's golfer mark and its own tagline on the login
+screen's gradient, set in real Montserrat. Play crops it in several places, so
+the lockup sits well inside the middle with even margins.
 
-Also required: **app icon 512 × 512**, 32-bit PNG, no alpha.
+Both are **flattened**. Play rejects transparency on both of these, and the
+existing `public/wbc-icon-512.png` was neither the right size nor opaque — it
+is 600 × 600 with an alpha channel despite the filename. The store icon is cut
+from `assets/icon.png`, the 1024 × 1024 source `@capacitor/assets` builds the
+launcher icons from, so the store icon and the icon on the phone are the same
+artwork.
+
+Committed rather than generated on demand: they change about once a decade, and
+rebuilding them needs Montserrat installed system-wide, which is not a thing to
+rely on.

@@ -55,3 +55,6 @@ build/
 # is bulk, the other is a credential, and neither belongs in git.
 store/screenshots/
 .screenshot-profile/
+# store/feature-graphic.png and store/play-icon-512.png ARE tracked — they are
+# authored artwork rather than regenerable output, and rebuilding them needs
+# Montserrat installed system-wide.
