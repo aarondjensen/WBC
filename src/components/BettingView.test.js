@@ -281,3 +281,68 @@ describe("the halfway window for a market-only player", () => {
     expect(screen.getByText("$100")).toBeTruthy();
   });
 });
+
+// ══════════════════════════════════════════════════════════════════
+//  A hole nobody has played is a dash, not "00"
+// ══════════════════════════════════════════════════════════════════
+//
+// The skins card printed "00" on every hole the field had not reached yet.
+//
+// It is React's oldest trap and it took a director noticing it on a live
+// board. An unplayed hole normalises to the NUMBER 0, and the cell drew its
+// circles with `{s && …}` — `0 && <div/>` evaluates to 0, and React renders
+// the number 0 rather than nothing, the way `false`, `null` and `undefined`
+// all do. Two such lines per cell, so two zeros, sitting in front of the dash
+// the cell was correctly choosing.
+//
+// Nothing else could have caught it: the arithmetic in lib/sideGames was
+// right — computeSkins reports an unplayed hole as no winner and no score —
+// and the mount tests rendered a tournament where every hole was played.
+const HALF_PLAYED = {
+  aaron_j_1: Object.fromEntries(Array.from({ length: 5 }, (_, i) => [i, 4])),
+  dave_s_1: Object.fromEntries(Array.from({ length: 5 }, (_, i) => [i, 5])),
+};
+
+// Scoped to the scorecard's own cells. A bare "0" elsewhere on the tab is
+// legitimate — a skins count, a pot — and asserting against the whole screen
+// would be testing the wrong thing and breaking on unrelated copy.
+const scoreCells = () =>
+  [...document.querySelectorAll("table td")].map(td => (td.textContent || "").trim());
+
+describe("the skins card mid-round", () => {
+  const openSkins = (extra) => {
+    mount({ holeData: HALF_PLAYED, round: 1, ...extra });
+    fireEvent.click(screen.getByText("Skins"));
+  };
+
+  it("draws no stray zero on the holes still to play", () => {
+    openSkins();
+    const cells = scoreCells();
+    expect(cells.length).toBeGreaterThan(0);
+    // A lone "0" is never a golf score, and "00" or "00–" is the bug exactly.
+    expect(cells.filter(t => t === "0")).toHaveLength(0);
+    expect(cells.filter(t => t.includes("00"))).toHaveLength(0);
+  });
+
+  it("still draws the dash it was choosing all along", () => {
+    openSkins();
+    expect(screen.queryAllByText("–").length).toBeGreaterThan(0);
+  });
+
+  // The scores that ARE posted must be untouched — a guard that hid the zero
+  // by hiding the cell would pass the assertion above and lose the card.
+  it("still shows the scores that have been posted", () => {
+    openSkins();
+    expect(screen.queryAllByText("4").length).toBeGreaterThan(0);
+    expect(screen.queryAllByText("5").length).toBeGreaterThan(0);
+  });
+
+  // And a round nobody has started at all takes the empty-state path rather
+  // than drawing eighteen columns of zeros.
+  it("says so when the round has no scores at all", () => {
+    mount({ holeData: {}, round: 1 });
+    fireEvent.click(screen.getByText("Skins"));
+    // The empty-state card, not eighteen columns of zeros.
+    expect(scoreCells().filter(t => t.includes("00"))).toHaveLength(0);
+  });
+});
