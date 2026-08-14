@@ -31,6 +31,22 @@ export function Popup({
   padding = 14, dismissOnBackdrop = true, zIndex = 300, overlayPadding = 12,
   portal = false,
 }) {
+  // ESC closes, which is what Bourbon Cup and MNQ have always done and WBC
+  // had nowhere in the app — on a desktop browser a popup here could only be
+  // dismissed by finding its Cancel button or hitting the backdrop.
+  //
+  // Gated on dismissOnBackdrop rather than on a second opt-out prop: the
+  // modals that turn backdrop-dismiss off are the destructive and blocking
+  // ones (the WD confirm, the scorecard sheet), and those are exactly the
+  // ones that should not vanish on a stray keypress either. One switch, and
+  // no call site has to remember to set two.
+  useEffect(() => {
+    if (!onClose || !dismissOnBackdrop) return;
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose, dismissOnBackdrop]);
+
   const node = (
     <div
       onClick={dismissOnBackdrop ? onClose : undefined}
