@@ -26,6 +26,31 @@ import { docIds, isSandboxEdition } from "./editionId";
 // and a name carrying a year would have to be re-cut every January.
 export const SANDBOX_NAME = "Demo Sandbox";
 
+// Every round of the sandbox, force-opened for scoring.
+//
+// lib/scoringGate shuts the scoring screen for anybody who is not a director
+// unless the round's date is TODAY and their tee time is within half an hour.
+// A freshly cut sandbox has no dates, no pairings and no tee times, so all
+// three checks fail and a tester finds a closed door where the app's main
+// screen should be — which is the difference between a tester who USED the app
+// and one who only browsed it, and the second kind is what fails a Play
+// production-access review.
+//
+// The gate is there to stop Round 3 scores landing in Round 1 on a leaderboard
+// somebody then has to repair. The sandbox has no such leaderboard, so the
+// reason is absent and only the obstruction is left.
+//
+// Shape matches what Admin's own force-open switch writes — { [round]: true },
+// rounds omitted rather than set false — so this is the existing mechanism
+// thrown, not a second one.
+export const sandboxScoringOpen = (rounds) => {
+  const n = Number(rounds);
+  if (!Number.isFinite(n) || n < 1) return {};
+  const out = {};
+  for (let r = 1; r <= n; r++) out[r] = true;
+  return out;
+};
+
 // ── Which years actually happened ──────────────────────────────────
 // Everything below decides what the New-year form opens pointed at, and all
 // of it reads the same thing: how much is IN each edition.

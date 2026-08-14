@@ -813,8 +813,10 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
                 ? `Everything in the current sandbox${held && held !== "Empty" ? ` — ${held} —` : ""} is deleted first. `
                   + `That data is nobody's round: it is whatever testers typed into it.\n\n`
                 : "")
-              + `The new one copies ${src.year}'s roster, handicaps, round setup and buy-in amounts. `
-              + `No scores, no pairings, no bets — it opens as a tournament nobody has played.\n\n`
+              + `The new one copies ${src.year}'s roster, handicaps, courses and buy-in amounts. `
+              + `No scores, no pairings, no bets — it opens as a tournament nobody has played, `
+              + `with scoring unlocked on every round so testers can post a card straight away `
+              + `without waiting for a tee time.\n\n`
               + `It has no year of its own, so it can never be confused with a real tournament `
               + `and never needs replacing when the calendar moves on.`
             }

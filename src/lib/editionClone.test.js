@@ -3,6 +3,7 @@ import {
   plannedYear, plannedSource, summaryLine, editionHasContent, newestBuiltEdition,
   reyearName, cloneMeta, cloneSideGames,
   cloneRosterRow, cloneRoundRow, editionDoc, overwriteWarning, rosterHandicap,
+  sandboxScoringOpen,
 } from "./editionClone";
 
 // The real shape this screen got wrong once, and must never get wrong again:
@@ -410,5 +411,34 @@ describe("editionDoc for the sandbox", () => {
 
   it("still dates a real edition normally", () => {
     expect(editionDoc({ year: 2026, id: "wbc_2026", name: "" }).year).toBe(2026);
+  });
+});
+
+// ── The sandbox opens for scoring ──────────────────────────────────
+// The defect this was written for: a sandbox cut with no dates, no pairings
+// and no tee times fails every check in lib/scoringGate, so a tester who is
+// not a director cannot post a single score. They can navigate the app and do
+// nothing in it — which is exactly the shallow engagement that fails a Play
+// production-access review, and the reason the sandbox exists at all.
+describe("sandboxScoringOpen", () => {
+  it("opens every round, one-based", () => {
+    expect(sandboxScoringOpen(4)).toEqual({ 1: true, 2: true, 3: true, 4: true });
+    expect(sandboxScoringOpen(1)).toEqual({ 1: true });
+  });
+
+  // Matches what Admin's own force-open switch writes: rounds are OMITTED
+  // rather than set false, so this is the existing mechanism thrown rather
+  // than a second shape scoringGate would have to learn.
+  it("omits rather than falsifies, and never writes a round 0", () => {
+    const out = sandboxScoringOpen(2);
+    expect(Object.keys(out)).toEqual(["1", "2"]);
+    expect(out[0]).toBeUndefined();
+    expect(out[3]).toBeUndefined();
+  });
+
+  it("is empty rather than wrong when the round count makes no sense", () => {
+    for (const bad of [0, -1, null, undefined, NaN, "x"]) {
+      expect(sandboxScoringOpen(bad)).toEqual({});
+    }
   });
 });
