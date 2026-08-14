@@ -31,6 +31,16 @@ dist-ssr
 # every clone of this app enormous to no purpose.
 build/
 
+# ── Apple's Sign in with Apple key ──
+# AuthKey_XXXXXXXXXX.p8, downloaded once from the developer portal and never
+# again — Apple will not re-issue the file, only let you revoke the key and
+# make another. It signs the tokens that let anyone authenticate as anyone in
+# this app, so a copy in git is worse than a leaked password: rotating it means
+# every Apple sign-in fails until Firebase is updated too. Keep it out of the
+# repo entirely; it belongs in a password manager, not a working tree.
+*.p8
+AuthKey_*
+
 # ── Firebase service-account keys ──
 # `npm run import:history -- --write` needs one, and the console downloads it as
 # <project>-firebase-adminsdk-<hash>.json straight into whatever folder you point
