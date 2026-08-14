@@ -122,8 +122,34 @@ read.
 
 ### Decision 2: Play, production or testing-only
 
-This is the one that cost you with MNQ, and there is a good chance you don't
-have to fight it at all. See [Step 0](#step-0-do-you-even-need-production-access).
+**Decided: INTERNAL TESTING**, for WBC and for The Bourbon Cup both.
+
+Up to 100 testers, live in minutes, exempt from the Data safety form, and no
+closed test at all — no twelve testers, no fourteen days, no production-access
+application. This is the one that cost you with MNQ, and the answer turned out
+to be that you never had to fight it: [Step 0](#step-0-do-you-even-need-production-access)
+already suspected as much and it was right.
+
+Play has no Unlisted track — that is an Apple mechanism — but internal testing
+is already the shape Unlisted suggests. The opt-in URL goes on the website, a
+tester taps it, Play installs the app, and it updates itself from then on.
+Nobody searches for anything and the app never appears in the store to be
+found. The pairing across both stores is therefore: **Unlisted on iOS,
+internal testing on Play.**
+
+Everything below about the twelve testers stays, because it is the right
+instructions if WBC ever wants a public listing. Until then it is reference
+rather than the plan.
+
+#### The one line the tester message has to contain
+
+The failure mode of internal testing is not a broken app, it is a tester who
+never gets one. **The account that opts in must be the account signed into the
+Play Store on that phone.** A man with a work Google account on his phone and a
+personal one on your list sees "item not found", cannot diagnose it, and
+reasonably concludes the app is broken. Collect the addresses first, add them
+all at once, and tell everybody to check
+**Settings → Google** before replying.
 
 ---
 
