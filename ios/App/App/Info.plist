@@ -39,6 +39,10 @@
 	     is "no non-exempt encryption". Without this key App Store Connect
 	     stops every single build at a manual questionnaire before it will let
 	     TestFlight or review see it. -->
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Choose photos from your library to add to the tournament gallery.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Take photos during the tournament to add to the shared gallery.</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
@@ -60,15 +64,6 @@
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
-	</array>
-	<key>UISupportedInterfaceOrientations~ipad</key>
-	<array>
-		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationPortraitUpsideDown</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
