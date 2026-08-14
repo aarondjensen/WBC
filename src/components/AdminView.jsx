@@ -45,7 +45,7 @@ import { EditionSwitcher } from "./EditionSwitcher";
 import { isHistoryCourseId } from "../lib/historyImport";
 import { localDateISO, fmtRoundDate } from "../lib/format";
 import { SCORING_LEAD_MIN } from "../lib/scoringGate";
-import { NUM_ROUNDS } from "../lib/rounds";
+import { NUM_ROUNDS, roundDateChoices } from "../lib/rounds";
 import { db } from "../lib/db";
 import { toDisplayName, isGeneratedName, shortName, fullName, splitName } from "../lib/playerNames";
 import { missingTees, describeMissingTees, pairingsTrouble } from "../lib/roundSetup";
@@ -2117,7 +2117,10 @@ export function AdminView({ registry, activePlayers, marketPool, sideGames, onUp
           // A date set before the event dates were (or after they moved) still
           // shows, as its own chip — otherwise the round would look unscheduled
           // while the leaderboard and the scoring gate use it.
-          const chips = days.includes(mine) || !mine ? days : [...days, mine];
+          // Empty when the event has no dates, so the calendar below renders
+          // even once this round HAS a date — see roundDateChoices for the
+          // one-item-list dead end that used to make a date unchangeable.
+          const chips = roundDateChoices(days, mine);
           const pick = (d) => { onSetRoundDate(r, d); setDatePickRound(null); };
           return (
             <Popup onClose={() => setDatePickRound(null)} maxWidth={340} portal>

@@ -59,3 +59,34 @@ export const getRoundCount = () => NUM_ROUNDS;
 // call sites were building it inline and half of them were building it from a
 // different source of the count.
 export const roundList = (n = NUM_ROUNDS) => Array.from({ length: clampRounds(n) }, (_, i) => i + 1);
+
+// ── Which days the round-date picker should offer ──────────────────
+// Given the days the tournament runs and the date this round currently holds,
+// what goes in the list — and when should there be no list at all, so the
+// caller shows a calendar instead.
+//
+// The bug this closes: a round date could be SET but not CHANGED.
+//
+// An edition with no start and end dates has no days to list, so the picker
+// falls back to a month calendar — which is right, and is the state every
+// freshly cut sandbox is in, because cloneMeta deliberately drops the source's
+// dates so a cloned year never opens already over.
+//
+// But the picker also appends the round's own date to the list when it falls
+// outside the event's days, so that a round scheduled before the dates were
+// set (or after they moved) still shows rather than reading as unscheduled.
+// With no event days at all, that append turned an empty list into a list of
+// exactly ONE — the date already chosen — and a one-item list of the thing you
+// are trying to change is not a choice. The calendar never rendered, and the
+// only way to a different date was to tap the single chip (which clears it),
+// close the popup, and open it again.
+//
+// So: no event days means no list, full stop. The stray-date append is for
+// reconciling a real schedule with a date outside it, and there is no schedule
+// to reconcile against here.
+export const roundDateChoices = (days = [], current = "") => {
+  const list = (days || []).filter(Boolean);
+  if (!list.length) return [];
+  if (!current || list.includes(current)) return list;
+  return [...list, current];
+};
