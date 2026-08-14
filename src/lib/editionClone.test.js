@@ -3,7 +3,7 @@ import {
   plannedYear, plannedSource, summaryLine, editionHasContent, newestBuiltEdition,
   reyearName, cloneMeta, cloneSideGames,
   cloneRosterRow, cloneRoundRow, editionDoc, overwriteWarning, rosterHandicap,
-  sandboxScoringOpen,
+  sandboxScoringOpen, SANDBOX_NAME,
 } from "./editionClone";
 
 // The real shape this screen got wrong once, and must never get wrong again:
@@ -360,7 +360,7 @@ describe("the sandbox is not a year", () => {
   // Cut from 2026, so it is FULL — this is what a sandbox looks like after a
   // fortnight of beta testing, and content is exactly what the year math
   // looks for.
-  const SANDBOX = { id: "wbc_demo", year: null, name: "Demo Sandbox" };
+  const SANDBOX = { id: "wbc_demo", year: null, name: "DEMO Sandbox" };
   const WITH_SANDBOX = [SANDBOX, ...YEARS];
   const FULL = {
     wbc_2026: { players: 16, rounds: 4, scores: 1152 },
@@ -396,17 +396,17 @@ describe("the sandbox is not a year", () => {
 // The row itself, which does carry a null year rather than a 0 or a NaN.
 describe("editionDoc for the sandbox", () => {
   it("writes a null year, not a zero", () => {
-    const d = editionDoc({ year: null, id: "wbc_demo", name: "Demo Sandbox" });
+    const d = editionDoc({ year: null, id: "wbc_demo", name: "DEMO Sandbox" });
     expect(d.year).toBeNull();
     expect(d.id).toBe("wbc_demo");
-    expect(d.name).toBe("Demo Sandbox");
+    expect(d.name).toBe("DEMO Sandbox");
   });
 
   // Even handed a real-looking year, because the id is what decides. A 2026
   // sitting in the sandbox's year field would sort it against tournaments the
   // first time somebody forgot the exclusion above.
   it("refuses a year even when one is passed", () => {
-    expect(editionDoc({ year: 2026, id: "wbc_demo", name: "Demo Sandbox" }).year).toBeNull();
+    expect(editionDoc({ year: 2026, id: "wbc_demo", name: "DEMO Sandbox" }).year).toBeNull();
   });
 
   it("still dates a real edition normally", () => {
@@ -440,5 +440,33 @@ describe("sandboxScoringOpen", () => {
     for (const bad of [0, -1, null, undefined, NaN, "x"]) {
       expect(sandboxScoringOpen(bad)).toEqual({});
     }
+  });
+});
+
+// ── Why the sandbox has to rename itself ───────────────────────────
+// reyearName re-years by replacing the source year in the string, and the
+// sandbox has no year to replace 2026 WITH. So the cloned tournament name
+// survives untouched, and the app header inside the sandbox read "WBC 2026" —
+// the live tournament's name exactly, with the DEMO badge left behind in the
+// picker where nobody a tap deep can see it.
+//
+// This pins the behaviour rather than changing it: reyearName is right to
+// leave the name alone (inventing "WBC 0" would be worse), which is precisely
+// why resetSandbox overwrites meta.name afterwards. If somebody ever "fixes"
+// reyearName to handle a null target, this test says what would break.
+describe("reyearName and the sandbox's absent year", () => {
+  it.each([[0], [null], [undefined], [NaN]])(
+    "leaves the name untouched when the target year is %p", (toYear) => {
+      expect(reyearName("WBC 2026", 2026, toYear)).toBe("WBC 2026");
+    });
+
+  it("is why the sandbox is renamed explicitly, not re-yeared", () => {
+    // What cloneMeta produces for a sandbox cut from 2026, before the override.
+    const cloned = cloneMeta({ name: "WBC 2026", location: "Gaylord, MI", rounds: 4 },
+                             { fromYear: 2026, toYear: Number(null) });
+    expect(cloned.name).toBe("WBC 2026");
+    // …and what it has to become, or the header lies about which edition it is.
+    expect(SANDBOX_NAME).toBe("DEMO Sandbox");
+    expect(SANDBOX_NAME).not.toContain("2026");
   });
 });

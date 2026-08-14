@@ -32,7 +32,7 @@ const EDITIONS = [
   // leaves it. In the shared list rather than a special case, because every
   // assertion about the rows has to hold with one present — that is the state
   // the app is in for the whole beta test.
-  { id: "wbc_demo", year: null, name: "Demo Sandbox" },
+  { id: "wbc_demo", year: null, name: "DEMO Sandbox" },
 ];
 const SUMMARIES = {
   wbc_2026: { players: 0, rounds: 0, scores: 0 },
