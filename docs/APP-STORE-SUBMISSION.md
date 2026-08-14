@@ -86,7 +86,7 @@ group of about sixteen people, behind a password. Apple's Guidelines 4.2
 (minimum functionality) and 4.3 (spam) are what catch these — not because the
 app is bad, but because the public App Store is the wrong shelf for it.
 
-**Recommendation: go Unlisted deliberately, from the first submission.**
+**DECIDED: Unlisted, deliberately, from the first submission.**
 
 What Unlisted means in practice:
 
@@ -115,6 +115,10 @@ beta state. So:
 
 On approval the distribution method flips to "Unlisted App" in Pricing and
 Availability and Apple generates the link. It applies to all future versions.
+
+The Account Holder on this account is **aarondjensen@gmail.com** — the unlisted
+request form must be submitted by that identity or it is rejected without being
+read.
 
 ### Decision 2: Play, production or testing-only
 
@@ -253,10 +257,11 @@ Then:
    the Notifications row in More (it should now say "Not in the app yet", not
    Safari instructions).
 8. App Store Connect listing:
-   - **Name:** use **"Wannabe Cup"**, not "WBC". `WBC` collides with the World
-     Baseball Classic and the World Boxing Council — a 5.2.1 trademark
+   - **Name: "Wannabe Cup"** (DECIDED). Not "WBC" — it collides with the World
+     Baseball Classic and the World Boxing Council, a 5.2.1 trademark
      rejection you don't need, on a 30-character field. The home-screen name
-     stays "WBC"; they're independent.
+     stays "WBC" (`CFBundleDisplayName`, unchanged); the two are independent
+     and nothing in the repo needs editing for this.
    - **Screenshots:** 6.9" iPhone (1290×2796 or 1320×2868) is the only required
      size. `TARGETED_DEVICE_FAMILY = 1`, so the app is iPhone-only and **no
      iPad screenshots are needed**. Take them from guest mode against a
