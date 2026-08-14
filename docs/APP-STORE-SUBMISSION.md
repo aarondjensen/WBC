@@ -281,23 +281,32 @@ Then:
 disappear.**
 
 The 12-testers/14-days rule applies to **personal developer accounts created
-after 13 November 2023**, and it gates **production access at the account
-level, not per app**. Two consequences:
+after 13 November 2023**. Organization accounts and personal accounts older
+than that are exempt outright.
 
-- **If MNQ eventually reached production on that same developer account, you
-  already have production access and WBC can go straight to production.** No
-  second testing period. Check Play Console → the account's app list: if any app
-  is live on the production track, you're through.
-- **If it never got there**, WBC faces the same wall — but you may not need to
-  climb it. WBC has sixteen users. The **internal testing track holds up to 100
-  testers, installs through the Play Store, requires no closed-testing period,
-  and pushes updates in minutes instead of days.** For a private tournament
-  that is arguably a *better* distribution channel than production, and it
-  sidesteps the requirement entirely.
+**Whether production access, once granted, covers the whole account or has to
+be re-earned for each new app is not settled here — check it, don't assume it.**
+Google's own wording is app-scoped ("run a closed test *for your app*"), it has
+been widely reported as account-level once granted, and there have been
+reports of it tightening. Two minutes in your own console beats any blog:
+
+> Create the WBC app record in Play Console (free, no commitment, doesn't
+> publish anything) and open its **Dashboard**. If a "Complete testing
+> requirements" / "Run a closed test with 12 testers" task card appears for
+> WBC, the requirement is per-app for your account and you have your answer.
+> If the dashboard goes straight to release tasks, you already have production
+> access.
+
+**But check whether you need production at all first**, because it may make the
+question moot. WBC has sixteen users. The **internal testing track holds up to
+100 testers, installs through the Play Store, has no closed-testing
+requirement, no 14-day wait, and pushes updates in minutes instead of days.**
+For a private tournament that is arguably a *better* distribution channel than
+production.
 
 If the honest answer is "the sixteen guys just need to install it", use internal
-testing and skip the rest of this section. Only pursue production if you want
-WBC publicly listed on Play.
+testing and skip the rest of this section. Only pursue production — and only
+then care about the per-app question — if you want WBC publicly listed on Play.
 
 ### The 12 testers, properly
 
