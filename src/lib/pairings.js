@@ -19,6 +19,57 @@
 // it will let a director delete it, and that answer is "every group in every
 // round", which needs the draw. Rows are sorted here rather than at the call
 // site so a caller cannot get the group order wrong by forgetting to.
+// ── NOBODY IS IN TWO GROUPS ────────────────────────────────────────
+// A player belongs to exactly one group in a round. That is not a preference,
+// it is what every screen downstream assumes: the scoring card renders a row
+// per player in the group, the setup check counts seats against the roster,
+// and the tee sheet hands one time to one foursome. A player in two groups
+// makes the seat count exceed the roster, which is what silently holds the
+// round's setup badge red with nothing on screen saying why.
+//
+// It is enforced in BOTH directions because it was broken in both:
+//
+//   ON THE WAY IN, because rows already in Firestore may be wrong. A pairing's
+//   document id carries its group number (pr_demo_r1_g2_aaron_j), so MOVING a
+//   player writes a new document and leaves the old one to be deleted
+//   separately — and if that delete does not happen, the fold used to place
+//   them in both groups. Which is exactly what happens when the read that
+//   works out what to delete fails: see setPairings in App.jsx, where a failed
+//   read used to read as "nothing stored".
+//
+//   ON THE WAY OUT, so the editor cannot create the state in the first place
+//   whatever it hands over.
+//
+// FIRST SEATING WINS, and the caller sorts before folding, so "first" is the
+// lowest group number and then the lowest player id — deterministic, and the
+// same answer on every phone rather than whichever row Firestore returned
+// first. A dropped duplicate is a row that should not exist; keeping the
+// earlier group is the arbitrary half of an answer that is only ever cleaning
+// up after a fault.
+export const dedupeGroups = (groups) => {
+  const seen = new Set();
+  return (groups || []).map(g => (g || []).filter(pid => {
+    if (!pid || seen.has(pid)) return false;
+    seen.add(pid);
+    return true;
+  }));
+};
+
+// Which players are seated more than once, for a caller that wants to SAY so
+// rather than quietly clean up. Empty when the draw is sound.
+export const duplicateSeats = (groups) => {
+  const seen = new Set();
+  const twice = new Set();
+  for (const g of groups || []) {
+    for (const pid of g || []) {
+      if (!pid) continue;
+      if (seen.has(pid)) twice.add(pid);
+      seen.add(pid);
+    }
+  }
+  return [...twice];
+};
+
 export const rowsToPairings = (rows) => {
   const pd = {};
   [...(rows || [])]
@@ -33,6 +84,9 @@ export const rowsToPairings = (rows) => {
       while (pd[rnd].length <= gi) pd[rnd].push([]);
       pd[rnd][gi].push(r.player_id);
     });
+  // Per ROUND, not across the whole map: a player is in one group in round 1
+  // and a different one in round 2, which is the entire point of a draw.
+  for (const rnd of Object.keys(pd)) pd[rnd] = dedupeGroups(pd[rnd]);
   return pd;
 };
 

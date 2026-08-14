@@ -48,7 +48,7 @@ import { SCORING_LEAD_MIN } from "../lib/scoringGate";
 import { NUM_ROUNDS } from "../lib/rounds";
 import { db } from "../lib/db";
 import { toDisplayName, isGeneratedName, shortName, fullName, splitName } from "../lib/playerNames";
-import { missingTees, describeMissingTees } from "../lib/roundSetup";
+import { missingTees, describeMissingTees, pairingsTrouble } from "../lib/roundSetup";
 import { indexFor, matchHistoryName } from "../lib/handicap";
 import { returningPlayers, returningLine } from "../lib/returningPlayers";
 import { deleteVerdict, deletionLines } from "../lib/playerDelete";
@@ -1861,9 +1861,15 @@ export function AdminView({ registry, activePlayers, marketPool, sideGames, onUp
     const teeTimesDone = groups.length > 0 && groups.every((_, gi) => teeTimes[gi] && teeTimes[gi].trim() !== "");
     const teesDone = hasCourse && !!teesSaved[r] && !teesModified[r] && allTees;
     const pairingsDone = hasCourse && groupsDone && teeTimesDone;
+    // The sentence behind a red P. Three conditions collapse into one badge,
+    // and without this it says only that one of them failed — see
+    // pairingsTrouble, and the evening it cost.
+    const pairingsWhy = pairingsDone ? null : pairingsTrouble({
+      hasCourse, groups, teeTimes, rosterCount: activePlayers.length,
+    });
     return {
       round: r, course, hasCourse, allTees, noTee, groupsDone, teeTimesDone,
-      teesDone, pairingsDone,
+      teesDone, pairingsDone, pairingsWhy,
       allDone: hasCourse && teesDone && pairingsDone,
       finalized: !!finalizedRounds[r],
     };
@@ -2055,6 +2061,30 @@ export function AdminView({ registry, activePlayers, marketPool, sideGames, onUp
           );
         })}
       </div>
+
+      {/* ── Why the round being edited is not ready ──
+          The P in the strip above has three ways to be red and, on its own,
+          says the same thing for all of them. This is the sentence: which of
+          the three, and which player or group.
+
+          Only for the round actually open, and only when there is something to
+          say — a line that appears under every round would be a wall of text
+          on a phone, and one that never disappears stops being read. See
+          pairingsTrouble in lib/roundSetup for the ordering. */}
+      {(() => {
+        const why = getRoundStatus(editRound).pairingsWhy;
+        if (!why) return null;
+        return (
+          <div style={{
+            display: "flex", alignItems: "center", gap: 7, marginBottom: 10,
+            padding: "7px 10px", borderRadius: R.sm,
+            background: K.danger + ALPHA.wash, border: `1px solid ${K.danger}${ALPHA.line}`,
+          }}>
+            <span aria-hidden style={{ fontSize: FS.micro, fontWeight: 800, color: K.danger, flexShrink: 0 }}>P</span>
+            <span style={{ fontSize: FS.label, fontWeight: 600, color: K.t2, lineHeight: 1.4 }}>{why}</span>
+          </div>
+        );
+      })()}
 
         {/* The day list, for ONE round, only while it is being chosen. The
             choices are the days the tournament runs — typed once in Admin →

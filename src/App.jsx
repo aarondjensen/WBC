@@ -36,7 +36,7 @@ import { useSheetDrag } from "./lib/useSheetDrag";
 import { usePullToRefresh, hasNewBundle } from "./lib/usePullToRefresh";
 import { NotificationSettings } from "./components/NotificationSettings";
 import { registerForPush, getCachedSubscriptionStatus } from "./lib/notifications";
-import { rowsToPairings } from "./lib/pairings";
+import { rowsToPairings, dedupeGroups } from "./lib/pairings";
 import { PAIRING_MODES, PAIRING_MODE_LABEL } from "./lib/pairingDraw";
 import { Popup, ConfirmModal } from "./components/Popup";
 import { EditionSwitcher } from "./components/EditionSwitcher";
@@ -2349,7 +2349,14 @@ export default function WBCApp() {
     await publishRoundFinalized(nf, key);
   };
 
-  const setPairings = async (rnd, groups) => {
+  const setPairings = async (rnd, rawGroups) => {
+    // The last gate before anything is written: nobody is seated twice. The
+    // editor's own transforms already pull a player out of every group before
+    // seating them (lib/pairings assignToGroup), so this should never fire —
+    // which is exactly why it is here. The draw is the thing every screen
+    // downstream trusts, the id scheme makes a stale row look like a real
+    // seat, and "should never happen" is what the last one did.
+    const groups = dedupeGroups(rawGroups);
     const existing = JSON.stringify(pairingsData[rnd] || []);
     const incoming = JSON.stringify(groups);
     if (existing === incoming) return;
@@ -2377,7 +2384,35 @@ export default function WBCApp() {
     // One read serves both: the stored times when the client has none, and the
     // ids to delete. Reading rather than trusting the local mirror also means a
     // row another director left behind cannot survive as a player in two groups.
-    const onServer = await db.get("pairings", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }, { field: "round_number", op: "==", value: rnd }]) || [];
+    // ── A FAILED READ IS NOT AN EMPTY ROUND ──
+    // This used to be `... || []`, and that one fallback is how a player ends
+    // up in two groups.
+    //
+    // db.get answers null when the read FAILS and [] when the round genuinely
+    // has no draw, and collapsing those together says "there is nothing stored,
+    // so there is nothing to delete" about a round that is in fact fully drawn.
+    // The new rows then land on top of the old ones — and because a pairing's
+    // document id carries its group number, MOVING a player writes
+    // pr_..._g2_aaron_j while pr_..._g1_aaron_j is left sitting there. Both
+    // rows are real, both fold in, and the man is in two groups.
+    //
+    // Nothing surfaces it. The seat count quietly exceeds the roster, which
+    // holds the round's setup badge red with no explanation, and the first
+    // honest symptom is a scorecard with a name on it twice.
+    //
+    // It is also not a rare path: this is a phone on a golf course, and the
+    // read is a network round trip. So a failed read now ABORTS the save with
+    // something the director can act on. Refusing to write is the safe half —
+    // the draw on screen is still theirs and the tap can be repeated — where
+    // writing half of it is not.
+    const onServer = await db.get("pairings", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }, { field: "round_number", op: "==", value: rnd }]);
+    if (onServer === null) {
+      // Put the board back to what is actually stored, so the screen is not
+      // showing a draw that was never saved.
+      setPairingsData(prev => ({ ...prev, [rnd]: pairingsData[rnd] || [] }));
+      notify("Couldn't reach the pairings — nothing was changed. Try again in a moment.");
+      return;
+    }
     let times = (teeTimesData[rnd] || []);
     if (!times.some(t => t)) times = rowsToTeeTimes(onServer)[rnd] || times;
     const rows = [];
