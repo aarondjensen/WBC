@@ -48,7 +48,11 @@ const COURSE = {
   ],
 };
 
+// "Test One" is not in the record books — see the player-editor tests, where
+// the difference between a career and a name somebody typed decides whether
+// the delete is offered at all.
 const PLAYERS = [
+  { id: "test_one", name: "Test One", handicap_index: 20 },
   { id: "aaron_j", name: "Aaron J", handicap_index: 12 },
   { id: "dave_s", name: "Dave S", handicap_index: 8 },
   { id: "matt_r", name: "Matt R", handicap_index: 15 },
@@ -73,6 +77,7 @@ const baseProps = {
   courses: [COURSE],
   setCourseForRound: vi.fn(), addCourse: vi.fn(), addPlayerToTournament: vi.fn(),
   updateHI: vi.fn(), updateName: vi.fn(), removePlayer: vi.fn(),
+  deletePlayer: vi.fn(), editionsHolding: vi.fn(async () => []),
   pairingsData: { 1: [["aaron_j", "dave_s", "matt_r", "pete_l"]] },
   setPairings: vi.fn(),
   teeData: { aaron_j_1: "Blue", dave_s_1: "Blue", matt_r_1: "White", pete_l_1: "White" },
@@ -143,6 +148,71 @@ describe("AdminView renders", () => {
       fireEvent.click(screen.getByText(tab));
       expect(screen.getByText(tab)).toBeTruthy();
     }
+  });
+
+  // ── The player editor ──
+  // Where both halves of "delete a player" are decided: whether the button is
+  // there at all, and what the confirmation promises before it runs. A career
+  // is not deletable from a phone at a golf course, and the enforcement that
+  // matters most is the one that never draws the button.
+  const openPlayer = (name) => {
+    fireEvent.click(screen.getByText("Players"));
+    fireEvent.click(screen.getByText(name));
+  };
+
+  it("offers Delete for a player the record books don't know", async () => {
+    mount();
+    openPlayer("Test One");
+    expect(screen.getByText("Move to inactive")).toBeTruthy();
+    expect(screen.getByText("Delete player")).toBeTruthy();
+  });
+
+  it("offers only Move to inactive for a career", () => {
+    // Aaron J has fourteen years behind that id. Deleting the record would cut
+    // every one of those rounds loose from his name.
+    mount();
+    openPlayer("Aaron J");
+    expect(screen.getByText("Move to inactive")).toBeTruthy();
+    expect(screen.queryByText("Delete player")).toBeNull();
+  });
+
+  it("says what a delete takes before it runs", async () => {
+    const deletePlayer = vi.fn();
+    mount({ deletePlayer, holeData: { test_one_1: card(4) } });
+    openPlayer("Test One");
+    fireEvent.click(screen.getByText("Delete player"));
+    // The confirmation is raised behind an await — the other-edition check
+    // is a read, and a refusal there is the whole point of taking it.
+    expect(await screen.findByText("Delete Test One?")).toBeTruthy();
+    expect(screen.getByText(/18 scored holes/)).toBeTruthy();
+    expect(deletePlayer).not.toHaveBeenCalled();
+  });
+
+  it("lists records off the roster so a demo name can still be deleted", async () => {
+    // The gap this closes: a player moved to inactive has no roster row, so the
+    // editor above cannot open him at all. Without this list a demo name is
+    // visible in the returning picker forever and removable only from the
+    // Firebase console.
+    const deletePlayer = vi.fn();
+    mount({
+      deletePlayer,
+      registry: [...baseProps.registry, { id: "junk_one", name: "Junk One", first_name: "Junk", last_name: "One" }],
+    });
+    fireEvent.click(screen.getByText("Players"));
+    expect(screen.getByText("Junk One")).toBeTruthy();
+    fireEvent.click(screen.getByText("Delete"));
+    expect(await screen.findByText("Delete Junk One?")).toBeTruthy();
+  });
+
+  it("refuses when the player is on another edition's roster", async () => {
+    const notify = vi.fn();
+    const deletePlayer = vi.fn();
+    mount({ notify, deletePlayer, editionsHolding: vi.fn(async () => ["wbc_2027"]) });
+    openPlayer("Test One");
+    fireEvent.click(screen.getByText("Delete player"));
+    await vi.waitFor(() => expect(notify).toHaveBeenCalled());
+    expect(notify.mock.calls[0][0]).toContain("2027");
+    expect(deletePlayer).not.toHaveBeenCalled();
   });
 
   it("opens on the tab the shell asks for", () => {

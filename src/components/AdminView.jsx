@@ -51,6 +51,7 @@ import { toDisplayName, isGeneratedName, shortName, fullName, splitName } from "
 import { missingTees, describeMissingTees } from "../lib/roundSetup";
 import { indexFor, matchHistoryName } from "../lib/handicap";
 import { returningPlayers, returningLine } from "../lib/returningPlayers";
+import { deleteVerdict, deletionLines } from "../lib/playerDelete";
 import { getDefaultTee } from "../lib/defaultTee";
 import { TROPHY_SVG_URL, ROUND_CHOICES, clampRounds, SIDE_GAME_KEYS, SIDE_GAME_LABELS, defaultTournamentName } from "../constants";
 
@@ -806,7 +807,7 @@ function PlayerRow({ player, isLast, onOpen, isDirector, account }) {
 // his account claim still points at the first — so the picker hands back the
 // id off his record rather than deriving one. See lib/returningPlayers.
 function PlayerEditor({ editing, set, onClose, tPlayers, players, memberships, claims, authUid,
-                        holeData, numRounds, onSave, onRemove, notify, confirm, tournamentStarted,
+                        holeData, numRounds, onSave, onRemove, askDelete, notify, confirm, tournamentStarted,
                         returning = [] }) {
   if (!editing) return null;
   const isNew = !!editing.isNew;
@@ -947,6 +948,32 @@ function PlayerEditor({ editing, set, onClose, tPlayers, players, memberships, c
       onRemove(editing.pid);
       onClose();
     }
+  };
+
+  // ── Delete outright ──
+  // The action "Move to inactive" is not, offered only where it is the right
+  // one. A player the record books know has a career behind his id, and there
+  // is no dialog that makes deleting one a thing this app does — so the button
+  // is not there at all for him, rather than there and refusing.
+  //
+  // That leaves it where it is actually wanted: a name typed into the demo
+  // edition, and "Aron" added at 11pm and re-added correctly a minute later.
+  // Neither is a golfer standing down for a year, and until this the only way
+  // to be rid of one was the Firebase console.
+  //
+  // The asking and the writing live in AdminView (askDelete), because the same
+  // decision is raised from two places — here, and the off-roster list on the
+  // Players tab, where a demo player already moved to inactive has to be
+  // reachable at all.
+  const canDelete = !isNew && !!askDelete && !matchHistoryName(p);
+
+  const doDelete = async () => {
+    const done = await askDelete({
+      pid: editing.pid,
+      name: fullName(p) || p.name,
+      historyName: matchHistoryName(p),
+    });
+    if (done) onClose();
   };
 
   return (
@@ -1100,6 +1127,24 @@ function PlayerEditor({ editing, set, onClose, tPlayers, players, memberships, c
               title="Take them off this year's roster"
               style={{ flexShrink: 0, color: K.t2, whiteSpace: "nowrap" }}>
               Move to inactive
+            </Btn>
+          </div>
+        )}
+
+        {/* ── Delete ──
+            On its own line under the status row rather than beside "Move to
+            inactive". The row is the button plus about 150px on a 360px phone,
+            so a second one there would ellipsise both — and putting the
+            destructive action next to the routine one, at the same size, is
+            how a director taps the wrong one during setup.
+            Right-aligned and quiet: it is the rarer action of the two, and the
+            confirmation is where it gets loud. */}
+        {canDelete && (
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: -4 }}>
+            <Btn variant="dangerOutline" size="sm" onClick={doDelete}
+              title="Delete this player and their record"
+              style={{ whiteSpace: "nowrap" }}>
+              Delete player
             </Btn>
           </div>
         )}
@@ -1495,7 +1540,7 @@ function TournamentPanel({ meta, onSave, notify, confirm, scoredRounds = [] }) {
 
 // AccessPanel moved to components/AccessPanel.jsx — see the header there.
 
-export function AdminView({ registry, activePlayers, marketPool, sideGames, onUpdateSideGames, rebuyIds, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, roundDates, onSetRoundDate, scoringOpen, onSetScoringOpen, pairingStrategy, onSetPairingStrategy, leaderboard, holeData, finalizedRounds, onFinalizeRound, onUnfinalizeRound, onDiscardRoundScores, notify, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, externalSettingsRound, onExternalSettingsHandled, teesSaved, onTeesSave, teesModified, onTeesModify, memberships, onSetDirector, claims, authUid, tournamentMeta, onSaveTournamentMeta }) {
+export function AdminView({ registry, activePlayers, marketPool, sideGames, onUpdateSideGames, rebuyIds, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, deletePlayer, editionsHolding, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, roundDates, onSetRoundDate, scoringOpen, onSetScoringOpen, pairingStrategy, onSetPairingStrategy, leaderboard, holeData, finalizedRounds, onFinalizeRound, onUnfinalizeRound, onDiscardRoundScores, notify, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, externalSettingsRound, onExternalSettingsHandled, teesSaved, onTeesSave, teesModified, onTeesModify, memberships, onSetDirector, claims, authUid, tournamentMeta, onSaveTournamentMeta }) {
   const [tab, setTab] = useState("rounds");
   // Themed confirmations (see lib/useConfirm). The host <ConfirmModal/> is
   // rendered once at the bottom of this view; `confirm(...)` returns a
@@ -1549,6 +1594,21 @@ export function AdminView({ registry, activePlayers, marketPool, sideGames, onUp
     () => returningPlayers({ registry, rosterIds: tPlayers.map(t => t.player_id) }),
     [registry, tPlayers],
   );
+
+  // ── Records that exist for no reason ──
+  // The returning pool minus everybody with a career, which leaves exactly the
+  // rows worth cleaning up: a player record with no rounds behind it and no
+  // place in this year's field. Demo names, and the misspelling added at 11pm
+  // and re-added correctly a minute later.
+  //
+  // It is its own list because the player editor cannot reach these — that
+  // editor opens off a ROSTER row, and one of the two ways to end up with junk
+  // in the registry is to have moved it to inactive already.
+  const deletablePool = useMemo(
+    () => (deletePlayer && editionsHolding ? returningPool.filter(r => !r.historyName) : []),
+    [returningPool, deletePlayer, editionsHolding],
+  );
+
   const [confirmCourse, setConfirmCourse] = useState(null);
   const [courseSearch, setCourseSearch] = useState("");
   const [courseStateFilter, setCourseStateFilter] = useState("MI");
@@ -1745,6 +1805,37 @@ export function AdminView({ registry, activePlayers, marketPool, sideGames, onUp
     }
   };
   const numRounds = tournament?.num_rounds || NUM_ROUNDS;
+
+  // ── Deleting a player, wherever it is raised from ──
+  // One flow behind both callers, because the decision is the same one and it
+  // is not a decision to have two copies of: check what the record books and
+  // the other editions say (lib/playerDelete), name what goes, then write.
+  //
+  // Returns whether it happened, so the player editor knows to close.
+  const askDelete = async ({ pid, name, historyName = null }) => {
+    if (!deletePlayer || !editionsHolding) return false;
+    const scoredHoles = Array.from({ length: numRounds }, (_, i) => i + 1)
+      .reduce((n, r) => n + holesEntered(holeData, pid, r), 0);
+    const verdict = deleteVerdict({
+      historyName,
+      // A read, taken on the tap: this console only ever loads its OWN
+      // edition's roster, so 2027 is invisible from here until it is asked
+      // about. Its failure is a refusal — see the module.
+      otherEditions: await editionsHolding(pid),
+      scoredHoles,
+      claimed: Object.values(claims || {}).some(c => c === pid),
+    });
+    if (!verdict.allowed) { notify(verdict.why); return false; }
+    if (!(await confirm({
+      title: `Delete ${name}?`,
+      message: deletionLines({ name, warnings: verdict.warnings }).join("\n"),
+      confirmLabel: "Delete",
+      destructive: true,
+    }))) return false;
+    await deletePlayer(pid);
+    notify(`Deleted ${name}`);
+    return true;
+  };
 
   // ── Single source of truth for round setup completion ──
   // Every place that shows "is this round ready?" (round cards, sub-tab dots,
@@ -2091,6 +2182,48 @@ export function AdminView({ registry, activePlayers, marketPool, sideGames, onUp
                       </div>
                     );
                   })()}
+
+                  {/* ── Player records off the roster ──
+                      Not "inactive players": a man who played in 2019 and is
+                      not coming this year is inactive, and he is deliberately
+                      NOT here — he has a career, he is in the returning
+                      picker, and nothing about him should be deleteable from a
+                      phone. What is here is the residue: a record with no
+                      rounds behind it and no place in this year's field.
+
+                      It has to be its own list because the editor above opens
+                      off a ROSTER row, so a demo name already moved to
+                      inactive would otherwise be unreachable — visible in the
+                      "Played before?" picker forever, and removable only from
+                      the Firebase console. */}
+                  {deletablePool.length > 0 && (
+                    <>
+                      <SectionLabel style={{ marginTop: 16 }}>Not in this year&apos;s field</SectionLabel>
+                      <Card pad={0} style={{ overflow: "hidden" }}>
+                        {deletablePool.map((r, i) => (
+                          <div key={r.id} style={{
+                            display: "flex", alignItems: "center", gap: 8, padding: "9px 12px",
+                            borderBottom: i === deletablePool.length - 1 ? "none" : `1px solid ${K.bdr}${ALPHA.hair}`,
+                          }}>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: FS.small, fontWeight: 700, color: K.t1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {r.name}
+                              </div>
+                              <div style={{ fontSize: FS.micro, color: K.t3, marginTop: 1 }}>{returningLine(r)}</div>
+                            </div>
+                            <Btn variant="dangerOutline" size="sm" style={{ flexShrink: 0, whiteSpace: "nowrap" }}
+                              onClick={() => askDelete({ pid: r.id, name: r.name })}>
+                              Delete
+                            </Btn>
+                          </div>
+                        ))}
+                      </Card>
+                      <div style={{ fontSize: FS.label, color: K.t3, marginTop: 6, lineHeight: 1.45 }}>
+                        Player records with no recorded rounds behind them. Add one back to this year from
+                        {" "}+ Add player, or delete it for good.
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
 
@@ -3120,6 +3253,7 @@ export function AdminView({ registry, activePlayers, marketPool, sideGames, onUp
         holeData={holeData} numRounds={numRounds}
         notify={notify} confirm={confirm} tournamentStarted={tournamentStarted}
         onRemove={removePlayer}
+        askDelete={askDelete}
         returning={returningPool}
         onSave={async (v) => {
           if (v.isNew) {

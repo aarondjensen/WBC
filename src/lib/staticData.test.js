@@ -42,6 +42,13 @@ describe("registryRows", () => {
     expect(registryRows([{ id: "p1" }])[0].index_override).toBeNull();
   });
 
+  // The field lib/playerScope filters on. Dropped here, a sandbox player would
+  // read as a career record and show up in every edition again.
+  it("carries the owning edition, and defaults it to none", () => {
+    expect(registryRows([{ id: "p1", edition_id: "wbc_demo" }])[0].edition_id).toBe("wbc_demo");
+    expect(registryRows([{ id: "p1" }])[0].edition_id).toBeNull();
+  });
+
   it("drops a row with no id and survives being handed nothing", () => {
     expect(registryRows([{ name: "Nobody" }])).toEqual([]);
     expect(registryRows()).toEqual([]);

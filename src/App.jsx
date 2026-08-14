@@ -43,6 +43,7 @@ import { EditionSwitcher } from "./components/EditionSwitcher";
 import { warmEditions } from "./lib/editions";
 import { lockNotice } from "./lib/editionLock";
 import { docIds } from "./lib/editionId";
+import { scopeFor, scopedRegistry } from "./lib/playerScope";
 // The small conversions every screen does — see lib/format.
 import { teeTimeToMinutes } from "./lib/format";
 // The Pairings editor tells a director when scoring will open.
@@ -836,8 +837,16 @@ export default function WBCApp() {
       read("tournament_rounds", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]),
     ]);
 
+    // Scoped on the way in, so every consumer of the registry — the roster
+    // join, the Players tab, the returning-player picker, the claim list and
+    // the bootstrap below — inherits it from one place. A player minted inside
+    // the demo carries that edition and is invisible everywhere else; see
+    // lib/playerScope. It is also what this function RETURNS, so the roster
+    // bootstrap cannot seed a real tournament with a sandbox's test names.
+    const scoped = scopedRegistry(registryRows(playerRows), TOURNAMENT_ID);
+
     if (playerRows?.length) {
-      DEMO_PLAYERS = registryRows(playerRows);
+      DEMO_PLAYERS = scoped;
       setRegistry(DEMO_PLAYERS);
       // DEMO_PLAYERS is module-level, so replacing it does not by itself
       // re-render anything that reads it. Nudge the state the roster derives
@@ -846,17 +855,17 @@ export default function WBCApp() {
     }
 
     const rounds = roundRows(trRows);
-    if (!rounds.length) return playerRows || [];
+    if (!rounds.length) return scoped;
     setTRounds(rounds);
 
     const courseIds = courseIdsOf(rounds);
-    if (!courseIds.length) return playerRows || [];
+    if (!courseIds.length) return scoped;
     const [cRows, tbRows] = await Promise.all([
       read("courses", [{ field: "id", op: "in", value: courseIds }]),
       read("tee_boxes", [{ field: "course_id", op: "in", value: courseIds }]),
     ]);
     if (cRows?.length) setCourseList(sortCoursesByRound(stitchCourses(cRows, tbRows), rounds));
-    return playerRows || [];
+    return scoped;
   }, []);
 
   const refreshStaticData = useCallback(() => loadStaticData(db.get), [loadStaticData]);
@@ -1824,11 +1833,30 @@ export default function WBCApp() {
   // legacy row's id and its display name do not have to agree, and deriving
   // over the top of one would file a man beside himself — new roster row, same
   // name, and his account claim still pointing at the record he has left.
+  //
+  // A registry row MINTED IN THE SANDBOX is stamped with that edition, and is
+  // then invisible everywhere else — a name typed into the demo is a test
+  // name, not a career, and an unstamped one turns up in every real edition's
+  // "Played before?" picker forever. See lib/playerScope.
+  //
+  // Only a record this edition cannot already see is scoped, and that
+  // qualifier is the whole safety of it. `db.upsert` MERGES, so scoping a row
+  // that already exists would write `edition_id: wbc_demo` onto a real career —
+  // and a director adding Aaron J to the demo, either off the returning picker
+  // or by typing the name his id was derived from, would delete him from
+  // 2026's registry without touching 2026. So an id already carrying a visible
+  // record keeps the scope that record has.
+  //
+  // The other direction is the one that has to WRITE rather than skip: an id
+  // whose only row is a demo row is invisible from here, so a real edition
+  // adding that name is claiming it, and scopeFor clears the stamp instead of
+  // leaving a roster row bound to a record nobody in this edition can read.
   const addPlayerToTournament = async (name, hi, parts = null, existingId = null) => {
     const id = existingId ? String(existingId) : name.toLowerCase().replace(/\s+/g, "_");
-    const rec = { id, name, ...(parts || {}) };
-    if (!DEMO_PLAYERS.find(p => p.id === id)) DEMO_PLAYERS.push({ ...rec });
-    else Object.assign(DEMO_PLAYERS.find(p => p.id === id), rec);
+    const known = DEMO_PLAYERS.find(p => p.id === id);
+    const rec = { id, name, ...(parts || {}), ...(known ? {} : scopeFor(TOURNAMENT_ID)) };
+    if (!known) DEMO_PLAYERS.push({ ...rec });
+    else Object.assign(known, rec);
     await db.upsert("players", rec, "id").catch(() => {});
     const newTp = { id: docIds.tournamentPlayer(_e(), id), tournament_id: TOURNAMENT_ID, player_id: id, handicap_index: hi, status: "active" };
     setTPlayers(prev => [...prev, newTp]);
@@ -1946,6 +1974,82 @@ export default function WBCApp() {
     });
     await db.delete("pairings", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }, { field: "player_id", op: "==", value: pid }]);
     notify("Moved to inactive");
+  };
+
+  // ── Where else this man holds a roster row ────────────────────────
+  // The one fact the delete decision needs that no screen already has: the
+  // roster subscription is filtered to THIS edition, by design, so from in here
+  // 2027 is invisible. Deleting the registry record while another year still
+  // binds to it would leave that year's roster row with no name to draw — the
+  // orphaned row lib/roster drops on sight, which is to say a player who
+  // silently vanishes from a tournament nobody is looking at yet.
+  //
+  // Returns null when the read fails. The caller must treat that as a refusal
+  // rather than as an empty list: not being able to check is not permission.
+  const editionsHolding = async (pid) => {
+    const rows = await db.get("tournament_players", [{ field: "player_id", op: "==", value: pid }]);
+    if (!rows) return null;
+    return [...new Set(rows.map(r => r.tournament_id).filter(t => t && t !== TOURNAMENT_ID))];
+  };
+
+  // ── Delete a player outright ──────────────────────────────────────
+  // The other half of "Move to inactive", and everything that one deliberately
+  // does not do. This takes the `players` record itself — the career id — plus
+  // everything this edition has filed under it: the roster row, the pairings,
+  // the tee assignments, the scores, and any skins document naming them (their
+  // market book, and any CTP they are holding, which would otherwise be a tag
+  // on a par 3 belonging to nobody).
+  //
+  // It exists for records that should not exist: a name typed into the demo, a
+  // misspelling added twice. WHO MAY BE DELETED is not decided here — see
+  // lib/playerDelete, which refuses anybody the record books know and anybody
+  // another edition still rosters, and AdminView, which asks.
+  //
+  // Only this edition's rows are swept. That is not a shortcut: a man on
+  // another year's roster cannot reach this function at all, so there is by
+  // then nothing of his anywhere else to sweep.
+  const deletePlayer = async (pid) => {
+    const tp = tPlayers.find(t => t.player_id === pid);
+    const gone = { field: "player_id", op: "==", value: pid };
+    const here = { field: "tournament_id", op: "==", value: TOURNAMENT_ID };
+
+    setTPlayers(prev => prev.filter(t => t.player_id !== pid));
+    setPairingsData(prev => {
+      const updated = {};
+      Object.keys(prev).forEach(rnd => {
+        updated[rnd] = prev[rnd].map(grp => grp.filter(id => id !== pid)).filter(grp => grp.length > 0);
+      });
+      return updated;
+    });
+    setTeeData(prev => {
+      const next = {};
+      Object.entries(prev).forEach(([rnd, byPlayer]) => {
+        const { [pid]: _gone, ...rest } = byPlayer || {};
+        next[rnd] = rest;
+      });
+      return next;
+    });
+    setHoleData(prev => {
+      const next = { ...prev };
+      // Keyed `${pid}_${round}`, and split from the RIGHT: a prefix match would
+      // also take "aaron_j_2"'s cards while deleting "aaron".
+      Object.keys(next).forEach(k => {
+        const at = k.lastIndexOf("_");
+        if (at > 0 && k.slice(0, at) === pid) delete next[k];
+      });
+      return next;
+    });
+    // The registry last in state, first in intent: every screen reads names
+    // through it, so dropping it is what makes the player disappear.
+    DEMO_PLAYERS = DEMO_PLAYERS.filter(p => p.id !== pid);
+    setRegistry(DEMO_PLAYERS);
+
+    if (tp) await db.deleteDoc("tournament_players", tp.id);
+    await db.delete("pairings", [here, gone]);
+    await db.delete("tee_assignments", [here, gone]);
+    await db.delete("hole_scores", [here, gone]);
+    await db.delete("skins", [here, gone]);
+    await db.deleteDoc("players", pid);
   };
 
   // Compute gross skin wins for scorecard highlighting: { "round_holeIdx": playerId }
@@ -2846,7 +2950,7 @@ export default function WBCApp() {
         {view === "photos" && !isGuest(user) && <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading photos…</div>}><PhotosView items={media} year={getTournamentYear()} uid={fbUser?.uid || null} isDirector={!!user.isDirector} isGuest={!!user.isGuest} canPost={!user.isGuest && !!fbUser?.uid && photoUploadsAllowed(photoConfig)} uploadsBlockedReason={photoUploadsAllowed(photoConfig) ? "" : uploadsDisabledReason(photoConfig)} onUpload={onUploadPhoto} onDelete={onDeletePhoto} notify={notify} /></Suspense>}
         {view === "skins" && <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading betting…</div>}><BettingView players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} numRounds={numRounds} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} marketBets={marketBets} onSaveMarketBet={onSaveMarketBet} leaderboard={getLeaderboard} finalizedRounds={finalizedRounds} pairingsData={pairingsData} firstTeeAt={firstTeeAt} marketNudge={marketNudge} teeTimesData={teeTimesData} roundDates={roundDates} inactivePlayers={inactivePlayers} onAddMarketOutsider={user.isDirector ? onAddMarketOutsider : undefined} /></Suspense>}
         {view === "groups" && <GroupsView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} pairingsData={pairingsData} teeTimesData={teeTimesData} getPlayerTee={getPlayerTee} user={user} />}
-        {view === "admin" && (user.isDirector ? <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading admin…</div>}><AdminView registry={registry} activePlayers={activePlayers} marketPool={marketPool} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} rebuyIds={rebuyIds} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
+        {view === "admin" && (user.isDirector ? <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading admin…</div>}><AdminView registry={registry} activePlayers={activePlayers} marketPool={marketPool} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} rebuyIds={rebuyIds} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} deletePlayer={deletePlayer} editionsHolding={editionsHolding} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
               setTeeTimesData(prev => {
                 const next = typeof updater === "function" ? updater(prev) : updater;
                 // THE SHEET IS SAVED FIRST, and on its own document. Tee times
