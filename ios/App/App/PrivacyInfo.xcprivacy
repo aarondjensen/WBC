@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  ══════════════════════════════════════════════════════════════════
+   PrivacyInfo.xcprivacy — what WBC collects, and which Apple APIs it
+   touches that need a stated reason.
+  ══════════════════════════════════════════════════════════════════
+
+  Apple has required this file since spring 2024. Without it App Store Connect
+  accepts the upload and then emails ITMS-91053 ("Missing API declaration")
+  hours later, which is a rejection discovered after you have already told
+  everyone the build is in.
+
+  It is the APP TARGET's declaration. Every pod (Firebase, Capacitor) ships its
+  own manifest and Apple aggregates them, so nothing here needs to re-state
+  what a dependency already declares — only what this target's own code does.
+
+  ── Tracking ──
+  False, and the domain list is empty. WBC has no ad SDK, no analytics SDK and
+  no third party it hands identifiers to. Firebase Auth, Firestore and Storage
+  are the backend this app talks to; that is a first-party service, not
+  tracking, and Apple's definition turns on linking data to third-party data
+  for advertising or measurement. Nothing here does that.
+
+  ── Collected data ──
+  Every type below is App Functionality, linked to the user, not used for
+  tracking:
+
+    EmailAddress   Google/Apple sign-in returns one. Apple's Hide My Email
+                   relay counts as an address, so it is declared either way.
+    Name           Ditto — the provider's display name — plus the roster name
+                   claimed on ClaimScreen.
+    UserID         The Firebase uid, and the permanent WBC player id it maps
+                   to (wbc_users). This is the join that sixteen years of
+                   history hangs off.
+    PhotosorVideos Uploaded to the tournament gallery from the photo picker.
+    OtherUserContent
+                   Scores, buy-in ledger rows and market shares. Not "other
+                   data": they are typed in by a person about a person.
+
+  Deliberately NOT declared, because the app does not collect them: precise or
+  coarse location (courses are chosen by name from a search, never from the
+  device), contacts, health, financial info (no money moves through this app —
+  the buy-in sheet is a ledger of cash handed over in a car park), advertising
+  data, crash or performance data (no crash SDK is linked).
+
+  ── Accessed API types ──
+  UserDefaults only. Capacitor's bridge and this app's own preferences read and
+  write it, all of it for this app's own use, which is reason CA92.1. The
+  file-timestamp, disk-space and boot-time reasons that Firebase needs are
+  declared by Firebase's own manifest inside its pods.
+
+  IF APPLE EMAILS ITMS-91053 ANYWAY, the email names the exact API category and
+  the approved reason codes for it. Add that category here rather than guessing
+  at more of them up front — an over-broad declaration is a claim about this
+  app that is not true.
+
+  Keep this in step with the App Privacy answers in App Store Connect. They are
+  two copies of the same statement and Apple compares them.
+-->
+<plist version="1.0">
+<dict>
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array>
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeEmailAddress</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeName</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeUserID</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypePhotosorVideos</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeOtherUserContent</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+	</array>
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>CA92.1</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>
