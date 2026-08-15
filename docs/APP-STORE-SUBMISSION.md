@@ -272,7 +272,7 @@ lead times and they break silently:
 
 Then:
 
-4. `npm run build && npx cap sync ios`
+4. `npm run ios:sync`
 5. Open `ios/App/App.xcworkspace`. Set **MARKETING_VERSION** to `1.0.0` and
    **CURRENT_PROJECT_VERSION** to `1`. Confirm `PrivacyInfo.xcprivacy` appears
    under Build Phases → Copy Bundle Resources (this branch added it; verify
@@ -403,11 +403,11 @@ What that means concretely:
 
 ### Everything else on Play
 
-1. `npm run build && npx cap sync android`
+1. `npm run android:bundle` — build, sync and bundle in one, from any shell
 2. Signing: `android/keystore.properties` (see the `.example` beside it) or the
    `WBC_KEYSTORE_*` env vars. **Back the keystore up somewhere you will still
    have in five years** — an upload key cannot be casually rotated.
-3. `cd android && ./gradlew bundleRelease` → `app/build/outputs/bundle/release/`.
+3. The bundle lands in `android/app/build/outputs/bundle/release/`.
    Watch for the `WBC: no release signing configured` warning; the build gladly
    produces an unsigned bundle Play will refuse.
 4. **Add the Play App Signing SHA-1 and SHA-256 to Firebase.** This is the
@@ -441,7 +441,9 @@ What that means concretely:
 Run the checks, then use the app:
 
 ```sh
-npm run test:run && npm run lint && npm run build
+npm run test:run
+npm run lint
+npm run build
 node --test firestore.rules.test.mjs   # if firestore.rules changed
 ```
 

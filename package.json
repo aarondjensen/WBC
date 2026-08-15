@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "android:bundle": "node scripts/android-bundle.mjs",
+    "ios:sync": "npm run build && npx cap sync ios",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest",
