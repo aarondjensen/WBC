@@ -78,7 +78,19 @@ android {
         applicationId "com.wannabecup.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
+        // Bumped for every upload, without exception: Play refuses any bundle
+        // whose versionCode is not strictly higher than the last one it took,
+        // and it refuses it at the upload screen after the build has already
+        // said BUILD SUCCESSFUL.
+        //
+        // 2 rather than 1 because the first bundle was a throwaway. Google's
+        // app signing certificate does not exist until a bundle has been
+        // uploaded and Play App Signing enrolled — but google-services.json
+        // has to carry that certificate's SHA-1 at BUILD time or Google
+        // Sign-In fails for everybody who installs from Play while working
+        // perfectly for whoever built it. So the first upload exists to mint
+        // the certificate, and this is the one testers actually get.
+        versionCode 2
         versionName "1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
