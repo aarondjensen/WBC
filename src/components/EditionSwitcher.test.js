@@ -35,8 +35,11 @@ const EDITIONS = [
   { id: "wbc_demo", year: null, name: "DEMO Sandbox" },
 ];
 const SUMMARIES = {
-  wbc_2026: { players: 0, rounds: 0, scores: 0 },
-  wbc_2025: { players: 16, rounds: 4, scores: 1152, roundCount: 4, finalizedRounds: { 1: true, 2: true, 3: true, 4: true }, pairings: {} },
+  // 2026 is not in the hand-kept table (that covers the imported years only),
+  // so its location can only come from what the director typed — which makes
+  // it the year that proves the row reads one off the counts load.
+  wbc_2026: { players: 0, rounds: 0, scores: 0, location: "Boyne Falls, MI" },
+  wbc_2025: { players: 16, rounds: 4, scores: 1152, location: "Gaylord, MI", roundCount: 4, finalizedRounds: { 1: true, 2: true, 3: true, 4: true }, pairings: {} },
   wbc_2015: { players: 12, rounds: 4, scores: 864, roundCount: 4, finalizedRounds: { 1: true, 2: true, 3: true, 4: true }, pairings: {} },
   wbc_demo: { players: 16, rounds: 4, scores: 900 },
 };
@@ -77,6 +80,12 @@ vi.mock("../lib/editions", () => ({
   setEditionLocked: (...a) => { locks.push(a); return Promise.resolve({ id: a[0], locked: a[1] }); },
   resetSandbox: (...a) => { sandboxes.push(a); return Promise.resolve({ id: "wbc_demo" }); },
   renameEdition: (...a) => { renames.push(a); return Promise.resolve({ ok: true, name: a[1] }); },
+  // The sheet's own read: the tapped year's rounds, with the course each was
+  // played on. Two small reads in the real thing, and only for one year.
+  loadEditionCourses: async (id) => (id === "wbc_2025"
+    ? [{ round: 1, name: "Black Forest" }, { round: 2, name: "The Loop" }]
+    : []),
+  forgetEditionCourses: () => {},
 }));
 
 const { EditionSwitcher } = await import("./EditionSwitcher");
@@ -110,45 +119,65 @@ describe("EditionSwitcher", () => {
     expect(screen.queryByText("Copy from")).toBeNull();
 
     releaseSummaries();
-    await waitFor(() => expect(screen.getByText(/1,152 scores/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Boyne Falls, MI")).toBeTruthy());
     // The counts have landed and the form is still put away.
     expect(screen.queryByText("Copy from")).toBeNull();
     expect(screen.queryByText("What comes across")).toBeNull();
   });
 
+  // ── A year and where it was played ────────────────────────────────
+  // The row used to carry the counts. Nobody scans a list of sixteen
+  // tournaments looking for a score total — they look for the year at Gull
+  // Lake View — so the counts moved to the sheet and the two places a
+  // director decides on them, and the row says where instead.
+  it("says where each year was played, not how many scores are in it", async () => {
+    open();
+    await screen.findByText("2026");
+    // The imported years have a location before anything is counted: it comes
+    // from the hand-kept table, which is the only source they have.
+    expect(screen.getByText("Gull Lake View, MI")).toBeTruthy();
+
+    releaseSummaries();
+    await waitFor(() => expect(screen.getByText("Boyne Falls, MI")).toBeTruthy());
+    // And no counts anywhere on the list.
+    expect(screen.queryByText(/1,152 scores/)).toBeNull();
+    expect(screen.queryByText(/16 players/)).toBeNull();
+  });
+
   it("fills a row in as that year's counts land, without waiting for the rest", async () => {
     open();
     await screen.findByText("2026");
-    // Nothing counted yet: every row says so rather than claiming a year is
-    // empty when we simply have not looked.
-    expect(screen.getAllByText("Counting…").length).toBe(EDITIONS.length);
+    // Until a year is counted, nothing about its state is claimed — the dot
+    // and its label are what say so, and every row is still saying it.
+    const counting = () => screen.getAllByTitle("Counting…").length;
+    expect(counting()).toBe(EDITIONS.length);
 
     streamYear("wbc_2025");
-    expect(screen.getByText("16 players · 4 rounds · 1,152 scores")).toBeTruthy();
-    // And the years still in flight are still saying so.
-    expect(screen.getAllByText("Counting…").length).toBe(EDITIONS.length - 1);
+    expect(counting()).toBe(EDITIONS.length - 1);
+    // 2025's own row now knows what it holds: a finished tournament.
+    expect(screen.getByTitle("Complete")).toBeTruthy();
   });
 
   it("tells a year it could not read apart from one it has not counted yet", async () => {
-    // Opposite sentences, and the second one is what puts a delete button on a
+    // Opposite answers, and the second one is what puts a delete button on a
     // finished tournament — so a year is only called unreadable once the whole
     // load has settled without it.
     open();
     await screen.findByText("2026");
-    expect(screen.queryByText("Couldn't read")).toBeNull();
+    expect(screen.queryByTitle("Couldn't read")).toBeNull();
 
     // 2026 is left out of the answer: its counts failed.
     const { wbc_2026: _gone, ...rest } = SUMMARIES;
     await act(async () => { releaseSummaries(rest); });
-    expect(screen.getByText("Couldn't read")).toBeTruthy();
-    expect(screen.queryByText("Counting…")).toBeNull();
+    expect(screen.getByTitle("Couldn't read")).toBeTruthy();
+    expect(screen.queryByTitle("Counting…")).toBeNull();
   });
 
   it("builds the form only once it is expanded, pointed at the next year from the last one played", async () => {
     open();
     await screen.findByText("2026");
     releaseSummaries();
-    await waitFor(() => expect(screen.getByText(/1,152 scores/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Boyne Falls, MI")).toBeTruthy());
 
     fireEvent.click(screen.getByText("+ New"));
     expect(screen.getByText("Copy from")).toBeTruthy();
@@ -195,7 +224,29 @@ describe("EditionSwitcher", () => {
       await screen.findByText("2015");
       openSheet("2015");
       expect(screen.getByText("Open this tournament")).toBeTruthy();
-      expect(screen.getByText("WBC 2015")).toBeTruthy();
+      // The name, and where it was played, on one line under the year.
+      expect(screen.getByText("WBC 2015 · Gull Lake View, MI")).toBeTruthy();
+    });
+
+    // What the row stopped carrying has to turn up here, or it is gone: the
+    // size of the field, and what they played.
+    it("says how many played and what they played, a tap deeper", async () => {
+      open();
+      await screen.findByText("2025");
+      releaseSummaries();
+      await waitFor(() => expect(screen.getByText("Boyne Falls, MI")).toBeTruthy());
+      openSheet("2025");
+      await waitFor(() => expect(screen.getByText("16 players")).toBeTruthy());
+      expect(screen.getByText("Black Forest")).toBeTruthy();
+      expect(screen.getByText("The Loop")).toBeTruthy();
+      expect(screen.getByText("R1")).toBeTruthy();
+    });
+
+    it("says a year with no round setup has none, rather than nothing", async () => {
+      open();
+      await screen.findByText("2015");
+      openSheet("2015");
+      await waitFor(() => expect(screen.getByText("No courses set")).toBeTruthy());
     });
 
     // The ACTIVE row opens it too, which the old inert row could not. There is
@@ -453,9 +504,10 @@ describe("EditionSwitcher", () => {
       for (const y of ["2026", "2025", "2015"]) expect(screen.getByText(y)).toBeTruthy();
     });
 
-    it("still shows what the sandbox holds", async () => {
+    it("still shows what the sandbox holds, a tap deeper", async () => {
       await settled();
-      expect(screen.getByText("16 players · 4 rounds · 900 scores")).toBeTruthy();
+      fireEvent.click(screen.getByText("DEMO"));
+      await waitFor(() => expect(screen.getByText("16 players")).toBeTruthy());
     });
 
     // The one path that could corrupt a real tournament: building next year's
@@ -489,8 +541,11 @@ describe("EditionSwitcher", () => {
       fireEvent.change(field, { target: { value: "The Snow Bowl" } });
       fireEvent.click(screen.getByText("Save name"));
       await waitFor(() => expect(renames).toEqual([["wbc_2015", "The Snow Bowl"]]));
-      // Back on the list, with the new name on the row it was typed for.
-      await waitFor(() => expect(screen.getByText(/The Snow Bowl/)).toBeTruthy());
+      // Back on the list, and the year it was typed for is carrying it — the
+      // row leads with where it was played, so the name is a tap deeper.
+      await waitFor(() => expect(screen.getByText("2015")).toBeTruthy());
+      fireEvent.click(screen.getByText("2015"));
+      expect(screen.getByText(/The Snow Bowl/)).toBeTruthy();
     });
 
     it("refuses to save an empty name rather than clearing one", async () => {

@@ -136,7 +136,7 @@ const _count = async (col, tid) => {
 
 const _tidFilter = (tid) => [{ field: "tournament_id", op: "==", value: tid }];
 
-// { [editionId]: { players, rounds, scores, roundCount, finalizedRounds, pairings } }
+// { [editionId]: { players, rounds, scores, location, roundCount, finalizedRounds, pairings } }
 //
 // An edition whose reads fail is left OUT of the map rather than reported as
 // zero — "we couldn't read it" and "there is nothing in it" are opposite
@@ -185,6 +185,13 @@ export const loadEditionSummaries = async (ids = [], { onEdition } = {}) => {
     if (ns === null) return;
     const state = states.get(id);
     const summary = Object.fromEntries(COUNT_COLS.map(([key], i) => [key, ns[i]]));
+    // WHERE it was played, which is what a row now says about a year instead
+    // of how many scores are in it. Free: the state documents are already in
+    // this hop for the finalization map, and the location is the field beside
+    // it. Blank for a year no director has filled in — the picker falls back
+    // to the hand-kept table in lib/editionLocation, which covers the imported
+    // years and is the only source they have.
+    summary.location = state?.meta?.location || "";
     const scores = summary.scores;
     // A year nobody has played cannot be finished, so there is nothing to ask
     // about it — and `finalizedRounds` on an empty year would read as a claim
@@ -223,6 +230,50 @@ export const loadEditionSummaries = async (ids = [], { onEdition } = {}) => {
 // long as the network takes. Replaced by loadEditionSummaries the moment that
 // resolves — see the cache note in lib/editionSummary for why a stale count
 // here cannot become a wrong delete.
+// ── What a year was PLAYED ON, one year at a time ──────────────────
+// For the sheet, which opens on one tapped year and is the only place that
+// wants this. Deliberately not part of the picker's bulk load: course names
+// need the round setup AND the course rows behind it, and gathering that for
+// seventeen years on every open would put ~70 reads on a screen whose whole
+// design note is about keeping them down. Tapping one year costs a handful.
+//
+// Two hops, both small: the year's round rows (four of them), then the courses
+// they name — fetched by ID rather than by reading the whole library, which is
+// sixty-odd documents most of which belong to other years.
+//
+// Returned in round order as [{ round, name }]. A round whose course row has
+// gone missing keeps its place with no name rather than vanishing: "R3" with a
+// blank beside it is the honest rendering of a course that was deleted out
+// from under a finished tournament.
+const _courseNames = new Map();
+
+export const loadEditionCourses = async (id) => {
+  if (!id) return [];
+  if (_courseNames.has(id)) return _courseNames.get(id);
+  const rounds = (await _get("tournament_rounds", _tidFilter(id)))
+    .filter(r => Number(r?.round_number) > 0)
+    .sort((a, b) => Number(a.round_number) - Number(b.round_number));
+  const ids = [...new Set(rounds.map(r => r.course_id).filter(Boolean))];
+  const named = new Map();
+  await Promise.all(ids.map(async cid => {
+    try {
+      const snap = await getDocs(query(collection(_db, "courses"), where("id", "==", cid)));
+      const row = snap.docs[0]?.data();
+      if (row?.name) named.set(cid, row.name);
+    } catch { /* a course that cannot be read is a round with no name */ }
+  }));
+  const out = rounds.map(r => ({ round: Number(r.round_number), name: named.get(r.course_id) || "" }));
+  // Remembered for as long as the app is up. The picker reloads the app when
+  // it switches years, so this is exactly the life of one visit to it — long
+  // enough to stop a director paying twice for tapping the same row twice.
+  _courseNames.set(id, out);
+  return out;
+};
+
+// Forget one year's courses — after a clone or a sandbox rebuild lands in it,
+// when the rounds it holds are no longer the rounds this cached.
+export const forgetEditionCourses = (id) => { if (id) _courseNames.delete(id); };
+
 export const cachedEditionSummaries = (ids = []) => readSummaryCache(ids);
 
 // Seed the currently-active edition into the collection if it isn't there yet,

@@ -80,9 +80,47 @@ describe("EditionSheet", () => {
     expect(screen.getByText(/viewing this tournament/)).toBeTruthy();
   });
 
-  it("carries the counts the row was showing", () => {
-    show({ summary: "16 players · 4 rounds · 1,152 scores" });
-    expect(screen.getByText("16 players · 4 rounds · 1,152 scores")).toBeTruthy();
+  // ── What the row stopped carrying ─────────────────────────────────
+  // The row says a year and where it was played; the size of the field and
+  // the courses it played are what this sheet is a tap deeper FOR, so their
+  // absence here would mean they are nowhere.
+  it("says how many played and what they played", () => {
+    show({ players: 16, location: "Gull Lake View, MI", courses: [
+      { round: 1, name: "Black Forest" }, { round: 2, name: "The Loop" },
+    ] });
+    expect(screen.getByText("16 players")).toBeTruthy();
+    expect(screen.getByText("Black Forest")).toBeTruthy();
+    expect(screen.getByText("R2")).toBeTruthy();
+    expect(screen.getByText("WBC 2025 · Gull Lake View, MI")).toBeTruthy();
+  });
+
+  // Three answers, not two: still reading, read and there are none, and a
+  // round whose course row has gone missing.
+  it("tells reading the courses apart from having none", () => {
+    show({ courses: null });
+    expect(screen.getByText("Reading the courses…")).toBeTruthy();
+    cleanup();
+    show({ courses: [] });
+    expect(screen.getByText("No courses set")).toBeTruthy();
+  });
+
+  it("keeps a round whose course has gone missing, with a dash", () => {
+    show({ courses: [{ round: 1, name: "Black Forest" }, { round: 2, name: "" }] });
+    expect(screen.getByText("R2")).toBeTruthy();
+    expect(screen.getByText("—")).toBeTruthy();
+  });
+
+  it("tells counting the roster apart from failing to read it", () => {
+    show({ players: null, countsFresh: false });
+    expect(screen.getByText("Counting the roster…")).toBeTruthy();
+    cleanup();
+    show({ players: null, countsFresh: true });
+    expect(screen.getByText("Roster couldn't be read")).toBeTruthy();
+  });
+
+  it("counts one player as a player", () => {
+    show({ players: 1 });
+    expect(screen.getByText("1 player")).toBeTruthy();
   });
 
   it("hands each action back to the caller", () => {
