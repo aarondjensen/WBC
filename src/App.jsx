@@ -1,5 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, lazy, Suspense } from "react";
-import { _app, _db, _auth, onAuthStateChanged, doGoogleSignIn, doAppleSignIn, doSignOut, consumeRedirectResult, deleteAccount, USERS_COLLECTION, NATIVE_APPLE_ENABLED, APPLE_PROVIDER_ENABLED, isNativePlatform, isAndroidNative, AUTH_PROVIDERS_ENABLED, TOURNAMENT_ID, getEditionSlug, getTournamentYear, isDefaultEdition, rememberDirector, getHomeEditionId, getActiveTournamentId } from "./firebase";
+import { _app, _db, _auth, onAuthStateChanged, doGoogleSignIn, doAppleSignIn, doSignOut, consumeRedirectResult, deleteAccount, USERS_COLLECTION, NATIVE_APPLE_ENABLED, APPLE_PROVIDER_ENABLED, isNativePlatform, isAndroidNative, AUTH_PROVIDERS_ENABLED, TOURNAMENT_ID, getEditionSlug, getTournamentYear, isDefaultEdition, rememberDirector, rememberSignedIn, hadAuthSession, getHomeEditionId, getActiveTournamentId } from "./firebase";
 import { readMembership, isDirectorAccount, resolveMember, setDirector, subscribeMemberships } from "./lib/accounts";
 // The fourth way in — no account, no password, no roster spot, no writes.
 import { guestUser, isGuest, setGuestWrites, GUEST_NOTICE } from "./lib/guestMode";
@@ -45,6 +45,7 @@ import { warmEditions, cachedEditions } from "./lib/editions";
 import { lockNotice, isEditionLocked, canAdminEdition, demoOnlyAdmin } from "./lib/editionLock";
 import { editionClosedToMembers } from "./lib/editionLifecycle";
 import { liveEdition, editionBannerShowing } from "./lib/editionHome";
+import { holdForAuth } from "./lib/authHold";
 import { docIds } from "./lib/editionId";
 import { scopeFor, scopedRegistry } from "./lib/playerScope";
 // The small conversions every screen does — see lib/format.
@@ -388,7 +389,11 @@ export default function WBCApp() {
   // are the source of truth for which player profiles are already claimed —
   // no redundant `claimed` flag is stored on the player record.
   const [claims, setClaims] = useState({});
-  const [fbUser, setFbUser] = useState(null);        // current Firebase Auth user
+  // undefined = Firebase has not answered yet; null = it answered, and nobody
+  // is signed in. The two have to be told apart: the app draws the sign-in
+  // screen for the second and must not draw it for the first. See the render
+  // gates below and hadAuthSession in firebase.js.
+  const [fbUser, setFbUser] = useState(undefined); // current Firebase Auth user
   const [claimState, setClaimState] = useState(null); // null | { status: "needs-claim", candidates }
   const [claimBusyId, setClaimBusyId] = useState(null);
   const [authMsg, setAuthMsg] = useState("");        // provider sign-in error, shown on login screen
@@ -1574,10 +1579,22 @@ export default function WBCApp() {
   // providers are disabled — no redirect/iframe machinery runs on cold start
   // until the feature is live.
   useEffect(() => {
-    if (!AUTH_PROVIDERS_ENABLED) return;
+    // Providers off: nobody can be signed in, so say so at once rather than
+    // leaving the app holding for an answer that is never coming.
+    if (!AUTH_PROVIDERS_ENABLED) { setFbUser(null); return; }
     consumeRedirectResult().catch(e => setAuthMsg(e?.message || "Sign-in failed."));
-    const unsub = onAuthStateChanged(_auth, u => setFbUser(u));
-    return unsub;
+    const unsub = onAuthStateChanged(_auth, u => {
+      setFbUser(u || null);
+      // What the next cold start reads to decide whether to wait for this
+      // answer or draw the sign-in screen straight away. Cleared on sign-out
+      // by the same listener, which fires with null.
+      rememberSignedIn(!!u);
+    });
+    // Belt and braces. onAuthStateChanged fires once on init even offline, so
+    // this should never be what ends the wait — but a splash that never
+    // resolves is a worse bug than the flash this is fixing.
+    const bail = setTimeout(() => setFbUser(v => (v === undefined ? null : v)), 4000);
+    return () => { clearTimeout(bail); unsub(); };
   }, []);
 
   // Resolve a signed-in Firebase user to a WBC player: already-claimed fast
@@ -2569,6 +2586,25 @@ export default function WBCApp() {
           setMembershipAnswer({ uid: fbUser.uid, doc: m || { uid: fbUser.uid } });
         }}
       />
+    );
+  }
+
+  // ── Switching editions must not flash the sign-in screen ──
+  // The switch clears the stored player session on purpose (see switchEdition)
+  // and reloads, so the app comes back up with no player AND no Firebase user
+  // yet — Auth restores itself from IndexedDB a few hundred milliseconds
+  // later. Without this the render fell through to the sign-in screen in that
+  // gap, and a director changing years watched Google and Apple buttons appear
+  // in front of an account that never signed out.
+  //
+  // Held only on a device that HAS signed in before, so a genuine stranger
+  // still gets the sign-in screen on the first frame rather than a splash.
+  if (holdForAuth({ user, authKnown: fbUser !== undefined, hadSession: hadAuthSession() })) {
+    return (
+      <div style={{ minHeight: "var(--app-height, 100dvh)", background: `radial-gradient(ellipse at 20% 50%, #0d1f3c 0%, ${K.bg} 70%)`, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+        <img src={WBC_LOGO} alt="WBC" style={{ height: 72, opacity: 0.85, animation: "pulse 1.5s ease-in-out infinite", filter: "drop-shadow(0 4px 16px rgba(34,211,167,0.3))" }} />
+        <style>{`@keyframes pulse { 0%,100% { opacity: 0.85; } 50% { opacity: 0.4; } }`}</style>
+      </div>
     );
   }
 
