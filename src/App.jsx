@@ -3,7 +3,7 @@ import { _app, _db, _auth, onAuthStateChanged, doGoogleSignIn, doAppleSignIn, do
 import { readMembership, isDirectorAccount, resolveMember, setDirector, subscribeMemberships } from "./lib/accounts";
 // The fourth way in — no account, no password, no roster spot, no writes.
 import { guestUser, isGuest, setGuestWrites, GUEST_NOTICE } from "./lib/guestMode";
-import { K, ON_ACC, ON_DANGER, FS, R, ALPHA, MOTION, FONT, SHADOW, SCRIM, DIM_PLACED, getTheme, setTheme } from "./theme";
+import { K, ON_ACC, ON_DANGER, FS, R, ALPHA, MOTION, FONT, SHADOW, SCRIM, DIM_PLACED, getTheme, setTheme, entranceBg } from "./theme";
 import { SegmentedToggle, Toggle, StickyTop, SectionLabel, Card, Toast, Btn } from "./components/ui";
 import { computeIndividualBoard, rankIndividualBoard, WD_SCORE } from "./lib/individualBoard";
 // Only what the SHELL still needs — the rest went to the Betting tab with it.
@@ -2589,34 +2589,32 @@ export default function WBCApp() {
     );
   }
 
-  // ── Switching editions must not flash the sign-in screen ──
-  // The switch clears the stored player session on purpose (see switchEdition)
-  // and reloads, so the app comes back up with no player AND no Firebase user
-  // yet — Auth restores itself from IndexedDB a few hundred milliseconds
-  // later. Without this the render fell through to the sign-in screen in that
-  // gap, and a director changing years watched Google and Apple buttons appear
-  // in front of an account that never signed out.
+  // ── Nothing between here and the tournament may be the sign-in screen ──
+  // Two gaps, one rule. Switching editions clears the stored player session on
+  // purpose (see switchEdition) and reloads, so the app comes back up with no
+  // player and no Firebase user yet — Auth restores itself from IndexedDB a
+  // few hundred milliseconds later. Then, once it answers, there is a second
+  // wait while the membership and the uid→player claim land.
   //
-  // Held only on a device that HAS signed in before, so a genuine stranger
-  // still gets the sign-in screen on the first frame rather than a splash.
-  if (holdForAuth({ user, authKnown: fbUser !== undefined, hadSession: hadAuthSession() })) {
+  // The render fell through to the sign-in screen in BOTH: first for the
+  // length of the auth restore, and then — after that was fixed — for the
+  // single frame between the membership answer and the effect that resolves
+  // the player, which is what a recording of an edition switch caught.
+  //
+  // Held only where an answer is actually coming: a device that has signed in
+  // before, or an account already in hand. A first-time visitor still gets the
+  // sign-in screen on the first frame rather than a pulsing logo. See
+  // lib/authHold, and note the claim screen is checked below — the hold gets
+  // out of the way of the one question this flow does need to ask.
+  if (holdForAuth({
+    user,
+    authKnown: fbUser !== undefined,
+    hadSession: hadAuthSession(),
+    signedIn: !!fbUser,
+    needsClaim: claimState?.status === "needs-claim",
+  })) {
     return (
-      <div style={{ minHeight: "var(--app-height, 100dvh)", background: `radial-gradient(ellipse at 20% 50%, #0d1f3c 0%, ${K.bg} 70%)`, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-        <img src={WBC_LOGO} alt="WBC" style={{ height: 72, opacity: 0.85, animation: "pulse 1.5s ease-in-out infinite", filter: "drop-shadow(0 4px 16px rgba(34,211,167,0.3))" }} />
-        <style>{`@keyframes pulse { 0%,100% { opacity: 0.85; } 50% { opacity: 0.4; } }`}</style>
-      </div>
-    );
-  }
-
-  // Signed in, and nothing to show yet — either the door has not answered or
-  // the roster has not arrived to say which player this account is. Holding
-  // here rather than falling through to the login screen is what stops the
-  // sign-in buttons appearing to somebody who is already signed in, which
-  // reads as "it threw me back out" and is indistinguishable from the gate
-  // having refused them.
-  if (fbUser && !user && (member === undefined || !storageLoaded)) {
-    return (
-      <div style={{ minHeight: "var(--app-height, 100dvh)", background: `radial-gradient(ellipse at 20% 50%, #0d1f3c 0%, ${K.bg} 70%)`, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div style={{ minHeight: "var(--app-height, 100dvh)", background: entranceBg(), display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
         <img src={WBC_LOGO} alt="WBC" style={{ height: 72, opacity: 0.85, animation: "pulse 1.5s ease-in-out infinite", filter: "drop-shadow(0 4px 16px rgba(34,211,167,0.3))" }} />
         <style>{`@keyframes pulse { 0%,100% { opacity: 0.85; } 50% { opacity: 0.4; } }`}</style>
       </div>
@@ -2644,7 +2642,7 @@ export default function WBCApp() {
 
   if (!user) {
     return (
-      <div style={{ minHeight: "var(--app-height, 100dvh)", background: `radial-gradient(ellipse at 20% 50%, #0d1f3c 0%, ${K.bg} 70%)`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", padding: 20 }}>
+      <div style={{ minHeight: "var(--app-height, 100dvh)", background: entranceBg(), display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", padding: 20 }}>
       <style>{`:root { --sab: env(safe-area-inset-bottom, 0px); }`}</style>
       <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
         <style>{`

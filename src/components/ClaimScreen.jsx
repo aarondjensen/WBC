@@ -20,7 +20,7 @@
 // career identity linking to 16 years of history, so this is the moment a real
 // person is bound to that identity.
 import { useState } from "react";
-import { K, FS, R, ALPHA, MOTION } from "../theme";
+import { K, FS, R, ALPHA, MOTION, entranceBg } from "../theme";
 import { WBC_LOGO } from "../constants";
 import { EditionSwitcher } from "./EditionSwitcher";
 
@@ -46,7 +46,7 @@ export function ClaimScreen({ fbUser, candidates, onClaim, onCancel, busyId, loc
   const displayName = fbUser?.displayName || "";
   const [switcherOpen, setSwitcherOpen] = useState(false);
   return (
-    <div style={{ minHeight: "var(--app-height, 100dvh)", background: `radial-gradient(ellipse at 20% 50%, #0d1f3c 0%, ${K.bg} 70%)`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", padding: 20 }}>
+    <div style={{ minHeight: "var(--app-height, 100dvh)", background: entranceBg(), display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", padding: 20 }}>
       <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
       <div style={{ width: "100%", maxWidth: 420, textAlign: "center" }}>
         <img src={WBC_LOGO} alt="WBC" style={{ height: 64, margin: "0 auto 16px", display: "block", filter: "drop-shadow(0 4px 16px rgba(34,211,167,0.3))" }} />

@@ -48,6 +48,9 @@
 // white on the dark one — and theme.test.js holds every one of these ratios.
 const DARK = {
   bg: "#080f1a", card: "#0e1829", inp: "#0a1425", hover: "#142036",
+  // The tint at the centre of the entrance backdrop — see entranceBg. A
+  // deeper navy on the dark page; a cooler paper on the light one.
+  entrance: "#0d1f3c",
   acc: "#22d3a7", accDim: "#0d9b73", accGlow: "rgba(34,211,167,0.12)",
   tourn: "#38bdf8", tournGlow: "rgba(56,189,248,0.12)",
   warn: "#f59e0b", danger: "#ef4444",
@@ -102,6 +105,7 @@ const LIGHT = {
   // than a neutral slate borrowed from nowhere. It is why the two themes read as
   // one app rather than two: the light one is the dark one turned inside out.
   bg: "#f2f5f9", card: "#ffffff", inp: "#e8edf4", hover: "#dde4ef",
+  entrance: "#e2eaf5",
   acc: "#0b7a5c", accDim: "#065f47", accGlow: "rgba(11,122,92,0.12)",
   tourn: "#0369a1", tournGlow: "rgba(3,105,161,0.12)",
   warn: "#a35a00", danger: "#c02626",
@@ -355,3 +359,19 @@ export const segTrack = ({ compact = false } = {}) => ({
   // bordered one would be, so two of these never disagree by a pixel.
   border: "1px solid transparent",
 });
+
+// ── The entrance backdrop ──────────────────────────────────────────
+// Behind the four screens somebody can arrive on before the tournament does:
+// the splash, the sign-in screen, the password screen and the claim screen.
+//
+// It used to be written out at each of those four call sites with the navy
+// hardcoded — `radial-gradient(ellipse at 20% 50%, #0d1f3c 0%, ${K.bg} 70%)` —
+// which is right in the dark theme and wrong in the light one, where it puts a
+// near-black blob across a near-white page. It shows up as a FLASH rather than
+// as a colour: these screens appear for half a second while an edition is
+// switching, and a dark blob on a light app reads as the screen breaking
+// rather than as a background.
+//
+// A function, not a constant, for the same reason ON_ACC is a live binding: K
+// is mutated in place by setTheme, so the value has to be read at call time.
+export const entranceBg = () => `radial-gradient(ellipse at 20% 50%, ${K.entrance} 0%, ${K.bg} 70%)`;
