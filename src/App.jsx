@@ -35,7 +35,9 @@ import { useRoster } from "./lib/roster";
 import { useSheetDrag } from "./lib/useSheetDrag";
 import { usePullToRefresh, hasNewBundle } from "./lib/usePullToRefresh";
 import { NotificationSettings } from "./components/NotificationSettings";
-import { registerForPush, getCachedSubscriptionStatus } from "./lib/notifications";
+import { NotificationPrompt } from "./components/NotificationPrompt";
+import { registerForPush, getCachedSubscriptionStatus, getNotificationPermissionState } from "./lib/notifications";
+import { shouldPromptForPush, wasPrompted, markPrompted, PUSH_PROMPT_DELAY_MS } from "./lib/notificationPrompt";
 import { rowsToPairings, dedupeGroups } from "./lib/pairings";
 import { PAIRING_MODES, PAIRING_MODE_LABEL } from "./lib/pairingDraw";
 import { Popup, ConfirmModal } from "./components/Popup";
@@ -1414,6 +1416,84 @@ export default function WBCApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
+  // ── The login stamp ──
+  // Written so Admin can answer "has he even opened it yet?" — see
+  // lib/playerActivity, which reads it back. `wbc_users/{uid}` is the only
+  // document a player may write about themselves (firestore.rules gates the
+  // write on the uid matching the document id), so the stamp goes there
+  // rather than onto the membership, which the rules make read-only to
+  // everybody but a director setting `is_director`.
+  //
+  // ONCE PER SESSION, latched on a ref rather than left to the dependency
+  // list: this effect re-runs whenever the user object is replaced, which
+  // happens on an edition switch and on the director flag resolving, and a
+  // "last seen" that rewrites itself several times a launch is a write per
+  // render in everything but name.
+  //
+  // Fire and forget. A player whose stamp does not land still gets to play;
+  // the failure is a director reading a slightly stale time.
+  const loginStamped = useRef(null);
+  useEffect(() => {
+    if (!user || user.isGuest || !fbUser?.uid || member !== true) return;
+    // Only once the claims map agrees this account owns this player. `user`
+    // is restored from localStorage on boot, a beat before the claims land,
+    // and the two can disagree — a phone that was last signed in as somebody
+    // else. This write MERGES onto the claim document, so stamping off the
+    // stored copy would be a "last seen" filed against the wrong man.
+    if (claims[fbUser.uid] !== user.id) return;
+    const key = `${fbUser.uid}:${user.id}`;
+    if (loginStamped.current === key) return;
+    loginStamped.current = key;
+    // Nothing but the time. player_id is already on the document — it is what
+    // was just checked — and re-sending an identity field on a merge is how a
+    // stale copy overwrites a good one.
+    db.upsert(USERS_COLLECTION, { id: fbUser.uid, uid: fbUser.uid, lastLoginAt: Date.now() })
+      .catch(e => console.warn("[login] stamp skipped:", e?.message || e));
+  }, [user, fbUser, member, claims]);
+
+  // ── Asking, once, on the first login ──
+  // Push was built, shipped and switched on by almost nobody, because the
+  // only way to find the toggle was to go looking for it in a sheet called
+  // My Account. So a player who has never been asked gets asked — see
+  // lib/notificationPrompt for every case where asking would be worse than
+  // silence, and components/NotificationPrompt for why the browser's own
+  // permission sheet has to come out of that modal's button rather than out
+  // of this effect.
+  const [pushPrompt, setPushPrompt] = useState(false);
+  useEffect(() => {
+    if (!user || user.isGuest) return;
+    if (!shouldPromptForPush({
+      playerId: user.id,
+      guest: !!user.isGuest,
+      native: isNativePlatform(),
+      permission: getNotificationPermissionState(),
+      subscribed: getCachedSubscriptionStatus(user.id),
+      prompted: wasPrompted(user.id),
+    })) return;
+    // A beat, so the first thing a player sees on opening the app is the
+    // tournament rather than a dialog about the tournament.
+    const t = setTimeout(() => setPushPrompt(true), PUSH_PROMPT_DELAY_MS);
+    return () => clearTimeout(t);
+  }, [user]);
+
+  // Both ways out mark them as asked. "Not now" that asks again tomorrow is
+  // how a prompt becomes the thing people dismiss without reading.
+  const closePushPrompt = useCallback(() => {
+    if (user?.id) markPrompted(user.id);
+    setPushPrompt(false);
+  }, [user]);
+
+  const enablePushFromPrompt = useCallback(async () => {
+    if (!user?.id) return;
+    const res = await registerForPush(user.id);
+    markPrompted(user.id);
+    setPushPrompt(false);
+    setNotifPerm(getNotificationPermissionState());
+    if (res.success) notify("Notifications on");
+    else if (res.state === "denied") notify("Blocked — you can allow them in your device settings");
+    else if (res.state !== "unsupported") notify(`Couldn't enable: ${res.error || res.state}`);
+  }, [user, notify]);
+
   // Keep this device's token fresh + mapped to the logged-in player when
   // permission is already granted, so a re-login re-registers silently.
   //
@@ -1554,7 +1634,9 @@ export default function WBCApp() {
       id: fb.uid, uid: fb.uid, tournament_id: TOURNAMENT_ID,
       player_id: player.id, email, displayName: fb.displayName || player.name,
       providers: (fb.providerData || []).map(p => p.providerId),
-      method, claimedAt: Date.now(),
+      // Stamped here as well as by the login effect, so the very first
+      // launch has a time on it before anything re-runs. See lib/playerActivity.
+      method, claimedAt: Date.now(), lastLoginAt: Date.now(),
     };
     setClaims(prev => ({ ...prev, [fb.uid]: player.id }));
     setClaimBusyId(null);
@@ -2724,6 +2806,14 @@ export default function WBCApp() {
       {/* "This phone is on its own." Renders nothing at all unless it has
           something to say — see components/SyncBanner. */}
       <SyncBanner status={syncStatus} />
+
+      {/* ── The first-login notifications ask ──
+          Raised over whatever the player landed on, once, and never again on
+          this device. See lib/notificationPrompt for the decision and
+          components/NotificationPrompt for why the button matters. */}
+      {pushPrompt && (
+        <NotificationPrompt onEnable={enablePushFromPrompt} onDismiss={closePushPrompt} />
+      )}
 
       {/* ── The guest strip ──
           A guest can tap anything, and what they tap moves on their screen and
