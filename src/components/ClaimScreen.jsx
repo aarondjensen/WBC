@@ -19,12 +19,32 @@
 // claiming is always by choosing your name. The player_id is the permanent
 // career identity linking to 16 years of history, so this is the moment a real
 // person is bound to that identity.
+import { useState } from "react";
 import { K, FS, R, ALPHA, MOTION } from "../theme";
 import { WBC_LOGO } from "../constants";
+import { EditionSwitcher } from "./EditionSwitcher";
 
-export function ClaimScreen({ fbUser, candidates, onClaim, onCancel, busyId }) {
+// ── The wrong tournament is a real way to arrive here ───────────────
+// Ported from Bourbon Cup. The roster on this screen is the ACTIVE edition's,
+// so somebody whose device is pointed at 2014 is offered 2014's field — and if
+// their name is not in it, the screen is a grid of other men with no way past
+// it but signing out. Same for a beta tester left in the sandbox.
+//
+// Two halves, and the second is not only for the locked case:
+//
+//   `locked`  a frozen year takes no scores from a member (firestore.rules,
+//             canWriteEdition), so claiming a name in one binds an account to
+//             a tournament they cannot play. Said BEFORE the tap.
+//   the link  "I am in the wrong year" is the same problem arriving quietly,
+//             so the way out is always on the screen.
+//
+// canManage={false} on the switcher: this screen belongs to somebody who has
+// not claimed a name yet, and creating or cloning a tournament is not
+// something they should be able to reach from it.
+export function ClaimScreen({ fbUser, candidates, onClaim, onCancel, busyId, locked = false, tournamentName = "" }) {
   const email = fbUser?.email || "";
   const displayName = fbUser?.displayName || "";
+  const [switcherOpen, setSwitcherOpen] = useState(false);
   return (
     <div style={{ minHeight: "var(--app-height, 100dvh)", background: `radial-gradient(ellipse at 20% 50%, #0d1f3c 0%, ${K.bg} 70%)`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", padding: 20 }}>
       <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
@@ -34,6 +54,28 @@ export function ClaimScreen({ fbUser, candidates, onClaim, onCancel, busyId }) {
         <p style={{ color: K.t2, fontSize: FS.small, margin: "0 0 22px", lineHeight: 1.5 }}>
           Signed in{displayName ? ` as ${displayName}` : ""}{email ? ` · ${email}` : ""}.
         </p>
+
+        {/* Said before the tap, not after it: the claim would go through and
+            then nothing else would, which is a worse way to learn this. */}
+        {locked && (
+          <div style={{
+            background: K.card, border: `1px solid ${K.warn}${ALPHA.line}`, borderRadius: R.lg,
+            padding: "12px 14px", marginBottom: 14, textAlign: "center",
+          }}>
+            <div style={{ fontSize: FS.body, fontWeight: 700, color: K.t1, marginBottom: 4 }}>
+              This tournament is frozen
+            </div>
+            <div style={{ fontSize: FS.small, color: K.t3, lineHeight: 1.5 }}>
+              {tournamentName || "It"} is finished, so no scores can be posted in it. Claim your
+              name in the tournament being played instead.
+            </div>
+            <button onClick={() => setSwitcherOpen(true)} style={{
+              marginTop: 10, padding: "8px 14px", borderRadius: R.sm, border: "none",
+              background: K.acc, color: K.bg, font: "inherit",
+              fontSize: FS.small, fontWeight: 800, cursor: "pointer",
+            }}>Choose a tournament</button>
+          </div>
+        )}
 
         {candidates.length === 0 ? (
           <div style={{ background: K.card, border: `1px dashed ${K.warn}${ALPHA.line}`, borderRadius: R.lg, padding: 24 }}>
@@ -59,10 +101,22 @@ export function ClaimScreen({ fbUser, candidates, onClaim, onCancel, busyId }) {
           </div>
         )}
 
-        <button onClick={onCancel} disabled={!!busyId} style={{ marginTop: 22, background: "transparent", border: "none", color: K.t3, fontSize: FS.small, fontWeight: 600, cursor: busyId ? "default" : "pointer", opacity: busyId ? 0.5 : 1 }}>
-          ← Not now, sign out
-        </button>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, marginTop: 22 }}>
+          {/* Not only for the frozen case — see the header. */}
+          {!locked && (
+            <button onClick={() => setSwitcherOpen(true)} disabled={!!busyId} style={{
+              background: "transparent", border: "none", color: K.t3, fontSize: FS.small,
+              fontWeight: 600, textDecoration: "underline", padding: "7px 4px",
+              cursor: busyId ? "default" : "pointer", opacity: busyId ? 0.5 : 1,
+            }}>Not your tournament? Switch</button>
+          )}
+          <button onClick={onCancel} disabled={!!busyId} style={{ background: "transparent", border: "none", color: K.t3, fontSize: FS.small, fontWeight: 600, cursor: busyId ? "default" : "pointer", opacity: busyId ? 0.5 : 1, padding: "7px 4px" }}>
+            ← Not now, sign out
+          </button>
+        </div>
       </div>
+
+      <EditionSwitcher open={switcherOpen} onClose={() => setSwitcherOpen(false)} canManage={false} />
     </div>
   );
 }
