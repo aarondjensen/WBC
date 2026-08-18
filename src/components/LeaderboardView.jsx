@@ -28,7 +28,7 @@ import { ScoreCell } from "./ScoreCell";
 import { LB_COL, LB_PAD_L, WBC_TROPHY, WBC_TROPHY_SILHOUETTE } from "../constants";
 import { NUM_ROUNDS } from "../lib/rounds";
 import { fmtPar } from "../lib/format";
-import { courseHandicapFor, buildStrokesMap, WD_SCORE } from "../lib/individualBoard";
+import { courseHandicapFor, buildStrokesMap, positionLabels, WD_SCORE } from "../lib/individualBoard";
 import { scoreCellMetrics } from "../lib/scoreMarks";
 import { teeTimesByPlayer, roundInPlay, thruStatus } from "../lib/thruStatus";
 
@@ -613,24 +613,25 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
                   were simply not reachable. */}
               <div ref={rowsRef} style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "auto" }}>
               {(() => {
-                // Pre-compute tied positions
-                const posMap = {};
-                let i = 0;
-                while (i < lb.length) {
-                  if (lb[i].roundsPlayed === 0) { posMap[lb[i].id] = i + 1; i++; continue; }
-                  let j = i + 1;
-                  while (j < lb.length && lb[j].roundsPlayed > 0 && lb[j].totalNetToPar === lb[i].totalNetToPar) j++;
-                  const tied = j - i > 1;
-                  for (let k = i; k < j; k++) posMap[lb[k].id] = tied ? `T${i + 1}` : i + 1;
-                  i = j;
-                }
+                // 1, 2, T3, T3, 5 — and everybody T1 until somebody posts a
+                // score. It lives in lib/individualBoard with the ranking it
+                // labels, because a position is a statement about the ranking
+                // and the two have to agree about what a tie is.
+                const posMap = positionLabels(lb);
                 const rows = lb.map((p, idx) => {
                 const pos = posMap[p.id] ?? idx + 1;
-                const top3 = pos === 1 || pos === "T1";
-                // A tie at the top stays a tie: both rows get the trophy rather
-                // than the board picking a champion out of sort order, which is
+                // Leading, and it takes a SCORE to lead. Before anybody has
+                // posted one the whole field is T1 — correctly, nobody is
+                // ahead of anybody — and marking all fourteen rows as the
+                // leader is not a leader mark, it is a green board. So the
+                // accent waits for a card, which is the same thing the trophy
+                // has always waited for.
+                //
+                // A tie at the top stays a tie: both rows get the mark rather
+                // than the board picking a leader out of sort order, which is
                 // a decision the scores have not made.
-                const isChampion = tournamentOver && top3 && !p.isWD && p.roundsPlayed > 0;
+                const leading = (pos === 1 || pos === "T1") && !p.isWD && p.roundsPlayed > 0;
+                const isChampion = tournamentOver && leading;
                 const isExpanded = expanded === p.id;
                 const mov = movements[p.id];
                 const displayTotal = showGross
@@ -693,7 +694,7 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
                       // rather than as an edge on the box. An edge runs the
                       // full height, so a tie at the top came out as one bar
                       // down two rows instead of a mark on each of them.
-                      ...(top3 && !p.isWD ? {
+                      ...(leading ? {
                         backgroundImage: `linear-gradient(${K.acc}, ${K.acc})`,
                         backgroundSize: "3px 58%",
                         backgroundPosition: "left center",
@@ -704,7 +705,7 @@ export function LeaderboardView({ lb, round, holeData, tRounds, courses, tPlayer
                           grey. It was the row's heaviest ink after the total,
                           which put the most weight on the least interesting
                           number: the order is already the order of the rows. */}
-                      <span style={{ fontWeight: 700, fontSize: fsStep(rowStyle.fontSize, -1), color: top3 ? K.acc : K.t3, display: "flex", alignItems: "center", gap: 2, fontVariantNumeric: "tabular-nums" }}>
+                      <span style={{ fontWeight: 700, fontSize: fsStep(rowStyle.fontSize, -1), color: leading ? K.acc : K.t3, display: "flex", alignItems: "center", gap: 2, fontVariantNumeric: "tabular-nums" }}>
                         {isChampion
                           ? <img src={WBC_TROPHY} alt="Champion" title="Champion" style={{ height: fsStep(rowStyle.fontSize, 2), display: "block" }} />
                           : pos}
