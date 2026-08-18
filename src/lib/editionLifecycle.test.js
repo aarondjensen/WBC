@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { allRoundsFinalized, editionState, deleteVerdict, STATE_LABEL,
-  editionDisplayName, editionActions } from "./editionLifecycle";
+  editionDisplayName, editionActions, editionClosedToMembers,
+} from "./editionLifecycle";
 import { groupKey } from "./groupSwitch";
 
 // A four-round tournament whose draw is two groups a round.
@@ -201,12 +202,16 @@ describe("editionActions", () => {
     // This is the whole reason the actions moved into a sheet. deleteVerdict
     // has always produced this string; until now the picker's only way to say
     // it was to omit the bin and hope the director inferred the rule.
-    const a = editionActions({ edition: live, state: "complete", canManage: true });
-    expect(a.delete).toBe(false);
-    expect(a.deleteWhy).toMatch(/record of the event/);
-
     const unread = editionActions({ edition: live, state: "unknown", canManage: true });
+    expect(unread.delete).toBe(false);
     expect(unread.deleteWhy).toMatch(/Couldn't read/);
+
+    // ── Except the one that says nothing anybody can act on ──
+    // A finished tournament refusing the bin is the rule of the app, not
+    // news, and it was printed under every one of sixteen finished years.
+    const done = editionActions({ edition: live, state: "complete", canManage: true });
+    expect(done.delete).toBe(false);
+    expect(done.deleteWhy).toBeNull();
   });
 
   it("will not open or delete the year you are standing in, and says why", () => {
@@ -238,5 +243,40 @@ describe("editionActions", () => {
   it("tells a player nothing about deletion either way", () => {
     // deleteWhy explains a control they were never offered. Silence.
     expect(editionActions({ edition: live, state: "complete" }).deleteWhy).toBeNull();
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════
+//  Closed to members — the app's copy of the rule
+// ══════════════════════════════════════════════════════════════════
+//
+// firestore.rules refuses a member's write into a year with every round signed
+// off, padlock or no padlock. This is what lets the app SAY that before the
+// write is thrown away, so it has to answer exactly what the rule answers —
+// including where the rule falls open.
+describe("editionClosedToMembers", () => {
+  it("closes a year with every round signed off", () => {
+    expect(editionClosedToMembers({ finalizedRounds: { 1: true, 2: true, 3: true, 4: true }, roundCount: 4 })).toBe(true);
+  });
+
+  it("leaves a tournament with a round still open, open", () => {
+    expect(editionClosedToMembers({ finalizedRounds: { 1: true, 2: true, 3: true }, roundCount: 4 })).toBe(false);
+    expect(editionClosedToMembers({ finalizedRounds: {}, roundCount: 4 })).toBe(false);
+  });
+
+  // The rules cannot see a group key, so a year finished that way still takes
+  // writes — and a notice saying otherwise would be a lie in the direction
+  // that stops people scoring.
+  it("does not count a round closed by a group signing its card", () => {
+    expect(editionClosedToMembers({
+      finalizedRounds: { 1: true, "2_aaron_j|brian_k": true, "3_x|y": true, "4_x|y": true },
+      roundCount: 4,
+    })).toBe(false);
+  });
+
+  it("never closes a year whose round count could not be read", () => {
+    expect(editionClosedToMembers({ finalizedRounds: { 1: true, 2: true } })).toBe(false);
+    expect(editionClosedToMembers({ finalizedRounds: { 1: true }, roundCount: 0 })).toBe(false);
+    expect(editionClosedToMembers()).toBe(false);
   });
 });

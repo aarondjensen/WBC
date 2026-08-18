@@ -286,6 +286,62 @@ service cloud.firestore {
           && !(request.resource != null && editionLocked(request.resource.data.get('tournament_id', '')));
     }
 
+    // ── A tournament that is OVER is closed whether or not anybody
+    //    remembered to lock it ──────────────────────────────────────
+    // The padlock is a director's deliberate act, and the years that most need
+    // protecting are the ones nobody thought about: sixteen finished
+    // tournaments, imported from spreadsheets, sitting one tap away in the
+    // Tournaments picker. Any member can open one — reading a past year is
+    // what that picker is for — and until now a member standing in an unlocked
+    // 2014 could post a score into it, or withdraw a man from a field that
+    // played twelve years ago, and the leaderboard of record would change.
+    //
+    // "Over" is not a stored flag either — WBC derives a year's state from
+    // what it holds, see lib/editionLifecycle — so this asks the one document
+    // that carries the answer: tournament_state, whose `finalized_rounds` map
+    // gains a key each time a round is signed off and whose `meta.rounds` says
+    // how many there are. Every round accounted for, and the tournament is the
+    // record of an event rather than an event.
+    //
+    // FAILS OPEN, three ways, all deliberate: no state document, no
+    // `meta.rounds`, or a partial finalization map all read as "still being
+    // played". A year that cannot be read must keep taking scores — the
+    // alternative is a tee box where nothing saves — and the deploy of this
+    // rule must not freeze the tournament it deploys into.
+    //
+    // A round finalized by every group signing its own card stores a GROUP KEY
+    // rather than a round number and so does not appear here. That is the safe
+    // direction: such a year reads as unfinished and keeps taking writes, and
+    // a director closing it out properly is what makes it final.
+    //
+    // Costs one more document read per member write, same bargain as the lock
+    // above and the same arithmetic: repeated get() on one path inside a single
+    // evaluation is billed once, and a tournament weekend's thirteen hundred
+    // scores make thirteen hundred extra reads.
+    function stateRounds(tid) {
+      return get(/databases/$(database)/documents/tournament_state/$('ts_' + tid))
+               .data.get('meta', {}).get('rounds', 0);
+    }
+
+    function stateFinalized(tid) {
+      return get(/databases/$(database)/documents/tournament_state/$('ts_' + tid))
+               .data.get('finalized_rounds', {}).keys().size();
+    }
+
+    function editionFinished(tid) {
+      return tid != ''
+        && exists(/databases/$(database)/documents/tournament_state/$('ts_' + tid))
+        && stateRounds(tid) > 0
+        && stateFinalized(tid) >= stateRounds(tid);
+    }
+
+    // Both ends again, for the reason editionOpen() checks both: otherwise a
+    // row could be moved out of a finished year and edited, or moved into one.
+    function editionRunning() {
+      return !(resource != null && editionFinished(resource.data.get('tournament_id', '')))
+          && !(request.resource != null && editionFinished(request.resource.data.get('tournament_id', '')));
+    }
+
     // What every edition-scoped MEMBER write is gated on. Directors are exempt
     // — somebody has to be able to correct a locked year, and a flag that can
     // strand a tournament beyond repair is a worse bug than the one it fixes.
@@ -309,8 +365,12 @@ service cloud.firestore {
     // rules would be off and a frozen year would still be refusing scores,
     // with the fix being a second deploy nobody mid-round would think to make.
     // Whatever turns enforcement off turns ALL of it off.
+    // A member writes into a year that is neither frozen nor over. A director
+    // writes anywhere — somebody has to be able to correct a card years later,
+    // and both of these gates would otherwise be one-way doors.
     function canWriteEdition() {
-      return canWrite() && (!enforcing() || editionOpen() || isDirector());
+      return canWrite()
+        && (!enforcing() || (editionOpen() && editionRunning()) || isDirector());
     }
 
     // ── Which PLAYER is holding this phone ────────────────────────

@@ -43,6 +43,7 @@ import { EditionSwitcher } from "./components/EditionSwitcher";
 import { EditionBanner } from "./components/EditionBanner";
 import { warmEditions, cachedEditions } from "./lib/editions";
 import { lockNotice, isEditionLocked, canAdminEdition, demoOnlyAdmin } from "./lib/editionLock";
+import { editionClosedToMembers } from "./lib/editionLifecycle";
 import { liveEdition, editionBannerShowing } from "./lib/editionHome";
 import { docIds } from "./lib/editionId";
 import { scopeFor, scopedRegistry } from "./lib/playerScope";
@@ -797,6 +798,13 @@ export default function WBCApp() {
   // assignment is idempotent and derived purely from state, which is what
   // makes it safe to do here.
   const numRounds = clampRounds(tournamentMeta?.rounds);
+  // ── Is this year over, as far as the rules are concerned? ──
+  // Every round signed off closes a tournament to members whether or not
+  // anybody locked it (see editionFinished in firestore.rules), and the app
+  // has to say so — a refused score with nothing on screen explaining it is
+  // the failure the lock banner already exists for. Mirrors what the rules
+  // count, not what the app counts; see editionClosedToMembers.
+  const editionClosed = editionClosedToMembers({ finalizedRounds, roundCount: numRounds });
   if (NUM_ROUNDS !== numRounds) setRoundCount(numRounds);
 
   // Every group in every round — what the director's crown lists. Kept here
@@ -2590,7 +2598,7 @@ export default function WBCApp() {
         // A director writes through a lock, so the notice is not for them —
         // it would be telling somebody the door is shut while they are
         // holding the key. See canWriteEdition in firestore.rules.
-        locked={isEditionLocked(activeEdition) && !isDirectorAccount(membership)}
+        locked={(isEditionLocked(activeEdition) || editionClosed) && !isDirectorAccount(membership)}
         tournamentName={tournamentName}
         onClaim={(p) => { setClaimBusyId(p.id); claimProfile(fbUser, p, "manual"); }}
         onCancel={handleLogout}
@@ -2748,11 +2756,11 @@ export default function WBCApp() {
           Not shown to a director, who is exempt and would be reading a wall
           that is not there for them, and not to a guest, who already has a
           louder strip saying nothing they do is saved. */}
-      {!isGuest(user) && lockNotice(activeEdition, { isDirector: !!user.isDirector }) && (
+      {!isGuest(user) && lockNotice(activeEdition, { isDirector: !!user.isDirector, finished: editionClosed }) && (
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 20px", background: K.t3 + ALPHA.wash, borderBottom: `1px solid ${K.t3}${ALPHA.hair}` }}>
           <span aria-hidden style={{ flexShrink: 0, fontSize: FS.label }}>🔒</span>
           <span style={{ flex: 1, minWidth: 0, fontSize: FS.label, fontWeight: 600, color: K.t2, lineHeight: 1.4 }}>
-            {lockNotice(activeEdition, { isDirector: !!user.isDirector })}
+            {lockNotice(activeEdition, { isDirector: !!user.isDirector, finished: editionClosed })}
           </span>
         </div>
       )}

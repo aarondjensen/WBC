@@ -35,7 +35,7 @@ import {
   plannedYear, plannedSource, summaryLine, editionHasContent, overwriteWarning,
   newestBuiltEdition,
 } from "../lib/editionClone";
-import { editionState, deleteVerdict, STATE_LABEL, editionDisplayName } from "../lib/editionLifecycle";
+import { editionState, deleteVerdict, STATE_LABEL, editionDisplayName, editionClosedToMembers } from "../lib/editionLifecycle";
 import { isEditionLocked, lockVerdict, bulkLockVerdict } from "../lib/editionLock";
 import { isSandboxEdition, SANDBOX_EDITION_ID as SANDBOX_ID } from "../lib/editionId";
 import { locationForYear } from "../lib/editionLocation";
@@ -336,6 +336,13 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
   // is also what refuses the delete: not being able to check is not
   // permission.
   const stateOf = (e) => editionState(summaries?.[e.id]);
+  // Is this year closed to members by being OVER rather than by the padlock?
+  // The lock dialog says different things about the two, because unlocking a
+  // finished tournament gives the field nothing back — see lockVerdict.
+  const closedOf = (e) => editionClosedToMembers({
+    finalizedRounds: summaries?.[e.id]?.finalizedRounds,
+    roundCount: summaries?.[e.id]?.roundCount,
+  });
 
   // Looked up by id on every render rather than stashed as an object, so the
   // sheet repaints from the reloaded list after a lock instead of showing the
@@ -816,7 +823,7 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
           onOpen={() => switchEdition(sheetEdition.id)}
           onLock={() => {
             const target = sheetEdition;
-            const v = lockVerdict(target, { isActive: target.id === activeId });
+            const v = lockVerdict(target, { isActive: target.id === activeId, finished: closedOf(target) });
             closeSheet();
             if (v.confirm) setPendingLock(target);
             else applyLock(target, v.next);
@@ -896,10 +903,10 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
           year every phone in the field is currently pointed at) can be tested
           without rendering this popup. */}
       {pendingLock && (() => {
-        const v = lockVerdict(pendingLock, { isActive: pendingLock.id === activeId });
+        const v = lockVerdict(pendingLock, { isActive: pendingLock.id === activeId, finished: closedOf(pendingLock) });
         return (
           <ConfirmModal
-            eyebrow="Freeze a year"
+            eyebrow={v.confirm.eyebrow}
             title={v.confirm.title}
             message={v.confirm.body}
             confirmLabel={v.confirm.confirmLabel}

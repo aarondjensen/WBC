@@ -87,16 +87,41 @@ export const demoOnlyAdmin = (args) =>
 //
 // Unlocking never asks. It only ever widens what is possible, and a control
 // that interrogates you for undoing something makes people leave it alone.
-export const lockVerdict = (edition, { isActive = false } = {}) => {
+export const lockVerdict = (edition, { isActive = false, finished = false } = {}) => {
   const locked = isEditionLocked(edition);
   const year = edition?.year ?? edition?.id ?? "this year";
 
+  // ── Both directions ask now ────────────────────────────────────
+  // Unlocking used to go straight through, on the reasoning that it only ever
+  // widens what is possible. That is true of the flag and false of the
+  // consequence: what it widens is a FINISHED tournament, and the years with a
+  // padlock on them are the record of sixteen events nobody should be able to
+  // edit. Thawing one is a deliberate act — usually to correct a card years
+  // later — and it should take two taps like freezing does.
   if (locked) {
     return {
       next: false,
-      confirm: null,
       label: "Unlock",
       title: `Unlock ${year} so members can write to it again`,
+      confirm: {
+        eyebrow: "Thaw a year",
+        title: `Unlock ${year}?`,
+        // ── What unlocking actually does depends on whether it is OVER ──
+        // A finished tournament refuses member writes with or without a
+        // padlock (see editionFinished in firestore.rules), so telling a
+        // director that unlocking 2019 hands it back to the field would be
+        // false about fifteen of the sixteen years in the picker. Taking the
+        // padlock off is still worth doing — it is what the bulk control
+        // counts, and a year that is only PART-played takes writes again — so
+        // the answer is to say which one this is.
+        body: finished
+          ? `${year} is finished, so its scores, cards and bets stay closed to members `
+            + `either way — this only takes the padlock off. A director can still correct `
+            + `a card in it, locked or not.`
+          : `Every member gets to post scores, sign cards and place bets in ${year} `
+            + `again. Lock it back when whatever you are correcting is done.`,
+        confirmLabel: "Unlock it",
+      },
     };
   }
 
@@ -105,6 +130,7 @@ export const lockVerdict = (edition, { isActive = false } = {}) => {
     label: "Lock",
     title: `Lock ${year} so only a director can change it`,
     confirm: {
+      eyebrow: "Freeze a year",
       title: `Lock ${year}?`,
       body: isActive
         // The active edition is what every phone in the field is pointed at.
@@ -206,8 +232,26 @@ export const lockBadge = (edition) => (isEditionLocked(edition) ? "LOCKED" : nul
 // told when the year they are looking at will not accept their writes. Null
 // for an unlocked edition, and null for a director, who is exempt and would
 // otherwise be warned about a wall that is not there for them.
-export const lockNotice = (edition, { isDirector = false } = {}) => {
-  if (!isEditionLocked(edition) || isDirector) return null;
+//
+// ── Two ways a year stops taking writes ───────────────────────────
+// The padlock is one and it is the deliberate one. The other is simply being
+// OVER: a tournament with every round finalized refuses member writes in
+// firestore.rules whether or not anybody locked it, because the record of a
+// finished event is not a thing a member should be able to edit years later.
+// See editionFinished() there.
+//
+// Both are said in the same voice, because to the person holding the phone
+// they are the same wall — and the point of saying either is that a refused
+// write is otherwise silent.
+export const lockNotice = (edition, { isDirector = false, finished = false } = {}) => {
+  if (isDirector) return null;
   const year = edition?.year ?? edition?.id ?? "This tournament";
-  return `${year} is locked. Scores, signatures and bets can't be changed — ask a director.`;
+  if (isEditionLocked(edition)) {
+    return `${year} is locked. Scores, signatures and bets can't be changed — ask a director.`;
+  }
+  if (finished) {
+    return `${year} is finished. Its scores, signatures and bets are the record of the event `
+      + `now — a director can still make a correction.`;
+  }
+  return null;
 };

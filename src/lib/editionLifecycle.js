@@ -145,6 +145,28 @@ export const editionDisplayName = (edition, title = "WBC") => {
   return name;
 };
 
+// ── Is this year closed to members? ────────────────────────────────
+// The app's copy of `editionFinished()` in firestore.rules, and it exists so
+// the app can SAY what the rules are about to do. A tournament with every
+// round signed off refuses member writes whether or not anybody locked it, and
+// a refused write is otherwise silent — scores that vanish on a tee box with
+// nothing on screen explaining why is the failure the lock banner exists for.
+//
+// Counted the way the rules count it, deliberately, rather than the way
+// `allRoundsFinalized` does: only ROUND NUMBERS in the finalization map, never
+// a round closed by every group signing its card. The rules cannot see a group
+// key, so a year finished that way still takes writes — and a notice claiming
+// otherwise would be telling somebody the door is shut while it is open.
+//
+// Zero rounds is never closed: a year whose round count could not be read is
+// one we know nothing about, and that has to fall the same way the rule does.
+export const editionClosedToMembers = ({ finalizedRounds, roundCount } = {}) => {
+  const n = Number(roundCount) || 0;
+  if (n <= 0) return false;
+  const rounds = Object.keys(finalizedRounds || {}).filter(k => /^\d+$/.test(String(k)));
+  return rounds.length >= n;
+};
+
 // ── What may be done to this year ──────────────────────────────────
 // One place, so the sheet and any future caller agree — and so the REFUSALS
 // come with their sentence attached.
@@ -177,7 +199,15 @@ export const editionActions = ({
     delete: canManage && verdict.allowed,
     // Scores made on the course this week. The caller names the count.
     graveDelete: canManage && verdict.allowed && verdict.grave === true,
-    // The sentence the row could only express by drawing nothing.
-    deleteWhy: canManage && !verdict.allowed ? verdict.why : null,
+    // The sentence the row could only express by drawing nothing — but only
+    // when it says something a director can act on or needs to know: "open
+    // another year first" is a next step, and "couldn't read what's in this
+    // year" is a warning that the sheet above it may be wrong too.
+    //
+    // A FINISHED tournament refusing the bin is neither. It is the rule of the
+    // app, it is obvious from the year on the sheet, and printing it under
+    // every one of sixteen finished years is a paragraph explaining an absence
+    // nobody asked about.
+    deleteWhy: canManage && !verdict.allowed && verdict.reason !== "complete" ? verdict.why : null,
   };
 };

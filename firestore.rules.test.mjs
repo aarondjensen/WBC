@@ -435,6 +435,80 @@ await env.withSecurityRulesDisabled(async (ctx) => {
 await check("unlocked again: the member's write lands", () =>
   assertSucceeds(setDoc(doc(carl, "hole_scores/hs_thawed"), { tournament_id: "wbc_2019", score: 4 })));
 
+// ── A finished year is closed even with no padlock on it ─────────
+// The lock is a director's deliberate act; these are the years nobody thought
+// about. Sixteen finished tournaments sit one tap away in the picker, any
+// member may open one, and until this rule a member standing in an unlocked
+// 2014 could post a score into a tournament that ended twelve years ago.
+//
+// "Finished" is every round accounted for in tournament_state — see
+// editionFinished. Asserted from both sides, because the direction it fails is
+// what matters: a year still being played must keep taking scores.
+await env.withSecurityRulesDisabled(async (ctx) => {
+  const db = ctx.firestore();
+  // 2014: four rounds, all four signed off. Unlocked, deliberately.
+  await setDoc(doc(db, "wbc_editions/wbc_2014"), { id: "wbc_2014", year: 2014, locked: false });
+  await setDoc(doc(db, "tournament_state/ts_wbc_2014"), {
+    id: "ts_wbc_2014", tournament_id: "wbc_2014",
+    meta: { rounds: 4 }, finalized_rounds: { 1: true, 2: true, 3: true, 4: true },
+  });
+  await setDoc(doc(db, "hole_scores/hs_2014_1"), { tournament_id: "wbc_2014", score: 4 });
+  // 2026: the tournament being played. One round done, three to go.
+  await setDoc(doc(db, "tournament_state/ts_wbc_2026"), {
+    id: "ts_wbc_2026", tournament_id: "wbc_2026",
+    meta: { rounds: 4 }, finalized_rounds: { 1: true },
+  });
+});
+
+await check("member CANNOT post a score into a finished year", () =>
+  assertFails(setDoc(doc(carl, "hole_scores/hs_2014_2"), { tournament_id: "wbc_2014", score: 4 })));
+await check("member CANNOT withdraw somebody from a finished year", () =>
+  assertFails(setDoc(doc(carl, "tournament_players/tp_2014"), { tournament_id: "wbc_2014", status: "WD" })));
+await check("member CANNOT edit a card that is already in a finished year", () =>
+  assertFails(setDoc(doc(carl, "hole_scores/hs_2014_1"), { score: 9 }, { merge: true })));
+await check("member CANNOT bet in a finished year", () =>
+  assertFails(setDoc(doc(carl, "skins/ctp_2014"), { tournament_id: "wbc_2014", skin_type: "ctp", hole: 7 })));
+
+// Both ends, so a row cannot be carried out of a finished year and edited.
+await check("member CANNOT move a row OUT of a finished year", () =>
+  assertFails(setDoc(doc(carl, "hole_scores/hs_2014_1"), { tournament_id: "wbc_2026", score: 9 }, { merge: true })));
+await check("member CANNOT move a row INTO a finished year", () =>
+  assertFails(setDoc(doc(carl, "hole_scores/hs_open_1"), { tournament_id: "wbc_2014", score: 9 }, { merge: true })));
+
+// ── And the direction that must never invert ──
+// A tournament being played takes scores from the field, and a correction to a
+// finished one is a director's to make.
+await check("member CAN still post a score in the year being played", () =>
+  assertSucceeds(setDoc(doc(carl, "hole_scores/hs_2026_live"), { tournament_id: "wbc_2026", score: 4 })));
+await check("director CAN still correct a finished year", () =>
+  assertSucceeds(setDoc(doc(aaron, "hole_scores/hs_2014_fix"), { tournament_id: "wbc_2014", score: 5 })));
+
+// ── Fails OPEN, the same three ways the lock does ──
+// Each is a shape the real database holds, and every one of them has to keep
+// taking writes: a year that cannot be read is not a year that is over.
+await check("no state document at all: still writable", () =>
+  assertSucceeds(setDoc(doc(carl, "hole_scores/hs_nostate"), { tournament_id: "wbc_2007", score: 4 })));
+await check("state document with no round count: still writable", async () => {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), "tournament_state/ts_wbc_2008"), {
+      tournament_id: "wbc_2008", finalized_rounds: { 1: true, 2: true },
+    });
+  });
+  return assertSucceeds(setDoc(doc(carl, "hole_scores/hs_2008"), { tournament_id: "wbc_2008", score: 4 }));
+});
+await check("a round still open: still writable", async () => {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), "tournament_state/ts_wbc_2009"), {
+      tournament_id: "wbc_2009", meta: { rounds: 4 }, finalized_rounds: { 1: true, 2: true, 3: true },
+    });
+  });
+  return assertSucceeds(setDoc(doc(carl, "hole_scores/hs_2009"), { tournament_id: "wbc_2009", score: 4 }));
+});
+
+// Reading is untouched, the same way freezing is not hiding.
+await check("a finished year is still readable by a guest", () =>
+  assertSucceeds(getDoc(doc(anon, "hole_scores/hs_2014_1"))));
+
 // ── The sandbox is an edition like any other, to the rules ───────
 // `wbc_demo` is special only in the APP — excluded from the year arithmetic,
 // from the clone-source list and from bulk locking. firestore.rules knows

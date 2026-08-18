@@ -26,29 +26,33 @@
 import { K, ON_ACC, FS, R, ALPHA } from "../theme";
 import { Popup } from "./Popup";
 import { IconLock, IconUnlock, IconTrash, IconPencil } from "./Icons";
-import { editionActions, STATE_LABEL } from "../lib/editionLifecycle";
+import { editionActions } from "../lib/editionLifecycle";
 
 const metaWord = {
   fontSize: FS.label, fontWeight: 800, letterSpacing: "0.06em",
   textTransform: "uppercase", lineHeight: 1,
 };
 
-// One row of the action list. The icon is decoration beside a word, so it is
-// aria-hidden inside Icons and the button carries the label itself.
-function Action({ icon: Icon, label, hint, danger, onClick, disabled }) {
+// One action, and it LOOKS like a button now — bordered, centred, sized to sit
+// beside another. They used to be borderless full-width rows with an
+// explanatory hint on the right, which read as a list of settings rather than
+// as two things a director can do; the words on them ("Rename", "Unlock") say
+// what they do, and a hint saying it again is a hint nobody needs twice.
+function Action({ icon: Icon, label, danger, onClick, disabled }) {
+  const ink = danger ? K.danger : K.t1;
   return (
     <button onClick={onClick} disabled={disabled} style={{
-      display: "flex", alignItems: "center", gap: 11, width: "100%",
-      padding: "12px 10px", borderRadius: R.sm, border: "none", background: "transparent",
-      font: "inherit", fontSize: FS.body, fontWeight: 700,
-      color: danger ? K.danger : K.t1, textAlign: "left",
+      flex: 1, minWidth: 0, display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+      padding: "11px 10px", borderRadius: R.sm, font: "inherit",
+      border: `1px solid ${danger ? K.danger + ALPHA.line : K.bdr}`,
+      background: danger ? `${K.danger}${ALPHA.wash}` : K.inp,
+      fontSize: FS.body, fontWeight: 700, color: ink,
       cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.4 : 1,
     }}>
-      <span style={{ flexShrink: 0, display: "flex", color: danger ? K.danger : K.t3 }}>
+      <span aria-hidden style={{ flexShrink: 0, display: "flex", color: danger ? K.danger : K.t3 }}>
         <Icon size={16} />
       </span>
-      <span style={{ flex: 1, minWidth: 0 }}>{label}</span>
-      {hint && <span style={{ flexShrink: 0, fontSize: FS.label, fontWeight: 600, color: K.t3 }}>{hint}</span>}
+      <span style={{ minWidth: 0 }}>{label}</span>
     </button>
   );
 }
@@ -81,41 +85,33 @@ export function EditionSheet({
     // 300 and renders UNDERNEATH the picker — present in the DOM, invisible on
     // screen, and only a screenshot catches it.
     <Popup onClose={onClose} portal zIndex={3500} maxWidth={420} padding={0} outerPadding={12}>
-      {/* The year at display size, the way the row leads with it. Somebody
-          arriving here tapped a row part-way down a scroll of seventeen; the
-          first thing the sheet owes them is which one they hit. The sandbox
-          has no year and must never look like it does — see the note on the
-          DEMO badge in EditionSwitcher. */}
+      {/* ── The name IS the heading ───────────────────────────────
+          "WBC 2025 · Gaylord, MI", once, at heading size. The year used to sit
+          above it at display size, which said the same four digits twice on a
+          sheet opened by tapping those four digits — and pushed everything
+          this screen exists for below the fold.
+
+          No state word and no padlock word either. Both were labels on facts
+          the sheet shows anyway: what a finished tournament is, is obvious
+          from the year on it, and the lock's own button says Unlock when it is
+          on. ACTIVE stays, because which edition the app has OPEN is the one
+          thing here that cannot be read off the tournament itself. */}
       <div style={{ padding: "15px 15px 13px", borderBottom: `1px solid ${K.bdr}` }}>
-        {isSandbox ? (
-          <span style={{
-            ...metaWord, fontSize: FS.small, color: K.tourn,
-            border: `1px solid ${K.tourn}${ALPHA.line}`, background: `${K.tourn}${ALPHA.wash}`,
-            padding: "4px 9px", borderRadius: R.xs, display: "inline-block",
-          }}>DEMO</span>
-        ) : (
-          <div style={{
-            fontSize: FS.display, fontWeight: 800, color: K.t1, lineHeight: 1,
-            fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em",
-          }}>{edition.year || edition.id}</div>
-        )}
-        {/* The full name, always — even when the row omitted it as derivable.
-            The row is a scan; this is the confirmation. */}
-        <div style={{ fontSize: FS.body, fontWeight: 600, color: K.t3, marginTop: 6, lineHeight: 1.3 }}>
-          {edition.name || edition.id}{location ? ` · ${location}` : ""}
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 8, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+          <div style={{ flex: 1, minWidth: 0, fontSize: FS.lead, fontWeight: 800, color: K.t1, lineHeight: 1.25 }}>
+            {edition.name || edition.id}{location ? ` · ${location}` : ""}
+          </div>
+          {isSandbox && (
+            <span style={{
+              ...metaWord, flexShrink: 0, color: K.tourn,
+              border: `1px solid ${K.tourn}${ALPHA.line}`, background: `${K.tourn}${ALPHA.wash}`,
+              padding: "4px 8px", borderRadius: R.xs,
+            }}>DEMO</span>
+          )}
           {isActive && (
-            <span style={{ ...metaWord, color: ON_ACC, background: K.acc, padding: "4px 8px", borderRadius: R.xs }}>
+            <span style={{ ...metaWord, flexShrink: 0, color: ON_ACC, background: K.acc, padding: "4px 8px", borderRadius: R.xs }}>
               ACTIVE
             </span>
-          )}
-          <span style={{ ...metaWord, color: K.t3 }}>{STATE_LABEL[state] || state}</span>
-          {acts.locked && (
-            <>
-              <span style={{ color: K.bdr }}>|</span>
-              <span style={{ ...metaWord, color: K.acc }}>Locked</span>
-            </>
           )}
         </div>
         {/* ── What this tournament WAS ─────────────────────────────
@@ -172,36 +168,39 @@ export function EditionSheet({
         )}
         {acts.open && canManage && <Divider />}
 
-        {/* Renaming is the one action here that changes nothing about the
-            tournament itself, so it leads the director's half. */}
-        {acts.rename && onRename && (
-          <Action icon={IconPencil} label="Rename" onClick={onRename} disabled={busy} />
+        {/* The director's two everyday controls, side by side: neither one
+            needs a full row, and a pair reads as a pair. Both keep their
+            confirms where they had them — locking asks, and so does unlocking
+            now, because what it thaws is the record of a finished event. */}
+        {(acts.rename || acts.lock) && (
+          <div style={{ display: "flex", gap: 7 }}>
+            {acts.rename && onRename && (
+              <Action icon={IconPencil} label="Rename" onClick={onRename} disabled={busy} />
+            )}
+            {acts.lock && (
+              <Action
+                icon={acts.locked ? IconUnlock : IconLock}
+                label={acts.locked ? "Unlock" : "Lock"}
+                onClick={onLock} disabled={busy}
+              />
+            )}
+          </div>
         )}
 
-        {acts.lock && (
-          <Action
-            icon={acts.locked ? IconUnlock : IconLock}
-            label={acts.locked ? "Unlock" : "Lock"}
-            hint={acts.locked ? "members can post scores" : "freeze it against members"}
-            onClick={onLock} disabled={busy}
-          />
-        )}
-
-        {acts.delete && <>
-          <Divider />
+        {/* The bin, on its own row and in red, because it is not one of the
+            everyday two. The years it refuses simply do not draw it: the
+            reason used to be spelled out here and it was a paragraph
+            explaining an absence nobody had asked about. */}
+        {acts.delete && <div style={{ display: "flex", marginTop: 7 }}>
           <Action icon={IconTrash} label="Delete this tournament" danger onClick={onDelete} disabled={busy} />
-        </>}
+        </div>}
 
-        {/* The sentence deleteVerdict has always produced and the row could
-            only express by drawing nothing. Shown to a director only — it
-            explains a control a member was never offered. */}
+        {/* What is left of the refusals: a next step, or a read that failed.
+            See editionActions for why a finished year says nothing here. */}
         {acts.deleteWhy && (
-          <>
-            {(acts.open || acts.lock) && <Divider />}
-            <p style={{ margin: "2px 10px 6px", fontSize: FS.small, fontWeight: 600, color: K.t3, lineHeight: 1.5 }}>
-              {acts.deleteWhy}
-            </p>
-          </>
+          <p style={{ margin: "9px 4px 2px", fontSize: FS.small, fontWeight: 600, color: K.t3, lineHeight: 1.5 }}>
+            {acts.deleteWhy}
+          </p>
         )}
 
         {/* A member looking at the year they are already in has nothing to do
