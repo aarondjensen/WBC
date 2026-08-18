@@ -167,6 +167,11 @@ export const editionActions = ({
   return {
     // Nowhere to go: you are already in it.
     open: !isActive,
+    // A name is a label on a row; it files nothing and breaks nothing, so
+    // every year a director can manage may be renamed — including the one
+    // they are standing in, and including a locked one. The lock freezes what
+    // is IN a tournament (see editionLock); what it is called is not that.
+    rename: canManage,
     lock: canManage,
     locked: edition?.locked === true,
     delete: canManage && verdict.allowed,

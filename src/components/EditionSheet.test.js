@@ -103,4 +103,20 @@ describe("EditionSheet", () => {
     fireEvent.click(screen.getByText("Lock"));
     expect(calls).toEqual([]);
   });
+
+  // Renaming is offered wherever a director is offered anything — including
+  // the active year and a locked one, which the lock does not cover: what a
+  // tournament is CALLED is not what is in it.
+  it("offers a rename to a director, on the active year and a locked one", () => {
+    show({ isActive: true, onRename: () => {} });
+    expect(screen.getByText("Rename")).toBeTruthy();
+    cleanup();
+    show({ edition: { ...YEAR, locked: true }, onRename: () => {} });
+    expect(screen.getByText("Rename")).toBeTruthy();
+  });
+
+  it("offers no rename to a member", () => {
+    show({ canManage: false, onRename: () => {} });
+    expect(screen.queryByText("Rename")).toBeNull();
+  });
 });

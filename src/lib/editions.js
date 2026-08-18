@@ -248,6 +248,49 @@ export const createEdition = async ({ year, name, id }) => {
   return doc_;
 };
 
+// ── Rename a tournament ─────────────────────────────────────────────
+// Ported from Bourbon Cup, where a rename is one field on one document. Here
+// it is TWO, because WBC keeps the name in two places and a director renaming
+// "WBC 2026" would rightly expect both to change:
+//
+//   wbc_editions/{id}.name        what the picker lists, and what a confirm
+//                                 dialog calls the year it is about to touch.
+//   tournament_state.meta.name    the event's own name, edited in Admin →
+//                                 Event and shown on the sign-in screens.
+//
+// Only the second is the tournament's name to a player; only the first exists
+// for a year nobody has opened yet. Writing one and not the other is how they
+// drift, and a picker that disagrees with the header about which tournament
+// this is undoes the whole point of naming one.
+//
+// The state write is a nested-map merge, so meta.location, meta.rounds and
+// everything else the event carries are left exactly as they are — and it is
+// addressed by edition rather than by the active pointer, because this renames
+// the year a director TAPPED, which is usually not the one they are standing
+// in. A year with no state document yet gets one holding just its name; the
+// first save from Admin fills in the rest.
+//
+// The id and the year are never touched. The id is the tournament_id every
+// other collection filters on and the slug every document id is built from —
+// changing it would orphan a whole tournament while the picker went on looking
+// right. Only a director can land either write; wbc_editions has been
+// director-only since before this existed.
+export const renameEdition = async (id, name) => {
+  if (!id) return { ok: false, error: "No tournament to rename." };
+  const trimmed = String(name ?? "").trim();
+  if (!trimmed) return { ok: false, error: "A tournament needs a name." };
+  await _upsert(EDITIONS_COL, { id: String(id), name: trimmed });
+  await _upsert("tournament_state", {
+    id: `ts_${id}`, tournament_id: String(id), meta: { name: trimmed },
+  });
+  // The picker paints from the cached index on its next open, so a stale name
+  // in there would show the old one until something else forced a reload —
+  // the same reason setEditionLocked patches it below.
+  const cached = readEditionsCache();
+  if (cached) writeEditionsCache(cached.map(e => (e.id === String(id) ? { ...e, name: trimmed } : e)));
+  return { ok: true, name: trimmed };
+};
+
 // There was a setEditionStatus here, and a draft/published/archived pill in
 // the picker to drive it. Both are gone: a year's state is DERIVED from what
 // it holds now (see lib/editionLifecycle.js), which is the only version of it

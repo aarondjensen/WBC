@@ -47,6 +47,8 @@ const SUMMARIES = {
 const locks = vi.hoisted(() => []);
 // Every (sourceId, options) the picker asked for a sandbox rebuild with.
 const sandboxes = vi.hoisted(() => []);
+// Every (id, name) the picker asked lib/editions to rename.
+const renames = vi.hoisted(() => []);
 
 // firebase.js initializes an app at import time, and lib/editions is the
 // module that talks to Firestore — both are mocked, so this is a render test
@@ -74,11 +76,12 @@ vi.mock("../lib/editions", () => ({
   switchEdition: () => {},
   setEditionLocked: (...a) => { locks.push(a); return Promise.resolve({ id: a[0], locked: a[1] }); },
   resetSandbox: (...a) => { sandboxes.push(a); return Promise.resolve({ id: "wbc_demo" }); },
+  renameEdition: (...a) => { renames.push(a); return Promise.resolve({ ok: true, name: a[1] }); },
 }));
 
 const { EditionSwitcher } = await import("./EditionSwitcher");
 
-afterEach(() => { cleanup(); locks.length = 0; sandboxes.length = 0; });
+afterEach(() => { cleanup(); locks.length = 0; sandboxes.length = 0; renames.length = 0; });
 
 const open = (props = {}) =>
   render(h(EditionSwitcher, { open: true, onClose: () => {}, canManage: true, ...props }));
@@ -94,15 +97,16 @@ describe("EditionSwitcher", () => {
   it("shows a player the years and none of the director's controls", async () => {
     open({ canManage: false });
     await screen.findByText("2026");
-    expect(screen.queryByText("Create new tournament")).toBeNull();
+    expect(screen.queryByText("+ New")).toBeNull();
   });
 
-  it("opens with the create form collapsed, and nothing under the list moves as the counts land", async () => {
+  it("opens on the list, and nothing under it moves as the counts land", async () => {
     open();
     await screen.findByText("2026");
-    // The button is there from the first frame — this is the thing that must
-    // not arrive late, because arriving late is what moved the years.
-    expect(screen.getByText("Create new tournament")).toBeTruthy();
+    // The door into the composer is in the header from the first frame — this
+    // is the thing that must not arrive late, because arriving late is what
+    // moved the years under a reaching thumb.
+    expect(screen.getByText("+ New")).toBeTruthy();
     expect(screen.queryByText("Copy from")).toBeNull();
 
     releaseSummaries();
@@ -146,28 +150,32 @@ describe("EditionSwitcher", () => {
     releaseSummaries();
     await waitFor(() => expect(screen.getByText(/1,152 scores/)).toBeTruthy());
 
-    fireEvent.click(screen.getByText("Create new tournament"));
+    fireEvent.click(screen.getByText("+ New"));
     expect(screen.getByText("Copy from")).toBeTruthy();
     // 2026 exists but is empty, so it is the year being built rather than one
     // to skip past; 2025 is the newest year that actually holds a tournament.
     expect(screen.getByPlaceholderText("Year").value).toBe("2026");
     expect(screen.getByText("Build 2026 from 2025")).toBeTruthy();
 
-    // And it folds away again.
-    fireEvent.click(screen.getByText("Create new tournament"));
+    // The list is gone while the composer is up — one screen, not two things
+    // sharing one — and ‹ brings it back.
+    expect(screen.queryByText("2015")).toBeNull();
+    fireEvent.click(screen.getByLabelText("Back"));
     expect(screen.queryByText("Copy from")).toBeNull();
+    expect(screen.getByText("2015")).toBeTruthy();
   });
 
   it("keeps what the director typed when the counts land behind them", async () => {
     open();
     await screen.findByText("2026");
-    fireEvent.click(screen.getByText("Create new tournament"));
+    fireEvent.click(screen.getByText("+ New"));
     fireEvent.change(screen.getByPlaceholderText("Year"), { target: { value: "2030" } });
 
     releaseSummaries();
-    // The row AND the source option both say it once the form is open, which
-    // is itself the proof the counts reached the form.
-    await waitFor(() => expect(screen.getAllByText(/1,152 scores/).length).toBeGreaterThan(1));
+    // The composer has replaced the list, so the only thing left that can say
+    // it is the source option — which is itself the proof the counts reached
+    // the form.
+    await waitFor(() => expect(screen.getAllByText(/1,152 scores/).length).toBe(1));
     // The seeding runs until the real counts arrive; a year already typed is
     // not one of the things it may correct.
     expect(screen.getByPlaceholderText("Year").value).toBe("2030");
@@ -456,10 +464,48 @@ describe("EditionSwitcher", () => {
     // target" filter if it were not excluded by id.
     it("is never in the Copy-from list", async () => {
       await settled();
-      fireEvent.click(screen.getByText("Create new tournament"));
+      fireEvent.click(screen.getByText("+ New"));
       const options = Array.from(document.querySelectorAll("option")).map(o => o.textContent);
       expect(options.some(t => /demo|sandbox/i.test(t))).toBe(false);
       expect(options.some(t => t.includes("2025"))).toBe(true);
+    });
+  });
+
+  // ── Renaming ──────────────────────────────────────────────────────
+  // Reached from the sheet, answered in its own view, and it must not offer
+  // the id or the year: those are what a tournament's every document is filed
+  // under. See renameEdition.
+  describe("rename", () => {
+    const openSheet = async (year = "2015") => {
+      open();
+      await screen.findByText("2026");
+      fireEvent.click(screen.getByText(year));
+    };
+
+    it("takes a director from the row to a name field, and saves it", async () => {
+      await openSheet();
+      fireEvent.click(screen.getByText("Rename"));
+      const field = screen.getByDisplayValue("WBC 2015");
+      fireEvent.change(field, { target: { value: "The Snow Bowl" } });
+      fireEvent.click(screen.getByText("Save name"));
+      await waitFor(() => expect(renames).toEqual([["wbc_2015", "The Snow Bowl"]]));
+      // Back on the list, with the new name on the row it was typed for.
+      await waitFor(() => expect(screen.getByText(/The Snow Bowl/)).toBeTruthy());
+    });
+
+    it("refuses to save an empty name rather than clearing one", async () => {
+      await openSheet();
+      fireEvent.click(screen.getByText("Rename"));
+      fireEvent.change(screen.getByDisplayValue("WBC 2015"), { target: { value: "   " } });
+      fireEvent.click(screen.getByText("Save name"));
+      expect(renames).toEqual([]);
+    });
+
+    it("is not offered to a member", async () => {
+      open({ canManage: false });
+      await screen.findByText("2026");
+      fireEvent.click(screen.getByText("2015"));
+      expect(screen.queryByText("Rename")).toBeNull();
     });
   });
 });

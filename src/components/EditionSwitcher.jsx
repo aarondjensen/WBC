@@ -28,7 +28,7 @@ import { IconLock, IconUnlock, IconChevron } from "./Icons";
 import { getActiveTournamentId } from "../firebase";
 import {
   loadEditions, loadEditionSummaries, cachedEditionSummaries, cachedEditions,
-  createEdition, cloneEdition, deleteEdition, switchEdition, ensureActiveEditionDoc,
+  createEdition, cloneEdition, deleteEdition, switchEdition, ensureActiveEditionDoc, renameEdition,
   setEditionLocked, resetSandbox,
 } from "../lib/editions";
 import {
@@ -53,6 +53,14 @@ const fieldStyle = (w) => ({
   // 16px: below that, iOS zooms the page on focus and never zooms back out.
   fontSize: FS.lead, fontWeight: 600, outline: "none",
 });
+
+// The three square buttons in the header — back, and close. Same box, so a
+// header that gains one does not shift the other.
+const headerBtn = {
+  flexShrink: 0, width: 32, height: 32, borderRadius: R.sm, border: `1px solid ${K.bdr}`,
+  background: "transparent", color: K.t2, fontSize: FS.lead, fontWeight: 600,
+  cursor: "pointer", lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center",
+};
 
 // What a clone can copy. Scores, pairings, tee assignments, skins and
 // signatures are NEVER cloned — see the note in lib/editions.js.
@@ -88,9 +96,21 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
   // effect below.
   const [summariesFresh, setSummariesFresh] = useState(false);
   const [loading, setLoading] = useState(true);
-  // Is the create form open? Closed on every open of the picker — see the
-  // note above the button.
-  const [buildOpen, setBuildOpen] = useState(false);
+  // ── "list" | "new" | "edit" ───────────────────────────────────────
+  // The composer used to sit under the list of every year, folded away behind
+  // a button. Even folded it was in the way: the popup is centred, so opening
+  // it grew the card in both directions and walked the year rows upwards under
+  // a reaching thumb — and switching a year reloads the app, so a mis-tap
+  // there is expensive.
+  //
+  // Ported from Bourbon Cup, which took the next step: the composer is its own
+  // VIEW. The list is the list, and building or renaming a tournament replaces
+  // it entirely — one screen, short, with its button where a thumb already is
+  // rather than at the bottom of seventeen rows. `mode` is reset to "list" on
+  // every open.
+  const [mode, setMode] = useState("list");
+  // The row being renamed: { id, name }. Null outside "edit".
+  const [editing, setEditing] = useState(null);
   // Have the form's defaults been settled off the real counts, and has the
   // director since typed over them? Either one ends the seeding.
   const [seeded, setSeeded] = useState(false);
@@ -134,7 +154,7 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
     if (!open) return;
     let alive = true;
     // Every open starts with the form put away and nothing typed into it.
-    setBuildOpen(false); setSeeded(false); setTouched(false);
+    setMode("list"); setEditing(null); setSeeded(false); setTouched(false);
     setErr(""); setCreateErr(""); setSummariesFresh(false);
     (async () => {
       // Whatever the last open learned, on this frame: the years themselves
@@ -205,13 +225,13 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
   // provisional and re-derived as better numbers arrive; once they land, or
   // once the director types anything, they stop moving.
   useEffect(() => {
-    if (!open || !buildOpen || seeded || touched) return;
+    if (!open || mode !== "new" || seeded || touched) return;
     const planned = plannedYear(editions, summaries);
     setYear(String(planned));
     setCloneFrom(plannedSource(editions, summaries, planned));
     setSourcePicked(false);
     if (summariesFresh) setSeeded(true);
-  }, [open, buildOpen, seeded, touched, editions, summaries, summariesFresh]);
+  }, [open, mode, seeded, touched, editions, summaries, summariesFresh]);
 
   if (!open) return null;
 
@@ -297,6 +317,32 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
   // row as it was when it was tapped.
   const sheetEdition = sheetFor ? editions.find((e) => e.id === sheetFor) || null : null;
   const closeSheet = () => setSheetFor(null);
+
+  // ── Rename ────────────────────────────────────────────────────────
+  // Opened from the sheet, answered in its own view. The id and the year are
+  // shown but not editable — see renameEdition for why changing an id would
+  // orphan a tournament.
+  const openRename = (e) => {
+    setEditing({ id: e.id, name: e.name || "" });
+    setCreateErr("");
+    setMode("edit");
+  };
+
+  const leaveForm = () => { setMode("list"); setEditing(null); setCreateErr(""); };
+
+  const doRename = async () => {
+    if (!editing?.name?.trim() || busy) return;
+    setBusy(true); setCreateErr("");
+    try {
+      const res = await renameEdition(editing.id, editing.name);
+      if (!res?.ok) { setCreateErr(res.error || "That didn't save."); return; }
+      setEditions(rows => rows.map(r => (r.id === editing.id ? { ...r, name: res.name } : r)));
+      notify?.(`Renamed to ${res.name}`);
+      leaveForm();
+    } catch (e) {
+      setCreateErr(e?.message || "That didn't save.");
+    } finally { setBusy(false); }
+  };
   const stateColor = (s) => s === "complete" ? K.acc : s === "live" ? K.warn : K.t3;
 
   // ── Freeze or thaw a year ────────────────────────────────────────
@@ -375,8 +421,40 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
 
   return (
     <>
-      <Popup onClose={onClose} maxWidth={400} padding={18} zIndex={3000} portal>
-        <div style={{ fontSize: FS.lead, fontWeight: 800, color: K.t1, letterSpacing: 0.5, marginBottom: 14 }}>Tournaments</div>
+      {/* viewportFit + align start: this popup holds text fields, and a centred
+          full-viewport overlay puts them — and the button under them — behind
+          the on-screen keyboard, because iOS does not shrink the CSS viewport
+          for it. padding 0 and a flex column so the header stays put while
+          only the middle scrolls. */}
+      <Popup
+        onClose={onClose} portal viewportFit align="start"
+        maxWidth={400} padding={0} outerPadding={12} zIndex={3000}
+        innerStyle={{ display: "flex", flexDirection: "column" }}
+      >
+        {/* One header for all three views: back out of a form, what this is,
+            the door into the composer, and the way out. */}
+        <div style={{
+          flexShrink: 0, display: "flex", alignItems: "center", gap: 9,
+          padding: "12px 14px", borderBottom: `1px solid ${K.bdr}`,
+        }}>
+          {mode !== "list" && (
+            <button onClick={leaveForm} aria-label="Back" style={{ ...headerBtn, fontSize: FS.title }}>‹</button>
+          )}
+          <div style={{ flex: 1, minWidth: 0, fontSize: FS.lead, fontWeight: 800, color: K.t1, letterSpacing: 0.5 }}>
+            {mode === "new" ? "New tournament" : mode === "edit" ? "Rename tournament" : "Tournaments"}
+          </div>
+          {mode === "list" && canManage && !loading && (
+            <button onClick={() => { setMode("new"); setCreateErr(""); }} style={{
+              flexShrink: 0, padding: "7px 12px", borderRadius: R.sm, font: "inherit",
+              border: `1px solid ${K.acc}`, background: "transparent", color: K.acc,
+              fontSize: FS.small, fontWeight: 800, letterSpacing: 0.5, cursor: "pointer",
+            }}>+ New</button>
+          )}
+          <button onClick={onClose} aria-label="Close" style={headerBtn}>✕</button>
+        </div>
+
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", overscrollBehavior: "contain", padding: 16 }}>
+        {mode === "list" ? (<>
 
         {loading ? (
           <div style={{ fontSize: FS.small, color: K.t3, padding: "10px 0 16px" }}>Loading…</div>
@@ -576,38 +654,35 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
           );
         })()}
 
-        {canManage && (
-          <div style={{ borderTop: `1px solid ${K.bdr}`, paddingTop: 14 }}>
-            {/* ── Put away until it is asked for ────────────────────────
-                This form used to sit open under the list, and every part of
-                it — the source dropdown, the planned year, the "what comes
-                across" panel — filled in only once the counts landed, half a
-                second or more after the popup opened.
-                The popup is CENTERED, so a panel appearing at the bottom
-                grows the card in both directions and walks the year rows
-                upwards. A director reaching for a year tapped the one below
-                it, and switching a year reloads the app.
-                Collapsed, this is one button of fixed height from the first
-                frame: nothing under the list moves on its own, and none of
-                the form — nor the defaults it opens pointed at — exists
-                until somebody asks for it. */}
-            <button
-              onClick={() => setBuildOpen(v => !v)}
-              aria-expanded={buildOpen}
-              style={{
-                width: "100%", display: "flex", alignItems: "center", gap: 9,
-                padding: "11px 12px", borderRadius: R.sm, cursor: "pointer",
-                background: buildOpen ? K.acc + ALPHA.wash : K.inp,
-                border: `1px solid ${buildOpen ? K.acc : K.bdr}`,
-                color: K.t1, textAlign: "left",
-              }}>
-              <span aria-hidden style={{ fontSize: FS.body, fontWeight: 800, color: K.acc, lineHeight: 1, flexShrink: 0 }}>+</span>
-              <span style={{ flex: 1, minWidth: 0, fontSize: FS.small, fontWeight: 800, letterSpacing: 0.5 }}>Create new tournament</span>
-              <span aria-hidden style={{ fontSize: FS.micro, color: K.t3, flexShrink: 0 }}>{buildOpen ? "▲" : "▼"}</span>
-            </button>
-
-            {buildOpen && (
-              <div style={{ marginTop: 12 }}>
+        </>) : mode === "edit" ? (<>
+          {/* ── Rename ────────────────────────────────────────────────
+              The name only. The id and the year are what every score, pairing
+              and card in this tournament is filed under — see renameEdition —
+              so they are shown as the fixed things they are rather than
+              offered as fields. */}
+          <div style={{ fontSize: FS.label, color: K.t3, marginBottom: 12, lineHeight: 1.45 }}>
+            <b style={{ color: K.t2 }}>{editing?.id}</b>
+            {" — the id and the year are fixed. Every score, pairing and card in this tournament is filed under them."}
+          </div>
+          <span style={{ ...rowLabel, display: "block", marginBottom: 5 }}>Name</span>
+          <input
+            value={editing?.name || ""} autoFocus
+            placeholder={`WBC ${editing?.id?.replace(/\D/g, "") || ""}`.trim()}
+            onChange={(e) => { setCreateErr(""); setEditing(v => ({ ...v, name: e.target.value })); }}
+            style={{ ...fieldStyle(), marginBottom: 12 }}
+          />
+          {createErr && (
+            <div style={{ fontSize: FS.label, fontWeight: 600, color: K.danger, marginBottom: 8, lineHeight: 1.45 }}>{createErr}</div>
+          )}
+          <Btn block disabled={busy || !editing?.name?.trim()} onClick={doRename} style={{ letterSpacing: 0.5 }}>
+            {busy ? "Saving…" : "Save name"}
+          </Btn>
+        </>) : (<>
+          {/* ── The composer, in its own view ─────────────────────────
+              Everything below used to live under the list behind a fold. Here
+              it is the whole screen, so the button that ends it lands where a
+              thumb already is instead of below seventeen rows of years. */}
+          <div>
                 {/* Source first, then target: the form reads top-to-bottom in the
                     direction the work goes — copy FROM last year, INTO next. The
                     other order made you type the answer before the question. */}
@@ -670,10 +745,9 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
                     ? `Build ${targetYear || "the new year"} from ${cloneSource?.year || "last year"}`
                     : `Create ${targetYear || "a year"}, blank`}
               </Btn>
-            </div>
-            )}
           </div>
-        )}
+        </>)}
+        </div>
       </Popup>
 
       {/* ── Behind the tap ────────────────────────────────────────────
@@ -708,6 +782,7 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
             if (v.confirm) setPendingLock(target);
             else applyLock(target, v.next);
           }}
+          onRename={() => { const t = sheetEdition; closeSheet(); openRename(t); }}
           onDelete={() => { const t = sheetEdition; closeSheet(); setPendingDelete(t); }}
         />
       )}

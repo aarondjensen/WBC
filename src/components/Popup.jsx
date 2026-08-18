@@ -18,7 +18,7 @@
 // App.jsx behaves exactly as before. ConfirmModal always portals — a confirm
 // is by definition the topmost layer, and it is routinely raised from inside
 // another popup.
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { K, FS, R, SCRIM } from "../theme";
 import { Btn } from "./ui";
@@ -37,6 +37,41 @@ import { Btn } from "./ui";
 // code that just wants "above the page" or "above everything".
 const Z_MAP = { content: 500, modal: 900 };
 
+// ── The rectangle that is actually visible ──────────────────────────
+// Ported from Bourbon Cup. iOS does NOT shrink the CSS viewport units
+// (vh/dvh/svh) for the on-screen keyboard, so a full-viewport overlay renders
+// its card — and the text field in it — behind the keys. visualViewport is the
+// only thing that knows where the visible strip is, so an overlay that has to
+// hold an input is sized to exactly that.
+//
+// Only runs when `enabled`, which is the `viewportFit` opt-in: every popup
+// that holds no input keeps the classic inset:0 overlay and pays nothing, not
+// even the listeners.
+function useViewportRect(enabled) {
+  const read = () => {
+    if (typeof window === "undefined") return { top: 0, left: 0, width: 0, height: 0 };
+    const v = window.visualViewport;
+    if (v) return { top: v.offsetTop, left: v.offsetLeft, width: v.width, height: v.height };
+    return { top: 0, left: 0, width: window.innerWidth, height: window.innerHeight };
+  };
+  const [rect, setRect] = useState(read);
+  useEffect(() => {
+    if (!enabled) return;
+    const v = window.visualViewport;
+    const update = () => setRect(read());
+    update();
+    if (v) { v.addEventListener("resize", update); v.addEventListener("scroll", update); }
+    window.addEventListener("resize", update);
+    window.addEventListener("orientationchange", update);
+    return () => {
+      if (v) { v.removeEventListener("resize", update); v.removeEventListener("scroll", update); }
+      window.removeEventListener("resize", update);
+      window.removeEventListener("orientationchange", update);
+    };
+  }, [enabled]);
+  return rect;
+}
+
 export function Popup({
   children,
   onClose,
@@ -49,8 +84,18 @@ export function Popup({
   outerPadding = 12,
   innerStyle,
   portal = false,
+  // ── Opt-ins, default off → byte-identical to the classic modal ──
+  //  viewportFit — size the overlay to the visual viewport rather than the
+  //                layout one, so a keyboard cannot cover the card. For a
+  //                popup with a text field in it.
+  //  align       — cross-axis placement: "center" (default) or "start". A tall
+  //                form belongs at the top of the visible strip, not centred
+  //                in what is left of it.
+  viewportFit = false,
+  align = "center",
 }) {
   const z = typeof zIndex === "number" ? zIndex : (Z_MAP[zIndex] || 500);
+  const rect = useViewportRect(viewportFit);
 
   // ESC closes unless disabled. Only registers when there is an onClose to call.
   //
@@ -80,7 +125,18 @@ export function Popup({
       // page's pull-to-refresh fighting a scrolling modal, without the app
       // having to keep a "is any popup open" ref in sync by hand.
       data-popup="1"
-      style={{ position: "fixed", inset: 0, background: SCRIM, zIndex: z, display: "flex", alignItems: "center", justifyContent: "center", padding: outerPadding }}
+      style={{
+        position: "fixed",
+        // viewportFit pins the overlay to the live visible rect (above the
+        // keyboard); otherwise the classic full-viewport overlay.
+        ...(viewportFit
+          ? { top: rect.top, left: rect.left, width: rect.width, height: rect.height }
+          : { inset: 0 }),
+        background: SCRIM, zIndex: z, display: "flex",
+        alignItems: align === "start" ? "flex-start" : "center",
+        justifyContent: "center", padding: outerPadding, boxSizing: "border-box",
+        overflowY: viewportFit ? "hidden" : "auto", overscrollBehavior: "contain",
+      }}
     >
       <div
         onClick={e => e.stopPropagation()}
@@ -92,7 +148,8 @@ export function Popup({
           maxWidth,
           // Caps at (--app-height - 90px) so long content scrolls instead of
           // pushing the modal off-screen in the iOS PWA.
-          maxHeight: "calc(var(--app-height, 100dvh) - 90px)",
+          // viewportFit cards fill the visible rect and scroll inside it.
+          maxHeight: viewportFit ? "100%" : "calc(var(--app-height, 100dvh) - 90px)",
           // ── The card is a FRAME. The scroller is inside it. ──
           // The card used to be the scroller. That works only for as long as
           // nothing is positioned against it: the moment a close button is

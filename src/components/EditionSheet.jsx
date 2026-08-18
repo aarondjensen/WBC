@@ -25,7 +25,7 @@
 // they were. Those are the two a person should have to answer twice.
 import { K, ON_ACC, FS, R, ALPHA } from "../theme";
 import { Popup } from "./Popup";
-import { IconLock, IconUnlock, IconTrash } from "./Icons";
+import { IconLock, IconUnlock, IconTrash, IconPencil } from "./Icons";
 import { editionActions, STATE_LABEL } from "../lib/editionLifecycle";
 
 const metaWord = {
@@ -65,7 +65,7 @@ const Divider = () => <div style={{ height: 1, background: K.bdr, margin: "6px 1
  */
 export function EditionSheet({
   edition, state = "unknown", summary = "", isActive = false, isSandbox = false,
-  canManage = false, busy = false, onOpen, onLock, onDelete, onClose,
+  canManage = false, busy = false, onOpen, onRename, onLock, onDelete, onClose,
 }) {
   if (!edition) return null;
   const acts = editionActions({ edition, state, isActive, isSandbox, canManage });
@@ -133,6 +133,12 @@ export function EditionSheet({
           }}>Open this tournament</button>
         )}
         {acts.open && canManage && <Divider />}
+
+        {/* Renaming is the one action here that changes nothing about the
+            tournament itself, so it leads the director's half. */}
+        {acts.rename && onRename && (
+          <Action icon={IconPencil} label="Rename" onClick={onRename} disabled={busy} />
+        )}
 
         {acts.lock && (
           <Action
