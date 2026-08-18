@@ -33,6 +33,7 @@ import { calcCH, courseHandicapFor, computeRoundLine, rankIndividualBoardIds, WD
 import { BuyInPrices } from "./BuyIns";
 import { TeeColorSwatch } from "./TeeColorSwatch";
 import { AccessPanel } from "./AccessPanel";
+import { PlayerActivityPanel } from "./PlayerActivityPanel";
 import { resolveTeeColor, TEE_COLOR_MAP } from "../lib/teeColors";
 import { useConfirm } from "../lib/useConfirm";
 import { useDirtyForm } from "../lib/useDirtyForm";
@@ -2188,6 +2189,12 @@ export function AdminView({ registry, activePlayers, marketPool, sideGames, onUp
                   <TournamentPanel meta={tournamentMeta} onSave={onSaveTournamentMeta} notify={notify}
                     confirm={confirm} scoredRounds={scoredRounds} />
                   <AccessPanel notify={notify} confirm={confirm} />
+                  {/* Who has come through that door, when they were last
+                      here, and whether an alert would reach them. Beside the
+                      password rather than on the Players tab, where the same
+                      names are already listed alphabetically for editing —
+                      this list is sorted by recency and read as a whole. */}
+                  <PlayerActivityPanel players={activePlayers} />
                 </div>
               )}
               {tab === "players" && (
