@@ -49,6 +49,34 @@ import { isSandboxEdition } from "./editionId";
 // seventeen years of tournaments the moment this deployed.
 export const isEditionLocked = (edition) => edition?.locked === true;
 
+// ── Inside the sandbox, every member is an administrator ───────────
+// The app's copy of `canAdminEdition()` in firestore.rules, and it has to stay
+// a mirror of it. The rules decide; this only decides what a person is
+// OFFERED, so that nobody is handed an Admin tab whose every save comes back
+// refused — which on these screens is worse than no tab at all, because they
+// auto-save on edit and `db.upsert` swallows a rejection: a tester would type
+// a name, watch it appear, and find it gone on the next load.
+//
+// Why it exists: the store reviewers and the Play testers have no account of
+// ours and no crown, and the crown cannot be granted ahead of time because it
+// lives on a membership document that does not exist until they sign in. The
+// sandbox is where they are meant to be, and a tester who cannot set a course
+// or make a draw cannot exercise the app they were handed.
+//
+// `tid` is the edition being written, not the row: the sandbox is identified
+// by its id (see editionId), which is what makes this a comparison rather than
+// a lookup.
+export const canAdminEdition = ({ isDirector = false, isMember = false, tid = "" } = {}) =>
+  isDirector === true || (isMember === true && isSandboxEdition(tid));
+
+// True only for the member who is an administrator BECAUSE of where they are
+// standing. The screens use it to hide what a real director gets and the rules
+// would still refuse — the career registry and the courses, which in WBC are
+// global rather than edition-scoped, so no sandbox grant can reach them. See
+// the note on canAdminEdition in firestore.rules.
+export const demoOnlyAdmin = (args) =>
+  args?.isDirector !== true && canAdminEdition(args);
+
 // ── What the director is about to do, in words ─────────────────────
 // Returned rather than written inline at the call site so the dangerous case
 // can be tested, because it is the one that is easy to get wrong and

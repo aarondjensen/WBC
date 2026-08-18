@@ -20,7 +20,8 @@
 // to be in front of them before they tap, and it is the assertion most likely
 // to be lost in a refactor of the copy.
 import { describe, it, expect } from "vitest";
-import { isEditionLocked, lockVerdict, bulkLockVerdict, lockBadge, lockNotice } from "./editionLock";
+import { isEditionLocked, lockVerdict, bulkLockVerdict, lockBadge, lockNotice, canAdminEdition, demoOnlyAdmin,
+} from "./editionLock";
 
 describe("isEditionLocked", () => {
   it("is true only for an explicit true", () => {
@@ -225,5 +226,43 @@ describe("lockNotice", () => {
 
   it("says nothing about an open year", () => {
     expect(lockNotice({ year: 2026 })).toBeNull();
+  });
+});
+
+// ── The sandbox administrator ──────────────────────────────────────
+// A mirror of canAdminEdition() in firestore.rules — the rules decide, this
+// only decides what somebody is offered. What matters is the LIMIT: a grant
+// that leaked into a real year would put a beta tester on the tee sheet of a
+// live tournament.
+describe("canAdminEdition", () => {
+  it("lets a director administer any year", () => {
+    expect(canAdminEdition({ isDirector: true, tid: "wbc_2026" })).toBe(true);
+    expect(canAdminEdition({ isDirector: true, tid: "wbc_demo" })).toBe(true);
+  });
+
+  it("lets a member administer the sandbox", () => {
+    expect(canAdminEdition({ isMember: true, tid: "wbc_demo" })).toBe(true);
+  });
+
+  it("does not let a member administer the tournament being played", () => {
+    expect(canAdminEdition({ isMember: true, tid: "wbc_2026" })).toBe(false);
+    expect(canAdminEdition({ isMember: true, tid: "wbc_2014" })).toBe(false);
+  });
+
+  // A guest is not a member: no account, no membership document, and every
+  // write refused in the rules whatever this said.
+  it("gives a guest nothing, sandbox or not", () => {
+    expect(canAdminEdition({ tid: "wbc_demo" })).toBe(false);
+    expect(canAdminEdition()).toBe(false);
+  });
+});
+
+describe("demoOnlyAdmin", () => {
+  // The screens hide their non-edition-scoped halves on this, so a director
+  // reading TRUE here would lose the registry and the courses.
+  it("is the member in the sandbox, and nobody else", () => {
+    expect(demoOnlyAdmin({ isMember: true, tid: "wbc_demo" })).toBe(true);
+    expect(demoOnlyAdmin({ isDirector: true, isMember: true, tid: "wbc_demo" })).toBe(false);
+    expect(demoOnlyAdmin({ isMember: true, tid: "wbc_2026" })).toBe(false);
   });
 });

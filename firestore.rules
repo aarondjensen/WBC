@@ -184,6 +184,64 @@ service cloud.firestore {
       return !enforcing() || isDirector();
     }
 
+    // ── Inside the SANDBOX, every member is an administrator ───────
+    // Ported from Bourbon Cup, whose store reviewers and beta testers get no
+    // account of ours and no crown — so the roster, the draw and the tee sheet
+    // were a tab reading "Directors Only", and the crown cannot be granted in
+    // advance because it lives on a membership document that does not exist
+    // until they sign in.
+    //
+    // The alternative on the table was an Admin tab that renders and refuses.
+    // It is the worse one: the admin screens auto-save on edit and `db.upsert`
+    // swallows a rejection, so a tester would type a name, watch it appear,
+    // and find it gone on the next load. An app that lies about a save is a
+    // worse thing to hand a reviewer than one that lets a tester move an
+    // invented golfer around a sandbox.
+    //
+    // WBC's sandbox is identified by its ID rather than by a flag on the row
+    // (see lib/editionId — `wbc_demo` is a namespace no year can produce), so
+    // unlike BC this costs NO extra document read: it is a string comparison
+    // on the document being written.
+    //
+    // BOTH ends, for the same reason editionOpen() checks both: without the
+    // `resource` half a member could take a sandbox document and rewrite its
+    // tournament_id into the live tournament, carrying the grant across with
+    // it. A write with neither end present is not a write.
+    function sandboxDoc(d) {
+      return d != null && d.data.get('tournament_id', '') == 'wbc_demo';
+    }
+
+    function inSandbox() {
+      return (resource != null || request.resource != null)
+          && (resource == null || sandboxDoc(resource))
+          && (request.resource == null || sandboxDoc(request.resource));
+    }
+
+    // Director-owned collections that are EDITION-SCOPED may be written by any
+    // member inside the sandbox. isDirector() is asked first, so a director
+    // writing a real year never pays for the comparison.
+    //
+    // What this deliberately does NOT cover, and the difference from Bourbon
+    // Cup: `players`, `courses` and `tee_boxes` are GLOBAL in WBC — the career
+    // registry is one row per golfer shared with sixteen years of history, and
+    // a course is shared by every edition that has ever played it. A grant
+    // that reached them would let a tester in the sandbox rename a real man or
+    // re-rate a real course, which is exactly the reach the sandbox exists to
+    // prevent. BC's players are edition-scoped, so its version of this covers
+    // them and this one cannot. A tester can therefore run the sandbox's
+    // tournament — its rounds, its draw, its tee sheet, its scoring, its
+    // finalize — with the roster it was cloned with, and cannot invent a new
+    // golfer or a new course.
+    //
+    // Not covered either: wbc_editions (creating, deleting or unlocking a
+    // tournament — it is also where `locked` lives, so a write there would let
+    // a member thaw the live year), wbc_secrets (the password) and the crown
+    // on wbc_accounts. All three are project-wide, and no tournament_id could
+    // scope them.
+    function canAdminEdition() {
+      return canAdmin() || (canWrite() && inSandbox());
+    }
+
     // ── A LOCKED EDITION ───────────────────────────────────────────
     // `locked: true` on wbc_editions/{id} freezes that tournament against
     // everybody but a director. See src/lib/editionLock.js for what it means;
@@ -393,10 +451,13 @@ service cloud.firestore {
                                       allow write: if canAdmin(); }
     match /tee_boxes/{doc}          { allow read: if isOpen();
                                       allow write: if canAdmin(); }
+    // These two are edition-scoped, so a member may write them inside the
+    // sandbox — see canAdminEdition. The three above are not: the career
+    // registry and the courses are shared with every year the app holds.
     match /tournament_rounds/{doc}  { allow read: if isOpen();
-                                      allow write: if canAdmin(); }
+                                      allow write: if canAdminEdition(); }
     match /pairings/{doc}           { allow read: if isOpen();
-                                      allow write: if canAdmin(); }
+                                      allow write: if canAdminEdition(); }
 
     // ── Written from a tee box ────────────────────────────────────
     // Members, not directors — see the note at the top of this file. Each of
@@ -480,8 +541,10 @@ service cloud.firestore {
                                 || isDirector()
                                 || request.resource.data.get('player_id', '') == myPlayerId());
       // Bets and tags are only ever removed in bulk — Start Fresh, or deleting
-      // an edition — both of which are director-only screens.
-      allow delete: if canAdmin();
+      // an edition — both of which are director-only screens. Start Fresh is
+      // one of the things a tester is asked to try, so it goes through
+      // canAdminEdition: inside the sandbox or not at all.
+      allow delete: if canAdminEdition();
     }
     match /wbc_scorecard_sigs/{doc} { allow read: if isOpen();
                                       allow write: if canWriteEdition(); }

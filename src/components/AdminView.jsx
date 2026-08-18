@@ -1541,8 +1541,21 @@ function TournamentPanel({ meta, onSave, notify, confirm, scoredRounds = [] }) {
 
 // AccessPanel moved to components/AccessPanel.jsx — see the header there.
 
-export function AdminView({ registry, activePlayers, marketPool, sideGames, onUpdateSideGames, rebuyIds, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, deletePlayer, editionsHolding, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, roundDates, onSetRoundDate, scoringOpen, onSetScoringOpen, pairingStrategy, onSetPairingStrategy, leaderboard, holeData, finalizedRounds, onFinalizeRound, onUnfinalizeRound, onDiscardRoundScores, notify, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, externalSettingsRound, onExternalSettingsHandled, teesSaved, onTeesSave, teesModified, onTeesModify, memberships, onSetDirector, claims, authUid, tournamentMeta, onSaveTournamentMeta }) {
-  const [tab, setTab] = useState("rounds");
+export function AdminView({ registry, activePlayers, marketPool, sideGames, onUpdateSideGames, rebuyIds, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, deletePlayer, editionsHolding, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, roundDates, onSetRoundDate, scoringOpen, onSetScoringOpen, pairingStrategy, onSetPairingStrategy, leaderboard, holeData, finalizedRounds, onFinalizeRound, onUnfinalizeRound, onDiscardRoundScores, notify, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, externalSettingsRound, onExternalSettingsHandled, teesSaved, onTeesSave, teesModified, onTeesModify, memberships, onSetDirector, claims, authUid, tournamentMeta, onSaveTournamentMeta, demoOnly = false }) {
+  // ── The sandbox administrator ─────────────────────────────────────
+  // `demoOnly` is a MEMBER who is an administrator only because of where they
+  // are standing — a beta tester or a store reviewer inside the sandbox, see
+  // canAdminEdition in lib/editionLock and the rule of the same name.
+  //
+  // Two of these tabs are not theirs, and the reason is the same for both:
+  // what they write is not edition-scoped, so no sandbox grant can reach it
+  // and the rules would refuse every save. Players edits the career registry —
+  // one row per golfer, shared with sixteen years of history. Event holds the
+  // tournament password and the crown. Hidden rather than shown-and-refused:
+  // these screens auto-save on edit and `db.upsert` swallows a rejection, so a
+  // refused save looks exactly like a save.
+  const [rawTab, setTab] = useState("rounds");
+  const tab = demoOnly && (rawTab === "players" || rawTab === "event") ? "rounds" : rawTab;
   // Themed confirmations (see lib/useConfirm). The host <ConfirmModal/> is
   // rendered once at the bottom of this view; `confirm(...)` returns a
   // Promise<boolean>.
@@ -1969,7 +1982,9 @@ export function AdminView({ registry, activePlayers, marketPool, sideGames, onUp
           tab regardless of that tab's content height — see ui.jsx. */}
       <StickyTop padBottom={10}>
         <SegmentedToggle
-          options={[["players","Players"],["rounds","Rounds"],["betting","Betting"],["event","Event"]]}
+          options={demoOnly
+            ? [["rounds","Rounds"],["betting","Betting"]]
+            : [["players","Players"],["rounds","Rounds"],["betting","Betting"],["event","Event"]]}
           value={tab}
           onChange={setTab}
         />
@@ -2518,7 +2533,11 @@ export function AdminView({ registry, activePlayers, marketPool, sideGames, onUp
               return (
                 <>
                   {pickable.length === 0 && (
-                    <div style={{ padding: 14, textAlign: "center", color: K.t3, fontSize: FS.label, lineHeight: 1.5 }}>No courses yet — search above to pull one from the course database, or add it by hand.</div>
+                    <div style={{ padding: 14, textAlign: "center", color: K.t3, fontSize: FS.label, lineHeight: 1.5 }}>
+                      {demoOnly
+                        ? "No courses saved yet. A director adds them to the shared list; anything in it can be used here."
+                        : "No courses yet — search above to pull one from the course database, or add it by hand."}
+                    </div>
                   )}
                   {courses.length > 0 && lib.length === 0 && (
                     <div style={{ padding: "9px 14px", color: K.t3, fontSize: FS.label }}>Nothing you have saved matches “{courseSearch.trim()}”.</div>
@@ -2545,18 +2564,28 @@ export function AdminView({ registry, activePlayers, marketPool, sideGames, onUp
                             {isAssigned
                               ? <span style={{ fontSize: FS.micro, fontWeight: 700, color: ac, flexShrink: 0 }}>✓ this round</span>
                               : <button onClick={() => use(c)} style={{ flexShrink: 0, fontSize: FS.label, fontWeight: 700, color: K.t2, background: "transparent", border: `1px solid ${K.bdr}`, borderRadius: R.sm, padding: "3px 9px", cursor: "pointer" }}>Use</button>}
-                            <button title="Edit course" onClick={() => setEditingCourse({ courseId: c.id, draft: { ...c, hole_pars: [...(c.hole_pars || Array(18).fill(4))], hole_handicaps: [...(c.hole_handicaps || Array(18).fill(0))], tee_boxes: (c.tee_boxes || []).map(t => ({ ...t })) } })}
-                              style={{ flexShrink: 0, background: "transparent", border: "none", color: ac, fontSize: FS.label, fontWeight: 700, cursor: "pointer", padding: "2px 2px" }}>Edit</button>
-                            <button title="Remove from your courses" onClick={() => setConfirmCourse({ course: c, delete: true, assignedRounds: Array.from({ length: numRounds }, (_, ri) => ri + 1).filter(r => tRounds.find(t => t.round_number === r && t.course_id === c.id)) })}
-                              style={{ flexShrink: 0, background: "transparent", border: "none", color: K.t3, fontSize: FS.small, cursor: "pointer", padding: "2px 2px", lineHeight: 1 }}>✕</button>
+                            {/* Editing or removing a course rewrites the shared
+                                library, which is not edition-scoped — a
+                                sandbox administrator may USE a course and may
+                                not change one. See demoOnly above. */}
+                            {!demoOnly && <>
+                              <button title="Edit course" onClick={() => setEditingCourse({ courseId: c.id, draft: { ...c, hole_pars: [...(c.hole_pars || Array(18).fill(4))], hole_handicaps: [...(c.hole_handicaps || Array(18).fill(0))], tee_boxes: (c.tee_boxes || []).map(t => ({ ...t })) } })}
+                                style={{ flexShrink: 0, background: "transparent", border: "none", color: ac, fontSize: FS.label, fontWeight: 700, cursor: "pointer", padding: "2px 2px" }}>Edit</button>
+                              <button title="Remove from your courses" onClick={() => setConfirmCourse({ course: c, delete: true, assignedRounds: Array.from({ length: numRounds }, (_, ri) => ri + 1).filter(r => tRounds.find(t => t.round_number === r && t.course_id === c.id)) })}
+                                style={{ flexShrink: 0, background: "transparent", border: "none", color: K.t3, fontSize: FS.small, cursor: "pointer", padding: "2px 2px", lineHeight: 1 }}>✕</button>
+                            </>}
                           </div>
                         );
                       })}
                     </>
                   )}
 
-                  {/* API results — only once the query is worth sending. */}
-                  {searching && (
+                  {/* API results — only once the query is worth sending, and
+                      never for a sandbox administrator: pulling a course out
+                      of the database ADDS it to the shared library, which the
+                      rules refuse them. The saved list above is theirs to
+                      assign from. */}
+                  {searching && !demoOnly && (
                     <div style={{ padding: 14, borderTop: `1px solid ${K.bdr}` }}>
                       <div style={{ fontSize: FS.micro, fontWeight: 700, color: K.t3, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>Search results</div>
                   {searchLoading && <div style={{ textAlign: "center", padding: 12, color: K.t3, fontSize: FS.label }}>Searching courses...</div>}

@@ -455,6 +455,58 @@ await env.withSecurityRulesDisabled(async (ctx) => {
 await check("a locked sandbox refuses a member, like any other edition", () =>
   assertFails(setDoc(doc(carl, "hole_scores/hs_demo_3"), { tournament_id: "wbc_demo", score: 4 })));
 
+// ── …with ONE exception: inside it, a member is an administrator ──
+// The beta testers and the store reviewers have no crown and cannot be given
+// one before they sign in, so the draw and the round setup — director-only
+// everywhere else — are theirs inside `wbc_demo`. See canAdminEdition.
+//
+// What is asserted here is mostly the LIMIT of that grant, because the grant
+// itself is the easy half: it must not reach the live tournament, must not
+// reach the collections that are not edition-scoped, and must not be
+// carryable across by relabelling a row.
+await env.withSecurityRulesDisabled(async (ctx) => {
+  await setDoc(doc(ctx.firestore(), "wbc_editions/wbc_demo"), { locked: false }, { merge: true });
+});
+await check("member CAN set a round's course in the sandbox", () =>
+  assertSucceeds(setDoc(doc(carl, "tournament_rounds/tr_demo_r1"), { tournament_id: "wbc_demo", round_number: 1, course_id: "c1" })));
+await check("member CAN make the draw in the sandbox", () =>
+  assertSucceeds(setDoc(doc(carl, "pairings/pair_demo_r1_g1_x"), { tournament_id: "wbc_demo", round_number: 1, group_number: 1 })));
+await check("member CAN clear the sandbox's skins, the way Start Fresh does", async () => {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), "skins/ctp_demo_wipe"), { tournament_id: "wbc_demo", skin_type: "ctp", hole: 7 });
+  });
+  return assertSucceeds(deleteDoc(doc(carl, "skins/ctp_demo_wipe")));
+});
+
+// The live tournament is untouched by any of it.
+await check("member still CANNOT set a round's course in a real year", () =>
+  assertFails(setDoc(doc(carl, "tournament_rounds/tr_2026_r1"), { tournament_id: "wbc_2026", round_number: 1, course_id: "c1" })));
+await check("member still CANNOT make the draw in a real year", () =>
+  assertFails(setDoc(doc(carl, "pairings/pair_2026_r1_g1_x"), { tournament_id: "wbc_2026", round_number: 1, group_number: 1 })));
+
+// Both ends, so the grant cannot be carried out of the sandbox on a rewritten
+// tournament_id — the same hole the lock's editionOpen() closes.
+await check("member CANNOT move a round row OUT of the sandbox", () =>
+  assertFails(setDoc(doc(carl, "tournament_rounds/tr_demo_r1"), { tournament_id: "wbc_2026" }, { merge: true })));
+await check("member CANNOT move a round row INTO the sandbox", async () => {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), "tournament_rounds/tr_2026_r2"), { tournament_id: "wbc_2026", round_number: 2 });
+  });
+  return assertFails(setDoc(doc(carl, "tournament_rounds/tr_2026_r2"), { tournament_id: "wbc_demo" }, { merge: true }));
+});
+
+// The collections that are NOT edition-scoped, which is where WBC's version of
+// this grant stops and Bourbon Cup's does not: the career registry is one row
+// per golfer shared with sixteen years of history, and a course is shared by
+// every edition that has ever played it. Neither carries a tournament_id, so
+// neither can be inside the sandbox.
+await check("member CANNOT edit the career registry, sandbox or not", () =>
+  assertFails(setDoc(doc(carl, "players/aaron_j"), { name: "Renamed By A Tester" }, { merge: true })));
+await check("member CANNOT add a course, sandbox or not", () =>
+  assertFails(setDoc(doc(carl, "courses/c_demo_new"), { name: "Tester National" })));
+await check("member CANNOT create or delete a tournament from inside the sandbox", () =>
+  assertFails(setDoc(doc(carl, "wbc_editions/wbc_demo"), { name: "mine now" }, { merge: true })));
+
 // ── The escape hatch still opens everything ──────────────────────
 // enforcing() is documented above as the ONLY way back from a field that has
 // been locked out: publish with `return false` and every phone can write again
