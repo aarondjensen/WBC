@@ -263,13 +263,13 @@ describe("EditionSwitcher", () => {
     // The whole reason the actions moved. deleteVerdict has always produced
     // this sentence; the row's only way to say it was to draw no bin at all
     // and leave a director to infer the rule from an absence.
-    it("says why a finished tournament refuses to be deleted", async () => {
+    it("draws no bin on a finished tournament, and no paragraph about it", async () => {
       open();
       await screen.findByText("2025");
       await act(async () => { releaseSummaries(); });
       openSheet("2025");
       expect(screen.queryByText("Delete this tournament")).toBeNull();
-      expect(screen.getByText(/record of the event/)).toBeTruthy();
+      expect(screen.queryByText(/record of the event/)).toBeNull();
     });
 
     it("offers the bin on a year that may go", async () => {
@@ -322,11 +322,24 @@ describe("EditionSwitcher", () => {
       expect(screen.queryByLabelText(/^2026.*locked/)).toBeNull();
     });
 
-    it("unlocks on one tap, without a dialog", async () => {
+    // Both directions ask now. What unlocking widens is a finished
+    // tournament, so it is as deliberate an act as freezing one.
+    it("asks before unlocking, and writes nothing if cancelled", async () => {
       open();
       await screen.findByText("2015");
       openSheet("2015");
       fireEvent.click(screen.getByText("Unlock"));
+      expect(screen.getByText("Unlock 2015?")).toBeTruthy();
+      fireEvent.click(screen.getByText("Cancel"));
+      expect(locks).toEqual([]);
+    });
+
+    it("unlocks once the director confirms", async () => {
+      open();
+      await screen.findByText("2015");
+      openSheet("2015");
+      fireEvent.click(screen.getByText("Unlock"));
+      fireEvent.click(screen.getByText("Unlock it"));
       await waitFor(() => expect(locks).toEqual([["wbc_2015", false]]));
     });
 

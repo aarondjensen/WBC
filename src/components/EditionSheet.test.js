@@ -28,12 +28,16 @@ describe("EditionSheet", () => {
     expect(container.textContent).toBe("");
   });
 
-  it("leads with the year and names the tournament under it", () => {
-    // Somebody arriving here tapped a row part-way down a scroll of seventeen.
-    show();
-    expect(screen.getByText("2025")).toBeTruthy();
-    expect(screen.getByText("WBC 2025")).toBeTruthy();
-    expect(screen.getByText("Not started")).toBeTruthy();
+  // The heading is the tournament's own name and where it was played, once.
+  // The year used to sit above it at display size — the same four digits the
+  // row that opened this sheet was tapped on — and pushed everything the
+  // sheet exists for below the fold.
+  it("is headed by the tournament and where it was played", () => {
+    show({ location: "Gaylord, MI" });
+    expect(screen.getByText("WBC 2025 · Gaylord, MI")).toBeTruthy();
+    // And no state word: what a finished tournament is, is obvious from it.
+    expect(screen.queryByText("Not started")).toBeNull();
+    expect(screen.queryByText("Complete")).toBeNull();
   });
 
   it("badges the sandbox instead of inventing a year for it", () => {
@@ -56,16 +60,31 @@ describe("EditionSheet", () => {
     expect(screen.getByText("Lock")).toBeTruthy();
     cleanup();
     show({ edition: { ...YEAR, locked: true } });
+    // The button says Unlock, so a badge saying Locked beside it is the same
+    // fact twice.
     expect(screen.getByText("Unlock")).toBeTruthy();
-    expect(screen.getByText("Locked")).toBeTruthy();
+    expect(screen.queryByText("Locked")).toBeNull();
   });
 
-  it("says why a finished tournament refuses to be deleted", () => {
-    // The sentence deleteVerdict has always produced and the row could only
-    // express by drawing nothing at all.
+  // A finished year draws no bin and says nothing about it: the rule is the
+  // app's, it is obvious from the year, and it was a paragraph under every one
+  // of sixteen finished tournaments.
+  it("simply draws no bin on a finished tournament", () => {
     show({ state: "complete" });
     expect(screen.queryByText("Delete this tournament")).toBeNull();
-    expect(screen.getByText(/record of the event/)).toBeTruthy();
+    expect(screen.queryByText(/record of the event/)).toBeNull();
+  });
+
+  // The refusals that are still worth a sentence: one is a next step, the
+  // other says the numbers above it may be wrong too.
+  it("still says how to get the bin back on the year you are in", () => {
+    show({ isActive: true });
+    expect(screen.getByText(/Open another year first/)).toBeTruthy();
+  });
+
+  it("still says when it could not read what a year holds", () => {
+    show({ state: "unknown" });
+    expect(screen.getByText(/Couldn't read/)).toBeTruthy();
   });
 
   it("has no door on the year you are already in, and says so", () => {

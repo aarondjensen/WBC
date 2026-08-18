@@ -54,13 +54,30 @@ describe("lockVerdict", () => {
     expect(v.confirm).toBeTruthy();
   });
 
-  // Not symmetrical, on purpose. A dialog in front of the undo is what makes
-  // people stop using the control at all.
-  it("unlocks without a question", () => {
+  // Symmetrical now. What unlocking widens is a FINISHED tournament — the
+  // record of an event that is over — so thawing one is as deliberate an act
+  // as freezing it, and takes the same two taps.
+  // Unlocking a finished tournament gives the field nothing back — the rules
+  // refuse a member's write into a year that is over whether or not it carries
+  // a padlock — and a dialog promising otherwise would be false about fifteen
+  // of the sixteen years in the picker.
+  it("does not promise a finished year back to the field", () => {
+    const v = lockVerdict(locked, { finished: true });
+    expect(v.confirm.body).toMatch(/stays? closed to members/i);
+    expect(v.confirm.body).toMatch(/padlock/);
+  });
+
+  it("does promise a part-played year back", () => {
+    const v = lockVerdict(locked, { finished: false });
+    expect(v.confirm.body).toMatch(/Every member gets to post scores/);
+  });
+
+  it("asks before unlocking as well", () => {
     const v = lockVerdict(locked);
     expect(v.next).toBe(false);
     expect(v.label).toBe("Unlock");
-    expect(v.confirm).toBeNull();
+    expect(v.confirm.confirmLabel).toBe("Unlock it");
+    expect(v.confirm.title).toMatch(/^Unlock/);
   });
 
   // ── The one this file exists for ──
@@ -264,5 +281,28 @@ describe("demoOnlyAdmin", () => {
     expect(demoOnlyAdmin({ isMember: true, tid: "wbc_demo" })).toBe(true);
     expect(demoOnlyAdmin({ isDirector: true, isMember: true, tid: "wbc_demo" })).toBe(false);
     expect(demoOnlyAdmin({ isMember: true, tid: "wbc_2026" })).toBe(false);
+  });
+});
+
+// A finished year refuses member writes in firestore.rules whether or not
+// anybody locked it, and a refused write is otherwise silent.
+describe("lockNotice on a finished year", () => {
+  it("says a year that is over is over", () => {
+    const n = lockNotice({ year: 2019 }, { finished: true });
+    expect(n).toMatch(/2019 is finished/);
+    expect(n).toMatch(/director/i);
+  });
+
+  it("still says nothing to a director", () => {
+    expect(lockNotice({ year: 2019 }, { finished: true, isDirector: true })).toBeNull();
+  });
+
+  // The padlock is the deliberate one, so it keeps its own words.
+  it("prefers the padlock's words when a year is both", () => {
+    expect(lockNotice({ year: 2019, locked: true }, { finished: true })).toMatch(/is locked/);
+  });
+
+  it("says nothing about a year still being played", () => {
+    expect(lockNotice({ year: 2026 }, { finished: false })).toBeNull();
   });
 });
