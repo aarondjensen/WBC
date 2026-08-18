@@ -34,7 +34,7 @@
 // any password (including none) is accepted. That is the bootstrap, not a
 // bug: before anybody has set one there is no way to present the right one.
 import { useState } from "react";
-import { K, FS, R } from "../theme";
+import { K, FS, R, entranceBg } from "../theme";
 import { WBC_LOGO } from "../constants";
 import { Btn } from "./ui";
 import { joinWithCode } from "../lib/accounts";
@@ -55,7 +55,7 @@ export function GateScreen({ fbUser, onPassed, onCancel }) {
   };
 
   return (
-    <div style={{ minHeight: "var(--app-height, 100dvh)", background: `radial-gradient(ellipse at 20% 50%, #0d1f3c 0%, ${K.bg} 70%)`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", padding: 20 }}>
+    <div style={{ minHeight: "var(--app-height, 100dvh)", background: entranceBg(), display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", padding: 20 }}>
       <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
       <div style={{ width: "100%", maxWidth: 340, textAlign: "center" }}>
         <img src={WBC_LOGO} alt="WBC" style={{ height: 64, margin: "0 auto 16px", display: "block", filter: "drop-shadow(0 4px 16px rgba(34,211,167,0.3))" }} />

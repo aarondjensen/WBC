@@ -33,4 +33,22 @@ describe("holdForAuth", () => {
   it("defaults to not waiting when it is told nothing", () => {
     expect(holdForAuth()).toBe(false);
   });
+
+  // ── The second gap, which is the one the recording caught ──
+  // Firebase answers with an account, and the player is still two reads away:
+  // the membership, then the uid→player claim. The sign-in screen used to
+  // paint for the single frame between the first landing and the second.
+  it("waits while a signed-in account is still being resolved to a player", () => {
+    expect(holdForAuth({ user: null, authKnown: true, signedIn: true })).toBe(true);
+  });
+
+  // …but never in front of the question it is waiting for. The claim screen
+  // asks which name on the roster this account is.
+  it("gets out of the way when there is a name to claim", () => {
+    expect(holdForAuth({ user: null, authKnown: true, signedIn: true, needsClaim: true })).toBe(false);
+  });
+
+  it("stops the moment the player resolves", () => {
+    expect(holdForAuth({ user: { id: "aaron_j" }, authKnown: true, signedIn: true })).toBe(false);
+  });
 });

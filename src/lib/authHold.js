@@ -33,11 +33,37 @@
 // confused with not having answered yet — the app holds for the second and
 // draws the sign-in screen for the first.
 
+// ── The other end of the same gap ─────────────────────────────────
+// Waiting for Firebase was only half of it. Once it answers with an account
+// there is a SECOND wait — the membership read, then the uid→player claim,
+// then the roster that names the player — and the app fell through to the
+// sign-in screen in the middle of that too. It showed for a single frame,
+// which is what a screen recording of an edition switch caught: splash, one
+// frame of Google and Apple buttons, then the tournament.
+//
+// It is one frame because React runs effects after paint: the render where
+// the membership answer lands can paint before the effect that resolves the
+// player has run. Nothing about that is a race worth timing out — the answer
+// is coming — so the rule is simply that a signed-in account with no player
+// yet holds, unless there is a question to put to them.
+//
+// `needsClaim` is that question: the claim screen asks which name on the
+// roster they are, and it must not be swallowed by the splash in front of it.
+
 /**
  * @param {object|null}  user       the resolved WBC player, if any
  * @param {boolean}      authKnown  has Firebase Auth answered at all yet?
  * @param {boolean}      hadSession has anybody signed in on this device before?
+ * @param {boolean}      signedIn   did it answer with an account?
+ * @param {boolean}      needsClaim is the claim screen about to be shown?
  * @returns {boolean} hold the splash rather than drawing the sign-in screen
  */
-export const holdForAuth = ({ user = null, authKnown = false, hadSession = false } = {}) =>
-  !user && !authKnown && !!hadSession;
+export const holdForAuth = ({
+  user = null, authKnown = false, hadSession = false, signedIn = false, needsClaim = false,
+} = {}) => {
+  if (user || needsClaim) return false;
+  // Signed in, no player yet: the resolution is in flight.
+  if (signedIn) return true;
+  // Not answered yet, on a device that has an answer coming.
+  return !authKnown && !!hadSession;
+};
