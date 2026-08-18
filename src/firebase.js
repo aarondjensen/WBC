@@ -44,7 +44,7 @@ import {
   deleteUser,
 } from "firebase/auth";
 import { editionSlug, editionYear } from "./lib/editionId";
-import { bootEdition, bootEditionMoved } from "./lib/editionHome";
+import { bootEdition, bootEditionMoved, defaultEdition } from "./lib/editionHome";
 
 // ─── Feature flag ──────────────────────────────────────────────────────────
 // Master switch for the whole Google/Apple sign-in feature. Keep FALSE until
@@ -204,7 +204,11 @@ const TOKENS_COLLECTION = "wbc_notifications_tokens";
 // had a look at 2014 off More → Tournaments would otherwise open the app on
 // the first tee into a twelve-year-old tournament. lib/editionHome owns that
 // rule and its reasoning; here is only the storage it reads.
-const DEFAULT_TOURNAMENT_ID = "wbc_2026";
+// Named in lib/editionHome, overridable per deploy with VITE_DEFAULT_EDITION
+// so next year's tournament is a build setting rather than a code change.
+const DEFAULT_TOURNAMENT_ID = defaultEdition({
+  override: typeof import.meta !== "undefined" ? import.meta.env?.VITE_DEFAULT_EDITION : "",
+});
 export const ACTIVE_EDITION_KEY = "wbc_active_edition";
 
 // The edition switched to during THIS run of the app, in sessionStorage so a
@@ -291,6 +295,10 @@ export const getActiveTournamentId = () => TOURNAMENT_ID;
 // all at index 0, with no indication of where they came from. A newly created
 // edition's roster is whatever the director cloned or added, including empty.
 export const isDefaultEdition = () => TOURNAMENT_ID === DEFAULT_TOURNAMENT_ID;
+
+// The tournament being played, whatever this device happens to have open.
+// EditionBanner asks, so it can offer the way back; see liveEdition.
+export const getHomeEditionId = () => DEFAULT_TOURNAMENT_ID;
 
 // The active edition's year, derived from its id (wbc_2026 → 2026). Single
 // source for every "which year is this" label, so the displayed year always

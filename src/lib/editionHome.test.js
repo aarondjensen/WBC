@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { bootEdition, bootEditionMoved } from "./editionHome";
+import { bootEdition, bootEditionMoved, defaultEdition, liveEdition, WEB_DEFAULT_EDITION_ID } from "./editionHome";
 
 const HOME = "wbc_2026";
 
@@ -52,5 +52,37 @@ describe("bootEditionMoved", () => {
     expect(bootEditionMoved(HOME, HOME)).toBe(false);
     expect(bootEditionMoved(null, HOME)).toBe(true);
     expect(bootEditionMoved("wbc_2014", null)).toBe(false);
+  });
+});
+
+describe("defaultEdition", () => {
+  it("is the tournament being played, by default", () => {
+    expect(defaultEdition()).toBe(WEB_DEFAULT_EDITION_ID);
+    expect(defaultEdition({ override: "" })).toBe(WEB_DEFAULT_EDITION_ID);
+    expect(defaultEdition({ override: "   " })).toBe(WEB_DEFAULT_EDITION_ID);
+  });
+
+  // So next year is a deploy setting rather than a code change, and so a
+  // store build could be pointed at the sandbox.
+  it("takes the deploy's override when there is one", () => {
+    expect(defaultEdition({ override: "wbc_2027" })).toBe("wbc_2027");
+    expect(defaultEdition({ override: " wbc_demo " })).toBe("wbc_demo");
+  });
+});
+
+describe("liveEdition", () => {
+  it("trusts the constant on a device that has never loaded the list", () => {
+    expect(liveEdition([], HOME)).toBe(HOME);
+    expect(liveEdition(null, HOME)).toBe(HOME);
+  });
+
+  it("confirms the home edition against a list that has loaded", () => {
+    expect(liveEdition([{ id: "wbc_2014" }, { id: HOME }], HOME)).toBe(HOME);
+  });
+
+  // Nothing to point at is not the same as pointing anywhere — the banner
+  // draws nothing rather than offering a year that does not exist.
+  it("answers with nothing when the home edition is not in the list", () => {
+    expect(liveEdition([{ id: "wbc_2014" }, { id: "wbc_2015" }], HOME)).toBe("");
   });
 });

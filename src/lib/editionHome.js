@@ -67,3 +67,63 @@ export const bootEdition = ({ stored, visit, home, isDirector, sessionKnown = tr
 // this to write the pointer back, so a player who has been returned to the
 // live tournament is returned to it once rather than on every launch.
 export const bootEditionMoved = (stored, booted) => !!booted && stored !== booted;
+
+// ══════════════════════════════════════════════════════════════════
+//  Where a device with no pointer starts, and what "the cup" means
+// ══════════════════════════════════════════════════════════════════
+//
+// Ported from Bourbon Cup's lib/defaultEdition, and it lands differently here
+// because WBC threw its `status` field away. BC reads "which year is the
+// tournament" off `status: published`; WBC derives a year's state from what it
+// HOLDS (see editionLifecycle, and the note there about a label that read
+// DRAFT on a finished 2025), and a derived state cannot answer this question —
+// an empty next year and an empty sandbox look identical to it, and the answer
+// is needed synchronously, before the first query is built, so a Firestore
+// round trip cannot be waited on either.
+//
+// So the live tournament is NAMED, in one place, with an env override so next
+// year is a deploy setting rather than a code change:
+//
+//   VITE_DEFAULT_EDITION=wbc_2027   →   2027 is the cup
+//
+// The override is also how a store build could be pointed at the sandbox the
+// way BC's native builds are. Deliberately not automatic here: BC seeds its
+// demo from a script that guarantees it exists, WBC's sandbox is cut by a
+// director from the picker, and a build that opened on an edition nobody has
+// created yet would show a tester an empty tournament with no roster to claim
+// from — which is worse than the year they get today.
+export const WEB_DEFAULT_EDITION_ID = "wbc_2026";
+
+// @param {string} [override]  import.meta.env.VITE_DEFAULT_EDITION
+export const defaultEdition = ({ override } = {}) => {
+  const cleaned = typeof override === "string" ? override.trim() : "";
+  return cleaned || WEB_DEFAULT_EDITION_ID;
+};
+
+// ── The tournament that is ON, as opposed to the one you are looking at ──
+// Two questions wear the word "active" and they must not be confused:
+// getActiveTournamentId() is WHICH EDITION THIS DEVICE HAS OPEN — a per-device
+// pointer, and the thing the picker paints ACTIVE — while this is WHICH
+// EDITION IS THE TOURNAMENT. They are the same id until somebody opens 2014,
+// and the whole reason this exists is the moment they part: the way back has
+// to be one tap, and one tap needs a destination.
+//
+// The list is what the picker has already cached, which on most devices is
+// nothing at all — so an EMPTY list means "not loaded", not "no such year",
+// and the constant is trusted. A list that HAS loaded and does not contain the
+// home edition returns "", so the caller draws nothing rather than a way back
+// that goes nowhere.
+export const liveEdition = (editions = [], home = WEB_DEFAULT_EDITION_ID) => {
+  const rows = (editions || []).filter((e) => e?.id);
+  if (!rows.length) return home || "";
+  return rows.some((e) => e.id === home) ? home : "";
+};
+
+// Is the way-back row on screen? Asked by EditionBanner, which draws it, and
+// by the app shell, which has to know: the nav's centre trophy sits in a dome
+// CARVED OUT of the page above the bar, and with this row present there is no
+// page above the bar to carve — the dome paints a bar-coloured disc across the
+// banner instead. Both callers have to agree about when that is, so the
+// decision is here rather than in either of them.
+export const editionBannerShowing = (viewingId, liveId) =>
+  !!liveId && !!viewingId && liveId !== viewingId;

@@ -1,5 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, lazy, Suspense } from "react";
-import { _app, _db, _auth, onAuthStateChanged, doGoogleSignIn, doAppleSignIn, doSignOut, consumeRedirectResult, deleteAccount, USERS_COLLECTION, NATIVE_APPLE_ENABLED, APPLE_PROVIDER_ENABLED, isNativePlatform, isAndroidNative, AUTH_PROVIDERS_ENABLED, TOURNAMENT_ID, getEditionSlug, getTournamentYear, isDefaultEdition, rememberDirector } from "./firebase";
+import { _app, _db, _auth, onAuthStateChanged, doGoogleSignIn, doAppleSignIn, doSignOut, consumeRedirectResult, deleteAccount, USERS_COLLECTION, NATIVE_APPLE_ENABLED, APPLE_PROVIDER_ENABLED, isNativePlatform, isAndroidNative, AUTH_PROVIDERS_ENABLED, TOURNAMENT_ID, getEditionSlug, getTournamentYear, isDefaultEdition, rememberDirector, getHomeEditionId, getActiveTournamentId } from "./firebase";
 import { readMembership, isDirectorAccount, resolveMember, setDirector, subscribeMemberships } from "./lib/accounts";
 // The fourth way in — no account, no password, no roster spot, no writes.
 import { guestUser, isGuest, setGuestWrites, GUEST_NOTICE } from "./lib/guestMode";
@@ -40,8 +40,10 @@ import { rowsToPairings, dedupeGroups } from "./lib/pairings";
 import { PAIRING_MODES, PAIRING_MODE_LABEL } from "./lib/pairingDraw";
 import { Popup, ConfirmModal } from "./components/Popup";
 import { EditionSwitcher } from "./components/EditionSwitcher";
-import { warmEditions } from "./lib/editions";
-import { lockNotice } from "./lib/editionLock";
+import { EditionBanner } from "./components/EditionBanner";
+import { warmEditions, cachedEditions } from "./lib/editions";
+import { lockNotice, isEditionLocked, canAdminEdition, demoOnlyAdmin } from "./lib/editionLock";
+import { liveEdition, editionBannerShowing } from "./lib/editionHome";
 import { docIds } from "./lib/editionId";
 import { scopeFor, scopedRegistry } from "./lib/playerScope";
 // The small conversions every screen does — see lib/format.
@@ -668,6 +670,16 @@ export default function WBCApp() {
   // UNLOCKED: a year whose row cannot be read is one the rules will let a
   // member write to, so a banner claiming otherwise would be the lie.
   const [activeEdition, setActiveEdition] = useState(null);
+  // Which edition IS the tournament, as opposed to the one this device has
+  // open — the destination EditionBanner offers. Read from the picker's cached
+  // index rather than a subscription: it is one constant checked against a
+  // list that is already on the device, and a phone that has never opened
+  // Tournaments has no list to check, which liveEdition treats as "trust the
+  // constant" rather than "there is nowhere to go". See lib/editionHome.
+  const liveTournamentId = useMemo(() => liveEdition(cachedEditions() || [], getHomeEditionId()), []);
+  // The banner takes the place of the page behind the trophy's dome — see the
+  // note on editionBannerShowing.
+  const bannerUp = editionBannerShowing(getActiveTournamentId(), liveTournamentId);
   const [holeData, setHoleData] = useState({});
   const [ctpData, setCtpData] = useState({});
   // ── The market's books, and which of them this phone may hold ──
@@ -1143,6 +1155,23 @@ export default function WBCApp() {
   // emptied a tournament earlier — so the effect reads exactly what it lists.
   const meId = user && !user.isGuest ? (user.id || null) : null;
   const meIsDirector = !!user?.isDirector;
+  // ── Who gets Admin ────────────────────────────────────────────────
+  // A director anywhere, and any member inside the SANDBOX — the beta testers
+  // and store reviewers, who have no crown and cannot be given one before
+  // they have signed in. The app mirrors firestore.rules here rather than
+  // guessing at it (canAdminEdition exists in both), so the tab is never
+  // offered to somebody whose every save would come back refused.
+  //
+  // `demoOnly` is the same person minus the crown, and it is what the Admin
+  // screen hides its non-edition-scoped halves on: the career registry and
+  // the courses are global in WBC, and no sandbox grant reaches them.
+  const adminArgs = {
+    isDirector: meIsDirector,
+    isMember: !isGuest(user) && !!fbUser,
+    tid: getActiveTournamentId(),
+  };
+  const canAdminHere = canAdminEdition(adminArgs);
+  const sandboxAdmin = demoOnlyAdmin(adminArgs);
   useEffect(() => {
     if (!meId) { setOwnBets([]); setAllBets(null); return; }
     const base = [
@@ -2558,6 +2587,11 @@ export default function WBCApp() {
         fbUser={fbUser}
         candidates={claimState.candidates}
         busyId={claimBusyId}
+        // A director writes through a lock, so the notice is not for them —
+        // it would be telling somebody the door is shut while they are
+        // holding the key. See canWriteEdition in firestore.rules.
+        locked={isEditionLocked(activeEdition) && !isDirectorAccount(membership)}
+        tournamentName={tournamentName}
         onClaim={(p) => { setClaimBusyId(p.id); claimProfile(fbUser, p, "manual"); }}
         onCancel={handleLogout}
       />
@@ -2796,7 +2830,7 @@ export default function WBCApp() {
       <MoreMenu
         open={menuOpen}
         onClose={() => setMenuOpen(false)}
-        isDirector={!!user.isDirector}
+        isDirector={canAdminHere}
         isGuest={isGuest(user)}
         adminFlag={adminActionNeeded && user.isDirector}
         notifFlag={notifPerm !== "granted" && !user.isGuest}
@@ -3012,7 +3046,7 @@ export default function WBCApp() {
         {view === "photos" && !isGuest(user) && <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading photos…</div>}><PhotosView items={media} year={getTournamentYear()} uid={fbUser?.uid || null} isDirector={!!user.isDirector} isGuest={!!user.isGuest} canPost={!user.isGuest && !!fbUser?.uid && photoUploadsAllowed(photoConfig)} uploadsBlockedReason={photoUploadsAllowed(photoConfig) ? "" : uploadsDisabledReason(photoConfig)} onUpload={onUploadPhoto} onDelete={onDeletePhoto} notify={notify} /></Suspense>}
         {view === "skins" && <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading betting…</div>}><BettingView players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} numRounds={numRounds} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} marketBets={marketBets} onSaveMarketBet={onSaveMarketBet} leaderboard={getLeaderboard} finalizedRounds={finalizedRounds} pairingsData={pairingsData} firstTeeAt={firstTeeAt} marketNudge={marketNudge} teeTimesData={teeTimesData} roundDates={roundDates} inactivePlayers={inactivePlayers} onAddMarketOutsider={user.isDirector ? onAddMarketOutsider : undefined} /></Suspense>}
         {view === "groups" && <GroupsView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} pairingsData={pairingsData} teeTimesData={teeTimesData} getPlayerTee={getPlayerTee} user={user} />}
-        {view === "admin" && (user.isDirector ? <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading admin…</div>}><AdminView registry={registry} activePlayers={activePlayers} marketPool={marketPool} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} rebuyIds={rebuyIds} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} deletePlayer={deletePlayer} editionsHolding={editionsHolding} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
+        {view === "admin" && (canAdminHere ? <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading admin…</div>}><AdminView registry={registry} activePlayers={activePlayers} marketPool={marketPool} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} rebuyIds={rebuyIds} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} deletePlayer={deletePlayer} editionsHolding={editionsHolding} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
               setTeeTimesData(prev => {
                 const next = typeof updater === "function" ? updater(prev) : updater;
                 // THE SHEET IS SAVED FIRST, and on its own document. Tee times
@@ -3038,7 +3072,7 @@ export default function WBCApp() {
                 if (rows.length) db.upsertMany("pairings", rows);
                 return next;
               });
-            }} roundDates={roundDates} onSetRoundDate={async (rnd, dateStr) => { const next = { ...roundDates }; if (dateStr) next[rnd] = dateStr; else delete next[rnd]; setRoundDates(next); await saveTournamentState(finalizedRounds, teesSaved, teesModified, next, scoringOpen); }} scoringOpen={scoringOpen} onSetScoringOpen={async (rnd, open) => { const next = { ...scoringOpen }; if (open) next[rnd] = true; else delete next[rnd]; setScoringOpen(next); await saveTournamentState(finalizedRounds, teesSaved, teesModified, roundDates, next); }} pairingStrategy={pairingStrategy} onSetPairingStrategy={async (rnd, cfg) => { const next = { ...pairingStrategy }; if (cfg) next[rnd] = cfg; else delete next[rnd]; setPairingStrategy(next); await saveTournamentState(finalizedRounds, teesSaved, teesModified, roundDates, scoringOpen, next); }} leaderboard={getLeaderboard} holeData={holeData} finalizedRounds={finalizedRounds} onDiscardRoundScores={onDiscardRoundScores} onFinalizeRound={finalizeWholeRound} onUnfinalizeRound={unfinalizeFromAdmin} notify={notify} getPlayerTee={getPlayerTee} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} externalSettingsRound={adminSettingsRound} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); setAdminSettingsRound(null); }} teesSaved={teesSaved} onTeesSave={async r => { const next = { ...teesSaved, [r]: true }; const nextMod = { ...teesModified, [r]: false }; setTeesSaved(next); setTeesModified(nextMod); await saveTournamentState(finalizedRounds, next, nextMod); }} teesModified={teesModified} onTeesModify={async r => { const nextMod = { ...teesModified, [r]: true }; setTeesModified(nextMod); await saveTournamentState(finalizedRounds, teesSaved, nextMod); }} memberships={memberships} onSetDirector={onSetDirector} claims={claims} authUid={fbUser?.uid || null} tournamentMeta={tournamentMeta} onSaveTournamentMeta={saveTournamentMeta} /></Suspense> : (
+            }} roundDates={roundDates} onSetRoundDate={async (rnd, dateStr) => { const next = { ...roundDates }; if (dateStr) next[rnd] = dateStr; else delete next[rnd]; setRoundDates(next); await saveTournamentState(finalizedRounds, teesSaved, teesModified, next, scoringOpen); }} scoringOpen={scoringOpen} onSetScoringOpen={async (rnd, open) => { const next = { ...scoringOpen }; if (open) next[rnd] = true; else delete next[rnd]; setScoringOpen(next); await saveTournamentState(finalizedRounds, teesSaved, teesModified, roundDates, next); }} pairingStrategy={pairingStrategy} onSetPairingStrategy={async (rnd, cfg) => { const next = { ...pairingStrategy }; if (cfg) next[rnd] = cfg; else delete next[rnd]; setPairingStrategy(next); await saveTournamentState(finalizedRounds, teesSaved, teesModified, roundDates, scoringOpen, next); }} leaderboard={getLeaderboard} holeData={holeData} finalizedRounds={finalizedRounds} onDiscardRoundScores={onDiscardRoundScores} onFinalizeRound={finalizeWholeRound} onUnfinalizeRound={unfinalizeFromAdmin} notify={notify} getPlayerTee={getPlayerTee} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} externalSettingsRound={adminSettingsRound} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); setAdminSettingsRound(null); }} teesSaved={teesSaved} onTeesSave={async r => { const next = { ...teesSaved, [r]: true }; const nextMod = { ...teesModified, [r]: false }; setTeesSaved(next); setTeesModified(nextMod); await saveTournamentState(finalizedRounds, next, nextMod); }} teesModified={teesModified} onTeesModify={async r => { const nextMod = { ...teesModified, [r]: true }; setTeesModified(nextMod); await saveTournamentState(finalizedRounds, teesSaved, nextMod); }} memberships={memberships} onSetDirector={onSetDirector} claims={claims} authUid={fbUser?.uid || null} tournamentMeta={tournamentMeta} onSaveTournamentMeta={saveTournamentMeta} demoOnly={sandboxAdmin} /></Suspense> : (
           <div style={{ textAlign: "center", padding: "40px 20px" }}>
             <div style={{ fontSize: FS.jumbo, marginBottom: 12 }}>🔒</div>
             <div style={{ fontSize: FS.lead, fontWeight: 700, color: K.t1 }}>Directors Only</div>
@@ -3046,7 +3080,14 @@ export default function WBCApp() {
         ))}
       </div>
 
-      <div ref={navRef} style={{ display: "flex", background: K.nav, borderTop: `1px solid ${K.bdr}`, zIndex: 100, paddingBottom: NAV_BOTTOM_PAD, flexShrink: 0 }}>
+      {/* The nav's box holds the way home as well as the tabs. Inside it
+          rather than above it, so `navH` measures both — the More menu is
+          seated on that measurement, and a sibling row would end up under it. */}
+      <div ref={navRef} style={{ display: "flex", flexDirection: "column", background: K.nav, borderTop: `1px solid ${K.bdr}`, zIndex: 100, paddingBottom: NAV_BOTTOM_PAD, flexShrink: 0 }}>
+        <EditionBanner viewingId={getActiveTournamentId()} liveId={liveTournamentId} />
+        {/* zIndex so the trophy, which rises out of this row, paints over the
+            banner rather than under it. */}
+        <div style={{ display: "flex", position: "relative", zIndex: 1 }}>
         {navItems.map(item => {
           // More reads active while its menu is open OR while one of the views
           // it leads to (Admin, Players) is the one on screen — otherwise
@@ -3093,7 +3134,7 @@ export default function WBCApp() {
               background: "transparent", border: "none", cursor: "pointer", color: clr, position: "relative",
               marginTop: 0,
             }}>
-              {isTrophy && (
+              {isTrophy && !bannerUp && (
                 // The dome the trophy sits in: a true 68px circle — equal
                 // radii, so the arc is a circle and not a squashed ellipse —
                 // with everything below the bar's top border clipped away.
@@ -3130,6 +3171,7 @@ export default function WBCApp() {
             </button>
           );
         })}
+        </div>
       </div>
     </div>
     </div>
