@@ -80,7 +80,7 @@ beforeEach(() => {
       ...rep(4, { tournament_id: "wbc_2026" }),
     ],
     tournament_state: [
-      { tournament_id: "wbc_2015", meta: { rounds: 4 },
+      { tournament_id: "wbc_2015", meta: { rounds: 4, location: "Augusta, MI" },
         finalized_rounds: { 1: true, 2: true, 3: true, 4: true } },
       { tournament_id: "wbc_2026", meta: { rounds: 4 }, finalized_rounds: { 1: true } },
     ],
@@ -224,15 +224,23 @@ describe("loadEditionSummaries — what it answers", () => {
 
   it("says a roster with no cards has a roster and no cards", async () => {
     const s = (await loadEditionSummaries(IDS)).wbc_2027;
-    expect(s).toEqual({ players: 8, rounds: 0, scores: 0 });
+    expect(s).toEqual({ players: 8, rounds: 0, scores: 0, location: "" });
     // No finalization on a year nobody has played — it would be a claim about
     // rounds that were never played.
     expect(s).not.toHaveProperty("finalizedRounds");
   });
 
+  // Where it was played rides the state read the finalization map is already
+  // making, which is why the row can say it without costing anything.
+  it("carries the location a director set, off the same read", async () => {
+    const s = await loadEditionSummaries(IDS);
+    expect(s.wbc_2015.location).toBe("Augusta, MI");
+    expect(s.wbc_2026.location).toBe("");
+  });
+
   it("says an untouched year is empty", async () => {
     expect((await loadEditionSummaries(IDS)).wbc_2028)
-      .toEqual({ players: 0, rounds: 0, scores: 0 });
+      .toEqual({ players: 0, rounds: 0, scores: 0, location: "" });
   });
 });
 

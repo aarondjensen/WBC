@@ -56,15 +56,19 @@ function Action({ icon: Icon, label, hint, danger, onClick, disabled }) {
 const Divider = () => <div style={{ height: 1, background: K.bdr, margin: "6px 10px" }} />;
 
 /**
- * @param {object}  edition    the row that was tapped
- * @param {string}  state      editionState() for it — drives the delete guard
- * @param {string}  summary    summaryLine(), or "Counting…" / "Couldn't read"
- * @param {boolean} isActive   is this the edition the app has open
- * @param {boolean} isSandbox  the disposable scratch copy
- * @param {boolean} canManage  draw the director half
+ * @param {object}  edition      the row that was tapped
+ * @param {string}  state        editionState() for it — drives the delete guard
+ * @param {string}  location     where it was played, for under the year
+ * @param {number}  players      how many golfers are on its roster; null while counting
+ * @param {boolean} countsFresh  have the counts landed (so null means none, not "not yet")
+ * @param {Array}   courses      [{ round, name }], null while they are being read
+ * @param {boolean} isActive     is this the edition the app has open
+ * @param {boolean} isSandbox    the disposable scratch copy
+ * @param {boolean} canManage    draw the director half
  */
 export function EditionSheet({
-  edition, state = "unknown", summary = "", isActive = false, isSandbox = false,
+  edition, state = "unknown", location = "", players = null, countsFresh = false,
+  courses = null, isActive = false, isSandbox = false,
   canManage = false, busy = false, onOpen, onRename, onLock, onDelete, onClose,
 }) {
   if (!edition) return null;
@@ -98,7 +102,7 @@ export function EditionSheet({
         {/* The full name, always — even when the row omitted it as derivable.
             The row is a scan; this is the confirmation. */}
         <div style={{ fontSize: FS.body, fontWeight: 600, color: K.t3, marginTop: 6, lineHeight: 1.3 }}>
-          {edition.name || edition.id}
+          {edition.name || edition.id}{location ? ` · ${location}` : ""}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 8, flexWrap: "wrap" }}>
           {isActive && (
@@ -114,11 +118,45 @@ export function EditionSheet({
             </>
           )}
         </div>
-        {/* What the row's second line said, kept — it is the only place the
-            counts appear and it is what a director is deciding on. */}
-        {summary && (
-          <div style={{ fontSize: FS.small, fontWeight: 600, color: K.t3, marginTop: 8 }}>{summary}</div>
-        )}
+        {/* ── What this tournament WAS ─────────────────────────────
+            The row says the year and where it was played; this is the tap
+            deeper, and what belongs a tap deeper is what the row could not
+            hold: how many men were in it and what they played.
+
+            The counts the row used to carry are not restated here. They are
+            still gathered — the state dot and the delete guard are built on
+            them — and they are still spelled out at the two places a director
+            decides on them: the clone-source list and the delete confirm. */}
+        <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 7 }}>
+          <div style={{ fontSize: FS.small, fontWeight: 700, color: K.t2 }}>
+            {players === null
+              ? (countsFresh ? "Roster couldn't be read" : "Counting the roster…")
+              : `${players} player${players === 1 ? "" : "s"}`}
+          </div>
+
+          {/* Round order, and a round whose course row has gone missing keeps
+              its place with a dash — a blank beside R3 is the honest rendering
+              of a course deleted out from under a finished tournament. */}
+          {courses === null ? (
+            <div style={{ fontSize: FS.label, fontWeight: 600, color: K.t3 }}>Reading the courses…</div>
+          ) : courses.length === 0 ? (
+            <div style={{ fontSize: FS.label, fontWeight: 600, color: K.t3 }}>No courses set</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+              {courses.map(({ round, name }) => (
+                <div key={round} style={{ display: "flex", gap: 8, fontSize: FS.small, lineHeight: 1.35 }}>
+                  <span style={{
+                    flexShrink: 0, width: 22, fontWeight: 800, color: K.t3,
+                    fontVariantNumeric: "tabular-nums",
+                  }}>R{round}</span>
+                  <span style={{ flex: 1, minWidth: 0, fontWeight: 600, color: name ? K.t1 : K.t3 }}>
+                    {name || "—"}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       <div style={{

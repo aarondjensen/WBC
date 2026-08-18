@@ -29,7 +29,7 @@ import { getActiveTournamentId } from "../firebase";
 import {
   loadEditions, loadEditionSummaries, cachedEditionSummaries, cachedEditions,
   createEdition, cloneEdition, deleteEdition, switchEdition, ensureActiveEditionDoc, renameEdition,
-  setEditionLocked, resetSandbox,
+  setEditionLocked, resetSandbox, loadEditionCourses, forgetEditionCourses,
 } from "../lib/editions";
 import {
   plannedYear, plannedSource, summaryLine, editionHasContent, overwriteWarning,
@@ -37,7 +37,8 @@ import {
 } from "../lib/editionClone";
 import { editionState, deleteVerdict, STATE_LABEL, editionDisplayName } from "../lib/editionLifecycle";
 import { isEditionLocked, lockVerdict, bulkLockVerdict } from "../lib/editionLock";
-import { isSandboxEdition } from "../lib/editionId";
+import { isSandboxEdition, SANDBOX_EDITION_ID as SANDBOX_ID } from "../lib/editionId";
+import { locationForYear } from "../lib/editionLocation";
 
 // The gutter label on each form row — a fixed width so the two controls
 // below share a left edge.
@@ -233,6 +234,27 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
     if (summariesFresh) setSeeded(true);
   }, [open, mode, seeded, touched, editions, summaries, summariesFresh]);
 
+  // ── What the tapped year was played on ────────────────────────────
+  // Fetched when a row is opened, never for the list: course names are two
+  // small reads per YEAR (see loadEditionCourses), and seventeen years of them
+  // on every open is the cost this picker spent a rewrite getting rid of.
+  //
+  // null while it is in flight, [] for a year with no rounds set — the sheet
+  // says different things about those two, because "not read yet" and "no
+  // courses" are not the same answer.
+  const [sheetCourses, setSheetCourses] = useState(null);
+  useEffect(() => {
+    if (!sheetFor) { setSheetCourses(null); return; }
+    let alive = true;
+    setSheetCourses(null);
+    loadEditionCourses(sheetFor)
+      .then(rows => { if (alive) setSheetCourses(rows); })
+      // A year whose rounds cannot be read is a year with nothing to say about
+      // its courses, which is what an empty list renders as.
+      .catch(() => { if (alive) setSheetCourses([]); });
+    return () => { alive = false; };
+  }, [sheetFor]);
+
   if (!open) return null;
 
   const targetYear = /^\d{4}$/.test(year) ? year : null;
@@ -272,6 +294,9 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
       const made = cloneFrom
         ? await cloneEdition(cloneFrom, { year, name }, cloneOpts)
         : await createEdition({ year, name });
+      // A clone can land round setup in the target year, so anything the sheet
+      // cached about its courses is now last year's answer.
+      if (made?.id) forgetEditionCourses(made.id);
       const rows = await loadEditions();
       const sums = await loadEditionSummaries(rows.map(e => e.id));
       setEditions(rows);
@@ -317,6 +342,7 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
   // row as it was when it was tapped.
   const sheetEdition = sheetFor ? editions.find((e) => e.id === sheetFor) || null : null;
   const closeSheet = () => setSheetFor(null);
+
 
   // ── Rename ────────────────────────────────────────────────────────
   // Opened from the sheet, answered in its own view. The id and the year are
@@ -378,6 +404,8 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
     setErr("");
     try {
       await resetSandbox(sourceId, DEFAULT_CLONE_OPTS);
+      // Its rounds are not the rounds the sheet last read.
+      forgetEditionCourses(SANDBOX_ID);
       const rows = await loadEditions();
       setEditions(rows);
       setSummaries(await loadEditionSummaries(rows.map(r => r.id)));
@@ -484,20 +512,29 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
               const isActive = e.id === activeId;
               const state = stateOf(e);
               const sandbox = isSandboxEdition(e.id);
-              // Three answers, not two. The counts arrive a year at a time, so
-              // a year MISSING from the map is either one still being counted
-              // or one that could not be read — and those are opposite
-              // sentences. Only once the whole load has settled does absence
-              // mean failure; until then it means we are still looking.
               const known = summaries?.[e.id] || null;
-              const summary = known ? summaryLine(known)
-                : summariesFresh ? "Couldn't read" : "Counting…";
+              // ── A year and WHERE it was played ────────────────────
+              // The row used to carry the counts — "16 players · 4 rounds ·
+              // 1,152 scores" — which is what a director deciding whether to
+              // delete a year needs and not what anybody scanning a list of
+              // sixteen tournaments is looking for. Nobody remembers 2018 by
+              // its score count; they remember it as the year at Lakewood
+              // Shores. The counts have moved to where the decisions are made:
+              // the sheet, the clone source list, and the delete confirm.
+              //
+              // Two sources, and the fallback is the one that covers most of
+              // the list: a year the app RAN has a location a director typed
+              // in Admin → Event, and the imported years have only the
+              // hand-kept table in lib/editionLocation. A year with neither
+              // shows nothing, which is better than a wrong city.
+              const where = known?.location || locationForYear(e.year);
               // "WBC 2015" beside a bold 2015 is the same word seventeen
               // times. A name that ISN'T the default is worth the space; the
-              // default is not. Suppressed for the sandbox, whose badge
-              // already says DEMO — "DEMO · DEMO Sandbox · 16 players" is the
-              // word twice in a row that has to fit a phone.
+              // default is not — and it is only shown when there is no
+              // location to show, since a row this size holds one of them.
+              // Suppressed for the sandbox, whose badge already says DEMO.
               const customName = sandbox ? null : editionDisplayName(e);
+              const second = where || customName || "";
               const locked = isEditionLocked(e);
               return (
                 // ── The whole row is one button, and it opens the SHEET ──
@@ -515,7 +552,7 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
                   key={e.id}
                   onClick={() => setSheetFor(e.id)}
                   title={known || summariesFresh ? STATE_LABEL[state] : "Counting…"}
-                  aria-label={`${sandbox ? "DEMO" : e.year}${customName ? ` — ${customName}` : ""}${locked ? ", locked" : ""}`}
+                  aria-label={`${sandbox ? "DEMO" : e.year}${second ? ` — ${second}` : ""}${locked ? ", locked" : ""}`}
                   style={{
                     display: "flex", alignItems: "center", gap: 8, width: "100%",
                     padding: "9px 10px", borderRadius: R.sm, textAlign: "left",
@@ -545,7 +582,7 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
                   <span style={{
                     flex: 1, minWidth: 0, fontSize: FS.label, fontWeight: 600, color: K.t3,
                     overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                  }}>{customName ? `${customName} · ${summary}` : summary}</span>
+                  }}>{second}</span>
                   {/* STATE, not a switch — the toggle is in the sheet now. SVG
                       rather than 🔒, because a colour font paints its own
                       palette: this one can be the accent, so "frozen" no
@@ -767,8 +804,10 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
         <EditionSheet
           edition={sheetEdition}
           state={stateOf(sheetEdition)}
-          summary={summaries?.[sheetEdition.id] ? summaryLine(summaries[sheetEdition.id])
-            : summariesFresh ? "Couldn't read" : "Counting…"}
+          players={summaries?.[sheetEdition.id]?.players ?? null}
+          countsFresh={!!summaries?.[sheetEdition.id] || summariesFresh}
+          courses={sheetCourses}
+          location={summaries?.[sheetEdition.id]?.location || locationForYear(sheetEdition.year)}
           isActive={sheetEdition.id === activeId}
           isSandbox={isSandboxEdition(sheetEdition.id)}
           canManage={canManage}

@@ -80,7 +80,10 @@ export const SUMMARY_CACHE_KEY = "wbc_edition_summaries";
 // the last one never wrote does not paint a row from a summary that cannot
 // have it. A mismatch drops the cache rather than migrating it: these are
 // counts, and re-counting them costs one open.
-export const SUMMARY_CACHE_VERSION = 1;
+// 2: `location` joined the summary. A version-1 entry has none, and the row
+// draws a year's location off it — a cached summary read by this build would
+// paint a blank where a city belongs until the real counts landed.
+export const SUMMARY_CACHE_VERSION = 2;
 
 // localStorage is wrapped everywhere it is touched in this app — Safari in
 // private mode throws on read as well as write, and a picker that cannot open
