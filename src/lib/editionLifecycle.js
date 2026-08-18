@@ -107,3 +107,72 @@ export const deleteVerdict = (state, { isActive = false, isSandbox = false } = {
   if (state === "live") return { allowed: true, reason: "live", grave: true };
   return { allowed: true, reason: state, grave: false };
 };
+
+// ── What the picker draws on a row, and what the sheet offers ───────
+// Ported from Bourbon Cup, which reworked its own picker first. Both apps had
+// the same failure at a 320pt viewport — a row carrying five or six things
+// with the identifying part squeezed — and both landed on the same shape: the
+// row states, the sheet acts.
+//
+// These live here rather than in the component because each one decides
+// whether something RENDERS AT ALL, which is the class of bug a screenshot
+// catches a week late and a test catches instantly.
+
+// The name, but only when it says something the year does not.
+//
+// Sixteen editions called "WBC ####" printed beside a bold year is the same
+// word sixteen times. A tournament somebody actually named is the case worth
+// the space, and it is the case this detects.
+//
+// An EXACT match against the app's own title, not "does the name end in the
+// year". The looser rule was tried in the other app and it is wrong in the
+// direction that loses information: a year named "Bandon Dunes 2024" comes
+// back as a bare numeral. The title is passed in so the helper is portable —
+// Bourbon Cup's tournament is not called WBC.
+//
+// Compared case- and whitespace-insensitively, because `createEdition` writes
+// `WBC ${year}` itself but a director retyping it by hand should not get the
+// year twice over a stray double space.
+const flat = (s) => String(s ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+
+export const editionDisplayName = (edition, title = "WBC") => {
+  const name = String(edition?.name ?? "").trim();
+  if (!name) return null;
+  const year = String(edition?.year ?? "").trim();
+  if (!year) return name;               // the sandbox: no year to be redundant with
+  if (flat(name) === flat(year)) return null;
+  if (title && flat(name) === flat(`${title} ${year}`)) return null;
+  return name;
+};
+
+// ── What may be done to this year ──────────────────────────────────
+// One place, so the sheet and any future caller agree — and so the REFUSALS
+// come with their sentence attached.
+//
+// That last part is the reason this exists at all. `deleteVerdict` has always
+// returned a `why` for every year it refuses ("Finished tournaments can't be
+// deleted — this is the record of the event"), and the picker has never had
+// anywhere to put it: the row drew no bin and left the director to infer the
+// rule from an absence. The sheet has room for a sentence, so the sentence
+// finally gets shown.
+//
+// `canManage` is the same non-boundary it is everywhere else here —
+// firestore.rules is what actually allows a write to wbc_editions. This only
+// decides what a person is offered, so nobody is handed a tap that comes back
+// refused.
+export const editionActions = ({
+  edition, state = "unknown", isActive = false, isSandbox = false, canManage = false,
+} = {}) => {
+  const verdict = deleteVerdict(state, { isActive, isSandbox });
+  return {
+    // Nowhere to go: you are already in it.
+    open: !isActive,
+    lock: canManage,
+    locked: edition?.locked === true,
+    delete: canManage && verdict.allowed,
+    // Scores made on the course this week. The caller names the count.
+    graveDelete: canManage && verdict.allowed && verdict.grave === true,
+    // The sentence the row could only express by drawing nothing.
+    deleteWhy: canManage && !verdict.allowed ? verdict.why : null,
+  };
+};

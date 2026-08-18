@@ -173,6 +173,67 @@ describe("EditionSwitcher", () => {
     expect(screen.getByPlaceholderText("Year").value).toBe("2030");
   });
 
+  // ── The row opens a sheet ────────────────────────────────────────
+  // The controls used to hang off the right-hand end of every row. At a 320pt
+  // viewport that left nothing for the summary line — the counts a director is
+  // actually deciding on — so they moved behind a tap. What is pinned here is
+  // that the tap still reaches all of them, and that the row keeps saying which
+  // year, what state and how much is in it.
+  const openSheet = (label) => fireEvent.click(screen.getByLabelText(new RegExp(`^${label}`)));
+
+  describe("the row sheet", () => {
+    it("opens on a tap and names the year it was opened from", async () => {
+      open();
+      await screen.findByText("2015");
+      openSheet("2015");
+      expect(screen.getByText("Open this tournament")).toBeTruthy();
+      expect(screen.getByText("WBC 2015")).toBeTruthy();
+    });
+
+    // The ACTIVE row opens it too, which the old inert row could not. There is
+    // nowhere to go, but there is still a lock to set and a reason the bin is
+    // missing — and an inert row could say neither.
+    it("opens on the active year, without offering to open it", async () => {
+      open();
+      await screen.findByText("2026");
+      openSheet("2026");
+      expect(screen.queryByText("Open this tournament")).toBeNull();
+      expect(screen.getByText(/Open another year first/)).toBeTruthy();
+    });
+
+    // The whole reason the actions moved. deleteVerdict has always produced
+    // this sentence; the row's only way to say it was to draw no bin at all
+    // and leave a director to infer the rule from an absence.
+    it("says why a finished tournament refuses to be deleted", async () => {
+      open();
+      await screen.findByText("2025");
+      await act(async () => { releaseSummaries(); });
+      openSheet("2025");
+      expect(screen.queryByText("Delete this tournament")).toBeNull();
+      expect(screen.getByText(/record of the event/)).toBeTruthy();
+    });
+
+    it("offers the bin on a year that may go", async () => {
+      // 2026 is empty — nothing is lost — but it is also ACTIVE here, so the
+      // sandbox is the one to check: disposable however full it is.
+      open();
+      await screen.findByText("2025");
+      await act(async () => { releaseSummaries(); });
+      openSheet("DEMO");
+      expect(screen.getByText("Delete this tournament")).toBeTruthy();
+    });
+
+    it("shows a member the state and none of the controls", async () => {
+      open({ canManage: false });
+      await screen.findByText("2015");
+      openSheet("2015");
+      expect(screen.getByText("Open this tournament")).toBeTruthy();
+      expect(screen.queryByText("Lock")).toBeNull();
+      expect(screen.queryByText("Unlock")).toBeNull();
+      expect(screen.queryByText("Delete this tournament")).toBeNull();
+    });
+  });
+
   // ── The padlock ──────────────────────────────────────────────────
   // firestore.rules is what a lock actually IS — firestore.rules.test.mjs
   // proves a member's write into a frozen year is refused. What is pinned
@@ -180,31 +241,33 @@ describe("EditionSwitcher", () => {
   // that a member is shown the state without it, and that the one tap which
   // can stop a live tournament asks first.
   describe("locking a year", () => {
-    const padlocks = () => screen.getAllByTitle(/^(Lock|Unlock) /);
-
-    it("offers a director a control on every year", async () => {
+    it("offers a director the control on every year, pointed the right way", async () => {
       open();
       await screen.findByText("2026");
-      expect(padlocks().length).toBe(EDITIONS.length);
-      // Pointed the right way round: 2015 is the locked one.
-      expect(screen.getByTitle(/^Unlock 2015/)).toBeTruthy();
-      expect(screen.getByTitle(/^Lock 2026/)).toBeTruthy();
+      openSheet("2015");
+      expect(screen.getByText("Unlock")).toBeTruthy();   // 2015 is the locked one
+      fireEvent.click(screen.getByText("Close"));
+      openSheet("2026");
+      expect(screen.getByText("Lock")).toBeTruthy();
     });
 
     // A member cannot write wbc_editions, so a padlock they could tap would be
     // a control whose every use comes back refused. They still need to see
-    // WHY their scores will not save.
-    it("shows a member the state and no control", async () => {
+    // WHY their scores will not save, and the row still says it.
+    it("leaves the state on the row for a member who has no control", async () => {
       open({ canManage: false });
       await screen.findByText("2015");
-      expect(screen.queryAllByTitle(/^(Lock|Unlock) /).length).toBe(0);
-      expect(screen.getByLabelText("Locked")).toBeTruthy();
+      // The row's own label carries it, so a member reading the list — rather
+      // than opening each year — still sees which ones are frozen.
+      expect(screen.getByLabelText(/^2015.*locked/)).toBeTruthy();
+      expect(screen.queryByLabelText(/^2026.*locked/)).toBeNull();
     });
 
     it("unlocks on one tap, without a dialog", async () => {
       open();
       await screen.findByText("2015");
-      fireEvent.click(screen.getByTitle(/^Unlock 2015/));
+      openSheet("2015");
+      fireEvent.click(screen.getByText("Unlock"));
       await waitFor(() => expect(locks).toEqual([["wbc_2015", false]]));
     });
 
@@ -213,7 +276,8 @@ describe("EditionSwitcher", () => {
     it("asks before freezing a year, and writes nothing if cancelled", async () => {
       open();
       await screen.findByText("2025");
-      fireEvent.click(screen.getByTitle(/^Lock 2025/));
+      openSheet("2025");
+      fireEvent.click(screen.getByText("Lock"));
       expect(screen.getByText("Lock 2025?")).toBeTruthy();
       fireEvent.click(screen.getByText("Cancel"));
       expect(locks).toEqual([]);
@@ -222,7 +286,8 @@ describe("EditionSwitcher", () => {
     it("writes the lock once the director confirms", async () => {
       open();
       await screen.findByText("2025");
-      fireEvent.click(screen.getByTitle(/^Lock 2025/));
+      openSheet("2025");
+      fireEvent.click(screen.getByText("Lock"));
       fireEvent.click(screen.getByText("Lock it"));
       await waitFor(() => expect(locks).toEqual([["wbc_2025", true]]));
     });
@@ -234,7 +299,8 @@ describe("EditionSwitcher", () => {
     it("warns that locking the active year stops the field", async () => {
       open();
       await screen.findByText("2026");
-      fireEvent.click(screen.getByTitle(/^Lock 2026/));
+      openSheet("2026");
+      fireEvent.click(screen.getByText("Lock"));
       expect(screen.getByText(/right now/i)).toBeTruthy();
       expect(screen.getByText(/directors are exempt/i)).toBeTruthy();
     });
