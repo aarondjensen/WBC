@@ -383,55 +383,6 @@ describe("EditionSwitcher", () => {
   // must never do is take the tournament being played down with the history.
   // 2026 is the active edition here (see the firebase mock); 2015 arrives
   // already locked, so only 2025 is left to freeze.
-  describe("locking every year at once", () => {
-    const bulk = () => screen.getByText(/Lock all but|Lock every tournament/);
-    // Absent, rather than present-and-doing-nothing: the control goes away
-    // once there is nothing left for it to lock.
-    const noBulk = () => screen.queryByText(/Lock all but|Lock every tournament|Unlock all/);
-
-    it("offers to lock everything except the active year", async () => {
-      open();
-      await screen.findByText("2026");
-      expect(bulk().textContent).toContain("Lock all but 2026");
-    });
-
-    it("is not offered to a member", async () => {
-      open({ canManage: false });
-      await screen.findByText("2026");
-      expect(screen.queryByText(/Lock all but|Unlock all/)).toBeNull();
-    });
-
-    it("locks only the open years, sparing the active one", async () => {
-      open();
-      await screen.findByText("2026");
-      fireEvent.click(bulk());
-      // Only 2025 is both open and inactive — 2015 is already locked, 2026 is
-      // the tournament being played.
-      expect(screen.getByText("Lock 1 year?")).toBeTruthy();
-      fireEvent.click(screen.getByText("Lock 1 year"));
-      await waitFor(() => expect(locks).toEqual([["wbc_2025", true]]));
-    });
-
-    it("writes nothing if the confirm is cancelled", async () => {
-      open();
-      await screen.findByText("2026");
-      fireEvent.click(bulk());
-      fireEvent.click(screen.getByText("Cancel"));
-      expect(locks).toEqual([]);
-    });
-
-    // The slot used to turn into "Unlock all" here. It is gone: thawing the
-    // record of sixteen tournaments in one tap is not an undo — nothing
-    // remembers which years were locked — and unlocking one year is a tap on
-    // its own row with its own confirm.
-    it("disappears once nothing else is open, rather than reversing", async () => {
-      open();
-      await screen.findByText("2026");
-      fireEvent.click(bulk());
-      fireEvent.click(screen.getByText("Lock 1 year"));
-      await waitFor(() => expect(noBulk()).toBeNull());
-    });
-  });
 
   // ── The sandbox ──────────────────────────────────────────────────
   // A permanent edition with no year, so testers have somewhere to play that

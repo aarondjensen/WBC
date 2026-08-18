@@ -24,7 +24,7 @@ import { K, ON_ACC, FS, R, ALPHA } from "../theme";
 import { Btn } from "./ui";
 import { Popup, ConfirmModal } from "./Popup";
 import { EditionSheet } from "./EditionSheet";
-import { IconLock, IconUnlock, IconChevron } from "./Icons";
+import { IconLock, IconChevron } from "./Icons";
 import { getActiveTournamentId } from "../firebase";
 import {
   loadEditions, loadEditionSummaries, cachedEditionSummaries, cachedEditions,
@@ -36,7 +36,7 @@ import {
   newestBuiltEdition,
 } from "../lib/editionClone";
 import { editionState, deleteVerdict, STATE_LABEL, editionDisplayName, editionClosedToMembers } from "../lib/editionLifecycle";
-import { isEditionLocked, lockVerdict, bulkLockVerdict } from "../lib/editionLock";
+import { isEditionLocked, lockVerdict } from "../lib/editionLock";
 import { isSandboxEdition, SANDBOX_EDITION_ID as SANDBOX_ID } from "../lib/editionId";
 import { locationForYear } from "../lib/editionLocation";
 
@@ -141,9 +141,6 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
   // row that grows buttons under your thumb moves every row below it — which
   // is how you tap Delete on 2015 aiming to open 2019.
   const [sheetFor, setSheetFor] = useState(null);
-  // The whole-list version, which asks in BOTH directions because neither one
-  // is a tap-again undo. See bulkLockVerdict.
-  const [pendingBulkLock, setPendingBulkLock] = useState(null);
   // { src, existing } — the year the sandbox is about to be cut from, and the
   // sandbox it would replace. Always confirmed: a rebuild wipes.
   const [pendingSandbox, setPendingSandbox] = useState(null);
@@ -440,28 +437,6 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
     } finally { setBusy(false); }
   };
 
-  // ── The same thing to every year at once ─────────────────────────
-  // allSettled, not all: seventeen independent writes, and one of them failing
-  // is not a reason to leave the other sixteen unreported. What actually
-  // landed is what the rows are repainted from, so a partial run shows exactly
-  // which years took it — a padlock is a claim about whether a tournament is
-  // safe, and painting sixteen of them shut when fifteen are would be the one
-  // way this feature could do harm.
-  const applyBulkLock = async (ids, next) => {
-    if (!ids?.length || busy) return;
-    setBusy(true);
-    setErr("");
-    const done = await Promise.allSettled(ids.map(id => setEditionLocked(id, next)));
-    const ok = ids.filter((_, i) => done[i].status === "fulfilled");
-    if (ok.length) {
-      const shut = new Set(ok);
-      setEditions(rows => rows.map(r => (shut.has(r.id) ? { ...r, locked: next } : r)));
-    }
-    const failed = ids.length - ok.length;
-    if (failed) setErr(`${failed} of ${ids.length} couldn't be ${next ? "locked" : "unlocked"}. The rest went through.`);
-    else notify?.(`${ok.length} ${ok.length === 1 ? "year" : "years"} ${next ? "locked" : "unlocked"}`);
-    setBusy(false);
-  };
   const cloneSource = editions.find(e => e.id === cloneFrom) || null;
   // The label on a source option: the year, and what is in it. "2025 · 16
   // players · 1,368 scores" is what makes it obvious which year is worth
@@ -657,36 +632,14 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
           <div style={{ fontSize: FS.label, fontWeight: 600, color: K.danger, marginBottom: 10, lineHeight: 1.45 }}>{err}</div>
         )}
 
-        {/* ── Every year at once ────────────────────────────────────
-            Seventeen editions is seventeen taps, and freezing the history
-            before handing the app to testers is the job this whole feature
-            exists for — a chore that long is one that gets abandoned halfway,
-            which leaves exactly the hole the lock was meant to close.
-
-            It sits under the LIST rather than in the create-tournament block
-            below, because that is what it acts on. One button: it locks while
-            anything is open and unlocks once nothing is, so the slot is never
-            a control that does nothing. See bulkLockVerdict. */}
-        {canManage && !loading && (() => {
-          const v = bulkLockVerdict(editions, activeId);
-          if (!v) return null;
-          return (
-            <button
-              onClick={() => setPendingBulkLock(v)}
-              disabled={busy}
-              style={{
-                width: "100%", marginBottom: 10, padding: "9px 0", borderRadius: R.sm,
-                background: "transparent", border: `1px solid ${K.bdr}`, color: K.t2,
-                fontSize: FS.label, fontWeight: 700, cursor: busy ? "default" : "pointer",
-                opacity: busy ? 0.5 : 1, display: "flex", alignItems: "center",
-                justifyContent: "center", gap: 7,
-              }}>
-              <span aria-hidden style={{ display: "flex", color: K.acc }}>
-                {v.next ? <IconLock size={14} /> : <IconUnlock size={14} />}
-              </span>{v.label}
-            </button>
-          );
-        })()}
+        {/* The "Lock all but 2026" button that stood here is gone, and so is
+            the "Unlock all" it turned into. Both were one tap that changed
+            sixteen tournaments, on a screen whose other controls each change
+            one — and the thing they were standing in for is now a rule rather
+            than a chore: a tournament with every round signed off refuses
+            member writes whether or not anybody locked it (see editionFinished
+            in firestore.rules). Freezing a year that is NOT finished is still
+            a padlock on its own row, with its own confirm. */}
 
         {/* ── The sandbox ───────────────────────────────────────────
             Cut from the newest year that actually holds a tournament, so a
@@ -951,25 +904,6 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
           />
         );
       })()}
-
-      {/* Both directions ask, unlike the single padlock. A bulk run flattens
-          whatever pattern of locks was there and nothing remembers it, so
-          "unlock all" is not undone by locking them back — it is a different
-          arrangement that happens to look similar. */}
-      {pendingBulkLock && (
-        <ConfirmModal
-          eyebrow={pendingBulkLock.next ? "Freeze the history" : "Open every year"}
-          title={pendingBulkLock.confirm.title}
-          message={pendingBulkLock.confirm.body}
-          confirmLabel={pendingBulkLock.confirm.confirmLabel}
-          onConfirm={() => {
-            const v = pendingBulkLock;
-            setPendingBulkLock(null);
-            applyBulkLock(v.ids, v.next);
-          }}
-          onCancel={() => setPendingBulkLock(null)}
-        />
-      )}
 
       {/* A rebuild WIPES, and says so in the count. Everything else in this
           app that destroys scores names how many, because "are you sure?" is
