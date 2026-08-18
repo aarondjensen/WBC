@@ -23,6 +23,8 @@ import { useState, useEffect } from "react";
 import { K, ON_ACC, FS, R, ALPHA } from "../theme";
 import { Btn } from "./ui";
 import { Popup, ConfirmModal } from "./Popup";
+import { EditionSheet } from "./EditionSheet";
+import { IconLock, IconUnlock, IconChevron } from "./Icons";
 import { getActiveTournamentId } from "../firebase";
 import {
   loadEditions, loadEditionSummaries, cachedEditionSummaries, cachedEditions,
@@ -33,7 +35,7 @@ import {
   plannedYear, plannedSource, summaryLine, editionHasContent, overwriteWarning,
   newestBuiltEdition,
 } from "../lib/editionClone";
-import { editionState, deleteVerdict, STATE_LABEL } from "../lib/editionLifecycle";
+import { editionState, deleteVerdict, STATE_LABEL, editionDisplayName } from "../lib/editionLifecycle";
 import { isEditionLocked, lockVerdict, bulkLockVerdict } from "../lib/editionLock";
 import { isSandboxEdition } from "../lib/editionId";
 
@@ -108,11 +110,16 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
   // not the form is open), `createErr` is the form's own.
   const [err, setErr] = useState("");
   const [createErr, setCreateErr] = useState("");
-  const [pending, setPending] = useState(null);
   const [pendingDelete, setPendingDelete] = useState(null);
   // The year a director is about to FREEZE. Unlocking never lands here — it
   // widens what is possible and asks nothing, see lockVerdict.
   const [pendingLock, setPendingLock] = useState(null);
+  // Which row's sheet is open. Null is the list.
+  //
+  // A popup rather than an expanding row: the actions include a delete, and a
+  // row that grows buttons under your thumb moves every row below it — which
+  // is how you tap Delete on 2015 aiming to open 2019.
+  const [sheetFor, setSheetFor] = useState(null);
   // The whole-list version, which asks in BOTH directions because neither one
   // is a tap-again undo. See bulkLockVerdict.
   const [pendingBulkLock, setPendingBulkLock] = useState(null);
@@ -284,6 +291,12 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
   // is also what refuses the delete: not being able to check is not
   // permission.
   const stateOf = (e) => editionState(summaries?.[e.id]);
+
+  // Looked up by id on every render rather than stashed as an object, so the
+  // sheet repaints from the reloaded list after a lock instead of showing the
+  // row as it was when it was tapped.
+  const sheetEdition = sheetFor ? editions.find((e) => e.id === sheetFor) || null : null;
+  const closeSheet = () => setSheetFor(null);
   const stateColor = (s) => s === "complete" ? K.acc : s === "live" ? K.warn : K.t3;
 
   // ── Freeze or thaw a year ────────────────────────────────────────
@@ -393,7 +406,6 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
               const isActive = e.id === activeId;
               const state = stateOf(e);
               const sandbox = isSandboxEdition(e.id);
-              const verdict = deleteVerdict(state, { isActive, isSandbox: sandbox });
               // Three answers, not two. The counts arrive a year at a time, so
               // a year MISSING from the map is either one still being counted
               // or one that could not be read — and those are opposite
@@ -402,99 +414,80 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
               const known = summaries?.[e.id] || null;
               const summary = known ? summaryLine(known)
                 : summariesFresh ? "Couldn't read" : "Counting…";
-              // "WBC 2015" beside a bold 2015 is the same word seventeen times.
-              // A name that ISN'T the default is worth the space; the default
-              // is not.
-              // Suppressed for the sandbox: the badge beside it already says
-              // DEMO, and "DEMO · Demo Sandbox · 16 players" is the word twice
-              // in a row that has to fit a phone.
-              const customName = !sandbox && e.name && e.name !== `WBC ${e.year}` ? e.name : null;
+              // "WBC 2015" beside a bold 2015 is the same word seventeen
+              // times. A name that ISN'T the default is worth the space; the
+              // default is not. Suppressed for the sandbox, whose badge
+              // already says DEMO — "DEMO · DEMO Sandbox · 16 players" is the
+              // word twice in a row that has to fit a phone.
+              const customName = sandbox ? null : editionDisplayName(e);
               const locked = isEditionLocked(e);
               return (
-                <div key={e.id} style={{
-                  display: "flex", alignItems: "center", gap: 8, borderRadius: R.sm,
-                  background: isActive ? K.acc + ALPHA.wash : K.inp,
-                  border: `1px solid ${isActive ? K.acc : K.bdr}`,
-                }}>
-                  {/* The whole row opens the year — a 40px-tall target instead
-                      of a 28px button at the end of it. The active row is inert
-                      because there is nowhere to go. */}
-                  <button
-                    onClick={isActive ? undefined : () => setPending(e)}
-                    disabled={isActive}
-                    title={known || summariesFresh ? STATE_LABEL[state] : "Counting…"}
-                    style={{
-                      flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 8,
-                      padding: "9px 10px", background: "transparent", border: "none",
-                      textAlign: "left", cursor: isActive ? "default" : "pointer", color: K.t1,
-                    }}>
-                    <span aria-hidden style={{
-                      width: 7, height: 7, borderRadius: "50%", flexShrink: 0,
-                      background: stateColor(state),
-                    }} />
-                    {/* A BADGE where a year would be, because the sandbox has
-                        no year and must not look like it does. This is the
-                        whole reason it is `wbc_demo` and not `wbc_2026_demo`:
-                        tapping a row reloads the app into that edition, and
-                        two rows both reading "2026" is a director in a hurry
-                        opening the wrong one mid-tournament. */}
-                    {sandbox ? (
-                      <span style={{
-                        fontSize: FS.micro, fontWeight: 800, flexShrink: 0, letterSpacing: 0.5,
-                        color: K.tourn, border: `1px solid ${K.tourn}${ALPHA.line}`,
-                        background: `${K.tourn}${ALPHA.wash}`, padding: "2px 6px", borderRadius: R.xs,
-                      }}>DEMO</span>
-                    ) : (
-                      <span style={{ fontSize: FS.body, fontWeight: 800, flexShrink: 0 }}>{e.year}</span>
-                    )}
+                // ── The whole row is one button, and it opens the SHEET ──
+                // It used to be a tap target with two controls bolted to its
+                // right-hand end, and at a 320pt viewport the summary line —
+                // the counts a director is actually deciding on — had nothing
+                // left. The padlock and the bin moved behind this tap; what
+                // stays is what the row is FOR: which year, what state, how
+                // much is in it.
+                //
+                // The ACTIVE row opens it too, unlike before. There is nowhere
+                // to go, but there is still a lock to set and a reason the bin
+                // is missing, and an inert row could say neither.
+                <button
+                  key={e.id}
+                  onClick={() => setSheetFor(e.id)}
+                  title={known || summariesFresh ? STATE_LABEL[state] : "Counting…"}
+                  aria-label={`${sandbox ? "DEMO" : e.year}${customName ? ` — ${customName}` : ""}${locked ? ", locked" : ""}`}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 8, width: "100%",
+                    padding: "9px 10px", borderRadius: R.sm, textAlign: "left",
+                    font: "inherit", color: K.t1, cursor: "pointer",
+                    background: isActive ? K.acc + ALPHA.wash : K.inp,
+                    border: `1px solid ${isActive ? K.acc : K.bdr}`,
+                  }}>
+                  <span aria-hidden style={{
+                    width: 7, height: 7, borderRadius: "50%", flexShrink: 0,
+                    background: stateColor(state),
+                  }} />
+                  {/* A BADGE where a year would be, because the sandbox has no
+                      year and must not look like it does. This is the whole
+                      reason it is `wbc_demo` and not `wbc_2026_demo`: opening a
+                      row reloads the app into that edition, and two rows both
+                      reading "2026" is a director in a hurry opening the wrong
+                      one mid-tournament. */}
+                  {sandbox ? (
                     <span style={{
-                      flex: 1, minWidth: 0, fontSize: FS.label, fontWeight: 600, color: K.t3,
-                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                    }}>{customName ? `${customName} · ${summary}` : summary}</span>
-                  </button>
-                  {/* ── The padlock ──────────────────────────────────
-                      Shown to a DIRECTOR as a control and to everybody else
-                      as a fact, because a member who cannot post a score into
-                      a year is owed the reason. It sits before the ACTIVE
-                      badge and the bin so its position does not move between
-                      rows — a control that lands under your thumb in a
-                      different place on every line is one that gets tapped by
-                      accident, and this one stops a tournament. */}
-                  {canManage ? (
-                    <button
-                      onClick={() => {
-                        const v = lockVerdict(e, { isActive });
-                        if (v.confirm) setPendingLock(e);
-                        else applyLock(e, v.next);
-                      }}
-                      disabled={busy}
-                      title={lockVerdict(e, { isActive }).title}
-                      style={{
-                        flexShrink: 0, background: "transparent", border: "none",
-                        padding: "4px 6px", cursor: busy ? "default" : "pointer",
-                        fontSize: FS.body, lineHeight: 1,
-                        opacity: locked ? 1 : 0.35,
-                      }}>{locked ? "🔒" : "🔓"}</button>
-                  ) : locked ? (
-                    <span aria-label="Locked" title="Locked — only a director can change this year"
-                      style={{ flexShrink: 0, padding: "4px 6px", fontSize: FS.body, lineHeight: 1 }}>🔒</span>
-                  ) : null}
-                  {isActive ? (
+                      fontSize: FS.micro, fontWeight: 800, flexShrink: 0, letterSpacing: 0.5,
+                      color: K.tourn, border: `1px solid ${K.tourn}${ALPHA.line}`,
+                      background: `${K.tourn}${ALPHA.wash}`, padding: "2px 6px", borderRadius: R.xs,
+                    }}>DEMO</span>
+                  ) : (
+                    <span style={{ fontSize: FS.body, fontWeight: 800, flexShrink: 0 }}>{e.year}</span>
+                  )}
+                  <span style={{
+                    flex: 1, minWidth: 0, fontSize: FS.label, fontWeight: 600, color: K.t3,
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  }}>{customName ? `${customName} · ${summary}` : summary}</span>
+                  {/* STATE, not a switch — the toggle is in the sheet now. SVG
+                      rather than 🔒, because a colour font paints its own
+                      palette: this one can be the accent, so "frozen" no
+                      longer has to be spelled as "washed out". */}
+                  {locked && (
+                    <span aria-hidden style={{ flexShrink: 0, display: "flex", color: K.acc }}>
+                      <IconLock size={15} />
+                    </span>
+                  )}
+                  {isActive && (
                     <span style={{
-                      flexShrink: 0, marginRight: 8, fontSize: FS.micro, fontWeight: 800,
+                      flexShrink: 0, fontSize: FS.micro, fontWeight: 800,
                       letterSpacing: 0.5, color: ON_ACC, background: K.acc,
                       padding: "3px 7px", borderRadius: R.xs,
                     }}>ACTIVE</span>
-                  ) : canManage && verdict.allowed ? (
-                    /* No bin at all on a year that may not be deleted — a
-                       finished tournament, or one we couldn't read. A greyed-out
-                       control invites a tap and then explains itself; an absent
-                       one says the answer is settled. lib/editions.js refuses
-                       these regardless. */
-                    <Btn variant="ghost" size="sm" onClick={() => setPendingDelete(e)} title="Delete this year"
-                      style={{ color: K.t3, padding: "4px 8px", flexShrink: 0, lineHeight: 1 }}>🗑</Btn>
-                  ) : null}
-                </div>
+                  )}
+                  <span aria-hidden style={{ flexShrink: 0, display: "flex", color: K.t3 }}>
+                    <IconChevron size={15} />
+                  </span>
+                </button>
               );
             })}
           </div>
@@ -543,7 +536,9 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
                 opacity: busy ? 0.5 : 1, display: "flex", alignItems: "center",
                 justifyContent: "center", gap: 7,
               }}>
-              <span aria-hidden>{v.next ? "🔒" : "🔓"}</span>{v.label}
+              <span aria-hidden style={{ display: "flex", color: K.acc }}>
+                {v.next ? <IconLock size={14} /> : <IconUnlock size={14} />}
+              </span>{v.label}
             </button>
           );
         })()}
@@ -681,18 +676,39 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
         )}
       </Popup>
 
-      {pending && (
-        <ConfirmModal
-          eyebrow="Switch tournament"
-          title={`Open ${pending.name}?`}
-          // No explanation under it. This said the app would reload and that
-          // you might have to pick your name again — the second half was not
-          // true in practice, and the first half is a paragraph about a
-          // reload nobody needs warning about. The eyebrow and the title say
-          // what the button does.
-          confirmLabel="Open"
-          onConfirm={() => switchEdition(pending.id)}
-          onCancel={() => setPending(null)}
+      {/* ── Behind the tap ────────────────────────────────────────────
+          Every control the row used to carry, with a word on it — and the one
+          sentence it could never carry at all: why a year that refuses to be
+          deleted refuses. Each handler closes the sheet first, because all
+          three either raise a confirm or reload the app, and a sheet left
+          standing behind either is a layer nobody asked for.
+
+          (The "Open WBC 2015?" confirm that used to stand here has gone with
+          it. It was an eyebrow and a title restating the button that had just
+          been tapped; the sheet puts the year at display size directly above
+          "Open this tournament", which is the same question asked once. The
+          DELETE and LOCK confirms below stay — those are the two a person
+          should have to answer twice.) */}
+      {sheetEdition && (
+        <EditionSheet
+          edition={sheetEdition}
+          state={stateOf(sheetEdition)}
+          summary={summaries?.[sheetEdition.id] ? summaryLine(summaries[sheetEdition.id])
+            : summariesFresh ? "Couldn't read" : "Counting…"}
+          isActive={sheetEdition.id === activeId}
+          isSandbox={isSandboxEdition(sheetEdition.id)}
+          canManage={canManage}
+          busy={busy}
+          onClose={closeSheet}
+          onOpen={() => switchEdition(sheetEdition.id)}
+          onLock={() => {
+            const target = sheetEdition;
+            const v = lockVerdict(target, { isActive: target.id === activeId });
+            closeSheet();
+            if (v.confirm) setPendingLock(target);
+            else applyLock(target, v.next);
+          }}
+          onDelete={() => { const t = sheetEdition; closeSheet(); setPendingDelete(t); }}
         />
       )}
 

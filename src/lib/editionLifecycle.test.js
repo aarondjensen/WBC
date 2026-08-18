@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { allRoundsFinalized, editionState, deleteVerdict, STATE_LABEL } from "./editionLifecycle";
+import { allRoundsFinalized, editionState, deleteVerdict, STATE_LABEL,
+  editionDisplayName, editionActions } from "./editionLifecycle";
 import { groupKey } from "./groupSwitch";
 
 // A four-round tournament whose draw is two groups a round.
@@ -144,5 +145,98 @@ describe("deleteVerdict and the sandbox", () => {
     const v = deleteVerdict("empty", { isSandbox: true, isActive: true });
     expect(v.allowed).toBe(false);
     expect(v.reason).toBe("active");
+  });
+});
+
+// ── What the picker draws ───────────────────────────────────────────
+// Two helpers that decide whether something is RENDERED AT ALL. Both were
+// ported from Bourbon Cup along with the row rework; the second is the one
+// that matters, because it finally carries `deleteVerdict`'s refusal sentence
+// somewhere a director can read it.
+describe("editionDisplayName", () => {
+  it("says nothing when the name is just WBC and the year", () => {
+    // Sixteen rows all reading "WBC ####" beside a bold year is the same word
+    // sixteen times.
+    expect(editionDisplayName({ name: "WBC 2015", year: 2015 })).toBeNull();
+    expect(editionDisplayName({ name: "WBC 2015", year: "2015" })).toBeNull();
+    expect(editionDisplayName({ name: "2015", year: 2015 })).toBeNull();
+  });
+
+  it("forgives the casing and spacing of a name typed by hand", () => {
+    expect(editionDisplayName({ name: "  wbc   2015 ", year: 2015 })).toBeNull();
+  });
+
+  it("shows a name somebody actually chose", () => {
+    expect(editionDisplayName({ name: "The Redemption Year", year: 2019 })).toBe("The Redemption Year");
+    // Merely ENDING in the year is not the same as being the default: the
+    // looser rule reduces a round at Bandon to a bare numeral.
+    expect(editionDisplayName({ name: "Bandon Dunes 2024", year: 2024 })).toBe("Bandon Dunes 2024");
+  });
+
+  it("shows whatever there is when there is no year — the sandbox", () => {
+    // wbc_demo has `year: null` on purpose, so two rows can never both read
+    // 2026. Its name is the only thing it has.
+    expect(editionDisplayName({ name: "DEMO Sandbox", year: null })).toBe("DEMO Sandbox");
+    expect(editionDisplayName({ name: "", year: 2015 })).toBeNull();
+    expect(editionDisplayName(null)).toBeNull();
+  });
+
+  it("is not tied to one app's tournament title", () => {
+    expect(editionDisplayName({ name: "The Bourbon Cup 2024", year: 2024 }, "The Bourbon Cup")).toBeNull();
+    expect(editionDisplayName({ name: "The Bourbon Cup 2024", year: 2024 })).toBe("The Bourbon Cup 2024");
+  });
+});
+
+describe("editionActions", () => {
+  const live = { id: "wbc_2026", year: 2026 };
+  const frozen = { id: "wbc_2015", year: 2015, locked: true };
+
+  it("offers a player nothing but the door", () => {
+    const a = editionActions({ edition: frozen, state: "complete" });
+    expect(a).toMatchObject({ open: true, lock: false, delete: false, deleteWhy: null });
+    expect(a.locked).toBe(true);
+  });
+
+  it("carries the refusal sentence the row could only express by drawing nothing", () => {
+    // This is the whole reason the actions moved into a sheet. deleteVerdict
+    // has always produced this string; until now the picker's only way to say
+    // it was to omit the bin and hope the director inferred the rule.
+    const a = editionActions({ edition: live, state: "complete", canManage: true });
+    expect(a.delete).toBe(false);
+    expect(a.deleteWhy).toMatch(/record of the event/);
+
+    const unread = editionActions({ edition: live, state: "unknown", canManage: true });
+    expect(unread.deleteWhy).toMatch(/Couldn't read/);
+  });
+
+  it("will not open or delete the year you are standing in, and says why", () => {
+    const a = editionActions({ edition: live, state: "setup", isActive: true, canManage: true });
+    expect(a.open).toBe(false);
+    expect(a.delete).toBe(false);
+    expect(a.deleteWhy).toMatch(/Open another year first/);
+    // Locking the running year stays offered — freezing it the moment the cup
+    // ends is a real thing a director wants.
+    expect(a.lock).toBe(true);
+  });
+
+  it("marks the dangerous delete as grave", () => {
+    // Scores made on the course this week. The confirm names the count.
+    const a = editionActions({ edition: live, state: "live", canManage: true });
+    expect(a.delete).toBe(true);
+    expect(a.graveDelete).toBe(true);
+    expect(editionActions({ edition: live, state: "setup", canManage: true }).graveDelete).toBe(false);
+  });
+
+  it("lets the sandbox go however full it is", () => {
+    // A scratch copy that testers filled with four finished rounds is exactly
+    // what a good beta test looks like, and it must not become permanent.
+    const a = editionActions({ edition: { id: "wbc_demo" }, state: "complete", isSandbox: true, canManage: true });
+    expect(a.delete).toBe(true);
+    expect(a.deleteWhy).toBeNull();
+  });
+
+  it("tells a player nothing about deletion either way", () => {
+    // deleteWhy explains a control they were never offered. Silence.
+    expect(editionActions({ edition: live, state: "complete" }).deleteWhy).toBeNull();
   });
 });
