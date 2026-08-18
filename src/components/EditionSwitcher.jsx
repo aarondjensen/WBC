@@ -19,7 +19,7 @@
 // delete appear. It is not a security boundary — firestore.rules is, and it
 // allows writes to wbc_editions to a director only — it is there so a player
 // is not shown controls whose every tap comes back refused.
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { K, ON_ACC, FS, R, ALPHA } from "../theme";
 import { Btn } from "./ui";
 import { Popup, ConfirmModal } from "./Popup";
@@ -233,6 +233,23 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
     setSourcePicked(false);
     if (summariesFresh) setSeeded(true);
   }, [open, mode, seeded, touched, editions, summaries, summariesFresh]);
+
+  // ── Is there more list under the fold? ────────────────────────────
+  // Measured rather than assumed: it depends on three things this component
+  // cannot know — how many years there are, how tall the phone is, and
+  // whether the keyboard is up. Re-measured on scroll and on every render,
+  // which is when what is in the list can have changed.
+  const bodyRef = useRef(null);
+  const [moreBelow, setMoreBelow] = useState(false);
+  const measureScroll = () => {
+    const el = bodyRef.current;
+    if (!el) return;
+    // A few pixels of slack: a scroller sitting at its end can be off by a
+    // fraction, and a fade that never quite turns off is worse than no fade.
+    const more = el.scrollHeight - el.scrollTop - el.clientHeight > 8;
+    setMoreBelow(prev => (prev === more ? prev : more));
+  };
+  useEffect(() => { measureScroll(); });
 
   // ── What the tapped year was played on ────────────────────────────
   // Fetched when a row is opened, never for the list: course names are two
@@ -464,7 +481,14 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
       <Popup
         onClose={onClose} portal viewportFit align="start"
         maxWidth={400} padding={0} outerPadding={12} zIndex={3000}
-        innerStyle={{ display: "flex", flexDirection: "column" }}
+        // ── The card FILLS what it is given ────────────────────────
+        // Sized to its content, the picker opened as a short card with a few
+        // rows in it and nothing to say that eleven more were underneath —
+        // the list scrolled inside a box that did not look like it scrolled.
+        // Full height, the rows run to the bottom edge and the one at the fold
+        // is visibly cut, which is the cue. Capped for a desktop, where a
+        // 400px column the height of a monitor is not a popup.
+        innerStyle={{ display: "flex", flexDirection: "column", height: "100%", maxHeight: "min(100%, 760px)" }}
       >
         {/* One header for all three views: back out of a form, what this is,
             the door into the composer, and the way out. */}
@@ -488,7 +512,12 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
           <button onClick={onClose} aria-label="Close" style={headerBtn}>✕</button>
         </div>
 
-        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", overscrollBehavior: "contain", padding: 16 }}>
+        <div style={{ flex: 1, minHeight: 0, position: "relative", display: "flex" }}>
+        <div
+          ref={bodyRef}
+          onScroll={measureScroll}
+          style={{ flex: 1, minWidth: 0, overflowY: "auto", overscrollBehavior: "contain", padding: 16 }}
+        >
         {mode === "list" ? (<>
 
         {loading ? (
@@ -505,15 +534,14 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
              rides the title attribute, and the legend below spells the colours
              out once instead of seventeen times).
 
-             The height cap is the other half. Without it the popup grows with
-             the number of years and pushes the create button off the bottom
-             forever; with it the list scrolls in place and everything else
-             stays where it was. 44vh so a phone still shows ~6 rows. */
+             The list used to be its OWN scroller, capped at 44vh, so that a
+             create form sitting underneath it stayed on screen. Both halves of
+             that are gone: the form is its own view behind + New, and the card
+             now fills the height it is given — so the list simply runs down
+             the card and the whole body scrolls. A scroller inside a scroller
+             is what made this look like a short list with nothing under it. */
           <div style={{
             display: "flex", flexDirection: "column", gap: 4, marginBottom: 10,
-            maxHeight: "min(44vh, 300px)", overflowY: "auto",
-            // Room for the scrollbar so it never sits on top of the bin.
-            paddingRight: 2,
           }}>
             {editions.map((e) => {
               const isActive = e.id === activeId;
@@ -615,17 +643,12 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
           </div>
         )}
 
-        {/* The dot, once, instead of a pill on every row. */}
-        {!loading && editions.length > 0 && (
-          <div style={{ display: "flex", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
-            {[["complete", "Complete"], ["live", "In progress"], ["setup", "Not started"]].map(([st, label]) => (
-              <span key={st} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: FS.micro, color: K.t3, fontWeight: 700 }}>
-                <span aria-hidden style={{ width: 6, height: 6, borderRadius: "50%", background: stateColor(st) }} />
-                {label}
-              </span>
-            ))}
-          </div>
-        )}
+        {/* The three-dot legend that stood here is gone. It spelled out a
+            colour code on a screen whose whole job is to get somebody into a
+            tournament, and it cost a row of the list to do it — the thing this
+            popup has least of. The dots stay: green for a tournament that
+            finished, amber for one being played, grey for one not started, and
+            each row carries the word itself as its title. */}
 
         {/* Reading the list failed, or a delete refused. It belongs to the
             list, so it is shown to everybody and whether or not the create
@@ -791,6 +814,19 @@ export function EditionSwitcher({ open, onClose, notify, canManage = true }) {
               </Btn>
           </div>
         </>)}
+        </div>
+        {/* The second half of the cue, for when a cut row is not enough: the
+            list fades out at the bottom edge while there is more under it, and
+            stops the moment it has been scrolled to the end. Drawn over the
+            scroller rather than inside it, or it would scroll away with the
+            rows it is describing. */}
+        {moreBelow && (
+          <div aria-hidden style={{
+            position: "absolute", left: 0, right: 0, bottom: 0, height: 40,
+            pointerEvents: "none",
+            background: `linear-gradient(to top, ${K.bg}, transparent)`,
+          }} />
+        )}
         </div>
       </Popup>
 

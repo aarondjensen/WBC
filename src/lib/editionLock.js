@@ -210,18 +210,21 @@ export const bulkLockVerdict = (editions = [], activeId = null) => {
     };
   }
 
-  return {
-    next: false,
-    ids: others.map(e => e.id),
-    label: "Unlock all",
-    confirm: {
-      title: `Unlock ${n(others.length)}?`,
-      body: `Every member will be able to post scores, sign cards and place bets in `
-        + `${others.length === 1 ? "it" : "all of them"} again. Nothing remembers which years `
-        + `were locked, so this cannot be undone by locking them back.`,
-      confirmLabel: `Unlock ${n(others.length)}`,
-    },
-  };
+  // ── There is no bulk UNLOCK ────────────────────────────────────
+  // There used to be: once everything was frozen the same button turned into
+  // "Unlock all", on the symmetry argument. Three things are wrong with it.
+  //
+  // It is not an undo — nothing remembers which years were locked, so tapping
+  // it and tapping back is not where you started. It thaws the RECORD of
+  // sixteen finished tournaments in one tap, which is the opposite of what
+  // every other guard in this area is for. And it is now mostly theatre
+  // anyway: a finished year refuses member writes whether or not it carries a
+  // padlock (see editionFinished in firestore.rules), so unlocking the history
+  // wholesale gives the field nothing it did not already have.
+  //
+  // Thawing one year is still a tap on its row, with its own confirm. That is
+  // the deliberate act this was letting somebody do sixteen times by accident.
+  return null;
 };
 
 // The one-word state for a row in the list. Null when there is nothing to say,

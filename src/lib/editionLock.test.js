@@ -124,10 +124,8 @@ describe("bulkLockVerdict", () => {
   // The one guarantee this control makes. The active year is the tournament
   // being played, and freezing it is a decision with its own warning on its
   // own row — never a side effect of tidying the other sixteen.
-  it("never touches the active year, in either direction", () => {
+  it("never touches the active year", () => {
     expect(bulkLockVerdict(YEARS, "wbc_2027").ids).not.toContain("wbc_2027");
-    const allShut = YEARS.map(e => (e.id === "wbc_2027" ? e : { ...e, locked: true }));
-    expect(bulkLockVerdict(allShut, "wbc_2027").ids).not.toContain("wbc_2027");
   });
 
   it("only names the years that are actually open", () => {
@@ -141,24 +139,18 @@ describe("bulkLockVerdict", () => {
     expect(v.confirm.title).toBe("Lock 1 year?");
   });
 
-  // Once there is nothing left to lock the same slot has to do something
-  // useful, or a director who locked everything is back to seventeen taps to
-  // undo it.
-  it("turns into Unlock all once everything else is shut", () => {
+  // ── And it goes away rather than reversing ──
+  // The slot used to turn into "Unlock all" once everything was frozen, which
+  // is not an undo (nothing remembers which years were locked) and thaws the
+  // record of sixteen tournaments in one tap. Unlocking is a year at a time,
+  // on its own row, with its own confirm.
+  it("offers nothing once every other year is already locked", () => {
     const allShut = YEARS.map(e => (e.id === "wbc_2027" ? e : { ...e, locked: true }));
-    const v = bulkLockVerdict(allShut, "wbc_2027");
-    expect(v.next).toBe(false);
-    expect(v.label).toBe("Unlock all");
-    expect(v.ids.sort()).toEqual(["wbc_2025", "wbc_2026"]);
+    expect(bulkLockVerdict(allShut, "wbc_2027")).toBeNull();
   });
 
-  // Unlike the single toggle, which lets an unlock through unasked. A bulk
-  // action flattens whatever pattern of locks was there and nothing remembers
-  // it, so neither direction is a tap-again undo.
-  it("asks in both directions, and says the unlock cannot be undone", () => {
+  it("still asks before locking sixteen tournaments", () => {
     expect(bulkLockVerdict(YEARS, "wbc_2027").confirm).toBeTruthy();
-    const allShut = YEARS.map(e => (e.id === "wbc_2027" ? e : { ...e, locked: true }));
-    expect(bulkLockVerdict(allShut, "wbc_2027").confirm.body).toMatch(/cannot be undone/i);
   });
 
   it("says nothing when there is no other year to act on", () => {
@@ -193,15 +185,15 @@ describe("bulkLockVerdict", () => {
     expect(v.ids.sort()).toEqual(["wbc_2025", "wbc_2027"]);
   });
 
-  it("never unlocks the sandbox either", () => {
+  // And it does not reappear as an unlock once the history is frozen, which
+  // is the state a director leaves this screen in.
+  it("offers nothing when the only unfrozen thing left is the sandbox", () => {
     const allShut = [
       { id: "wbc_2027", year: 2027, locked: true },
       { id: "wbc_2026", year: 2026 },
-      { id: "wbc_demo", year: null, locked: true },
+      { id: "wbc_demo", year: null },
     ];
-    const v = bulkLockVerdict(allShut, "wbc_2026");
-    expect(v.next).toBe(false);
-    expect(v.ids).toEqual(["wbc_2027"]);
+    expect(bulkLockVerdict(allShut, "wbc_2026")).toBeNull();
   });
 
   // Nothing to offer when the sandbox is the only other edition — the button
