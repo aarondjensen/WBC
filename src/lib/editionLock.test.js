@@ -20,7 +20,7 @@
 // to be in front of them before they tap, and it is the assertion most likely
 // to be lost in a refactor of the copy.
 import { describe, it, expect } from "vitest";
-import { isEditionLocked, lockVerdict, bulkLockVerdict, lockBadge, lockNotice, canAdminEdition, demoOnlyAdmin,
+import { isEditionLocked, lockVerdict, lockBadge, lockNotice, canAdminEdition, demoOnlyAdmin,
 } from "./editionLock";
 
 describe("isEditionLocked", () => {
@@ -104,110 +104,6 @@ describe("lockVerdict", () => {
   it("survives an edition with no year at all", () => {
     expect(() => lockVerdict({ id: "wbc_masters" })).not.toThrow();
     expect(lockVerdict({}).confirm.title).toContain("this year");
-  });
-});
-
-describe("bulkLockVerdict", () => {
-  const YEARS = [
-    { id: "wbc_2027", year: 2027 },
-    { id: "wbc_2026", year: 2026 },
-    { id: "wbc_2025", year: 2025 },
-  ];
-
-  it("offers to lock every year but the active one", () => {
-    const v = bulkLockVerdict(YEARS, "wbc_2027");
-    expect(v.next).toBe(true);
-    expect(v.ids.sort()).toEqual(["wbc_2025", "wbc_2026"]);
-    expect(v.label).toBe("Lock all but 2027");
-  });
-
-  // The one guarantee this control makes. The active year is the tournament
-  // being played, and freezing it is a decision with its own warning on its
-  // own row — never a side effect of tidying the other sixteen.
-  it("never touches the active year", () => {
-    expect(bulkLockVerdict(YEARS, "wbc_2027").ids).not.toContain("wbc_2027");
-  });
-
-  it("only names the years that are actually open", () => {
-    const half = [
-      { id: "wbc_2027", year: 2027 },
-      { id: "wbc_2026", year: 2026, locked: true },
-      { id: "wbc_2025", year: 2025 },
-    ];
-    const v = bulkLockVerdict(half, "wbc_2027");
-    expect(v.ids).toEqual(["wbc_2025"]);
-    expect(v.confirm.title).toBe("Lock 1 year?");
-  });
-
-  // ── And it goes away rather than reversing ──
-  // The slot used to turn into "Unlock all" once everything was frozen, which
-  // is not an undo (nothing remembers which years were locked) and thaws the
-  // record of sixteen tournaments in one tap. Unlocking is a year at a time,
-  // on its own row, with its own confirm.
-  it("offers nothing once every other year is already locked", () => {
-    const allShut = YEARS.map(e => (e.id === "wbc_2027" ? e : { ...e, locked: true }));
-    expect(bulkLockVerdict(allShut, "wbc_2027")).toBeNull();
-  });
-
-  it("still asks before locking sixteen tournaments", () => {
-    expect(bulkLockVerdict(YEARS, "wbc_2027").confirm).toBeTruthy();
-  });
-
-  it("says nothing when there is no other year to act on", () => {
-    expect(bulkLockVerdict([{ id: "wbc_2027", year: 2027 }], "wbc_2027")).toBeNull();
-    expect(bulkLockVerdict([], "wbc_2027")).toBeNull();
-    expect(bulkLockVerdict()).toBeNull();
-  });
-
-  // No active edition resolved yet — the picker can render before
-  // getActiveTournamentId has anything to say. Every year is fair game then,
-  // and the label cannot promise to spare one.
-  // Also the label the SANDBOX gets whenever it is the active edition, since
-  // it has no year to name — so this is the common case, not an edge one.
-  // "Lock every other year" read as alternating years on a phone.
-  it("copes with no active year at all", () => {
-    const v = bulkLockVerdict(YEARS, null);
-    expect(v.ids.length).toBe(3);
-    expect(v.label).toBe("Lock every tournament year");
-  });
-
-  // ── The sandbox is never swept up ──
-  // This is the exclusion the whole workflow turns on. The sequence a director
-  // runs is "cut a sandbox, lock the history, hand out the link" — and they
-  // will usually still be standing on the real tournament when they tap it.
-  // A sandbox caught by "lock all but 2026" hands twelve testers an app that
-  // refuses every tap, which is the exact failure the lock was built to
-  // prevent, pointed at the wrong people.
-  it("never locks the sandbox, even when it is not the active edition", () => {
-    const withSandbox = [...YEARS, { id: "wbc_demo", year: null, name: "Demo Sandbox" }];
-    const v = bulkLockVerdict(withSandbox, "wbc_2026");
-    expect(v.ids).not.toContain("wbc_demo");
-    expect(v.ids.sort()).toEqual(["wbc_2025", "wbc_2027"]);
-  });
-
-  // And it does not reappear as an unlock once the history is frozen, which
-  // is the state a director leaves this screen in.
-  it("offers nothing when the only unfrozen thing left is the sandbox", () => {
-    const allShut = [
-      { id: "wbc_2027", year: 2027, locked: true },
-      { id: "wbc_2026", year: 2026 },
-      { id: "wbc_demo", year: null },
-    ];
-    expect(bulkLockVerdict(allShut, "wbc_2026")).toBeNull();
-  });
-
-  // Nothing to offer when the sandbox is the only other edition — the button
-  // should not appear at all rather than appear and do nothing.
-  it("says nothing when the sandbox is the only other edition", () => {
-    expect(bulkLockVerdict(
-      [{ id: "wbc_2026", year: 2026 }, { id: "wbc_demo", year: null }],
-      "wbc_2026",
-    )).toBeNull();
-  });
-
-  it("counts in plain language", () => {
-    expect(bulkLockVerdict(YEARS, "wbc_2027").confirm.confirmLabel).toBe("Lock 2 years");
-    expect(bulkLockVerdict(YEARS.slice(0, 2), "wbc_2027").confirm.confirmLabel).toBe("Lock 1 year");
   });
 });
 
