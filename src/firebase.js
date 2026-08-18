@@ -44,6 +44,7 @@ import {
   deleteUser,
 } from "firebase/auth";
 import { editionSlug, editionYear } from "./lib/editionId";
+import { bootEdition, bootEditionMoved } from "./lib/editionHome";
 
 // ─── Feature flag ──────────────────────────────────────────────────────────
 // Master switch for the whole Google/Apple sign-in feature. Keep FALSE until
@@ -196,16 +197,61 @@ const TOKENS_COLLECTION = "wbc_notifications_tokens";
 // prefer getActiveTournamentId() / tournamentFilter(); all three read the same
 // source. The pointer persists per-device in localStorage and defaults to
 // wbc_2026, so behavior is unchanged until an edition is chosen.
+//
+// ── Where the app OPENS is a separate question ──
+// The pointer says which edition the app is in; it does not follow that a
+// pointer left on a past year should still be there next launch. A player who
+// had a look at 2014 off More → Tournaments would otherwise open the app on
+// the first tee into a twelve-year-old tournament. lib/editionHome owns that
+// rule and its reasoning; here is only the storage it reads.
 const DEFAULT_TOURNAMENT_ID = "wbc_2026";
 export const ACTIVE_EDITION_KEY = "wbc_active_edition";
 
+// The edition switched to during THIS run of the app, in sessionStorage so a
+// cold start forgets it. It has to survive one reload, because switching
+// editions IS a reload (see lib/editions).
+const EDITION_VISIT_KEY = "wbc_edition_visit";
+
+// Has this device ever been signed in as a director? A cached hint written by
+// App.jsx when the membership resolves, read here at import time — long before
+// any account has loaded — for the one decision it is allowed to make: whether
+// a pointer parked on another edition is kept. It authorizes nothing. Every
+// write is still firestore.rules' to refuse, and a stale hint on a phone that
+// is no longer a director's costs that phone nothing but a pointer it kept.
+const DIRECTOR_HINT_KEY = "wbc_edition_keeper";
+
 const _readInitialEdition = () => {
+  let stored = null;
   try {
-    if (typeof localStorage !== "undefined") {
-      return localStorage.getItem(ACTIVE_EDITION_KEY) || DEFAULT_TOURNAMENT_ID;
-    }
+    if (typeof localStorage !== "undefined") stored = localStorage.getItem(ACTIVE_EDITION_KEY);
   } catch { /* blocked storage / SSR */ }
-  return DEFAULT_TOURNAMENT_ID;
+
+  // `sessionKnown` distinguishes "no visit" from "cannot read a visit". Where
+  // sessionStorage is unavailable no visit could ever be recorded, and every
+  // switch would be undone by its own reload.
+  let visit = null;
+  let sessionKnown = true;
+  try {
+    if (typeof sessionStorage === "undefined") sessionKnown = false;
+    else visit = sessionStorage.getItem(EDITION_VISIT_KEY);
+  } catch { sessionKnown = false; }
+
+  let isDirector = false;
+  try {
+    if (typeof localStorage !== "undefined") isDirector = localStorage.getItem(DIRECTOR_HINT_KEY) === "1";
+  } catch { /* blocked storage */ }
+
+  const booted = bootEdition({ stored, visit, home: DEFAULT_TOURNAMENT_ID, isDirector, sessionKnown });
+
+  // Write the decision back, so a player returned to the live tournament is
+  // returned to it once rather than every launch, and so anything else reading
+  // the key sees the edition actually on screen.
+  if (bootEditionMoved(stored, booted)) {
+    try {
+      if (typeof localStorage !== "undefined") localStorage.setItem(ACTIVE_EDITION_KEY, booted);
+    } catch { /* blocked storage */ }
+  }
+  return booted || DEFAULT_TOURNAMENT_ID;
 };
 
 export let TOURNAMENT_ID = _readInitialEdition();
@@ -257,7 +303,22 @@ export const setActiveTournamentId = (id) => {
   try {
     if (typeof localStorage !== "undefined") localStorage.setItem(ACTIVE_EDITION_KEY, id);
   } catch { /* ignore */ }
+  // Deliberate: somebody chose this edition just now, so it holds until the
+  // app is closed even if it is not the live one.
+  try {
+    if (typeof sessionStorage !== "undefined") sessionStorage.setItem(EDITION_VISIT_KEY, id);
+  } catch { /* ignore */ }
   return TOURNAMENT_ID;
+};
+
+// Remember whether this device belongs to a director, for the boot decision
+// above. Called from App.jsx wherever the membership flag is read.
+export const rememberDirector = (on) => {
+  try {
+    if (typeof localStorage === "undefined") return;
+    if (on) localStorage.setItem(DIRECTOR_HINT_KEY, "1");
+    else localStorage.removeItem(DIRECTOR_HINT_KEY);
+  } catch { /* blocked storage */ }
 };
 
 // Standard tournament-scope filter for db queries — routes through the active

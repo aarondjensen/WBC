@@ -1,5 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, lazy, Suspense } from "react";
-import { _app, _db, _auth, onAuthStateChanged, doGoogleSignIn, doAppleSignIn, doSignOut, consumeRedirectResult, deleteAccount, USERS_COLLECTION, NATIVE_APPLE_ENABLED, APPLE_PROVIDER_ENABLED, isNativePlatform, isAndroidNative, AUTH_PROVIDERS_ENABLED, TOURNAMENT_ID, getEditionSlug, getTournamentYear, isDefaultEdition } from "./firebase";
+import { _app, _db, _auth, onAuthStateChanged, doGoogleSignIn, doAppleSignIn, doSignOut, consumeRedirectResult, deleteAccount, USERS_COLLECTION, NATIVE_APPLE_ENABLED, APPLE_PROVIDER_ENABLED, isNativePlatform, isAndroidNative, AUTH_PROVIDERS_ENABLED, TOURNAMENT_ID, getEditionSlug, getTournamentYear, isDefaultEdition, rememberDirector } from "./firebase";
 import { readMembership, isDirectorAccount, resolveMember, setDirector, subscribeMemberships } from "./lib/accounts";
 // The fourth way in — no account, no password, no roster spot, no writes.
 import { guestUser, isGuest, setGuestWrites, GUEST_NOTICE } from "./lib/guestMode";
@@ -1600,6 +1600,11 @@ export default function WBCApp() {
   useEffect(() => {
     if (!user || user.isGuest) return;
     const flag = isDirectorAccount(membership);
+    // Remembered on the device for one decision made before any account has
+    // loaded: whether an app opening in a past edition is put back into the
+    // live tournament. A director building next year keeps their place; a
+    // player who looked at 2014 does not. See lib/editionHome.
+    rememberDirector(flag);
     if (user.isDirector !== flag) setUser(u => (u ? { ...u, isDirector: flag } : u));
   }, [membership, user]);
 
