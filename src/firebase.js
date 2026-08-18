@@ -319,6 +319,40 @@ export const setActiveTournamentId = (id) => {
   return TOURNAMENT_ID;
 };
 
+// ── Has anybody ever signed in on this device? ─────────────────────
+// Firebase Auth restores its session from IndexedDB, asynchronously, so on
+// every cold start there is a window — usually a few hundred milliseconds —
+// in which the app cannot tell a signed-in player from a stranger.
+//
+// Normally nothing shows for it: the player's session is also in localStorage
+// and is read synchronously, so the app renders the tournament and the auth
+// answer lands behind it. Switching editions is the case where that does not
+// hold, because the switch deliberately clears the stored session (see
+// switchEdition) — so the reload comes up with no player, no Firebase user
+// YET, and falls through to the sign-in screen. Google and Apple buttons flash
+// in front of somebody who is already signed in and merely changing years.
+//
+// This is the flag that closes that window: a device that has signed in before
+// holds the splash until Firebase answers, rather than assuming nobody is
+// there. It is a HINT about what to draw, never about what is allowed —
+// firestore.rules decides that, and a stale flag costs a device half a second
+// of logo before the sign-in screen it was going to show anyway.
+const AUTH_SEEN_KEY = "wbc_signed_in";
+
+export const rememberSignedIn = (on) => {
+  try {
+    if (typeof localStorage === "undefined") return;
+    if (on) localStorage.setItem(AUTH_SEEN_KEY, "1");
+    else localStorage.removeItem(AUTH_SEEN_KEY);
+  } catch { /* blocked storage */ }
+};
+
+export const hadAuthSession = () => {
+  try {
+    return typeof localStorage !== "undefined" && localStorage.getItem(AUTH_SEEN_KEY) === "1";
+  } catch { return false; }
+};
+
 // Remember whether this device belongs to a director, for the boot decision
 // above. Called from App.jsx wherever the membership flag is read.
 export const rememberDirector = (on) => {
