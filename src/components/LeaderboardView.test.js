@@ -73,6 +73,20 @@ describe("LeaderboardView renders", () => {
     expect(rendered()).toMatch(/no scores yet/i);
   });
 
+  // The Wednesday board. Nobody has a score, so nobody is ahead of anybody —
+  // it used to number the field 1, 2, 3 down a list sorted by name.
+  it("has the whole field tied before a ball is struck", () => {
+    mount({
+      holeData: {},
+      lb: [
+        row("aaron_j", "A Jensen", 0, { roundsPlayed: 0, totalThru: 0, rds: [] }),
+        row("dave_k", "D Kelley", 0, { roundsPlayed: 0, totalThru: 0, rds: [] }),
+        row("eric_o", "E Olson", 0, { roundsPlayed: 0, totalThru: 0, rds: [] }),
+      ],
+    });
+    expect(screen.getAllByText("T1")).toHaveLength(3);
+  });
+
   it("draws a round nobody has played", () => {
     mount({ holeData: {}, lb: [row("aaron_j", "Aaron J", 0, { roundsPlayed: 0, totalThru: 0, rds: [] })] });
     expect(rendered().length).toBeGreaterThan(0);

@@ -7,6 +7,7 @@ import {
   computeIndividualBoard,
   rankIndividualBoard,
   rankIndividualBoardIds,
+  positionLabels,
   WD_SCORE,
 } from "./individualBoard";
 
@@ -355,5 +356,48 @@ describe("rankIndividualBoard", () => {
     ];
     const once = rankIndividualBoard(rows);
     expect(rankIndividualBoardIds(once)).toEqual(once.map(r => r.id));
+  });
+});
+
+// ── positionLabels ─────────────────────────────────────────────────
+describe("positionLabels", () => {
+  const row = (id, net, extra = {}) => ({ id, name: id, roundsPlayed: 1, totalNetToPar: net, ...extra });
+  const unplayed = (id) => ({ id, name: id, roundsPlayed: 0, totalNetToPar: 0 });
+
+  it("numbers a ranked field, and shares a number on a tie", () => {
+    expect(positionLabels([row("a", -3), row("b", -1), row("c", -1), row("d", 2)]))
+      .toEqual({ a: 1, b: "T2", c: "T2", d: 4 });
+  });
+
+  // The one this was written for. On the Wednesday nobody has a score, so the
+  // board has nothing to rank on — and it was handing out 1, 2, 3 … down a list
+  // sorted by NAME, so a player found himself lying 9th in a tournament that
+  // had not started.
+  it("ties the whole field before a ball is struck", () => {
+    expect(positionLabels([unplayed("a"), unplayed("b"), unplayed("c")]))
+      .toEqual({ a: "T1", b: "T1", c: "T1" });
+  });
+
+  it("ties the men who have not teed off yet, behind the ones who have", () => {
+    expect(positionLabels([row("a", -2), row("b", 1), unplayed("c"), unplayed("d")]))
+      .toEqual({ a: 1, b: 2, c: "T3", d: "T3" });
+  });
+
+  it("does not tie a single unplayed man with anybody", () => {
+    expect(positionLabels([row("a", -2), unplayed("c")])).toEqual({ a: 1, c: 2 });
+  });
+
+  // A withdrawal is sorted by name because there is nothing else to sort it
+  // by, so it ties with nobody — and its row says WD where a score would be.
+  it("numbers withdrawals one at a time", () => {
+    const board = [row("a", -2), unplayed("c"), unplayed("d"),
+                   { id: "w", name: "w", roundsPlayed: 0, totalNetToPar: 0, isWD: true },
+                   { id: "x", name: "x", roundsPlayed: 2, totalNetToPar: 3, withdrew: true }];
+    expect(positionLabels(board)).toEqual({ a: 1, c: "T2", d: "T2", w: 4, x: 5 });
+  });
+
+  it("copes with an empty board", () => {
+    expect(positionLabels([])).toEqual({});
+    expect(positionLabels()).toEqual({});
   });
 });

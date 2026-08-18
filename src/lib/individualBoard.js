@@ -275,11 +275,12 @@ export function computeIndividualBoard({
 //
 // Returns the ROWS in order. rankIndividualBoardIds returns just the ids, for
 // callers (like the pairing resolver) that only need the order.
+// `isWD` is the roster-level withdrawal flag App.jsx puts on the player;
+// `withdrew` is derived from the sentinel holes. Either marks a player out.
+const isOut = (r) => !!(r?.withdrew || r?.isWD);
+const bucketOf = (r) => isOut(r) ? 2 : r.roundsPlayed > 0 ? 0 : 1;
+
 export function rankIndividualBoard(board = []) {
-  // `isWD` is the roster-level withdrawal flag App.jsx puts on the player;
-  // `withdrew` is derived from the sentinel holes. Either marks a player out.
-  const bucketOf = (r) =>
-    (r.withdrew || r.isWD) ? 2 : r.roundsPlayed > 0 ? 0 : 1;
 
   return [...board].sort((a, b) => {
     const ba = bucketOf(a), bb = bucketOf(b);
@@ -292,6 +293,52 @@ export function rankIndividualBoard(board = []) {
     if (an !== bn) return an < bn ? -1 : 1;
     return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
   });
+}
+
+// ── positionLabels ─────────────────────────────────────────────────
+// The number in front of each name on a ranked board: 1, 2, T3, T3, 5.
+//
+// Takes a board already in rankIndividualBoard order and returns { id: label }.
+// A tie shows the position both players share and skips the one behind it,
+// which is how every scoreboard prints a tie and how the trophy on the
+// leaderboard knows two men can win the same tournament.
+//
+// ── Players with no card yet ARE tied ──────────────────────────────
+// This is the part that was wrong. Before a ball is struck nobody has a score,
+// so the board has nothing to rank on — and it was handing out 1, 2, 3 … 14
+// down a list sorted by NAME, which reads as a standing and is not one. A
+// player looking at it on the Wednesday finds himself lying 9th in a
+// tournament that has not started.
+//
+// So the unplayed block ties, wherever it falls: everybody on the morning of
+// round one, and mid-tournament the men who have not teed off yet, who are all
+// equally without a score and all equally behind the field that has one.
+//
+// Withdrawals are numbered individually and deliberately. rankIndividualBoard
+// sorts them by name because there is nothing else to sort them by, so their
+// number means no more than an unplayed man's did — but the row says WD where
+// its score would be, which is the part that stops it reading as a standing.
+export function positionLabels(board = []) {
+  const labels = {};
+  let i = 0;
+  while (i < board.length) {
+    const row = board[i];
+    let j = i + 1;
+    // How far the tie runs. A withdrawal ties with nobody, so its group is
+    // itself and j stays where it is.
+    if (!isOut(row)) {
+      if (row.roundsPlayed > 0) {
+        while (j < board.length && !isOut(board[j]) && board[j].roundsPlayed > 0
+               && board[j].totalNetToPar === row.totalNetToPar) j++;
+      } else {
+        while (j < board.length && !isOut(board[j]) && !(board[j].roundsPlayed > 0)) j++;
+      }
+    }
+    const tied = j - i > 1;
+    for (let k = i; k < j; k++) labels[board[k].id] = tied ? `T${i + 1}` : i + 1;
+    i = j;
+  }
+  return labels;
 }
 
 export function rankIndividualBoardIds(board = []) {
