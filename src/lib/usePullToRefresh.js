@@ -68,14 +68,44 @@ export function usePullToRefresh({
   useEffect(() => {
     if (refreshing) return;
 
-    // Walk up from the touch target. Returns the scroll container, or null if
-    // we cross a popup backdrop first (gesture belongs to the modal, not the
-    // page) or never find one at all (touch outside the app body).
+    // ── Which element is the finger actually scrolling? ──────────────
+    // Not always the app body. Pairings and the leaderboard both lay out to
+    // the height they HAVE rather than the height of what is in them: the app
+    // body is a flex column, the screen inside it is flex:1, and the stack of
+    // rows carries its own `overflow-y: auto` as a backstop for a draw too
+    // deep to shrink any further. When that backstop is doing its job the app
+    // body cannot scroll at all — its scrollTop is pinned at 0 forever — and
+    // asking IT whether we are "at top" answers yes on every touch, including
+    // the ones where the stack is scrolled half way down.
+    //
+    // That is not a cosmetic wrong answer. `atTop` is what licenses the
+    // preventDefault() below, so every upward flick on a scrolled stack had
+    // its native scroll cancelled and turned into a pull instead: the tab
+    // scrolled down fine and then would not come back, and only switching
+    // tabs — which remounts the stack at scrollTop 0 — got it unstuck.
+    //
+    // So walk up and take the INNERMOST element that is genuinely scrolling,
+    // falling back to the app body when nothing between it and the touch is.
+    const scrollsItself = (el) => {
+      if (el.scrollHeight - el.clientHeight <= 1) return false;
+      const oy = window.getComputedStyle(el).overflowY;
+      return oy === "auto" || oy === "scroll";
+    };
+
+    // Returns the element the gesture belongs to, or null if we cross a popup
+    // backdrop first (it belongs to the modal, not the page) or never reach
+    // the app body at all (touch outside it).
     const findScrollEl = (target) => {
       let el = target;
+      let inner = null;
       while (el) {
         if (el.dataset && el.dataset.popup != null) return null;
-        if (el.classList && el.classList.contains(scrollClass)) return el;
+        if (el.classList && el.classList.contains(scrollClass)) return inner || el;
+        // Both halves of scrollsItself matter: `overflow-y: auto` on a stack
+        // that fits is not a scroller, and a tall stack in a `visible` box
+        // scrolls an ancestor rather than itself. A stack that fits leaves
+        // `inner` null and the pull keeps working exactly as it always has.
+        if (!inner && el.nodeType === 1 && scrollsItself(el)) inner = el;
         el = el.parentElement;
       }
       return null;

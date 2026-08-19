@@ -47,15 +47,39 @@ export function GroupsView({ players, round, tRounds, courses, pairingsData, tee
   // measurement, so running it after paint shows one frame at the wrong size.
   // The stack is flex: 1 against a floor, so its height is the space on offer
   // and does NOT move when the rung it feeds changes — no measure/grow loop.
+  //
+  // Observed, not listened for. `window.resize` only fires when the WINDOW
+  // changes, and most of what moves this stack's floor is above it inside a
+  // window that never moved: the round pills grow a line when the course names
+  // arrive from Firestore and another one when a phone's font is large enough
+  // to wrap them, and the edition and sync banners come and go under the tab.
+  // Every one of those shortens the stack with no resize event to hear, and
+  // the fit went on sizing against the height the tab had before — which is a
+  // draw drawn a rung too big for the room it is now in, which is a tab that
+  // scrolls when the whole point of the fit is that it does not.
+  //
+  // A ResizeObserver on the stack itself catches all of them, and the window
+  // resize with them, since that moves this box too. The width it also reports
+  // cannot start a loop: `scrollbar-gutter: stable` below means the scrollbar
+  // appearing does not narrow the box, so the rung cannot change the width
+  // that chose it. The listener stays as the fallback for anything without an
+  // observer.
   useLayoutEffect(() => {
+    const el = stackRef.current;
+    if (!el) return undefined;
     const measure = () => {
-      const el = stackRef.current;
-      if (!el) return;
-      setBox(prev => (prev.h === el.clientHeight && prev.w === el.clientWidth
+      const node = stackRef.current;
+      if (!node) return;
+      setBox(prev => (prev.h === node.clientHeight && prev.w === node.clientWidth
         ? prev
-        : { h: el.clientHeight, w: el.clientWidth }));
+        : { h: node.clientHeight, w: node.clientWidth }));
     };
     measure();
+    if (typeof ResizeObserver !== "undefined") {
+      const ro = new ResizeObserver(measure);
+      ro.observe(el);
+      return () => ro.disconnect();
+    }
     window.addEventListener("resize", measure);
     return () => window.removeEventListener("resize", measure);
   }, [drawShape]);
@@ -111,8 +135,10 @@ export function GroupsView({ players, round, tRounds, courses, pairingsData, tee
         // The stack takes the rest of the tab whatever it holds — that height
         // IS the input to the fit above. overflowY stays auto as a backstop:
         // a draw too deep for even the smallest rung scrolls rather than
-        // losing its last group off the bottom.
-        <div ref={stackRef} style={{ display: "flex", flexDirection: "column", gap: CARD_GAP, flex: 1, minHeight: 0, overflowY: "auto" }}>
+        // losing its last group off the bottom. The gutter is reserved whether
+        // or not that backstop fires, so a scrollbar arriving cannot narrow
+        // the box the fit measured and send it round again a rung smaller.
+        <div ref={stackRef} style={{ display: "flex", flexDirection: "column", gap: CARD_GAP, flex: 1, minHeight: 0, overflowY: "auto", scrollbarGutter: "stable" }}>
           {drawn.map((rows, gi) => {
             const teeTime = roundTeeTimes[gi];
             return (
