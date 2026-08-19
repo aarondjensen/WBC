@@ -1434,21 +1434,22 @@ function TournamentPanel({ meta, onSave, notify, confirm, scoredRounds = [] }) {
           onto one room, both hanging off the same menu, one of them three taps
           further in. Switching years and cloning next one live there alone
           now, so editions are created, opened and deleted in exactly one
-          place, and what is left here is the scope this tab writes into. */}
+          place, and what is left here is the scope this tab writes into.
+
+          It does not say where to go and change it either. The only person who
+          reads this line is a director, who opened this tab from the same menu
+          that carries Tournaments two rows up — a pointer back at the menu
+          they just came through is a sentence they have to read every visit to
+          learn something they already know. */}
       <div>
         <div style={{ ...label, marginBottom: 8 }}>Active edition</div>
         <div style={{
           width: "100%", boxSizing: "border-box", padding: "12px 14px", borderRadius: R.md,
           background: K.card, border: `1px solid ${K.bdr}`, color: K.t1,
           fontSize: FS.small, fontWeight: 700, letterSpacing: 0.3,
-          display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
+          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
         }}>
-          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            Edition · <span style={{ color: K.acc }}>{TOURNAMENT_ID}</span>
-          </span>
-          <span style={{ fontSize: FS.label, fontWeight: 600, color: K.t3, flexShrink: 0 }}>
-            More › Tournaments to change
-          </span>
+          Edition · <span style={{ color: K.acc }}>{TOURNAMENT_ID}</span>
         </div>
       </div>
 
