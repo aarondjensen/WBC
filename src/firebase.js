@@ -687,8 +687,22 @@ export const consumeRedirectResult = async () => {
     // no error. Naming it beats another silent trip to the sign-in screen; see
     // the note on REDIRECT_MARK above for what causes it and what to check.
     if (attempted) {
+      // ── Which button, and where it was pressed ──────────────────
+      // Apple and Google do not come home the same way. Google returns with a
+      // GET; Apple, because we ask for the name and email scopes, returns with
+      // a cross-site form POST (`response_mode=form_post`), and a POST landing
+      // back inside an iOS home-screen app is the fragile step — it is
+      // routinely handed to Safari instead, leaving the installed app sitting
+      // where it started with nothing to show for the trip.
+      //
+      // That is a different sentence from "something went wrong", because
+      // there is something to DO about it: the other button works in there,
+      // and Apple works in Safari. The mark records which provider was tried,
+      // so the message can say so rather than making somebody guess.
       const err = new Error(
-        "Sign-in came back empty. On an iPhone home-screen app this usually clears if you open wannabecup.com in Safari instead — tell Aaron if it keeps happening.",
+        attempted === "apple" && isStandalonePWA()
+          ? "Sign in with Apple can't finish inside an iPhone home-screen app. Use Sign in with Google here, or open wannabecup.com in Safari."
+          : "Sign-in came back empty. On an iPhone home-screen app this usually clears if you open wannabecup.com in Safari instead — tell Aaron if it keeps happening.",
       );
       err.code = "app/redirect-empty";
       throw err;
