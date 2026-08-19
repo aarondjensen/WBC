@@ -1664,19 +1664,51 @@ export default function WBCApp() {
     // Providers off: nobody can be signed in, so say so at once rather than
     // leaving the app holding for an answer that is never coming.
     if (!AUTH_PROVIDERS_ENABLED) { setFbUser(null); return; }
-    consumeRedirectResult().catch(e => setAuthMsg(e?.message || "Sign-in failed."));
+
+    // ── "Sign-in came back empty" is not a failure on its own ──
+    // The redirect handler can return nothing to getRedirectResult() while
+    // Firebase has ALREADY applied the credential — the pending record is
+    // consumed during Auth's own initialisation, and what arrives instead is
+    // the auth state, a moment later. Reported as an error, that is a red
+    // notice on the sign-in screen belonging to somebody who is in the middle
+    // of being signed in.
+    //
+    // It happened for real: a player photographed that message on his phone
+    // while the admin screen showed him signed in six minutes earlier, and the
+    // login stamp behind that row is only written once an account has been
+    // resolved all the way to a player. He was in; the app told him he was
+    // not.
+    //
+    // So an empty return is HELD, and only becomes a message if Firebase then
+    // says nobody is signed in. `armed` survives until an answer arrives; the
+    // timer is for the case where the listener's first answer is null and the
+    // user lands a beat later, which is the ordering this cannot control.
+    let armed = "";
+    let settle = null;
+    consumeRedirectResult().catch(e => {
+      if (e?.code === "app/redirect-empty") {
+        if (_auth?.currentUser) return;   // already in — nothing to report
+        armed = e.message;
+        settle = setTimeout(() => { if (armed && !_auth?.currentUser) setAuthMsg(armed); }, 2500);
+        return;
+      }
+      setAuthMsg(e?.message || "Sign-in failed.");
+    });
+
     const unsub = onAuthStateChanged(_auth, u => {
       setFbUser(u || null);
       // What the next cold start reads to decide whether to wait for this
       // answer or draw the sign-in screen straight away. Cleared on sign-out
       // by the same listener, which fires with null.
       rememberSignedIn(!!u);
+      // Signed in after all: the redirect did its job by another route.
+      if (u) { armed = ""; if (settle) { clearTimeout(settle); settle = null; } }
     });
     // Belt and braces. onAuthStateChanged fires once on init even offline, so
     // this should never be what ends the wait — but a splash that never
     // resolves is a worse bug than the flash this is fixing.
     const bail = setTimeout(() => setFbUser(v => (v === undefined ? null : v)), 4000);
-    return () => { clearTimeout(bail); unsub(); };
+    return () => { clearTimeout(bail); if (settle) clearTimeout(settle); unsub(); };
   }, []);
 
   // Resolve a signed-in Firebase user to a WBC player: already-claimed fast
