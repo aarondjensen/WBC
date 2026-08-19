@@ -43,7 +43,6 @@ import { PAIRING_MODES, PAIRING_MODE_LABEL, resolvePairingCfg, buildPriorPartner
 import { stateMatches, hasRealSlope, parseRapidAPI, fetchCourseTees } from "../lib/courseSearch";
 import { apiUrl } from "../lib/apiBase";
 import { Popup, ConfirmModal } from "./Popup";
-import { EditionSwitcher } from "./EditionSwitcher";
 import { isHistoryCourseId } from "../lib/historyImport";
 import { localDateISO, fmtRoundDate } from "../lib/format";
 import { SCORING_LEAD_MIN } from "../lib/scoringGate";
@@ -1332,7 +1331,6 @@ function DateRangeCalendar({ start, end, onChange, mode = "range" }) {
 }
 
 function TournamentPanel({ meta, onSave, notify, confirm, scoredRounds = [] }) {
-  const [showEditions, setShowEditions] = useState(false);
   const [busy, setBusy] = useState(false);
   // The calendar opens on a tap and closes on Save. Closing on Save rather than
   // on the second date is deliberate: picking a range leaves the card dirty,
@@ -1426,26 +1424,32 @@ function TournamentPanel({ meta, onSave, notify, confirm, scoredRounds = [] }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      {/* The same sheet the More menu opens, from the other door. This one is
-          inside AdminView, which only a director renders, so it always
-          manages. */}
-      <EditionSwitcher open={showEditions} onClose={() => setShowEditions(false)} notify={notify} canManage />
+      {/* Active edition — a LABEL now, not a door. It stays first on the tab
+          because it says which tournament everything BELOW it is editing:
+          the name, the dates, the event password, the roster. Renaming the
+          wrong year is the mistake this ordering prevents.
 
-      {/* Active edition — switch year or start a new one. First card on the
-          tab because it decides which tournament everything BELOW it is
-          editing; renaming the wrong year is the mistake this ordering
-          prevents. */}
+          It used to open the edition switcher. That is the SAME sheet More →
+          Tournaments opens, with the same director controls — two front doors
+          onto one room, both hanging off the same menu, one of them three taps
+          further in. Switching years and cloning next one live there alone
+          now, so editions are created, opened and deleted in exactly one
+          place, and what is left here is the scope this tab writes into. */}
       <div>
         <div style={{ ...label, marginBottom: 8 }}>Active edition</div>
-        <button onClick={() => setShowEditions(true)} style={{
-          width: "100%", padding: "12px 14px", borderRadius: R.md,
+        <div style={{
+          width: "100%", boxSizing: "border-box", padding: "12px 14px", borderRadius: R.md,
           background: K.card, border: `1px solid ${K.bdr}`, color: K.t1,
-          fontSize: FS.small, fontWeight: 700, letterSpacing: 0.3, cursor: "pointer",
+          fontSize: FS.small, fontWeight: 700, letterSpacing: 0.3,
           display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
         }}>
-          <span>Edition · <span style={{ color: K.acc }}>{TOURNAMENT_ID}</span></span>
-          <span style={{ fontSize: FS.label, color: K.t3, flexShrink: 0 }}>Open / clone a year ›</span>
-        </button>
+          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            Edition · <span style={{ color: K.acc }}>{TOURNAMENT_ID}</span>
+          </span>
+          <span style={{ fontSize: FS.label, fontWeight: 600, color: K.t3, flexShrink: 0 }}>
+            More › Tournaments to change
+          </span>
+        </div>
       </div>
 
       <div style={{ background: K.card, borderRadius: R.lg, border: `1px solid ${K.bdr}`, padding: 14 }}>
