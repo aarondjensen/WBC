@@ -130,9 +130,12 @@ describe("AdminView renders", () => {
     mount();
     fireEvent.click(screen.getByText("Event"));
     // Still says which year the fields under it are writing into — that is
-    // what the card is for.
+    // what the card is for, and all it is for. No pointer back at the menu.
     expect(screen.getByText("Active edition")).toBeTruthy();
-    expect(screen.getByText("More \u203a Tournaments to change")).toBeTruthy();
+    // The id sits in its own accent span, so match that rather than the whole
+    // "Edition \u00b7 wbc_2026" line — getByText reads an element's own text nodes.
+    expect(screen.getByText("wbc_2026")).toBeTruthy();
+    expect(screen.queryByText(/More \u203a Tournaments/)).toBeNull();
     // And no door: nothing on this tab opens the switcher.
     expect(screen.queryByText(/Open \/ clone a year/)).toBeNull();
     // "Tournaments" on its own is the switcher's heading — the state it opens
