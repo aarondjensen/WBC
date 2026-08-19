@@ -470,13 +470,31 @@ export const _auth = _authInstance;
 export const _googleProvider = new GoogleAuthProvider();
 
 // Apple uses the generic OAuthProvider with the 'apple.com' provider id —
-// the Firebase JS SDK has no dedicated AppleAuthProvider class. Request
-// name + email scopes so Apple can populate displayName when the user allows
-// it. WBC never matches on email (players claim their profile by picking their
-// name), so Apple's "Hide My Email" private relay has no effect on the flow.
+// the Firebase JS SDK has no dedicated AppleAuthProvider class.
+//
+// ── NO SCOPES, and that is the whole point ─────────────────────────
+// This asked for `email` and `name`, so Apple could populate displayName. That
+// is what broke Sign in with Apple inside an iOS home-screen app.
+//
+// Apple's rule: requesting ANY scope forces `response_mode=form_post`, so the
+// round trip comes home as a cross-site form POST rather than a GET. The POST
+// itself is fine — the handler answers it on our own domain, Vercel forwards
+// the body, both verified — but a POST navigation landing back inside an iOS
+// standalone web app is routinely handed to Safari instead of to the app. The
+// installed app is left sitting where it started with no user and no error,
+// which is exactly the "came back empty" a player hit repeatedly this week
+// while the SAME button in Safari signed him straight in. Google was never
+// affected because its redirect comes home as a GET.
+//
+// Dropping the scopes costs nothing this app uses. It never matches on email —
+// players claim a profile by picking their own name off the roster, which is
+// why Apple's "Hide My Email" relay was already irrelevant — and a missing
+// displayName falls back to the claimed player's name (see claimProfile).
+// What it buys is a GET return trip, the same shape Google has always used.
+//
+// The NATIVE build is untouched: it signs in through the Capacitor plugin's
+// own Apple sheet, which never makes this trip at all.
 export const _appleProvider = new OAuthProvider("apple.com");
-_appleProvider.addScope("email");
-_appleProvider.addScope("name");
 
 // Apple OAuth token/code, captured at sign-in / reauth. Firebase does NOT
 // persist the Apple token, but App Store Guideline 5.1.1(v) requires the app to
