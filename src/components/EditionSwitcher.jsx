@@ -7,14 +7,18 @@
 // Switching an edition reloads the app (see lib/editions.js), so both the
 // switch and the delete go through a confirmation first.
 //
-// Two doors open this, and they want different things:
+// More → Tournaments is the ONE door onto this, for everybody. Reading a past
+// year — its leaderboard, its cards, who won — is what the menu entry is for,
+// and reading is open to every member in firestore.rules; a director opens the
+// same entry and builds next year in it. (The claim screen renders it too, for
+// a player picking the year they were invited to — read-only, before there is
+// a session to manage anything with.)
 //
-//   More → Tournaments   ANYBODY. Reading a past year — its leaderboard, its
-//                        cards, who won — is what the menu entry is for, and
-//                        reading is open to every member in firestore.rules.
-//   Admin → Tournament   the DIRECTOR, who also builds next year here.
+// Admin → Event used to open this as well, and it was the same sheet with the
+// same controls three taps further in, off a sibling row of the same menu.
+// That card is a label now; switching and cloning happen here alone.
 //
-// `canManage` is the difference. Without it this is a list of years and a
+// `canManage` is what varies by caller. Without it this is a list of years and a
 // Switch button; with it, the New-edition form, the status pill and the
 // delete appear. It is not a security boundary — firestore.rules is, and it
 // allows writes to wbc_editions to a director only — it is there so a player

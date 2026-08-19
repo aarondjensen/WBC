@@ -120,6 +120,27 @@ describe("AdminView renders", () => {
     }
   });
 
+  // ── One door onto the editions ──
+  // The Event tab used to open the SAME edition switcher More → Tournaments
+  // opens, with the same New/clone/delete controls, three taps further in off
+  // a sibling row of the same menu. It is a label now. What this guards is the
+  // easy regression: somebody puts a switcher back and the app has two places
+  // that create and delete tournament years again.
+  it("names the active edition on Event without offering to switch it", () => {
+    mount();
+    fireEvent.click(screen.getByText("Event"));
+    // Still says which year the fields under it are writing into — that is
+    // what the card is for.
+    expect(screen.getByText("Active edition")).toBeTruthy();
+    expect(screen.getByText("More \u203a Tournaments to change")).toBeTruthy();
+    // And no door: nothing on this tab opens the switcher.
+    expect(screen.queryByText(/Open \/ clone a year/)).toBeNull();
+    // "Tournaments" on its own is the switcher's heading — the state it opens
+    // in. The label above reads "More \u203a Tournaments to change", which is a
+    // different text node, so this is the sheet and not the sentence.
+    expect(screen.queryByText("Tournaments")).toBeNull();
+  });
+
   it("renders a tournament nobody has set up yet", () => {
     // The state a director is actually in the first time they open this: no
     // roster, no rounds, no courses, no draw. Every list here has to cope with
