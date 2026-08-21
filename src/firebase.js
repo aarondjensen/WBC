@@ -892,10 +892,17 @@ const pairingCallable = async (name) => {
 // A callable's own timeout is seventy seconds. Both of these are behind a
 // button somebody presses standing outside, on a course, having just been sent
 // to another browser and back — and seventy seconds of a button reading
-// "Checking…" is indistinguishable from the app having died. Twelve is long
-// enough for a cold function start on a bad signal and short enough to still
-// be an answer.
-const PAIRING_TIMEOUT_MS = 12000;
+// "Checking…" is indistinguishable from the app having died.
+//
+// ── Why the number is generous, not tight ─────────────────────────
+// This governs a SLOW server and nothing else. A dead network does not wait
+// for it: a callable with nowhere to go rejects in about a second with
+// `internal`, which lib/authPairing turns into "couldn't reach the server".
+// So the only thing a short timeout buys is failing a request that was going
+// to succeed — and the request most likely to be slow is the very first one
+// after `firebase deploy`, which is a cold container start, and is also the
+// one this whole feature is judged on. Hence twenty-five rather than twelve.
+const PAIRING_TIMEOUT_MS = 25000;
 
 const withPairingTimeout = (promise) => Promise.race([
   promise,
