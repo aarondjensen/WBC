@@ -730,6 +730,26 @@ service cloud.firestore {
 
     // ── Everything else ───────────────────────────────────────────
     // Default deny. Adding a collection to the app means adding it here.
+    // ── wbc_auth_pairings — server-only, and it must stay that way ──
+    // Holds a Firebase CUSTOM TOKEN: whoever reads one of these documents can
+    // sign in as that account. It exists because Sign in with Apple cannot
+    // complete inside an iPhone home-screen app — Firebase's backend asks
+    // Apple for scopes we never requested, any scope forces a form POST on the
+    // way home, and iOS hands a cross-site POST to Safari and never hands it
+    // back. So Safari signs in and files a token here, and the installed app
+    // claims it. See src/lib/authPairing.js and functions/index.js.
+    //
+    // Both ends go through Cloud Functions, whose Admin SDK bypasses these
+    // rules entirely. So NO client ever needs access, and this rule is written
+    // out rather than left to the catch-all below purely so that the next
+    // person to add a collection here reads this paragraph first.
+    //
+    // Do not loosen it. The 32-byte pairing id is the only credential guarding
+    // those tokens; a readable collection would make it a listable one.
+    match /wbc_auth_pairings/{pairId} {
+      allow read, write: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

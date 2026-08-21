@@ -435,6 +435,112 @@ exports.deleteMembership = onCall(async (request) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────
+//  Auth pairing — signing in the home-screen app, when the app cannot
+// ─────────────────────────────────────────────────────────────────────────
+// Sign in with Apple cannot complete inside an iPhone home-screen app. Asked
+// what URL to send a phone to, Firebase's own backend answers, for Apple,
+// `scope=email name` and `response_mode=form_post` — it adds those scopes
+// itself, the client asks for none — and Apple's rule is that any scope forces
+// form_post. So the trip home from Apple is a cross-site form POST, iOS hands a
+// cross-site POST to Safari and does not hand it back, and the sign-in
+// finishes in Safari while the installed app sits on the sign-in screen. iOS
+// gives a home-screen app its own storage partition, so nothing in the browser
+// crosses between them.
+//
+// These two functions are what crosses it. Safari signs in the ordinary way
+// and OFFERS a custom token under a pairing id; the home-screen app CLAIMS it
+// with the id it kept. See src/lib/authPairing.js for the whole shape.
+//
+// ── Why this collection is server-only ────────────────────────────
+// The document holds a custom token: whoever reads it can sign in as that
+// account. firestore.rules never names wbc_auth_pairings, so it falls to the
+// catch-all deny at the bottom of that file and NO client can touch it — the
+// Admin SDK here bypasses rules, which is the whole reason the token can live
+// somewhere a phone cannot read. Do not add a rule for this collection.
+//
+// The id is the only credential, so it is treated as one: 32 random bytes
+// minted client-side, checked for shape at both ends, deleted on the first
+// successful claim, and expired ten minutes after it was offered.
+const PAIRINGS_COL = "wbc_auth_pairings";
+const PAIRING_TTL_MS = 10 * 60 * 1000;
+
+// Must agree with isPairId in src/lib/authPairing.js: 32 bytes, base64url.
+const isPairId = (v) => typeof v === "string" && /^[A-Za-z0-9_-]{43}$/.test(v);
+
+// ─── offerAuthPairing — Safari's half ────────────────────────────────────
+// Called from the browser where sign-in actually worked, once there is a user.
+// Mints a custom token for the CALLER'S OWN uid and nobody else's: the uid
+// comes from the verified auth context, never from the request body, so this
+// cannot be asked to hand out a token for another account.
+exports.offerAuthPairing = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Sign in first, then pair.");
+  }
+  const pairId = request.data?.pairId;
+  if (!isPairId(pairId)) {
+    throw new HttpsError("invalid-argument", "That is not a pairing code.");
+  }
+  const uid = request.auth.uid;
+  let token;
+  try {
+    token = await admin.auth().createCustomToken(uid);
+  } catch (err) {
+    logger.error("offerAuthPairing: createCustomToken failed", { uid, message: err?.message });
+    throw new HttpsError("internal", "Could not create the pairing token.");
+  }
+  try {
+    await db.collection(PAIRINGS_COL).doc(pairId).set({
+      token,
+      uid,
+      createdAt: Date.now(),
+      expiresAt: Date.now() + PAIRING_TTL_MS,
+    });
+  } catch (err) {
+    logger.error("offerAuthPairing: write failed", { uid, message: err?.message });
+    throw new HttpsError("internal", "Could not store the pairing token.");
+  }
+  logger.info("Auth pairing offered", { uid });
+  return { offered: true };
+});
+
+// ─── claimAuthPairing — the home-screen app's half ───────────────────────
+// Deliberately UNAUTHENTICATED: the app calling this has no session yet, which
+// is the entire problem being solved. The pairing id is the credential, and
+// the three things that make that safe are all here — the shape check above
+// (so this is not a probe endpoint), the expiry, and the delete, which makes
+// a token single-use even if the id is later read out of Safari's history.
+//
+// A missing or expired id answers `{ ready: false }` rather than throwing.
+// The app polls this every time it comes to the foreground, and "not yet" is
+// the ordinary answer while somebody is still typing their Apple password.
+exports.claimAuthPairing = onCall(async (request) => {
+  const pairId = request.data?.pairId;
+  if (!isPairId(pairId)) {
+    throw new HttpsError("invalid-argument", "That is not a pairing code.");
+  }
+  const ref = db.collection(PAIRINGS_COL).doc(pairId);
+  let snap;
+  try {
+    snap = await ref.get();
+  } catch (err) {
+    logger.error("claimAuthPairing: read failed", { message: err?.message });
+    throw new HttpsError("internal", "Could not read the pairing.");
+  }
+  if (!snap.exists) return { ready: false };
+
+  const data = snap.data() || {};
+  // Deleted whether it is used or stale, so an expired record cannot sit there
+  // waiting for a clock to be wrong.
+  await ref.delete().catch(() => { /* best effort — the token is still expired */ });
+  if (!data.token || !(Number(data.expiresAt) > Date.now())) {
+    logger.info("Auth pairing expired before it was claimed", { uid: data.uid });
+    return { ready: false, expired: true };
+  }
+  logger.info("Auth pairing claimed", { uid: data.uid });
+  return { ready: true, token: data.token };
+});
+
+// ─────────────────────────────────────────────────────────────────────────
 //  onBudgetAlert — the photo library's circuit breaker
 // ─────────────────────────────────────────────────────────────────────────
 // Google Cloud budgets alert; they do not cap. The documented way to get a

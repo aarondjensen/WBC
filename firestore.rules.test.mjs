@@ -116,6 +116,23 @@ await check("member can claim a name (wbc_users, own uid)", () =>
 await check("member CANNOT claim a name as somebody else", () =>
   assertFails(setDoc(doc(mike, "wbc_users/uid_aaron"), { uid: "uid_aaron", player_id: "aaron_j" })));
 
+// ── The pairing tokens are server-only, and nothing may soften that ──
+// wbc_auth_pairings holds Firebase CUSTOM TOKENS — a document read here is a
+// sign-in as that account. Both ends go through Cloud Functions, whose Admin
+// SDK bypasses these rules, so the correct client access is NONE, and this is
+// asserted from every direction rather than assumed from the catch-all: a
+// signed-in member is the account most likely to be handed access by a
+// well-meaning future rule, and a director the next.
+const PAIR_DOC = "wbc_auth_pairings/" + "A".repeat(43);
+await check("nobody signed out can read a pairing token", () =>
+  assertFails(getDoc(doc(anon, PAIR_DOC))));
+await check("a member cannot read a pairing token", () =>
+  assertFails(getDoc(doc(mike, PAIR_DOC))));
+await check("a member cannot write one either", () =>
+  assertFails(setDoc(doc(mike, PAIR_DOC), { token: "forged" })));
+await check("nobody signed out can write one", () =>
+  assertFails(setDoc(doc(anon, PAIR_DOC), { token: "forged" })));
+
 // ── The market: a book belongs to one player, and it is money ──
 // `skins` holds the CTP tags AND the market's bets. Under a flat member write
 // any player could rewrite anybody's book — not by a path the app offers, but
@@ -278,6 +295,14 @@ await check("director can appoint another director", () =>
   assertSucceeds(setDoc(doc(aaron, "wbc_accounts/uid_mike"), { is_director: true }, { merge: true })));
 await check("director cannot change their OWN crown", () =>
   assertFails(setDoc(doc(aaron, "wbc_accounts/uid_aaron"), { is_director: false }, { merge: true })));
+// Not even the crown reaches the pairing tokens. There is no such thing as a
+// person who should read one — the two Cloud Functions that own them bypass
+// these rules entirely, and a director's console is where somebody would go
+// looking if a rule here ever let them.
+await check("a director cannot read a pairing token either", () =>
+  assertFails(getDoc(doc(aaron, PAIR_DOC))));
+await check("a director cannot forge one", () =>
+  assertFails(setDoc(doc(aaron, PAIR_DOC), { token: "forged" })));
 
 // The director-owned half, from the other side. Same five collections the
 // member above was refused.

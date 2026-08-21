@@ -1,5 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, lazy, Suspense } from "react";
-import { _app, _auth, onAuthStateChanged, doGoogleSignIn, doAppleSignIn, doSignOut, consumeRedirectResult, deleteAccount, USERS_COLLECTION, NATIVE_APPLE_ENABLED, APPLE_PROVIDER_ENABLED, isNativePlatform, isAndroidNative, AUTH_PROVIDERS_ENABLED, TOURNAMENT_ID, getEditionSlug, getTournamentYear, isDefaultEdition, rememberDirector, rememberSignedIn, hadAuthSession, getHomeEditionId, getActiveTournamentId } from "./firebase";
+import { _app, _auth, onAuthStateChanged, doGoogleSignIn, doAppleSignIn, doSignOut, consumeRedirectResult, deleteAccount, newPairId, offerPairing, claimPairing, USERS_COLLECTION, NATIVE_APPLE_ENABLED, APPLE_PROVIDER_ENABLED, isNativePlatform, isAndroidNative, AUTH_PROVIDERS_ENABLED, TOURNAMENT_ID, getEditionSlug, getTournamentYear, isDefaultEdition, rememberDirector, rememberSignedIn, hadAuthSession, getHomeEditionId, getActiveTournamentId } from "./firebase";
 import { readMembership, isDirectorAccount, resolveMember, setDirector, subscribeMemberships } from "./lib/accounts";
 // The fourth way in — no account, no password, no roster spot, no writes.
 import { guestUser, isGuest, setGuestWrites, GUEST_NOTICE } from "./lib/guestMode";
@@ -31,6 +31,7 @@ import { warmChunks, whenIdle } from "./lib/whenIdle";
 import { registerAppServiceWorker } from "./lib/swRegister";
 import { NotificationPrompt } from "./components/NotificationPrompt";
 import { registerForPush, getCachedSubscriptionStatus, getNotificationPermissionState, isStandalonePWA } from "./lib/notifications";
+import { PAIR_KEY, encodePairing, decodePairing, readPairParam, stripPairParam, pairingUrl } from "./lib/authPairing";
 import { shouldPromptForPush, wasPrompted, markPrompted, PUSH_PROMPT_DELAY_MS } from "./lib/notificationPrompt";
 import { rowsToPairings, dedupeGroups } from "./lib/pairings";
 import { EditionBanner } from "./components/EditionBanner";
@@ -75,6 +76,11 @@ const GroupsView = lazy(() => import("./components/GroupsView").then(m => ({ def
 // sees. It is reached one moment after an OAuth round trip, so the network it
 // needs is the network that just answered.
 const ClaimScreen = lazy(() => import("./components/ClaimScreen").then(m => ({ default: m.ClaimScreen })));
+// The two halves of signing the home-screen app in — see lib/authPairing. Lazy
+// because most people never see either: Safari signs in without them, and so
+// does the installed app once it has been paired the first time.
+const PairWaitScreen = lazy(() => import("./components/PairScreen").then(m => ({ default: m.PairWaitScreen })));
+const PairDoneScreen = lazy(() => import("./components/PairScreen").then(m => ({ default: m.PairDoneScreen })));
 // The two sheets off the More menu. Warmed when that menu opens rather than
 // on idle — the same trick warmEditions() already plays with their DATA, one
 // tap ahead of the sheet they belong to.
@@ -412,6 +418,114 @@ export default function WBCApp() {
   const [claimState, setClaimState] = useState(null); // null | { status: "needs-claim", candidates }
   const [claimBusyId, setClaimBusyId] = useState(null);
   const [authMsg, setAuthMsg] = useState("");        // provider sign-in error, shown on login screen
+
+  // ── Pairing: the way into the home-screen app ──────────────────────
+  // Sign in with Apple cannot finish inside an installed iPhone app (see
+  // lib/authPairing). Two independent bits of state, because the two halves
+  // run in two different browsers and never at the same time:
+  //
+  //   pairWait  the HOME-SCREEN app's half — the id it minted and is waiting
+  //             on. Null when this is not that flow.
+  //   pairOffer SAFARI's half — the id it was opened with, and how far filing
+  //             the token has got.
+  const [pairWait, setPairWait] = useState(null);   // null | { id, url, status, error }
+  const [pairOffer, setPairOffer] = useState(null); // null | { id, status, error }
+
+  // Safari, opened from the home-screen app. Read once, on mount, and taken
+  // straight back out of the address bar: whoever holds the id can sign in as
+  // this account, so it must not sit in history or ride along in a shared link.
+  useEffect(() => {
+    const id = readPairParam(window.location.search);
+    if (!id) return;
+    setPairOffer({ id, status: "waiting", error: "" });
+    const clean = stripPairParam(window.location.href);
+    if (clean) { try { window.history.replaceState(null, "", clean); } catch { /* no history access */ } }
+  }, []);
+
+  // …and once somebody is signed in here, file the token under that id. Runs
+  // for an account that was ALREADY signed in on this browser too, which is
+  // the common case: they used Safari yesterday.
+  //
+  // ── Why a ref and not an `alive` flag ─────────────────────────────
+  // The obvious shape — flip the status to "offering" inside the effect, and
+  // cancel on cleanup — eats its own result. Writing the status changes
+  // `pairOffer`, which re-runs the effect, which runs the PREVIOUS run's
+  // cleanup, which cancels the call that is still in flight. The screen then
+  // sits on "Pairing…" forever, having actually paired. So the once-only guard
+  // is a ref keyed on the pairing id, nothing cancels, and every write checks
+  // it is still writing about the same id.
+  const offeredRef = useRef(null);
+  useEffect(() => {
+    const id = pairOffer?.id;
+    if (!id || !fbUser || offeredRef.current === id) return;
+    offeredRef.current = id;
+    const settle = (patch) => setPairOffer(p => (p && p.id === id ? { ...p, ...patch } : p));
+    offerPairing(id)
+      .then(() => settle({ status: "done" }))
+      .catch(e => settle({ status: "error", error: e?.message || "Pairing failed." }));
+  }, [pairOffer, fbUser]);
+
+  // The home-screen app's half: present the id and see whether Safari has
+  // filed anything yet. Returns quietly when it has not — that is the ordinary
+  // answer while somebody is still typing an Apple password over there.
+  const takePairing = useCallback(async (id) => {
+    setPairWait(p => (p ? { ...p, status: "checking", error: "" } : p));
+    try {
+      const signedIn = await claimPairing(id);
+      if (signedIn) {
+        try { localStorage.removeItem(PAIR_KEY); } catch { /* blocked storage */ }
+        setPairWait(null);
+        return true;
+      }
+      setPairWait(p => (p ? { ...p, status: "not-yet" } : p));
+    } catch (e) {
+      setPairWait(p => (p ? { ...p, status: "error", error: e?.message || "Pairing failed." } : p));
+    }
+    return false;
+  }, []);
+
+  // Tapping Apple in the home-screen app starts this instead of a sign-in that
+  // provably cannot finish there.
+  const startPairing = useCallback(() => {
+    setAuthMsg("");
+    let id;
+    try { id = newPairId(); } catch (e) { setAuthMsg(e?.message || "Couldn't start pairing."); return; }
+    try { localStorage.setItem(PAIR_KEY, encodePairing(id, Date.now())); } catch { /* blocked storage */ }
+    setPairWait({ id, url: pairingUrl(window.location.origin, id), status: "idle", error: "" });
+  }, []);
+
+  // Coming back to the app is the signal that Safari is finished with — iOS
+  // fires visibilitychange when the icon is tapped again. Checking on that as
+  // well as on the button means the usual path is: sign in over there, come
+  // back, and already be in.
+  //
+  // A pairing left over from a launch that was interrupted is picked up on
+  // mount too, which is what makes this survive the app being evicted while
+  // somebody is in Safari — the id is in localStorage, not in this component.
+  useEffect(() => {
+    if (!AUTH_PROVIDERS_ENABLED) return;
+    // `undefined` is "Firebase has not answered yet" and a user is "already
+    // in" — neither is somebody to show a pairing screen to. Only a settled
+    // null is. Reading _auth.currentUser instead would put the pairing screen
+    // in front of a signed-in player for the length of a cold start.
+    if (fbUser !== null) return;
+    const resume = () => {
+      let id = null;
+      try { id = decodePairing(localStorage.getItem(PAIR_KEY), Date.now()); } catch { /* blocked storage */ }
+      if (!id) return;
+      setPairWait(p => p || { id, url: pairingUrl(window.location.origin, id), status: "idle", error: "" });
+      takePairing(id);
+    };
+    resume();
+    const onVisible = () => { if (document.visibilityState === "visible") resume(); };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [fbUser, takePairing]);
+
+  const cancelPairing = useCallback(() => {
+    try { localStorage.removeItem(PAIR_KEY); } catch { /* blocked storage */ }
+    setPairWait(null);
+  }, []);
 
   // ── The door: the tournament-password membership ──
   // wbc_accounts/{uid}, and the only place Admin access comes from, via its
@@ -1869,10 +1983,21 @@ export default function WBCApp() {
     setAuthMsg("");
     try { await doGoogleSignIn(); } catch (e) { setAuthMsg(e?.message || "Google sign-in failed."); }
   }, []);
+  // ── Apple, in an installed home-screen app ──
+  // Not a sign-in, because one provably cannot finish there: Firebase asks
+  // Apple for scopes we never requested, any scope forces a form POST on the
+  // way home, and iOS hands a cross-site POST to Safari and never hands it
+  // back. So the button starts a PAIRING instead — sign in where sign-in
+  // works, and carry the result across. See lib/authPairing.
+  //
+  // Google is deliberately left alone: its trip home is a GET, which comes
+  // back into the app, and changing a flow that works to match one that
+  // doesn't would be the wrong trade.
   const handleAppleSignIn = useCallback(async () => {
     setAuthMsg("");
+    if (!isNativePlatform() && isStandalonePWA()) { startPairing(); return; }
     try { await doAppleSignIn(); } catch (e) { setAuthMsg(e?.message || "Apple sign-in failed."); }
-  }, []);
+  }, [startPairing]);
 
   // Unified logout: clear the Firebase session too, or the auth listener would
   // immediately re-resolve and log the person back in. Safe no-op for PIN-only
@@ -2808,6 +2933,47 @@ export default function WBCApp() {
       </div>
   );
 
+  // ── The two pairing screens ────────────────────────────────────────
+  // Both go BEFORE the auth hold, and for the same reason: a device that has
+  // signed in before holds the splash while Firebase answers, and either of
+  // these would spend that wait behind a pulsing logo — the home-screen app on
+  // the one screen telling somebody what to do next, and Safari on the one
+  // telling them it worked.
+  if (pairWait) {
+    return (
+      <Suspense fallback={authHoldScreen}>
+        <PairWaitScreen
+          url={pairWait.url}
+          status={pairWait.status}
+          error={pairWait.error}
+          onCheck={() => takePairing(pairWait.id)}
+          onCancel={cancelPairing}
+        />
+      </Suspense>
+    );
+  }
+  // Nobody signed in here YET is not a state this screen can say anything
+  // useful about — the answer to it is the ordinary sign-in screen — so it
+  // falls through instead of rendering. Once there is a user, "waiting" is
+  // read as "offering": the effect above is what moves it off that, and
+  // deriving the label here rather than writing it into state is what keeps
+  // that effect from re-triggering itself.
+  if (pairOffer && fbUser) {
+    return (
+      <Suspense fallback={authHoldScreen}>
+        <PairDoneScreen
+          status={pairOffer.status === "waiting" ? "offering" : pairOffer.status}
+          error={pairOffer.error}
+          onRetry={() => {
+            offeredRef.current = null;
+            setPairOffer(p => (p ? { ...p, status: "waiting", error: "" } : p));
+          }}
+          onDismiss={() => setPairOffer(null)}
+        />
+      </Suspense>
+    );
+  }
+
   if (holdForAuth({
     user,
     authKnown: fbUser !== undefined,
@@ -2877,9 +3043,23 @@ export default function WBCApp() {
                   buttons below are two different accounts, so reaching for the
                   other one because "Apple didn't work last time" arrives as a
                   stranger, on a roster his own name has already gone from. */}
-              {isStandalonePWA() && (
+              {/* ── Two different sentences, for two different arrivals ──
+                  In SAFARI, opened from the home-screen app: they are here to
+                  connect it, and the only thing that matters is that they pick
+                  the button they always use — the other one is a second
+                  Firebase account, and would pair the wrong one.
+                  In the INSTALLED app: iOS gives it a storage partition of its
+                  own, so being asked again is not the app losing them, and
+                  everything of theirs comes back on the same button. Apple
+                  takes a detour through Safari from here (see lib/authPairing);
+                  saying so before the tap stops it reading as a failure. */}
+              {pairOffer ? (
                 <p style={{ color: K.t3, fontSize: FS.label, fontWeight: 500, lineHeight: 1.45, margin: "-4px 0 12px" }}>
-                  The home-screen app signs in separately. Use the same button you used on the website — the other makes a second account.
+                  Connecting your home-screen app. Sign in with the button you always use — the other one is a different account.
+                </p>
+              ) : isStandalonePWA() && (
+                <p style={{ color: K.t3, fontSize: FS.label, fontWeight: 500, lineHeight: 1.45, margin: "-4px 0 12px" }}>
+                  The home-screen app signs in separately from Safari. Use the same button you used there — the other makes a second account. Apple finishes in Safari; we&rsquo;ll walk you through it.
                 </p>
               )}
               <button onClick={handleGoogleSignIn} style={{ width: "100%", padding: "13px 0", borderRadius: R.lg, background: "#fff", border: "none", color: "#1f1f1f", fontSize: FS.body, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
