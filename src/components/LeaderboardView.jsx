@@ -23,7 +23,6 @@
 // wrong size.
 import { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { K, FS, fsStep, R, ALPHA, MOTION } from "../theme";
-import { Popup } from "./Popup";
 import { ScoreCell } from "./ScoreCell";
 import { LB_COL, LB_PAD_L, WBC_TROPHY, WBC_TROPHY_SILHOUETTE } from "../constants";
 import { NUM_ROUNDS } from "../lib/rounds";

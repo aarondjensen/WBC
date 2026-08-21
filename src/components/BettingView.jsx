@@ -21,7 +21,7 @@
 import { useState, useEffect, useRef } from "react";
 import { K, FS, R, ALPHA, MOTION, FONT } from "../theme";
 import { SegmentedToggle, StickyTop, SectionLabel, Card, Btn } from "./ui";
-import { Popup, ConfirmModal } from "./Popup";
+import { ConfirmModal } from "./Popup";
 import { BuyInTracker } from "./BuyIns";
 import { useConfirm } from "../lib/useConfirm";
 import { CTP_MAX_FT, SIDE_GAME_KEYS, SIDE_GAME_LABELS } from "../constants";
