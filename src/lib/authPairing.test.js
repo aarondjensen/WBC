@@ -117,6 +117,37 @@ describe("what a failed pairing says", () => {
   // The bug this exists for: a callable's `message` for a server-side failure
   // is the code word again, so passing it through put the word "INTERNAL" on
   // screen under the button. Found by driving the flow with no network.
+  // ── The distinction two people lost an afternoon to ─────────────
+  // A function that RAN and threw carries a real explanation. A call that
+  // never arrived carries the code word back as its own message, because a
+  // browser cannot read the status of a response with no CORS headers — which
+  // is what an undeployed function answers with. Collapsing both onto "check
+  // your connection" sent two people to look at their wifi while the fault was
+  // on the server.
+  it("shows what the server said, when the server said anything", () => {
+    const real = "The server couldn't create a pairing token. Tell Aaron.";
+    expect(pairingErrorMessage("functions/internal", real)).toBe(real);
+    expect(pairingErrorMessage("internal", real)).toBe(real);
+  });
+
+  it("ignores a message that is only the code echoed back", () => {
+    expect(pairingErrorMessage("functions/internal", "internal")).toBe(PAIRING_ERRORS.internal);
+    expect(pairingErrorMessage("internal", "internal")).toBe(PAIRING_ERRORS.internal);
+    expect(pairingErrorMessage("internal", "")).toBe(PAIRING_ERRORS.internal);
+    expect(pairingErrorMessage("internal", undefined)).toBe(PAIRING_ERRORS.internal);
+    // Single tokens are never prose, whatever they say.
+    expect(pairingErrorMessage("internal", "UNAVAILABLE")).toBe(PAIRING_ERRORS.internal);
+  });
+
+  // Unreachable and undeployed are the same code, so the wording cannot claim
+  // to know which — and must not tell somebody whose app is plainly working
+  // that their connection is at fault.
+  it("does not blame the phone for a server that isn't there", () => {
+    const msg = PAIRING_ERRORS.internal;
+    expect(msg).not.toMatch(/check your connection/i);
+    expect(msg).toMatch(/tell aaron/i);
+  });
+
   it("never shows a player a Firebase error code", () => {
     const codes = [
       ...Object.keys(PAIRING_ERRORS),

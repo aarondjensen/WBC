@@ -150,23 +150,32 @@ export const stripPairParam = (href) => {
 export const pairingUrl = (origin, id) => `${origin}/?${PAIR_PARAM}=${id}`;
 
 // ── Turning a callable's failure into a sentence ──────────────────
-// Callables answer with a code and, for anything server-side, a `message` that
-// is just the code word again. Passed through, that put the word "INTERNAL" on
-// screen under the pairing button — found by driving this flow with the server
-// unreachable, which is exactly the state a phone on a course is in.
+// Callables answer with a code and a `message`. Which of the two is worth
+// anything depends on where the failure happened, and telling them apart is
+// the whole job of this function:
 //
-// So every code this can produce gets a sentence, and so does anything it
-// cannot: nothing in this flow ever shows a player a Firebase error code.
+//   • The function RAN and threw. Its HttpsError carries a real explanation
+//     written on the server — "couldn't mint the pairing token" — and that is
+//     the most useful sentence anybody will get.
+//   • The call never arrived. The SDK reports `internal` and sets the message
+//     to the code word again, because a browser cannot read the status of a
+//     response with no CORS headers — which is what an undeployed function, or
+//     one without public invoker permission, answers with.
+//
+// Both used to land on this table's `internal` entry, which threw the server's
+// explanation away and told the player to check their connection. That sent
+// two people looking at their wifi while the actual fault was on the server —
+// so a message with prose in it now wins over anything written here.
 export const PAIRING_ERRORS = {
-  // The shape of "the app shipped but `firebase deploy --only functions` did
-  // not". Reads to a player as sign-in being broken, so it names the fix and
-  // who can do it.
+  // Kept for completeness, though a browser rarely sees it: a missing function
+  // fails CORS first and arrives as `internal` below.
   "not-found": "Pairing isn't switched on for this app yet — a director needs to deploy the Cloud Functions.",
-  // Everything that is really "no usable connection". A callable reports a
-  // dead network as `internal`, which is why that is here rather than being
-  // treated as a bug worth reporting.
-  "internal": "Couldn't reach the server. Check your connection and try again.",
-  "unavailable": "Couldn't reach the server. Check your connection and try again.",
+  // Deliberately does NOT just blame the phone. This is equally the shape of
+  // "the Cloud Functions were never deployed" and "they are deployed but not
+  // publicly invokable", and a player who can see the rest of the app working
+  // has already ruled out their own connection.
+  "internal": "Couldn't reach the pairing service. If the rest of the app is working, this is our end — tell Aaron.",
+  "unavailable": "Couldn't reach the pairing service. If the rest of the app is working, this is our end — tell Aaron.",
   "deadline-exceeded": "The server took too long. Try again.",
   "unauthenticated": "That sign-in didn't stick. Sign in again in Safari, then come back.",
   "invalid-argument": "That pairing code isn't valid any more. Start again from the app.",
@@ -175,6 +184,15 @@ export const PAIRING_ERRORS = {
 
 export const PAIRING_FALLBACK = "Pairing failed. Try again, or sign in at wannabecup.com in Safari.";
 
-/** @param {string} code  a callable error code, with or without the "functions/" prefix */
-export const pairingErrorMessage = (code) =>
-  PAIRING_ERRORS[String(code || "").replace(/^functions\//, "")] || PAIRING_FALLBACK;
+/**
+ * @param {string} code           a callable error code, with or without "functions/"
+ * @param {string} [serverMessage] the error's message, if there is one
+ */
+export const pairingErrorMessage = (code, serverMessage) => {
+  const key = String(code || "").replace(/^functions\//, "");
+  const msg = String(serverMessage || "").trim();
+  // Prose means the function ran and explained itself. A single token means
+  // the SDK echoed the code back and there is nothing behind it.
+  if (msg && /\s/.test(msg) && msg !== key) return msg;
+  return PAIRING_ERRORS[key] || PAIRING_FALLBACK;
+};

@@ -918,7 +918,9 @@ const withPairingTimeout = (promise) => Promise.race([
 // "INTERNAL" that used to appear under the button.
 const mapPairingError = (e) => {
   if (e?.code === "app/pairing-timeout") return e;  // already carries a sentence
-  const err = new Error(pairingErrorMessage(e?.code));
+  // The message goes in as well as the code: when the function RAN and threw,
+  // what it said is the most useful thing anybody gets. See pairingErrorMessage.
+  const err = new Error(pairingErrorMessage(e?.code, e?.message));
   err.code = e?.code || "";
   return err;
 };
