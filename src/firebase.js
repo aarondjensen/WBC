@@ -37,6 +37,7 @@ import {
   signInWithRedirect,
   getRedirectResult,
   signInWithCredential,
+  signInWithCustomToken,
   linkWithCredential,
   linkWithPopup,
   reauthenticateWithPopup,
@@ -52,6 +53,7 @@ import { bootEdition, bootEditionMoved, defaultEdition } from "./lib/editionHome
 import {
   REDIRECT_MARK_KEY, encodeRedirectMark, decodeRedirectMark, emptyRedirectMessage,
 } from "./lib/authRedirect";
+import { PAIR_ID_BYTES, encodePairId, isPairId, pairingErrorMessage } from "./lib/authPairing";
 
 // ─── Feature flag ──────────────────────────────────────────────────────────
 // Master switch for the whole Google/Apple sign-in feature. Keep FALSE until
@@ -557,25 +559,32 @@ export const _googleProvider = new GoogleAuthProvider();
 // Apple uses the generic OAuthProvider with the 'apple.com' provider id —
 // the Firebase JS SDK has no dedicated AppleAuthProvider class.
 //
-// ── NO SCOPES, and that is the whole point ─────────────────────────
-// This asked for `email` and `name`, so Apple could populate displayName. That
-// is what broke Sign in with Apple inside an iOS home-screen app.
+// ── NO SCOPES — and it does NOT buy what it was thought to buy ─────
+// This asked for `email` and `name`, and was changed to ask for nothing on the
+// theory that Apple's scope rule (any scope forces `response_mode=form_post`)
+// was what broke Sign in with Apple inside an iPhone home-screen app.
 //
-// Apple's rule: requesting ANY scope forces `response_mode=form_post`, so the
-// round trip comes home as a cross-site form POST rather than a GET. The POST
-// itself is fine — the handler answers it on our own domain, Vercel forwards
-// the body, both verified — but a POST navigation landing back inside an iOS
-// standalone web app is routinely handed to Safari instead of to the app. The
-// installed app is left sitting where it started with no user and no error,
-// which is exactly the "came back empty" a player hit repeatedly this week
-// while the SAME button in Safari signed him straight in. Google was never
-// affected because its redirect comes home as a GET.
+// The theory was right about the cause and wrong about the cure. Asked what
+// URL to send a phone to — with a provider carrying NO scopes, exactly as
+// below — Firebase's own backend answers:
 //
-// Dropping the scopes costs nothing this app uses. It never matches on email —
-// players claim a profile by picking their own name off the roster, which is
-// why Apple's "Hide My Email" relay was already irrelevant — and a missing
-// displayName falls back to the claimed player's name (see claimProfile).
-// What it buys is a GET return trip, the same shape Google has always used.
+//   appleid.apple.com/auth/authorize
+//     response_type = code
+//     scope         = email name        ← added server-side, not by us
+//     response_mode = form_post
+//
+// The scopes are Firebase's, not the client's, and there is no console setting
+// or client call that removes them. So Apple's trip home is a cross-site form
+// POST no matter what this line says, iOS hands that POST to Safari and does
+// not hand it back, and the web redirect flow cannot complete inside an
+// installed app. lib/authPairing is the way round it, and the reason the Apple
+// button does something else entirely there.
+//
+// Asking for nothing here is still right — it just is not a fix. The app never
+// matches on email (players claim a profile by picking their own name off the
+// roster, which is why Apple's "Hide My Email" relay was always irrelevant)
+// and a missing displayName falls back to the claimed player's name. Scopes we
+// do not use are consent screen somebody has to read.
 //
 // The NATIVE build is untouched: it signs in through the Capacitor plugin's
 // own Apple sheet, which never makes this trip at all.
@@ -847,6 +856,97 @@ export const doAppleSignIn = async () => {
   } catch (e) {
     throw mapAuthError(e);
   }
+};
+
+// ─── Auth pairing — the way into the home-screen app ─────────────────────
+// Sign in with Apple cannot finish inside an iPhone home-screen app, and it is
+// not ours to fix: Firebase's backend asks Apple for `scope=email name` — the
+// client asks for none — and any scope forces `response_mode=form_post`, so
+// the trip home is a cross-site POST that iOS hands to Safari and never hands
+// back. lib/authPairing carries the whole reasoning; functions/index.js holds
+// the server half. This is the three calls the app makes.
+//
+// The pairing id is a bearer credential, so it is minted from the platform CSPRNG
+// and nowhere else. No Math.random fallback: a predictable id would be a way to
+// sign in as somebody else, and an app that cannot make a safe one must say so
+// rather than make an unsafe one.
+export const newPairId = () => {
+  const rng = globalThis.crypto;
+  if (!rng?.getRandomValues) {
+    const e = new Error("This browser can't generate a secure pairing code. Sign in at wannabecup.com in Safari instead.");
+    e.code = "app/no-crypto";
+    throw e;
+  }
+  return encodePairId(rng.getRandomValues(new Uint8Array(PAIR_ID_BYTES)));
+};
+
+// Loaded on demand, like the other two callables in this file — the callables
+// SDK is a chunk of its own (see vite.config.js) and a launch should not fetch
+// it for a screen most people never see.
+const pairingCallable = async (name) => {
+  const { getFunctions, httpsCallable } = await import("firebase/functions");
+  return httpsCallable(getFunctions(_app), name);
+};
+
+// ── Both calls are timeboxed, and that is not belt-and-braces ──────
+// A callable's own timeout is seventy seconds. Both of these are behind a
+// button somebody presses standing outside, on a course, having just been sent
+// to another browser and back — and seventy seconds of a button reading
+// "Checking…" is indistinguishable from the app having died. Twelve is long
+// enough for a cold function start on a bad signal and short enough to still
+// be an answer.
+const PAIRING_TIMEOUT_MS = 12000;
+
+const withPairingTimeout = (promise) => Promise.race([
+  promise,
+  new Promise((_, reject) => setTimeout(() => {
+    const e = new Error("Couldn't reach the server. Check your connection and try again.");
+    e.code = "app/pairing-timeout";
+    reject(e);
+  }, PAIRING_TIMEOUT_MS)),
+]);
+
+// Every failure this flow can produce becomes a sentence — see
+// pairingErrorMessage in lib/authPairing, and the note there about the word
+// "INTERNAL" that used to appear under the button.
+const mapPairingError = (e) => {
+  if (e?.code === "app/pairing-timeout") return e;  // already carries a sentence
+  const err = new Error(pairingErrorMessage(e?.code));
+  err.code = e?.code || "";
+  return err;
+};
+
+// Safari's half: file a custom token for THIS account under the pairing id.
+// The uid is never sent — the Cloud Function takes it from the verified auth
+// context, so this cannot ask for a token belonging to anybody else.
+export const offerPairing = async (pairId) => {
+  requireCurrentUser();
+  if (!isPairId(pairId)) throw new Error("That is not a pairing code.");
+  try {
+    const offer = await pairingCallable("offerAuthPairing");
+    await withPairingTimeout(offer({ pairId }));
+    return true;
+  } catch (e) {
+    throw mapPairingError(e);
+  }
+};
+
+// The home-screen app's half: present the id and sign in with what comes back.
+// Returns false for "not yet" — the ordinary answer while somebody is still
+// typing their Apple password in the other browser — and true once in.
+export const claimPairing = async (pairId) => {
+  if (!_auth) throw new Error("Sign-in is not enabled yet.");
+  if (!isPairId(pairId)) return false;
+  let result;
+  try {
+    const claim = await pairingCallable("claimAuthPairing");
+    result = (await withPairingTimeout(claim({ pairId })))?.data;
+  } catch (e) {
+    throw mapPairingError(e);
+  }
+  if (!result?.ready || !result.token) return false;
+  await signInWithCustomToken(_auth, result.token);
+  return true;
 };
 
 // ─── Account linking (Google ⇆ Apple → one Firebase uid) ─────────────────
