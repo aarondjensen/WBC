@@ -167,8 +167,17 @@ describe("the backgrounds hardcoded outside theme.js", () => {
   const dark = paletteFor("dark").bg;
   const light = paletteFor("light").bg;
 
-  it.each(["../index.html", "./index.html"])("%s pre-paints both themes", (f) => {
-    const html = read(f);
+  // One index.html, and only one. This used to check a second copy at
+  // src/index.html as well. Vite's root is the repo root and its entry is the
+  // index.html beside package.json, so that file was never built, never
+  // served, and never seen — but it WAS asserted against, which is what kept
+  // it alive through every change it did not receive. By the end it disagreed
+  // with the real one about the viewport, the theme colour and the favicon,
+  // and it argued for each in comments as carefully as the entry argues for
+  // the opposite. A duplicate nothing runs is a duplicate that is always
+  // right, so it was deleted rather than fixed.
+  it("index.html pre-paints both themes", () => {
+    const html = read("../index.html");
     expect(html).toContain(THEME_KEY);
     expect(html).toContain(dark);
     expect(html).toContain(light);
@@ -188,10 +197,6 @@ describe("the backgrounds hardcoded outside theme.js", () => {
   // is invisible. Move the palette without moving the splash and the screen
   // changes shade at the moment React appears, which is precisely the flash
   // the pre-paint above exists to prevent.
-  //
-  // Only the served document is checked. src/index.html is a stale copy that
-  // Vite never builds — the root one is the entry — so holding it to a splash
-  // it does not have would be asserting a duplicate stays duplicated.
   it("index.html paints the entrance gradient both themes mount into", () => {
     const html = read("../index.html");
     expect(html).toContain(paletteFor("dark").entrance);
