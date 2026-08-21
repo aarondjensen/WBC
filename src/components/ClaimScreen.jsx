@@ -82,8 +82,15 @@ export function ClaimScreen({ fbUser, candidates, onClaim, onCancel, busyId, loc
 
         {candidates.length === 0 ? (
           <div style={{ background: K.card, border: `1px dashed ${K.warn}${ALPHA.line}`, borderRadius: R.lg, padding: 24 }}>
+            {/* ── The common cause is named first, because it is fixable ──
+                Google and Apple are two different Firebase accounts for the
+                same human. Somebody who claimed his name with one and then
+                signed in with the other arrives here as a stranger, and his
+                own name is missing from the roster precisely BECAUSE he
+                already has it. Sending him to a director to have something
+                freed up in Firebase would undo a claim that is correct. */}
             <p style={{ color: K.t2, fontSize: FS.small, margin: 0, lineHeight: 1.6 }}>
-              Every player profile has already been claimed. If one of them is you, ask a tournament director to free it up in Firebase, then sign in again.
+              Every name has already been claimed &mdash; and if one of them is yours, you claimed it with the <strong style={{ color: K.t1 }}>other</strong> sign-in button. Sign out and use the one you used the first time. If that isn&rsquo;t it, ask a tournament director.
             </p>
           </div>
         ) : (

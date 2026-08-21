@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
@@ -97,5 +98,25 @@ export default defineConfig({
     // ran under vitest, which resolves imports the script's own runtime could
     // not. A test of the LOGIC could never have caught it.
     include: ['src/**/*.{test,spec}.{js,jsx}', 'scripts/**/*.{test,spec}.{js,jsx}'],
+    // ── `firebase/auth` means the BROWSER build here, as it does in the app ──
+    // The package ships two: a browser build and a Node one whose
+    // browser-only exports are stubs that throw
+    // auth/operation-not-supported-in-this-environment. Vite picks the browser
+    // build for every real bundle; vitest runs in Node and picks the other,
+    // so a test of anything browser-shaped in Auth tests a stub.
+    //
+    // src/lib/authResolver.test.js is that test — it guards the internal field
+    // firebase.js overrides to keep Sign in with Apple working inside an iPhone
+    // home-screen app, and against the Node build the class it needs is an
+    // error object. Aliased, tests see what a phone sees.
+    // A file path, not a package specifier: @firebase/auth's exports map has
+    // no ./dist/* entry, so the browser build is only reachable by pointing
+    // straight at it.
+    alias: [
+      {
+        find: /^firebase\/auth$/,
+        replacement: fileURLToPath(new URL('./node_modules/@firebase/auth/dist/esm/index.js', import.meta.url)),
+      },
+    ],
   },
 })

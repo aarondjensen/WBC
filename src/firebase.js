@@ -49,6 +49,9 @@ import {
 } from "firebase/auth";
 import { editionSlug, editionYear } from "./lib/editionId";
 import { bootEdition, bootEditionMoved, defaultEdition } from "./lib/editionHome";
+import {
+  REDIRECT_MARK_KEY, encodeRedirectMark, decodeRedirectMark, emptyRedirectMessage,
+} from "./lib/authRedirect";
 
 // ─── Feature flag ──────────────────────────────────────────────────────────
 // Master switch for the whole Google/Apple sign-in feature. Keep FALSE until
@@ -434,6 +437,64 @@ export const isAndroidNative = () => {
 // that cannot be exercised from a dev machine. Not worth 3KB.
 
 
+// ─── The resolver, with its redirect state on disk ───────────────────────
+// `browserPopupRedirectResolver` is what makes popup and redirect sign-in work
+// at all (see the CAVEAT below). It also decides WHERE the redirect round trip
+// keeps its state, and the stock answer — sessionStorage — is what breaks Sign
+// in with Apple inside an iPhone home-screen app.
+//
+// ── The failure, exactly ──────────────────────────────────────────
+// signInWithRedirect writes a `pendingRedirect` flag before navigating away,
+// and getRedirectResult reads it on the way back. Read the SDK
+// (@firebase/auth, RedirectAction.execute) and the consequence is stark: with
+// no flag it does not wait for the auth event, does not raise anything, and
+// resolves NULL. No user, no error, no clue.
+//
+// The flag lives in sessionStorage, and a home-screen web app is suspended for
+// the whole of the trip to Apple and back — which is precisely when iOS is
+// free to evict it. It relaunches on the return leg with sessionStorage empty,
+// so the credential Apple just handed back is dropped on the floor and the
+// player is looking at the sign-in screen again. In Safari the same button
+// takes the popup path and never touches any of this, which is why it works
+// there and not in the installed app.
+//
+// Persistence is the one thing about the resolver worth changing, and the SDK
+// reads it off a single field. Subclassing to swap that field keeps every
+// other behaviour — the iframe, the origin validation, the popup path —
+// exactly as shipped.
+//
+// ── The cost, stated ──────────────────────────────────────────────
+// localStorage is shared between tabs where sessionStorage was not, so two
+// browser tabs starting redirects at once can consume each other's flag. That
+// is a desktop shape nobody here has; the phone shape is the whole feature.
+// The empty-return message now asks for another tap, and a second tap works.
+//
+// ── If a Firebase upgrade moves this ──────────────────────────────
+// The guard below refuses the swap unless the stock resolver really does carry
+// `_redirectPersistence`, so a rename degrades to today's behaviour rather
+// than to a resolver the SDK cannot use. authResolver.test.js asserts the
+// field is still there, so the rename fails the suite instead of the
+// tournament.
+const _redirectResolver = (() => {
+  // Providers off: nothing below ever runs, so build nothing (see the gate note
+  // under initializeAuth — while sign-in is dark this file touches no Auth
+  // machinery at all on a cold start).
+  if (!AUTH_PROVIDERS_ENABLED) return browserPopupRedirectResolver;
+  try {
+    if (typeof browserPopupRedirectResolver !== "function") return browserPopupRedirectResolver;
+    if (!("_redirectPersistence" in new browserPopupRedirectResolver())) return browserPopupRedirectResolver;
+    return class DurableRedirectResolver extends browserPopupRedirectResolver {
+      constructor() {
+        super();
+        this._redirectPersistence = browserLocalPersistence;
+      }
+    };
+  } catch (e) {
+    console.warn("redirect persistence left on sessionStorage:", e?.message || e);
+    return browserPopupRedirectResolver;
+  }
+})();
+
 // ─── Auth persistence — explicit and durable (MNQ lesson) ────────────────
 // Bare getAuth() resolves persistence through a SILENT fallback chain
 // [indexedDB → localStorage → sessionStorage → in-memory]. If IndexedDB is
@@ -447,7 +508,7 @@ export const isAndroidNative = () => {
 // CAVEAT: initializeAuth does NOT auto-register the popup/redirect resolver
 // that getAuth wires up. Without browserPopupRedirectResolver, both the
 // popup (browser-tab) and redirect (installed-PWA) Google flows break — so
-// we pass it explicitly on WEB.
+// we pass it explicitly on WEB — as `_redirectResolver`, the one built above.
 //
 // MNQ lesson (native): the resolver must be OMITTED on native. initializeAuth
 // eagerly processes pending-redirect state THROUGH the resolver during
@@ -478,7 +539,7 @@ if (AUTH_PROVIDERS_ENABLED) {
       persistence: [indexedDBLocalPersistence, browserLocalPersistence],
       // Resolver on web only; omitted on native (see the WKWebView note above).
       ...(!isNativePlatform()
-        ? { popupRedirectResolver: browserPopupRedirectResolver }
+        ? { popupRedirectResolver: _redirectResolver }
         : {}),
     });
   } catch (e) {
@@ -633,24 +694,27 @@ const isStandalonePWA = () =>
 //
 // WBC should not hit that: authDomain is wannabecup.com and vercel.json
 // proxies /__/auth/*, which makes the handler first-party. But "should not"
-// is not "cannot" — a missed OAuth redirect URI in Google Cloud, or a Vercel
-// rewrite that stops matching, reproduces it exactly. So the fact that a
-// redirect was attempted at all gets recorded, and coming back empty becomes
-// a sentence on screen instead of a silent loop.
+// is not "cannot" — a missed OAuth redirect URI in Google Cloud, a Vercel
+// rewrite that stops matching, or the evicted home-screen app the resolver
+// note above is about, all reproduce it exactly. So the fact that a redirect
+// was attempted at all gets recorded, and coming back empty becomes a sentence
+// on screen instead of a silent loop.
 //
-// sessionStorage survives the round trip (same tab, same origin) and nothing
-// else does, which is why it is the place this is left.
-const REDIRECT_MARK = "wbc_auth_redirect";
-
+// It is kept in localStorage, with a time on it — NOT sessionStorage. See
+// lib/authRedirect for why: an iPhone home-screen app is suspended for the
+// whole of the trip to the provider and back, and a suspended web app is one
+// iOS may evict, which empties sessionStorage. The mark has to survive that
+// or the app comes home with no memory of having left.
 const markRedirect = (providerId) => {
-  try { sessionStorage.setItem(REDIRECT_MARK, providerId || "1"); } catch { /* blocked storage */ }
+  try { localStorage.setItem(REDIRECT_MARK_KEY, encodeRedirectMark(providerId, Date.now())); }
+  catch { /* blocked storage */ }
 };
 
 const takeRedirectMark = () => {
   try {
-    const v = sessionStorage.getItem(REDIRECT_MARK);
-    if (v) sessionStorage.removeItem(REDIRECT_MARK);
-    return v;
+    const raw = localStorage.getItem(REDIRECT_MARK_KEY);
+    if (raw) localStorage.removeItem(REDIRECT_MARK_KEY);
+    return decodeRedirectMark(raw, Date.now());
   } catch { return null; }
 };
 
@@ -727,25 +791,22 @@ export const consumeRedirectResult = async () => {
     }
     // We sent them to the provider and got back nothing at all — no user and
     // no error. Naming it beats another silent trip to the sign-in screen; see
-    // the note on REDIRECT_MARK above for what causes it and what to check.
+    // the note on markRedirect above for what causes it and what to check.
     if (attempted) {
-      // ── Which button, and where it was pressed ──────────────────
-      // Apple and Google do not come home the same way. Google returns with a
-      // GET; Apple, because we ask for the name and email scopes, returns with
-      // a cross-site form POST (`response_mode=form_post`), and a POST landing
-      // back inside an iOS home-screen app is the fragile step — it is
-      // routinely handed to Safari instead, leaving the installed app sitting
-      // where it started with nothing to show for the trip.
+      // ── What it says, and what it deliberately no longer says ───
+      // This used to read "Sign in with Apple can't finish inside an iPhone
+      // home-screen app — use Sign in with Google here." It was written when
+      // that looked like the truth, and it made things worse: Google and Apple
+      // mint SEPARATE Firebase accounts for the same human, so a player who
+      // took the advice arrived as a stranger, and the name he had already
+      // claimed with Apple was gone from the roster he was offered. He was
+      // walked out of a sign-in that works on the second tap and into one that
+      // cannot work at all.
       //
-      // That is a different sentence from "something went wrong", because
-      // there is something to DO about it: the other button works in there,
-      // and Apple works in Safari. The mark records which provider was tried,
-      // so the message can say so rather than making somebody guess.
-      const err = new Error(
-        attempted === "apple" && isStandalonePWA()
-          ? "Sign in with Apple can't finish inside an iPhone home-screen app. Use Sign in with Google here, or open wannabecup.com in Safari."
-          : "Sign-in came back empty. On an iPhone home-screen app this usually clears if you open wannabecup.com in Safari instead — tell Aaron if it keeps happening.",
-      );
+      // The mark records which provider was tried, so the message names that
+      // button and asks for it again. The wording lives in lib/authRedirect
+      // with a test that it never points at the other provider.
+      const err = new Error(emptyRedirectMessage(attempted, isStandalonePWA()));
       err.code = "app/redirect-empty";
       throw err;
     }
