@@ -357,7 +357,7 @@ exports.revokeAppleToken = onCall({ secrets: [APPLE_PRIVATE_KEY] }, async (reque
       expiresIn: "5m",
     });
   } catch (err) {
-    logger.error("Apple client secret sign failed", { message: err?.message });
+    logger.error("Apple client secret sign failed", { reason: err?.message });
     throw new HttpsError("internal", "Could not build Apple client secret.");
   }
 
@@ -427,7 +427,7 @@ exports.deleteMembership = onCall(async (request) => {
   try {
     await db.collection("wbc_accounts").doc(uid).delete();
   } catch (err) {
-    logger.error("deleteMembership failed", { uid, message: err?.message });
+    logger.error("deleteMembership failed", { uid, reason: err?.message });
     throw new HttpsError("internal", `Could not delete membership: ${err?.message || err}`);
   }
   logger.info("Membership deleted", { uid });
@@ -498,7 +498,13 @@ exports.offerAuthPairing = onCall(async (request) => {
     // shown to whoever is holding the phone (see pairingErrorMessage in
     // src/lib/authPairing.js), which is why it names the fix rather than
     // describing the error.
-    logger.error("offerAuthPairing: createCustomToken failed", { uid, message: err?.message });
+    // ── `reason`, not `message` ─────────────────────────────────────
+    // Cloud Logging's structured payload has its own `message` field and it
+    // wins, so `{ message: err.message }` silently drops the error text: this
+    // exact failure logged "createCustomToken failed" and nothing about WHY,
+    // which cost a round trip through a player standing on a course. Every
+    // logger call in this file was written that way; they are all `reason` now.
+    logger.error("offerAuthPairing: createCustomToken failed", { uid, reason: err?.message, code: err?.code });
     throw new HttpsError(
       "internal",
       "The server couldn't create a pairing token. Tell Aaron: the functions service account needs the Service Account Token Creator role.",
@@ -512,7 +518,7 @@ exports.offerAuthPairing = onCall(async (request) => {
       expiresAt: Date.now() + PAIRING_TTL_MS,
     });
   } catch (err) {
-    logger.error("offerAuthPairing: write failed", { uid, message: err?.message });
+    logger.error("offerAuthPairing: write failed", { uid, reason: err?.message });
     throw new HttpsError("internal", "The server couldn't file the pairing token. Tell Aaron.");
   }
   logger.info("Auth pairing offered", { uid });
@@ -539,7 +545,7 @@ exports.claimAuthPairing = onCall(async (request) => {
   try {
     snap = await ref.get();
   } catch (err) {
-    logger.error("claimAuthPairing: read failed", { message: err?.message });
+    logger.error("claimAuthPairing: read failed", { reason: err?.message });
     throw new HttpsError("internal", "The server couldn't read the pairing. Tell Aaron.");
   }
   if (!snap.exists) return { ready: false };
