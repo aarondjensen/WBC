@@ -1,28 +1,19 @@
 import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, lazy, Suspense } from "react";
-import { _app, _db, _auth, onAuthStateChanged, doGoogleSignIn, doAppleSignIn, doSignOut, consumeRedirectResult, deleteAccount, USERS_COLLECTION, NATIVE_APPLE_ENABLED, APPLE_PROVIDER_ENABLED, isNativePlatform, isAndroidNative, AUTH_PROVIDERS_ENABLED, TOURNAMENT_ID, getEditionSlug, getTournamentYear, isDefaultEdition, rememberDirector, rememberSignedIn, hadAuthSession, getHomeEditionId, getActiveTournamentId } from "./firebase";
+import { _app, _auth, onAuthStateChanged, doGoogleSignIn, doAppleSignIn, doSignOut, consumeRedirectResult, deleteAccount, USERS_COLLECTION, NATIVE_APPLE_ENABLED, APPLE_PROVIDER_ENABLED, isNativePlatform, isAndroidNative, AUTH_PROVIDERS_ENABLED, TOURNAMENT_ID, getEditionSlug, getTournamentYear, isDefaultEdition, rememberDirector, rememberSignedIn, hadAuthSession, getHomeEditionId, getActiveTournamentId } from "./firebase";
 import { readMembership, isDirectorAccount, resolveMember, setDirector, subscribeMemberships } from "./lib/accounts";
 // The fourth way in — no account, no password, no roster spot, no writes.
 import { guestUser, isGuest, setGuestWrites, GUEST_NOTICE } from "./lib/guestMode";
-import { K, ON_ACC, ON_DANGER, FS, R, ALPHA, MOTION, FONT, SHADOW, SCRIM, DIM_PLACED, getTheme, setTheme, entranceBg } from "./theme";
-import { SegmentedToggle, Toggle, StickyTop, SectionLabel, Card, Toast, Btn } from "./components/ui";
+import { K, FS, R, ALPHA, MOTION, SHADOW, getTheme, setTheme, entranceBg } from "./theme";
+import { Toggle, SectionLabel, Card, Toast, Btn } from "./components/ui";
 import { computeIndividualBoard, rankIndividualBoard, WD_SCORE } from "./lib/individualBoard";
 // Only what the SHELL still needs — the rest went to the Betting tab with it.
 import { fieldFor, computeSkins, toggleIn } from "./lib/sideGames";
 import { normalizeLots, openingSharesLeft, marketWindows, eligibleBets, rebuyers, teeOffAt, roundComplete, marketOutsiders } from "./lib/market";
 // Which books this phone may hold, and when a director publishes the reveal.
 import { betsToHold, shouldPublish, betsSignature } from "./lib/marketSeal";
-import { BuyInPrices, BuyInTracker } from "./components/BuyIns";
 import { SyncBanner } from "./components/SyncBanner";
-import { TeeColorSwatch } from "./components/TeeColorSwatch";
-import { OnCourseScoring } from "./components/OnCourseScoring";
 import { LeaderboardView } from "./components/LeaderboardView";
-import { GroupsView } from "./components/GroupsView";
-import { GroupSetup } from "./components/GroupSetup";
-import { AccessPanel } from "./components/AccessPanel";
-import { ClaimScreen } from "./components/ClaimScreen";
 import { GateScreen } from "./components/GateScreen";
-// What colour a set of tees is — see lib/teeColors.
-import { TEE_COLOR_MAP } from "./lib/teeColors";
 // Tee times survive a re-group because of these two — see lib/teeSheet.js.
 import { rowsToTeeTimes, mergeTeeTimes } from "./lib/teeSheet";
 // Score documents → the holeData map, deletions included — see lib/holeScores.
@@ -34,14 +25,12 @@ import { useSyncStatus } from "./lib/useSyncStatus";
 import { useRoster } from "./lib/roster";
 import { useSheetDrag } from "./lib/useSheetDrag";
 import { usePullToRefresh, hasNewBundle } from "./lib/usePullToRefresh";
-import { NotificationSettings } from "./components/NotificationSettings";
+// Fetching the tabs nobody has tapped yet — see lib/whenIdle.
+import { warmChunks } from "./lib/whenIdle";
 import { NotificationPrompt } from "./components/NotificationPrompt";
 import { registerForPush, getCachedSubscriptionStatus, getNotificationPermissionState } from "./lib/notifications";
 import { shouldPromptForPush, wasPrompted, markPrompted, PUSH_PROMPT_DELAY_MS } from "./lib/notificationPrompt";
 import { rowsToPairings, dedupeGroups } from "./lib/pairings";
-import { PAIRING_MODES, PAIRING_MODE_LABEL } from "./lib/pairingDraw";
-import { Popup, ConfirmModal } from "./components/Popup";
-import { EditionSwitcher } from "./components/EditionSwitcher";
 import { EditionBanner } from "./components/EditionBanner";
 import { warmEditions, cachedEditions } from "./lib/editions";
 import { lockNotice, isEditionLocked, canAdminEdition, demoOnlyAdmin } from "./lib/editionLock";
@@ -52,8 +41,6 @@ import { docIds } from "./lib/editionId";
 import { scopeFor, scopedRegistry } from "./lib/playerScope";
 // The small conversions every screen does — see lib/format.
 import { teeTimeToMinutes } from "./lib/format";
-// The Pairings editor tells a director when scoring will open.
-import { SCORING_LEAD_MIN } from "./lib/scoringGate";
 // How many rounds this event plays — a live binding. See lib/rounds.
 import { NUM_ROUNDS, setRoundCount } from "./lib/rounds";
 import { db, writes } from "./lib/db";
@@ -62,11 +49,35 @@ import { getDefaultTee } from "./lib/defaultTee";
 import { missingTees } from "./lib/roundSetup";
 import { indexFor, matchHistoryName } from "./lib/handicap";
 import { groupKey as groupKeyOf, roundOfGroupKey, liveRound, roundFinalized, switchableGroups, groupProgress } from "./lib/groupSwitch";
-import { AppHeader, HEADER_SAFE_PAD } from "./components/AppHeader";
+import { AppHeader } from "./components/AppHeader";
 import { GroupSwitcher } from "./components/GroupSwitcher";
-import { OffRoundBanner } from "./components/OffRoundBanner";
 import { MoreMenu } from "./components/MoreMenu";
-import { PlayersView } from "./components/PlayersView";
+// ── The tabs, fetched off the critical path and warmed straight after ──
+// Every one of these is a screen nobody is looking at when the app opens, and
+// together they were most of what a phone downloaded before it could draw a
+// leaderboard. `lazy` moves them into chunks of their own.
+//
+// On its own that would be a bad trade for THIS app. The Scoring tab is
+// tapped on a tee box, and a chunk that has not been fetched yet needs a
+// network at the exact moment there may not be one. So every one of them is
+// WARMED after first paint — see the warm effect below and lib/whenIdle. Off
+// the critical path, on the phone before anybody taps.
+const OnCourseScoring = lazy(() => import("./components/OnCourseScoring").then(m => ({ default: m.OnCourseScoring })));
+const PlayersView = lazy(() => import("./components/PlayersView").then(m => ({ default: m.PlayersView })));
+const GroupsView = lazy(() => import("./components/GroupsView").then(m => ({ default: m.GroupsView })));
+// Picking your name off the roster, shown once per account and never again.
+// It is here for what it DRAGS: ClaimScreen renders the Tournaments sheet, so
+// a static import of it pinned EditionSwitcher into the startup bundle and
+// undid the deferral above. Not warmed, for the same reason — warming it
+// would fetch that sheet on every launch to serve a screen almost nobody
+// sees. It is reached one moment after an OAuth round trip, so the network it
+// needs is the network that just answered.
+const ClaimScreen = lazy(() => import("./components/ClaimScreen").then(m => ({ default: m.ClaimScreen })));
+// The two sheets off the More menu. Warmed when that menu opens rather than
+// on idle — the same trick warmEditions() already plays with their DATA, one
+// tap ahead of the sheet they belong to.
+const EditionSwitcher = lazy(() => import("./components/EditionSwitcher").then(m => ({ default: m.EditionSwitcher })));
+const NotificationSettings = lazy(() => import("./components/NotificationSettings").then(m => ({ default: m.NotificationSettings })));
 // ── The gallery, fetched only if somebody opens it ──
 // Its data subscription is already deferred until first open (see the
 // wbc_media listener), for the reason that the photo index is the one
@@ -82,7 +93,7 @@ const PhotosView = lazy(() => import("./components/PhotosView"));
 const AdminView = lazy(() => import("./components/AdminView").then(m => ({ default: m.AdminView })));
 import { photoUploadsAllowed, uploadsDisabledReason } from "./lib/media";
 import { returningPlayers, returningLine } from "./lib/returningPlayers";
-import { TROPHY_SVG_URL, WBC_LOGO, WBC_FAVICON, ROUND_CHOICES, clampRounds, CTP_MAX_FT, CTP_WHEEL_ITEM, CTP_WHEEL_H, SIDE_GAME_KEYS, SIDE_GAME_LABELS, defaultTournamentName } from "./constants";
+import { WBC_LOGO, WBC_FAVICON, clampRounds, SIDE_GAME_KEYS, defaultTournamentName } from "./constants";
 // firebase/messaging is NOT imported here — see the MODULE LOAD POLICY note in
 // lib/notifications.js. It is pulled in dynamically by the one effect that
 // listens for foreground pushes, so it stays out of the startup bundle (it is
@@ -468,7 +479,17 @@ export default function WBCApp() {
   // Tournaments is a tap further in than this menu, so the years are fetched
   // while the menu is being read — see warmEditions, which does nothing at all
   // on a device that has opened the picker before.
-  useEffect(() => { if (menuOpen) warmEditions(); }, [menuOpen]);
+  // The CHUNKS for both go with it. Tournaments and Notifications are the two
+  // sheets this menu leads to, and a menu being read is a whole tap's worth of
+  // warning that one of them is about to be opened.
+  useEffect(() => {
+    if (!menuOpen) return;
+    warmEditions();
+    return warmChunks([
+      () => import("./components/EditionSwitcher"),
+      () => import("./components/NotificationSettings"),
+    ]);
+  }, [menuOpen]);
   // The bar's real height, measured rather than guessed: the menu sits flush
   // on top of it, and the bar's height moves with the device's bottom inset.
   const navRef = useRef(null);
@@ -1223,6 +1244,45 @@ export default function WBCApp() {
 
   const [photosOpened, setPhotosOpened] = useState(false);
   useEffect(() => { if (view === "photos") setPhotosOpened(true); }, [view]);
+
+  // ── The scoring screen mounts on its first open, and never unmounts ──
+  // It is rendered under `display: none` rather than unmounted, so that a
+  // scorer who steps over to the leaderboard mid-hole comes back to the card
+  // exactly as they left it. That is worth keeping, and it is also why `lazy`
+  // alone would have bought nothing here: an always-mounted component fetches
+  // its chunk at mount, which is the moment this was trying to get out of.
+  //
+  // So the same latch the gallery uses. Before the first open there is no card
+  // state to preserve — nobody has typed anything — and after it the mount is
+  // permanent, so the behaviour it exists for is untouched.
+  //
+  // The one thing this changes: `scoringGroup` is reported UP by the screen,
+  // and is null until it has mounted. Its only reader is the header's group
+  // switcher, which renders behind `view === "scoring"` — so it cannot be read
+  // before the mount that fills it.
+  const [scoringOpened, setScoringOpened] = useState(false);
+  useEffect(() => { if (view === "scoring") setScoringOpened(true); }, [view]);
+
+  // ── Fetching the tabs before anybody taps them ──
+  // The three tabs above are `lazy`, which keeps them out of the bundle a
+  // phone downloads to draw a leaderboard. Left at that, the saving would be
+  // paid for at the worst possible moment: the Scoring tab is opened standing
+  // on a tee box, and that is exactly where the signal to fetch a chunk may
+  // have gone.
+  //
+  // So they are fetched during the idle stretch after first paint, while the
+  // app is doing nothing and the phone is still wherever it opened the app.
+  // By the time anybody taps, the chunk is in the browser's cache and `lazy`
+  // resolves without a network at all.
+  //
+  // Deliberately not gated on being signed in: somebody on the login screen
+  // has a network by definition — they are authenticating over it — which
+  // makes it the best moment there is to be doing this.
+  useEffect(() => warmChunks([
+    () => import("./components/OnCourseScoring"),
+    () => import("./components/PlayersView"),
+    () => import("./components/GroupsView"),
+  ]), []);
   useEffect(() => {
     if (!photosOpened) return;
     return db.subscribe("wbc_media", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
@@ -2720,6 +2780,17 @@ export default function WBCApp() {
   // sign-in screen on the first frame rather than a pulsing logo. See
   // lib/authHold, and note the claim screen is checked below — the hold gets
   // out of the way of the one question this flow does need to ask.
+  // The pulsing mark shown while an answer is on its way. Named because it is
+  // used twice: by the hold below, and as the fallback the claim screen shows
+  // while its chunk arrives — which is the same wait, so it should not look
+  // like a different one.
+  const authHoldScreen = (
+      <div style={{ minHeight: "var(--app-height, 100dvh)", background: entranceBg(), display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+        <img src={WBC_LOGO} alt="WBC" style={{ height: 72, opacity: 0.85, animation: "pulse 1.5s ease-in-out infinite", filter: "drop-shadow(0 4px 16px rgba(34,211,167,0.3))" }} />
+        <style>{`@keyframes pulse { 0%,100% { opacity: 0.85; } 50% { opacity: 0.4; } }`}</style>
+      </div>
+  );
+
   if (holdForAuth({
     user,
     authKnown: fbUser !== undefined,
@@ -2727,18 +2798,14 @@ export default function WBCApp() {
     signedIn: !!fbUser,
     needsClaim: claimState?.status === "needs-claim",
   })) {
-    return (
-      <div style={{ minHeight: "var(--app-height, 100dvh)", background: entranceBg(), display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-        <img src={WBC_LOGO} alt="WBC" style={{ height: 72, opacity: 0.85, animation: "pulse 1.5s ease-in-out infinite", filter: "drop-shadow(0 4px 16px rgba(34,211,167,0.3))" }} />
-        <style>{`@keyframes pulse { 0%,100% { opacity: 0.85; } 50% { opacity: 0.4; } }`}</style>
-      </div>
-    );
+    return authHoldScreen;
   }
 
   // A signed-in Firebase user with no resolved player takes precedence over the
   // login screen so they can pick their profile even before any app `user` is set.
   if (claimState?.status === "needs-claim") {
     return (
+      <Suspense fallback={authHoldScreen}>
       <ClaimScreen
         fbUser={fbUser}
         candidates={claimState.candidates}
@@ -2751,6 +2818,7 @@ export default function WBCApp() {
         onClaim={(p) => { setClaimBusyId(p.id); claimProfile(fbUser, p, "manual"); }}
         onCancel={handleLogout}
       />
+      </Suspense>
     );
   }
 
@@ -3013,12 +3081,23 @@ export default function WBCApp() {
           (reading a past year is what the entry is for, and firestore.rules
           allows the read to any member); only a director gets the New-year
           form, the status pill and the delete. */}
-      <EditionSwitcher
-        open={editionsOpen}
-        onClose={() => setEditionsOpen(false)}
-        notify={notify}
-        canManage={!!user.isDirector}
-      />
+      {/* Mounted only while open. The component already returns null when it
+          is not (see the guard at the top of it), but a `lazy` one still
+          fetches its chunk the moment it is mounted — so rendering it always
+          would have undone the deferral. Warmed on the menu open above, which
+          is the only way in, so the fallback below is a formality: null rather
+          than a spinner, because a flash of "loading" inside a sheet that is
+          itself animating in reads as a fault. */}
+      {editionsOpen && (
+        <Suspense fallback={null}>
+          <EditionSwitcher
+            open={editionsOpen}
+            onClose={() => setEditionsOpen(false)}
+            notify={notify}
+            canManage={!!user.isDirector}
+          />
+        </Suspense>
+      )}
 
       {/* Notifications, in their own sheet rather than a section buried inside
           Account. They are a menu entry now, so they need somewhere to land —
@@ -3103,11 +3182,13 @@ export default function WBCApp() {
                     token against a player id, and "guest" is not one. There is
                     nothing to notify them about and nobody to notify. */}
                 {!isGuest(user) && (
-                  <NotificationSettings
-                    user={user}
-                    notify={notify}
-                    onPermissionChange={setNotifPerm}
-                  />
+                  <Suspense fallback={null}>
+                    <NotificationSettings
+                      user={user}
+                      notify={notify}
+                      onPermissionChange={setNotifPerm}
+                    />
+                  </Suspense>
                 )}
 
                 <div style={{ height: 1, background: K.bdr, margin: "18px 0 14px" }} />
@@ -3195,10 +3276,14 @@ export default function WBCApp() {
           type from that measurement, so it needs a floor to measure against. */}
       <div className="wbc-app-body" style={{ padding: (view === "leaderboard" || view === "admin") ? "14px 20px 0 20px" : "14px 20px", flex: 1, overflowY: "auto", overflowX: "hidden", display: (view === "leaderboard" || view === "admin" || view === "groups") ? "flex" : "block", flexDirection: "column", minHeight: 0, paddingBottom: (view === "leaderboard" || view === "admin") ? "28px" : 0 }}>
         {view === "leaderboard" && <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} finalizedRounds={finalizedRounds} skinWins={skinWins} pairingsData={pairingsData} teeTimesData={teeTimesData} loaded={storageLoaded} />}
+        {scoringOpened && (
         <div style={{ display: view === "scoring" ? "block" : "none", paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
+          <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading scoring…</div>}>
           <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeTimesData={teeTimesData} roundDates={roundDates} scoringOpen={scoringOpen} setTee={setTee} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={onSignScorecard} onAttestScorecard={onAttestScorecard} onUnsignScorecard={onUnsignScorecard} onFinalizeRound={finalizeGroup} onUnfinalizeRound={onUnfinalizeGroup} onGoToAdminCourses={(rnd) => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); setAdminSettingsRound(rnd || null); }} markPlayerWD={markPlayerWD} ctpData={ctpData} onSetCtp={onSetCtp} onConfirmCtp={onConfirmCtp} directorPick={directorPick} onGroupChange={setScoringGroup} onSetRound={setRound} />
+          </Suspense>
         </div>
-        {view === "players" && <PlayersView players={allPlayers} registry={registry} meId={user?.id} year={getTournamentYear()} isDirector={!!user.isDirector} onSetOverride={setIndexOverride} />}
+        )}
+        {view === "players" && <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading players…</div>}><PlayersView players={allPlayers} registry={registry} meId={user?.id} year={getTournamentYear()} isDirector={!!user.isDirector} onSetOverride={setIndexOverride} /></Suspense>}
         {/* Posting requires a real account: firestore.rules pins uploadedBy to
             the caller's uid, so a guest — who has no uid at all — could never
             have added to the library. It is not shown one either: the menu row
@@ -3209,7 +3294,7 @@ export default function WBCApp() {
             screen they left open. */}
         {view === "photos" && !isGuest(user) && <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading photos…</div>}><PhotosView items={media} year={getTournamentYear()} uid={fbUser?.uid || null} isDirector={!!user.isDirector} isGuest={!!user.isGuest} canPost={!user.isGuest && !!fbUser?.uid && photoUploadsAllowed(photoConfig)} uploadsBlockedReason={photoUploadsAllowed(photoConfig) ? "" : uploadsDisabledReason(photoConfig)} onUpload={onUploadPhoto} onDelete={onDeletePhoto} notify={notify} /></Suspense>}
         {view === "skins" && <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading betting…</div>}><BettingView players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} numRounds={numRounds} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} marketBets={marketBets} onSaveMarketBet={onSaveMarketBet} leaderboard={getLeaderboard} finalizedRounds={finalizedRounds} pairingsData={pairingsData} firstTeeAt={firstTeeAt} marketNudge={marketNudge} teeTimesData={teeTimesData} roundDates={roundDates} inactivePlayers={inactivePlayers} onAddMarketOutsider={user.isDirector ? onAddMarketOutsider : undefined} /></Suspense>}
-        {view === "groups" && <GroupsView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} pairingsData={pairingsData} teeTimesData={teeTimesData} getPlayerTee={getPlayerTee} user={user} />}
+        {view === "groups" && <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading pairings…</div>}><GroupsView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} pairingsData={pairingsData} teeTimesData={teeTimesData} getPlayerTee={getPlayerTee} user={user} /></Suspense>}
         {view === "admin" && (canAdminHere ? <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading admin…</div>}><AdminView registry={registry} activePlayers={activePlayers} marketPool={marketPool} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} rebuyIds={rebuyIds} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} deletePlayer={deletePlayer} editionsHolding={editionsHolding} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
               setTeeTimesData(prev => {
                 const next = typeof updater === "function" ? updater(prev) : updater;

@@ -50,7 +50,7 @@
 // does; until that exists the notifications are real and they arrive on the
 // web app, which is what the card points at.
 import { useState, useEffect } from "react";
-import { K, FONT, FS, R, ALPHA, MOTION } from "../theme";
+import { K, FONT, FS, R, ALPHA } from "../theme";
 import { Card, SectionLabel, Toggle} from "./ui";
 import { isNativePlatform } from "../firebase";
 import {
