@@ -485,8 +485,24 @@ exports.offerAuthPairing = onCall(async (request) => {
   try {
     token = await admin.auth().createCustomToken(uid);
   } catch (err) {
+    // ── The one that will bite, and what it looks like ──────────────
+    // createCustomToken signs a JWT, and on Cloud Functions v2 that is done by
+    // asking IAM to sign it — which needs the runtime service account to hold
+    // "Service Account Token Creator" ON ITSELF. It is not granted by default,
+    // and nothing else in this file needs it, so this function can be the
+    // first thing in the project ever to ask.
+    //
+    // The failure reaches the phone as a bare `internal`, which is the same
+    // code a browser reports when it cannot reach the function at all — so the
+    // message has to carry the difference, because the code cannot. It is
+    // shown to whoever is holding the phone (see pairingErrorMessage in
+    // src/lib/authPairing.js), which is why it names the fix rather than
+    // describing the error.
     logger.error("offerAuthPairing: createCustomToken failed", { uid, message: err?.message });
-    throw new HttpsError("internal", "Could not create the pairing token.");
+    throw new HttpsError(
+      "internal",
+      "The server couldn't create a pairing token. Tell Aaron: the functions service account needs the Service Account Token Creator role.",
+    );
   }
   try {
     await db.collection(PAIRINGS_COL).doc(pairId).set({
@@ -497,7 +513,7 @@ exports.offerAuthPairing = onCall(async (request) => {
     });
   } catch (err) {
     logger.error("offerAuthPairing: write failed", { uid, message: err?.message });
-    throw new HttpsError("internal", "Could not store the pairing token.");
+    throw new HttpsError("internal", "The server couldn't file the pairing token. Tell Aaron.");
   }
   logger.info("Auth pairing offered", { uid });
   return { offered: true };
@@ -524,7 +540,7 @@ exports.claimAuthPairing = onCall(async (request) => {
     snap = await ref.get();
   } catch (err) {
     logger.error("claimAuthPairing: read failed", { message: err?.message });
-    throw new HttpsError("internal", "Could not read the pairing.");
+    throw new HttpsError("internal", "The server couldn't read the pairing. Tell Aaron.");
   }
   if (!snap.exists) return { ready: false };
 
