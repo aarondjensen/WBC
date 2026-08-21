@@ -22,7 +22,11 @@ import {
   getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
   doc, deleteDoc, collection, query, where, getDocs, writeBatch,
 } from "firebase/firestore";
-import { getFunctions, httpsCallable } from "firebase/functions";
+// firebase/functions is NOT imported here. Its one caller in this file is the
+// Apple token revoke inside deleteAccount, which pulls it in with a dynamic
+// import — see the note there. Statically imported it rode in the chunk every
+// phone fetches at launch, and it was initialized at module load too, for a
+// callable that fires when somebody deletes their account.
 import {
   getAuth,
   initializeAuth,
@@ -177,7 +181,6 @@ export const _db = (() => {
     return getFirestore(_app);
   }
 })();
-const _functions = getFunctions(_app);
 
 // Firestore collections owned by this module. wbc_users maps a Firebase
 // Auth uid → player_id (the permanent career identity shared with 16 years
@@ -408,6 +411,27 @@ export const isAndroidNative = () => {
 // `await` the plugin's METHOD calls (e.g. FirebaseAuthentication.signInWithApple()),
 // which return real promises. On web the plugin is imported but never invoked
 // (every caller is isNativePlatform()-gated), so it's inert there.
+//
+// ── Deferring this was tried, and does not work. Do not try it again ──
+// The plugin plus @capacitor/core are the only Capacitor code this app
+// imports, and a browser can never reach any of it, so an `await import()`
+// behind the native gates looks like free savings. Measured, it is not:
+//
+//   • The chunk they land in (`vendor`) also holds Vite's module-preload
+//     helper, which every dynamic import in the app needs. That helper is
+//     eager, so the chunk is eager, so the plugin ships regardless.
+//   • Giving them a chunk of their own in vite.config.js does get them out of
+//     `vendor`, but the plugin's web implementation imports a much larger
+//     slice of firebase/auth than this app does — 127KB of it — and rolldown
+//     moves that slice into the new chunk with them. The new chunk is then
+//     eager too, because the app's own auth code depends on the same modules.
+//     Net saving over the whole build: about 3KB gzipped.
+//   • Pinning firebase/auth to its own group to separate them does nothing at
+//     all: rolldown ignores that group and emits a byte-identical build.
+//
+// So the cost is a shape this file's own warning above says hangs forever if
+// it is written even slightly wrong, on the one code path — native sign-in —
+// that cannot be exercised from a dev machine. Not worth 3KB.
 
 
 // ─── Auth persistence — explicit and durable (MNQ lesson) ────────────────
@@ -937,7 +961,12 @@ export const deleteAccount = async (playerId) => {
     const authorizationCode = _appleAuthorizationCode;
     if (authorizationCode) {
       try {
-        const revokeAppleToken = httpsCallable(_functions, "revokeAppleToken");
+        // Loaded on demand. The callables SDK exists in this app for two
+        // buttons on the account sheet, and a static import made every phone
+        // in the field carry it to the first tee. Awaiting the module here
+        // costs a deletion one fetch and costs a launch nothing.
+        const { getFunctions, httpsCallable } = await import("firebase/functions");
+        const revokeAppleToken = httpsCallable(getFunctions(_app), "revokeAppleToken");
         await Promise.race([
           revokeAppleToken({ authorizationCode }),
           new Promise((_, reject) => setTimeout(() => reject(new Error("revoke timed out")), 8000)),
