@@ -1,6 +1,9 @@
 {
   "name": "WBC 2026",
   "short_name": "WBC",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
   "icons": [
     {
       "src": "/icons/icon-48.webp",
