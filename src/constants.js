@@ -28,9 +28,20 @@ export const clampRounds = (n) => {
 // the trophy below is a TROPHY: an award, used where a result is being shown.
 // They are not interchangeable, which is why both are here rather than one
 // standing in for the other.
-export const WBC_LOGO = "/wbc-icon-512.png";
+//
+// WEBP, and cut to 384px. The mark is drawn at 90px at its largest (the
+// sign-in screen) and at 30px as the header's CSS mask; the file it used to
+// point at was a 600px PNG weighing 67KB, painted while the app was still
+// waiting on Firebase. It is the FIRST thing on screen on a cold start, so it
+// was also the slowest — 13KB now, same artwork, and the alpha channel the
+// mask needs survives the format.
+export const WBC_LOGO = "/wbc-logo.webp";
 // The 192px cut, for the apple-touch-icon. Kept here with its sibling even
 // though the favicon effect currently writes the path literally.
+//
+// Actually 192px now. It was a 768px image behind that name, 118KB of it,
+// fetched on every launch to be drawn at 32px in a tab — and again by
+// firebase-messaging-sw.js as a notification icon.
 export const WBC_FAVICON = "/wbc-icon-192.png";
 
 // Clean SVG trophy for large silhouette display
@@ -154,7 +165,7 @@ export const WBC_TROPHY = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIoAAAD
 // re-downloaded on every deploy because it rode inside code that changes
 // constantly. As a static asset it is fetched once and cached for a year,
 // and it stops being the reason a code generator gives up on this file.
-export const WBC_TROPHY_SILHOUETTE = "/wbc-trophy-silhouette.png";
+export const WBC_TROPHY_SILHOUETTE = "/wbc-trophy-silhouette.webp";
 
 // ── What a tournament is called before anyone names it ──
 // The app shell and the admin console both fall back to this, and they are

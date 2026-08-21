@@ -40,6 +40,12 @@ export default defineConfig({
           // somebody opening a leaderboard.
           if (/[\\/]node_modules[\\/](@firebase|firebase)[\\/]messaging[\\/]/.test(id)) return "firebase-messaging";
           if (/[\\/]node_modules[\\/](@firebase|firebase)[\\/]storage[\\/]/.test(id)) return "firebase-storage";
+          // The callables SDK, same treatment for the same reason. It serves
+          // two buttons on the account sheet — revoke an Apple token, release
+          // a membership — and both call sites `await import()` it. Without a
+          // name of its own it landed straight back in `firebase` below and
+          // every phone fetched it to open a leaderboard.
+          if (/[\\/]node_modules[\\/](@firebase|firebase)[\\/]functions[\\/]/.test(id)) return "firebase-functions";
           if (/[\\/]node_modules[\\/](@firebase|firebase|idb)[\\/]/.test(id)) return "firebase";
           if (/[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/.test(id)) return "react";
           return "vendor";

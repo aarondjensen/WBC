@@ -43,7 +43,6 @@
 // collapsing both into null would put the password screen in front of
 // somebody who is already through it, on the first tee, with no signal.
 import { doc, getDoc, setDoc, collection, onSnapshot } from "firebase/firestore";
-import { getFunctions, httpsCallable } from "firebase/functions";
 import { _app, _db } from "../firebase";
 
 // One membership document per account, keyed BY the uid so the rules can
@@ -235,8 +234,16 @@ export async function setAccessCode(code) {
 // is gone grants nothing (nothing can sign in as that uid again), so
 // refusing to delete somebody's account because a callable was not deployed
 // is the worse failure of the two.
+//
+// firebase/functions is imported HERE rather than at the top of the file, and
+// the reason is startup rather than tidiness: a static import puts the
+// callables SDK in the chunk every phone downloads before it can draw a
+// leaderboard, to serve one button on the account sheet. Deleting an account
+// can afford a round trip for the module; opening the app cannot. Same policy
+// as lib/notifications.js — see the MODULE LOAD POLICY note there.
 export async function releaseMembership() {
   try {
+    const { getFunctions, httpsCallable } = await import("firebase/functions");
     await httpsCallable(getFunctions(_app), "deleteMembership")();
     return { ok: true };
   } catch (e) {
