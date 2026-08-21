@@ -19,6 +19,7 @@
 // browser, and come back — and a player who does not understand WHY will
 // assume it is broken and stop. Every line here is doing that job. It is the
 // one screen in this app where explaining costs less than not explaining.
+import { useState } from "react";
 import { K, FS, R, ALPHA, entranceBg } from "../theme";
 import { WBC_LOGO } from "../constants";
 import { Btn } from "./ui";
@@ -51,9 +52,40 @@ const Step = ({ n, children, done = false }) => (
  * "checking" while the claim is in flight, "not-yet" when Safari has not
  * offered anything yet — which is the ordinary answer while somebody is still
  * typing an Apple password, and so is worded as a nudge rather than a failure.
+ *
+ * ── "bounced", and why this screen has two ways out ────────────────
+ * A home-screen app cannot reliably hand a URL to Safari. Whether a
+ * target="_blank" link leaves the app depends on whether iOS considers that
+ * URL part of the app, which depends on the manifest, which iOS reads once
+ * when the icon is created and never again. Get it wrong and the link reloads
+ * the app onto its own pairing URL: the player taps "Open Safari" and watches
+ * the page refresh, over and over, with nothing to do about it. Not a
+ * hypothetical — it is what the first person to use this screen hit.
+ *
+ * So the link is the happy path and never the only path. "bounced" is the app
+ * having caught itself being reopened instead of Safari, and its answer is a
+ * copy button plus the URL in a box somebody can select by hand. That works
+ * whatever iOS decides, because at that point the only thing crossing between
+ * the two browsers is a person with a clipboard.
+ *
+ * It is a prop of its own rather than a `status` value because the two are
+ * different axes and outlive each other: the app claims on every foreground,
+ * so a bounced screen still cycles through "checking" and "not-yet" while its
+ * instructions have to stay put.
  */
-export function PairWaitScreen({ url, status = "idle", error = "", onOpen, onCheck, onCancel }) {
+export function PairWaitScreen({ url, status = "idle", bounced = false, error = "", onOpen, onCheck, onCancel }) {
   const busy = status === "checking";
+  // null = not tried, true = copied, false = the browser refused. The third
+  // state matters: a button that says "copied" and did not would strand
+  // somebody with no way to get the URL out of the app at all.
+  const [copied, setCopied] = useState(null);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(null), 4000);
+    } catch { setCopied(false); }
+  };
   return (
     <div style={shell}>
       <div style={{ width: "100%", maxWidth: 380, textAlign: "center" }}>
@@ -62,28 +94,56 @@ export function PairWaitScreen({ url, status = "idle", error = "", onOpen, onChe
           Finish in Safari
         </h1>
         <p style={{ color: K.t2, fontSize: FS.small, margin: "0 0 20px", lineHeight: 1.5 }}>
-          Apple won&rsquo;t complete a sign-in inside a home-screen app &mdash; that&rsquo;s an iPhone rule, not a WBC one.
-          Sign in once in Safari and this app picks it up. You only do this the first time.
+          {bounced
+            ? "Your iPhone kept that link inside the app instead of opening Safari. Copy it and paste it into Safari yourself — everything after that is the same."
+            : "Apple won't complete a sign-in inside a home-screen app — that's an iPhone rule, not a WBC one. Sign in once in Safari and this app picks it up. You only do this the first time."}
         </p>
 
         <div style={{ background: K.card, border: `1px solid ${K.bdr}`, borderRadius: R.lg, padding: "16px 14px 6px", marginBottom: 16 }}>
-          <Step n={1}>Tap <strong style={{ color: K.t1 }}>Open Safari</strong> below.</Step>
-          <Step n={2}>Sign in there with the same button you always use.</Step>
-          <Step n={3}>Come back here and tap <strong style={{ color: K.t1 }}>I&rsquo;m signed in</strong>.</Step>
+          {bounced ? (
+            <>
+              <Step n={1}>Tap <strong style={{ color: K.t1 }}>Copy link</strong> below.</Step>
+              <Step n={2}>Open <strong style={{ color: K.t1 }}>Safari</strong>, paste it into the address bar, and go.</Step>
+              <Step n={3}>Sign in there, then come back here and tap <strong style={{ color: K.t1 }}>I&rsquo;m signed in</strong>.</Step>
+            </>
+          ) : (
+            <>
+              <Step n={1}>Tap <strong style={{ color: K.t1 }}>Open Safari</strong> below.</Step>
+              <Step n={2}>Sign in there with the same button you always use.</Step>
+              <Step n={3}>Come back here and tap <strong style={{ color: K.t1 }}>I&rsquo;m signed in</strong>.</Step>
+            </>
+          )}
         </div>
 
-        {/* An anchor, not window.open: in a home-screen app a target=_blank
-            link is what reliably hands the URL to Safari, and it needs no
-            popup permission to do it. */}
-        <a
-          href={url} target="_blank" rel="noopener noreferrer" onClick={onOpen}
-          style={{
-            display: "flex", alignItems: "center", justifyContent: "center",
-            width: "100%", padding: "13px 0", borderRadius: R.lg,
-            background: K.acc, color: K.bg, textDecoration: "none",
-            fontSize: FS.body, fontWeight: 800, letterSpacing: "0.02em",
-          }}
-        >Open Safari</a>
+        {/* An anchor rather than window.open, because a target=_blank link is
+            what a home-screen app can offer Safari without needing popup
+            permission. Whether iOS actually hands it over is not ours to
+            decide — hence the copy path below, and the note on "bounced". */}
+        {!bounced && (
+          <a
+            href={url} target="_blank" rel="noopener noreferrer" onClick={onOpen}
+            style={{
+              display: "flex", alignItems: "center", justifyContent: "center",
+              width: "100%", padding: "13px 0", borderRadius: R.lg,
+              background: K.acc, color: K.bg, textDecoration: "none",
+              fontSize: FS.body, fontWeight: 800, letterSpacing: "0.02em",
+            }}
+          >Open Safari</a>
+        )}
+
+        <Btn onClick={copy} size="lg" block variant={bounced ? "primary" : "ghost"}
+          style={bounced ? undefined : { marginTop: 6, color: K.t3 }}>
+          {copied === true ? "Link copied ✓" : bounced ? "Copy link" : "Didn't open Safari? Copy the link"}
+        </Btn>
+
+        {(bounced || copied === false) && (
+          <div style={{
+            marginTop: 8, padding: "9px 11px", borderRadius: R.md,
+            background: K.inp, border: `1px solid ${K.bdr}`,
+            color: K.t2, fontSize: FS.label, fontWeight: 500,
+            textTransform: "none", wordBreak: "break-all", userSelect: "all", textAlign: "left",
+          }}>{url}</div>
+        )}
 
         <Btn onClick={onCheck} size="lg" block disabled={busy} variant="secondary" style={{ marginTop: 10 }}>
           {busy ? "Checking…" : "I'm signed in — continue"}

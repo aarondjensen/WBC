@@ -434,12 +434,30 @@ export default function WBCApp() {
   // Safari, opened from the home-screen app. Read once, on mount, and taken
   // straight back out of the address bar: whoever holds the id can sign in as
   // this account, so it must not sit in history or ride along in a shared link.
+  //
+  // ── Unless it is not Safari at all ────────────────────────────────
+  // A pairing URL is only ever handed out by the home-screen app, to be opened
+  // somewhere else. So seeing one while RUNNING as the home-screen app means
+  // exactly one thing: iOS kept the link instead of passing it to Safari, and
+  // the app has just reloaded onto its own pairing URL. Left alone that is an
+  // infinite loop with a button in it — tap Open Safari, watch the page
+  // refresh, repeat — which is what the first player to reach this screen got.
+  //
+  // Caught here it becomes a different screen: copy the link, paste it into
+  // Safari by hand. The manifest change that caused it is reverted (see
+  // lib/manifest.test.js) but this stays, because whether a link escapes a
+  // home-screen app is iOS's decision and it is read from a manifest cached
+  // when the icon was created — so an old icon can still behave the old way.
   useEffect(() => {
     const id = readPairParam(window.location.search);
     if (!id) return;
-    setPairOffer({ id, status: "waiting", error: "" });
     const clean = stripPairParam(window.location.href);
     if (clean) { try { window.history.replaceState(null, "", clean); } catch { /* no history access */ } }
+    if (isStandalonePWA()) {
+      setPairWait({ id, url: pairingUrl(window.location.origin, id), status: "idle", bounced: true, error: "" });
+      return;
+    }
+    setPairOffer({ id, status: "waiting", error: "" });
   }, []);
 
   // …and once somebody is signed in here, file the token under that id. Runs
@@ -491,7 +509,7 @@ export default function WBCApp() {
     let id;
     try { id = newPairId(); } catch (e) { setAuthMsg(e?.message || "Couldn't start pairing."); return; }
     try { localStorage.setItem(PAIR_KEY, encodePairing(id, Date.now())); } catch { /* blocked storage */ }
-    setPairWait({ id, url: pairingUrl(window.location.origin, id), status: "idle", error: "" });
+    setPairWait({ id, url: pairingUrl(window.location.origin, id), status: "idle", bounced: false, error: "" });
   }, []);
 
   // Coming back to the app is the signal that Safari is finished with — iOS
@@ -513,7 +531,7 @@ export default function WBCApp() {
       let id = null;
       try { id = decodePairing(localStorage.getItem(PAIR_KEY), Date.now()); } catch { /* blocked storage */ }
       if (!id) return;
-      setPairWait(p => p || { id, url: pairingUrl(window.location.origin, id), status: "idle", error: "" });
+      setPairWait(p => p || { id, url: pairingUrl(window.location.origin, id), status: "idle", bounced: false, error: "" });
       takePairing(id);
     };
     resume();
@@ -2945,6 +2963,7 @@ export default function WBCApp() {
         <PairWaitScreen
           url={pairWait.url}
           status={pairWait.status}
+          bounced={pairWait.bounced}
           error={pairWait.error}
           onCheck={() => takePairing(pairWait.id)}
           onCancel={cancelPairing}

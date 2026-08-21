@@ -65,6 +65,60 @@ describe("PairWaitScreen — the home-screen app's half", () => {
     expect(screen.getByText(/Checking/i).closest("button").disabled).toBe(true);
   });
 
+  // ── The loop the first real user fell into ──────────────────────
+  // The manifest declared a scope, so iOS treated the pairing URL as part of
+  // the app and kept the link instead of handing it to Safari: tap Open
+  // Safari, watch the page reload onto the same screen, repeat. The scope is
+  // gone, but whether a link escapes a home-screen app is iOS's call, read
+  // from a manifest cached when the icon was made — so an old icon can still
+  // do it, and this is the way out that does not depend on iOS at all.
+  it("swaps the link for a copyable URL once it has bounced", () => {
+    render(h(PairWaitScreen, { url: URL_, bounced: true, onCheck: () => {}, onCancel: () => {} }));
+    expect(screen.queryByRole("link", { name: /Open Safari/i })).toBe(null);
+    expect(screen.getByRole("button", { name: /Copy link/i })).toBeTruthy();
+    // Selectable by hand, for a browser that refuses the clipboard outright.
+    expect(screen.getByText(URL_)).toBeTruthy();
+  });
+
+  it("says what iOS did, rather than blaming the sign-in", () => {
+    render(h(PairWaitScreen, { url: URL_, bounced: true, onCheck: () => {}, onCancel: () => {} }));
+    expect(screen.getByText(/kept that link inside the app/i)).toBeTruthy();
+    expect(screen.getByText(/paste it into the address bar/i)).toBeTruthy();
+  });
+
+  // Bounced is sticky and the claim runs on every foreground, so the two have
+  // to coexist: the instructions must survive a "nothing yet" answer.
+  it("keeps the copy instructions while it goes on claiming", () => {
+    render(h(PairWaitScreen, { url: URL_, bounced: true, status: "not-yet", onCheck: () => {}, onCancel: () => {} }));
+    expect(screen.getByRole("button", { name: /Copy link/i })).toBeTruthy();
+    expect(screen.getByText(/Nothing to pick up yet/i)).toBeTruthy();
+  });
+
+  it("offers the copy escape before it has bounced too", () => {
+    render(h(PairWaitScreen, { url: URL_, onCheck: () => {}, onCancel: () => {} }));
+    expect(screen.getByRole("button", { name: /Copy the link/i })).toBeTruthy();
+  });
+
+  it("copies to the clipboard, and says so", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+    render(h(PairWaitScreen, { url: URL_, bounced: true, onCheck: () => {}, onCancel: () => {} }));
+    fireEvent.click(screen.getByRole("button", { name: /Copy link/i }));
+    await screen.findByText(/Link copied/i);
+    expect(writeText).toHaveBeenCalledWith(URL_);
+    vi.unstubAllGlobals();
+  });
+
+  // A clipboard that throws must not leave a button claiming it worked.
+  it("shows the URL to select when the clipboard refuses", async () => {
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText: vi.fn().mockRejectedValue(new Error("no")) } });
+    render(h(PairWaitScreen, { url: URL_, onCheck: () => {}, onCancel: () => {} }));
+    fireEvent.click(screen.getByRole("button", { name: /Copy the link/i }));
+    await screen.findByText(URL_);
+    expect(screen.queryByText(/Link copied/i)).toBe(null);
+    vi.unstubAllGlobals();
+  });
+
   it("has a way back to the sign-in screen", () => {
     const onCancel = vi.fn();
     render(h(PairWaitScreen, { url: URL_, onCheck: () => {}, onCancel: onCancel }));

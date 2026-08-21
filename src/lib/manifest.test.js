@@ -1,32 +1,31 @@
 /**
- * The web app manifest, and the one thing in it that is about SIGNING IN.
+ * The web app manifest, and the member it must NOT declare.
  *
  * JSON cannot hold a comment, so the reasoning lives here.
  *
- * ── Why `scope` earns its place ───────────────────────────────────
- * Signing in from an iPhone home-screen app is three top-level navigations:
- * the app leaves for Firebase's handler on wannabecup.com, the handler sends
- * the phone to appleid.apple.com, and Apple sends it back to the handler.
- * Only the middle one is off our domain.
+ * ── `scope` was added on a theory, and it broke a real screen ──────
+ * It went in to make iOS treat /__/auth/handler as part of the installed app,
+ * in the hope that the trip home from Apple would then land in the app rather
+ * than in Safari. It did not fix that — the trip home from Apple is a
+ * cross-site POST, which iOS hands to Safari whatever the scope says (see
+ * src/lib/authPairing.js).
  *
- * iOS decides what to do with each of those by asking whether the URL is
- * inside the installed app's SCOPE. In scope, the app navigates itself. Out of
- * scope, iOS opens a browser over the top — and whether the return leg comes
- * back to the app or is simply left in Safari depends on iOS agreeing that the
- * URL it lands on belongs to the app. This manifest declared no scope at all,
- * so that judgement was left to a default, on the one step of the one flow
- * where getting it wrong means the player is looking at wannabecup.com in
- * Safari while his home-screen app sits on the sign-in screen, still signed
- * out. That is the bug this file is a test for.
+ * What it DID do was break the way out. Pairing works by opening
+ * wannabecup.com/?pair=<id> in Safari with a target="_blank" link. Declare
+ * `scope: "/"` and that URL is inside the app, so iOS keeps the link in the
+ * app instead of handing it to Safari: the app reloads onto its own pairing
+ * URL, strips the parameter, and draws the same screen again. To the player
+ * holding the phone, tapping "Open Safari" just refreshes the page. Forever.
  *
- * `"/"` is the whole origin, which is what we want: /__/auth/handler is the
- * app's own sign-in handler (proxied by vercel.json) and has to be treated as
- * part of the app.
+ * So there is no `scope` here, and no `start_url` either — a start_url of "/"
+ * implies the same scope by spec, and this app has only ever launched at "/"
+ * anyway. `id` stays: it is what keeps an install pointed at the same app
+ * across changes to either, and it has no bearing on link routing.
  *
- * `start_url` and `id` go with it — a manifest with no start_url takes
- * whatever page happened to be open when somebody tapped Add to Home Screen,
- * and `id` is what keeps an install pointing at the same app across changes to
- * either.
+ * If a future change wants `scope` back, it has to answer this first: what
+ * happens when the pairing link is tapped? There is a copy-the-link fallback
+ * on that screen now precisely because this cannot be reasoned about from a
+ * desk — but the fallback is the fallback, not the plan.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -36,16 +35,16 @@ const manifest = JSON.parse(
 );
 
 describe("the PWA manifest", () => {
-  // The sign-in one. See the header.
-  it("puts the whole origin in scope, so the auth handler is inside the app", () => {
-    expect(manifest.scope).toBe("/");
+  // The one this file exists for. See the header before changing it.
+  it("declares no scope, so the pairing link can still reach Safari", () => {
+    expect("scope" in manifest).toBe(false);
   });
 
-  it("always launches at the top of the app", () => {
-    expect(manifest.start_url).toBe("/");
+  it("declares no start_url either, which would imply the same scope", () => {
+    expect("start_url" in manifest).toBe(false);
   });
 
-  it("has a stable identity", () => {
+  it("keeps a stable identity", () => {
     expect(manifest.id).toBe("/");
   });
 
