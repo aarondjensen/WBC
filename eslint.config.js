@@ -149,9 +149,11 @@ export default defineConfig([
     },
   },
   // Service worker — no DOM, and `firebase` arrives as a global from the
-  // compat bundles pulled in via importScripts().
+  // compat bundles pulled in via importScripts(). sw-cache-rules.js is pulled
+  // into it the same way and runs in the same scope, so it needs the same
+  // globals despite not being a worker entry point itself.
   {
-    files: ['public/**/*-sw.js'],
+    files: ['public/**/*-sw.js', 'public/sw-*.js'],
     languageOptions: {
       globals: { ...globals.serviceworker, firebase: 'readonly' },
     },
