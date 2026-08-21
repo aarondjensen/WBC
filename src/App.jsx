@@ -26,7 +26,9 @@ import { useRoster } from "./lib/roster";
 import { useSheetDrag } from "./lib/useSheetDrag";
 import { usePullToRefresh, hasNewBundle } from "./lib/usePullToRefresh";
 // Fetching the tabs nobody has tapped yet — see lib/whenIdle.
-import { warmChunks } from "./lib/whenIdle";
+import { warmChunks, whenIdle } from "./lib/whenIdle";
+// Keeping the app shell on the phone — see lib/swRegister.
+import { registerAppServiceWorker } from "./lib/swRegister";
 import { NotificationPrompt } from "./components/NotificationPrompt";
 import { registerForPush, getCachedSubscriptionStatus, getNotificationPermissionState } from "./lib/notifications";
 import { shouldPromptForPush, wasPrompted, markPrompted, PUSH_PROMPT_DELAY_MS } from "./lib/notificationPrompt";
@@ -1283,6 +1285,21 @@ export default function WBCApp() {
     () => import("./components/PlayersView"),
     () => import("./components/GroupsView"),
   ]), []);
+
+  // ── And keeping all of it for next time ──
+  // The chunks above are fetched once and then held by the service worker, so
+  // the launch after this one reads the whole app off disk. Firestore already
+  // does this for the DATA (see the persistent cache in firebase.js); this is
+  // the same bargain for the code, and it is what makes the app open at all
+  // on a course with no signal.
+  //
+  // On idle, and after the warm, for the same reason the warm is on idle: a
+  // worker installing is a worker fetching its own dependencies, and none of
+  // that should be happening while the leaderboard is still arriving. It does
+  // nothing on the dev server or in the native builds — see lib/swRegister.
+  useEffect(() => whenIdle(() => {
+    registerAppServiceWorker({ isProd: import.meta.env.PROD, isNative: isNativePlatform() });
+  }), []);
   useEffect(() => {
     if (!photosOpened) return;
     return db.subscribe("wbc_media", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
@@ -2826,7 +2843,10 @@ export default function WBCApp() {
     return (
       <div style={{ minHeight: "var(--app-height, 100dvh)", background: entranceBg(), display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", padding: 20 }}>
       <style>{`:root { --sab: env(safe-area-inset-bottom, 0px); }`}</style>
-      <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+      {/* No font <link> here. index.html declares @font-face for the app font
+          from this origin, so every screen — this one included, and every modal
+          portaled out of it — already has it. A screen re-declaring it put the
+          request back on fonts.googleapis.com and undid that. */}
         <style>{`
           @keyframes toastDown { 0% { transform: translateX(-50%) translateY(-20px); opacity: 0; } 100% { transform: translateX(-50%) translateY(0); opacity: 1; } }
           /* Same drop-in for a full-width bar, which holds no centring
@@ -2930,7 +2950,6 @@ export default function WBCApp() {
     <div style={{ minHeight: "var(--app-height, 100dvh)", background: "#030810", display: "flex", justifyContent: "center", overflow: "hidden" }}>
     <div style={{ height: "var(--app-height, 100dvh)", display: "flex", flexDirection: "column", background: K.bg, fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", color: K.t1, width: "100%", maxWidth: 480, position: "relative", boxShadow: "0 0 80px rgba(0,0,0,0.8)", flexShrink: 0, overflow: "hidden" }}>
       <style>{`:root { --sab: env(safe-area-inset-bottom, 0px); }`}</style>
-      <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
 
       {/* Every notify() in the app lands here. It used to render only in the
           admin settings modal's header, so a message raised anywhere else —

@@ -6,9 +6,16 @@
   <meta name="robots" content="index, follow" />
   <title>Delete Your Account · Wannabe Cup</title>
   <meta name="description" content="How to delete your Wannabe Cup (WBC) account and what data is removed or retained." />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <!-- The app font, from this origin — see index.html. One less third-party origin on a page the app stores link to directly. -->
+  <style>
+    @font-face {
+      font-family: 'Montserrat';
+      font-style: normal;
+      font-weight: 300 900;
+      font-display: swap;
+      src: url('/fonts/montserrat-latin.woff2') format('woff2');
+    }
+  </style>
   <style>
     :root {
       --bg: #080f1a; --card: #0e1829; --acc: #22d3a7; --accDim: #0d9b73;

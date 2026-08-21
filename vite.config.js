@@ -25,6 +25,23 @@ export default defineConfig({
         // `firebase/firestore` and `@firebase/*` all resolve into the same
         // node_modules tree, and listing package names by hand misses the
         // transitive half — which is most of it.
+        //
+        // ── The other half of this lives in vercel.json ──
+        // Splitting the chunks only pays if the browser actually KEEPS the
+        // ones that did not change, and that is a response header, not a
+        // bundler setting. vercel.json sends /assets/* as
+        // `max-age=31536000, immutable`, which is safe precisely because
+        // every name here carries a content hash: the bytes behind a given
+        // URL can never change, because a new build writes a new URL.
+        //
+        // index.html gets the opposite — `max-age=0, must-revalidate`. It is
+        // the one file whose URL stays put while its contents change, it is
+        // what names the current chunks, and it is what hasNewBundle diffs to
+        // notice a deploy (see lib/usePullToRefresh). Caching it would pin a
+        // phone to an old build AND blind the mechanism for escaping one.
+        // The service worker and the manifest are the same case, and the
+        // service worker is the one that is hard to undo: a stale copy keeps
+        // serving the version it was, on a device with no address bar.
         manualChunks(id) {
           if (!id.includes("node_modules")) return;
           // ── Push and photo storage, on their own ──

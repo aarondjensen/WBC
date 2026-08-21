@@ -19,13 +19,53 @@
          the bottom nav pads itself by --sab, and the whole bar lifts off the
          bottom of the screen. Learned twice now. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <!-- The app font, loaded from the document rather than only from whichever
-         React screen happens to render its own <link>. Portaled modals attach
-         to <body>, outside every one of those screens, so the stylesheet has to
-         be here for them to have a font to inherit. -->
-    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+    <!-- ── The app font, served from this origin ─────────────────────
+         It used to come from fonts.googleapis.com, and the bytes were never
+         the problem: Montserrat ships as ONE variable woff2 covering the whole
+         300–900 axis, so asking for seven weights and asking for one fetched
+         exactly the same 37KB file. What it cost was the ROUND TRIPS. A
+         render-blocking stylesheet on a second origin, naming files on a
+         third, is a DNS lookup, a TCP handshake and a TLS negotiation — twice,
+         before a single glyph can be drawn. The two preconnects that used to
+         sit here were an admission of that, and they only ever hid part of it.
+
+         Same origin, the @font-face rules inline below (no stylesheet request
+         at all) and the file preloaded above, so the browser's preload scanner
+         starts fetching it from the first bytes of this document rather than
+         after a CSS round trip tells it to.
+
+         Declared HERE rather than in a React screen's own <link>: portaled
+         modals attach to <body>, outside every one of those screens, so this
+         is the only place they can inherit a font from.
+
+         Montserrat is SIL OFL 1.1 — see public/fonts/OFL.txt, which ships
+         alongside the files as that licence requires. -->
+    <link rel="preload" href="/fonts/montserrat-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <!-- The mark on the splash below. Preloaded rather than left to be
+         discovered, because the splash is the FIRST content on screen and the
+         browser should be fetching it while it is still parsing this file. -->
+    <link rel="preload" href="/wbc-logo.webp" as="image" />
+    <style>
+      /* The two subsets Google served, kept apart for the same reason it kept
+         them apart: latin-ext is twice the size of latin and is only fetched
+         if something on screen actually needs a character in its range. */
+      @font-face {
+        font-family: 'Montserrat';
+        font-style: normal;
+        font-weight: 300 900;
+        font-display: swap;
+        src: url('/fonts/montserrat-latin.woff2') format('woff2');
+        unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+      }
+      @font-face {
+        font-family: 'Montserrat';
+        font-style: normal;
+        font-weight: 300 900;
+        font-display: swap;
+        src: url('/fonts/montserrat-latin-ext.woff2') format('woff2');
+        unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+      }
+    </style>
     <meta name="theme-color" content="#080f1a" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <!-- Opaque dark status bar (white text), content sits BELOW it. With no
@@ -72,6 +112,62 @@
       input, button, textarea, select { font-family: inherit; text-transform: inherit; }
       input:not([type="button"]):not([type="submit"]):not([type="reset"]),
       textarea { text-transform: none; }
+
+      /* ── The splash, and why it is in this file ────────────────────
+         Until React mounts there was nothing on screen at all: #root was
+         empty, so the first thing anybody saw was a flat background, and it
+         stayed flat until ~250KB of JavaScript had been fetched, parsed and
+         run. The app HAS a loading screen — the pulsing mark it shows while
+         auth answers — but it lives inside the bundle, which means it can
+         only appear after the wait it exists to explain is over.
+
+         This is that same screen, hand-written, weighing nothing, painted
+         from the first bytes of the document. The gradient, the mark, its
+         height and its pulse all match authHoldScreen in App.jsx, so the
+         hand-off when React mounts is invisible — the same picture, drawn by
+         something else.
+
+         It removes ITSELF: createRoot().render() clears everything already
+         inside its container, so the splash is gone the moment React paints.
+         Nothing has to remember to take it away.
+
+         The two gradients are entranceBg() from theme.js, resolved. Held
+         honest by theme.test.js, which fails if the palette moves and this
+         does not. */
+      #wbc-splash {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: radial-gradient(ellipse at 20% 50%, #0d1f3c 0%, #080f1a 70%);
+      }
+      html[data-theme="light"] #wbc-splash {
+        background: radial-gradient(ellipse at 20% 50%, #e2eaf5 0%, #f2f5f9 70%);
+      }
+      #wbc-splash img {
+        height: 72px;
+        width: auto;
+        opacity: 0.85;
+        filter: drop-shadow(0 4px 16px rgba(34,211,167,0.3));
+        animation: wbcSplashPulse 1.5s ease-in-out infinite;
+      }
+      @keyframes wbcSplashPulse { 0%, 100% { opacity: 0.85; } 50% { opacity: 0.4; } }
+      /* Shown only if the bundle never arrives — see the timer below. A mark
+         that pulses forever reads as "working", which is the one thing it is
+         not doing, and this app is opened in places with no signal. */
+      #wbc-splash-late {
+        position: absolute;
+        left: 20px; right: 20px; bottom: 15%;
+        text-align: center;
+        font-size: 12px;
+        letter-spacing: 0.04em;
+        color: #7b8eae;
+        display: none;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #wbc-splash img { animation: none; }
+      }
     </style>
     <script>
       // Is a text field focused — i.e. is an on-screen keyboard up? See the
@@ -157,7 +253,28 @@
     </script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- See the note on #wbc-splash above. This is inside #root on purpose:
+           React clears its container on the first render, so the splash is
+           removed by the thing replacing it and there is no teardown to get
+           wrong. `alt` is empty because it is decoration — the screen it
+           stands in for has no text either. -->
+      <div id="wbc-splash">
+        <img src="/wbc-logo.webp" alt="" />
+        <div id="wbc-splash-late">Still loading — check your signal</div>
+      </div>
+    </div>
+    <script>
+      // If the bundle has not replaced the splash after twelve seconds, say
+      // so. Long enough that a slow-but-working load never sees it; short
+      // enough to be useful to somebody holding a phone that is not going to
+      // finish. Cheap to be wrong in either direction — it is one line of
+      // grey text, and React blows the whole splash away regardless.
+      setTimeout(function () {
+        var late = document.getElementById('wbc-splash-late');
+        if (late && document.getElementById('wbc-splash')) late.style.display = 'block';
+      }, 12000);
+    </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

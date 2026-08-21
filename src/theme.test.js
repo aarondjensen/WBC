@@ -180,6 +180,29 @@ describe("the backgrounds hardcoded outside theme.js", () => {
     expect(css).toContain(light);
   });
 
+  // ── The splash holds a THIRD copy, and it is the visible one ──
+  // index.html paints the entrance gradient itself now, so that something is
+  // on screen before the bundle lands (see #wbc-splash). It is the same
+  // picture App.jsx draws once it has mounted — entranceBg() over the two
+  // `entrance` tokens — and the whole point is that the hand-off between them
+  // is invisible. Move the palette without moving the splash and the screen
+  // changes shade at the moment React appears, which is precisely the flash
+  // the pre-paint above exists to prevent.
+  //
+  // Only the served document is checked. src/index.html is a stale copy that
+  // Vite never builds — the root one is the entry — so holding it to a splash
+  // it does not have would be asserting a duplicate stays duplicated.
+  it("index.html paints the entrance gradient both themes mount into", () => {
+    const html = read("../index.html");
+    expect(html).toContain(paletteFor("dark").entrance);
+    expect(html).toContain(paletteFor("light").entrance);
+    // Not just the colours — the gradient they are arranged into. entranceBg()
+    // is a radial ellipse offset to 20%, and a splash that used them as a flat
+    // fill would pass on the two lines above while still visibly changing when
+    // the app took over.
+    expect(html).toMatch(/radial-gradient\(ellipse at 20% 50%/);
+  });
+
   // The browser paints what the app does not — scrollbars, the caret, control
   // internals, Android's auto-darkening — and guesses which way round from the
   // DEVICE unless told. Told in both files, and keyed off the app's theme

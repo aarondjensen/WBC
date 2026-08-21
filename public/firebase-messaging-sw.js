@@ -15,19 +15,51 @@
 // app-side when pendingAttestCount goes to 0 (App.jsx setAppBadge effect),
 // NOT when the user taps the notification.
 
-importScripts("https://www.gstatic.com/firebasejs/12.11.0/firebase-app-compat.js");
-importScripts("https://www.gstatic.com/firebasejs/12.11.0/firebase-messaging-compat.js");
+// ─── Two jobs, and neither may take the other down ──────────────────────
+// This worker also keeps the app's own code on the phone now, so a cold start
+// out of range opens instead of hanging. That lives here rather than in a
+// worker of its own because a scope may only have ONE registration —
+// registering a second at "/" would have replaced this one and quietly turned
+// push off for everybody who had it on. See sw-cache-rules.js.
+//
+// ── Why every importScripts is wrapped ──
+// importScripts is synchronous and it THROWS. A throw at the top level of a
+// service worker is not a caught error and a degraded worker: the whole
+// script fails to evaluate, the registration is thrown away, and the phone
+// ends up with no worker at all. So a single unreachable file below would
+// take down push AND caching together — and two of the three come off
+// gstatic, over whatever network the phone had at install time.
+//
+// This was not hypothetical. It is exactly what happened the first time this
+// file was loaded somewhere gstatic was unreachable: registration failed with
+// "ServiceWorker script evaluation failed" and nothing worked at all.
+//
+// Wrapped separately, the failure is contained to the job that needs the file
+// that did not arrive. A phone that could not reach gstatic still caches the
+// app; a phone that somehow could not read its own /sw-cache-rules.js still
+// gets pushes.
+try {
+  importScripts("/sw-cache-rules.js");
+} catch (e) {
+  console.warn("[SW] app shell caching unavailable:", e && e.message);
+}
 
-firebase.initializeApp({
-  apiKey: "AIzaSyBcS6KphgfN15xwfCcmLXx3YMIMUeYuhfc",
-  authDomain: "wannabecup-c5aab.firebaseapp.com",
-  projectId: "wannabecup-c5aab",
-  storageBucket: "wannabecup-c5aab.firebasestorage.app",
-  messagingSenderId: "281900029443",
-  appId: "1:281900029443:web:68da433d8ec5a16b74a036",
-});
-
-const messaging = firebase.messaging();
+let messagingReady = false;
+try {
+  importScripts("https://www.gstatic.com/firebasejs/12.11.0/firebase-app-compat.js");
+  importScripts("https://www.gstatic.com/firebasejs/12.11.0/firebase-messaging-compat.js");
+  firebase.initializeApp({
+    apiKey: "AIzaSyBcS6KphgfN15xwfCcmLXx3YMIMUeYuhfc",
+    authDomain: "wannabecup-c5aab.firebaseapp.com",
+    projectId: "wannabecup-c5aab",
+    storageBucket: "wannabecup-c5aab.firebasestorage.app",
+    messagingSenderId: "281900029443",
+    appId: "1:281900029443:web:68da433d8ec5a16b74a036",
+  });
+  messagingReady = true;
+} catch (e) {
+  console.warn("[SW] push unavailable:", e && e.message);
+}
 
 // ─── Immediate activation lifecycle ─────────────────────────────────────
 self.addEventListener("install", (event) => {
@@ -87,47 +119,59 @@ const applyBadge = async (count) => {
 };
 
 // ─── Background message handler ──────────────────────────────────────────
-messaging.onBackgroundMessage(async (payload) => {
-  console.log("[SW] onBackgroundMessage fired", payload);
+// Guarded by the same flag as the imports above: with no firebase there is
+// nothing to attach this to, and everything below it — the click handler, the
+// badge messages from the page — is plain service worker API that works
+// either way and stays registered.
+if (messagingReady) {
   try {
-    const data = payload.data || {};
-    const title = data.title || payload.notification?.title || "WBC 2026";
-    const body = data.body || payload.notification?.body || "";
-
-    // Only attest_ready represents a pending action; the rest are
-    // informational. The app's setAppBadge effect reconciles the count to
-    // the true pending-attestation count on next open, so an overcount here
-    // self-corrects.
-    if (data.type === "attest_ready") {
+    const messaging = firebase.messaging();
+    messaging.onBackgroundMessage(async (payload) => {
+      console.log("[SW] onBackgroundMessage fired", payload);
       try {
-        const current = await getBadgeCount();
-        const next = current + 1;
-        await setBadgeCount(next);
-        await applyBadge(next);
-      } catch (e) {
-        console.warn("[SW] Badge update failed", e);
-      }
-    }
+        const data = payload.data || {};
+        const title = data.title || payload.notification?.title || "WBC 2026";
+        const body = data.body || payload.notification?.body || "";
 
-    return self.registration.showNotification(title, {
-      body,
-      icon: "/wbc-icon-192.png",
-      badge: "/wbc-icon-192.png",
-      data,
-      tag: data.type || "default",
-      renotify: true,
+        // Only attest_ready represents a pending action; the rest are
+        // informational. The app's setAppBadge effect reconciles the count to
+        // the true pending-attestation count on next open, so an overcount here
+        // self-corrects.
+        if (data.type === "attest_ready") {
+          try {
+            const current = await getBadgeCount();
+            const next = current + 1;
+            await setBadgeCount(next);
+            await applyBadge(next);
+          } catch (e) {
+            console.warn("[SW] Badge update failed", e);
+          }
+        }
+
+        return self.registration.showNotification(title, {
+          body,
+          icon: "/wbc-icon-192.png",
+          badge: "/wbc-icon-192.png",
+          data,
+          tag: data.type || "default",
+          renotify: true,
+        });
+      } catch (err) {
+        console.error("[SW] onBackgroundMessage failed", err);
+        try {
+          return self.registration.showNotification("WBC 2026", {
+            body: "A new update — open the app for details.",
+            icon: "/wbc-icon-192.png",
+            badge: "/wbc-icon-192.png",
+          });
+        } catch { /* truly hopeless */ }
+      }
     });
-  } catch (err) {
-    console.error("[SW] onBackgroundMessage failed", err);
-    try {
-      return self.registration.showNotification("WBC 2026", {
-        body: "A new update — open the app for details.",
-        icon: "/wbc-icon-192.png",
-        badge: "/wbc-icon-192.png",
-      });
-    } catch { /* truly hopeless */ }
+  } catch (e) {
+    // firebase.messaging() throws where the browser cannot support it at all.
+    console.warn("[SW] background messages unavailable:", e && e.message);
   }
-});
+}
 
 // ─── Click handler ──────────────────────────────────────────────────────
 // Navigates via hash routing (App.jsx reads window.location.hash on load to

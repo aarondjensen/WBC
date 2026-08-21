@@ -56,7 +56,10 @@ export function GateScreen({ fbUser, onPassed, onCancel }) {
 
   return (
     <div style={{ minHeight: "var(--app-height, 100dvh)", background: entranceBg(), display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Montserrat', sans-serif", fontVariantNumeric: "lining-nums tabular-nums", padding: 20 }}>
-      <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+      {/* No font <link> here. index.html declares @font-face for the app font
+          from this origin, so every screen — this one included, and every modal
+          portaled out of it — already has it. A screen re-declaring it put the
+          request back on fonts.googleapis.com and undid that. */}
       <div style={{ width: "100%", maxWidth: 340, textAlign: "center" }}>
         <img src={WBC_LOGO} alt="WBC" style={{ height: 64, margin: "0 auto 16px", display: "block", filter: "drop-shadow(0 4px 16px rgba(34,211,167,0.3))" }} />
         <h1 style={{ fontSize: FS.hero, color: K.t1, margin: "0 0 6px", fontWeight: 800, letterSpacing: "-0.02em" }}>Event password</h1>
