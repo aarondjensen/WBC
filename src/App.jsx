@@ -11,6 +11,7 @@ import { fieldFor, computeSkins, toggleIn } from "./lib/sideGames";
 import { normalizeLots, openingSharesLeft, marketWindows, eligibleBets, rebuyers, teeOffAt, roundComplete, marketOutsiders } from "./lib/market";
 // Which books this phone may hold, and when a director publishes the reveal.
 import { betsToHold, shouldPublish, betsSignature } from "./lib/marketSeal";
+import { SIDE_BETS_COL, sideBetId, buildSideBet, toggleSettled } from "./lib/sideBets";
 import { SyncBanner } from "./components/SyncBanner";
 import { LeaderboardView } from "./components/LeaderboardView";
 import { GateScreen } from "./components/GateScreen";
@@ -857,6 +858,12 @@ export default function WBCApp() {
   const [ownBets, setOwnBets] = useState([]);
   const [allBets, setAllBets] = useState(null);
   const [publishedBets, setPublishedBets] = useState(null);
+  // The side bet ledger — every wager the app records and does not run. One
+  // document per bet, world-readable like the leaderboard: see lib/sideBets
+  // for why nothing here scores or settles them, and why the terms are free
+  // text. Bounded the way the market's books are — a handful a weekend — so it
+  // rides on the ordinary subscription block below rather than being deferred.
+  const [sideBets, setSideBets] = useState([]);
   // The three side games' money, from tournament_state.side_games. Each `in`
   // is an ARRAY of player ids, or NULL when no director has ever touched it —
   // and null means everybody, which is what every tournament played before
@@ -1194,6 +1201,11 @@ export default function WBCApp() {
     ], (docs) => {
       setCtpData(rowsToCtp(docs));
     }));
+
+    // The side bet ledger. World-readable, unlike the market's books — a side
+    // bet is between two named men and says so on its row, so there is nothing
+    // to seal and no advantage in reading one. See lib/sideBets.
+    unsubs.push(db.subscribe(SIDE_BETS_COL, [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], setSideBets));
 
     unsubs.push(db.subscribe("tournament_state", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
       if (docs?.length) {
@@ -1536,6 +1548,10 @@ export default function WBCApp() {
       await db.delete("wbc_rounds_state", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
       // The reveal goes with the bets it was published from.
       await db.delete("wbc_market_result", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
+      // And the side bet ledger, which is this tournament's wagers and nobody
+      // else's. Leaving it would put a weekend of settled bets on a scorecard
+      // set that no longer has the rounds they were made on.
+      await db.delete(SIDE_BETS_COL, [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }]);
     } catch(e) { console.error("Start fresh clear failed:", e); }
     // Keep tPlayers (roster + HIs) intact — clear everything else
     setTRounds([]);
@@ -1547,6 +1563,7 @@ export default function WBCApp() {
     // the buy-in lists. Resetting them here keeps the screen agreeing with what
     // is left in Firestore instead of showing a pot nobody has bought into.
     setOwnBets([]); setAllBets(null); setPublishedBets(null);
+    setSideBets([]);
     setSideGames(mergeSideGames(null));
     setPairingsData({});
     setTeeData({});
@@ -2608,6 +2625,54 @@ export default function WBCApp() {
     });
   };
 
+  // ── The side bet ledger ──────────────────────────────────────────
+  // A ledger, not a game: the app records the wager and settles nothing. See
+  // lib/sideBets for the shape, and for what firestore.rules can and cannot
+  // check about who agreed to what.
+  //
+  // These three THROW where nearly every other write in this file swallows.
+  // That is deliberate and it is the only place it is right: everything else
+  // here is a correction to something already on screen, where a failed write
+  // and the next snapshot winning is the correct trade — which is why db.upsert
+  // catches and returns null rather than rejecting. This is a person tapping
+  // Add and watching for their bet to appear, and a silent failure there is the
+  // app agreeing to a bet it never recorded. The sheet stays open on a throw so
+  // the typing is not lost.
+  const onAddSideBet = async ({ playerA, playerB, amount, detail }) => {
+    const uid = fbUser?.uid;
+    // The Add button is hidden without a uid, so this is unreachable from the
+    // screen — but a quiet return would close the sheet on a bet that was never
+    // written, which is the failure above reached by another route.
+    if (!uid) throw new Error("You need to be signed in to log a bet.");
+    const saved = await db.upsert(SIDE_BETS_COL, buildSideBet({
+      id: sideBetId(Date.now(), Math.random()),
+      tournamentId: TOURNAMENT_ID,
+      createdBy: uid,
+      playerA, playerB, amount, detail,
+      now: Date.now(),
+    }));
+    if (!saved) throw new Error("That bet wasn't saved.");
+  };
+
+  const onDeleteSideBet = async (bet) => {
+    if (bet?.id) await db.deleteDoc(SIDE_BETS_COL, bet.id);
+  };
+
+  // A player's own "paid" mark, toggled. BOTH players marking is what settles a
+  // bet — see lib/sideBets for why that is two marks rather than a flag.
+  //
+  // The write carries the document's own id beside the one field it means to
+  // change, because db.upsert needs an id to address the row. That is safe
+  // against the rule which lets the OTHER player write to a bet they do not
+  // own: the rule allows exactly one affected key, and a field written back
+  // unchanged is not an affected key, so the diff it reads is `settled_by`
+  // alone.
+  const onSettleSideBet = async (bet, pid) => {
+    if (!bet?.id || !pid) return;
+    const saved = await db.upsert(SIDE_BETS_COL, { id: bet.id, settled_by: toggleSettled(bet, pid) });
+    if (!saved) throw new Error("That wasn't recorded.");
+  };
+
   // ── Confirming a standing CTP ────────────────────────────────────
   // The other answer the on-course prompt can take. A group that walks off a
   // par 3 without getting inside the standing tag is not saying nothing —
@@ -3528,7 +3593,7 @@ export default function WBCApp() {
             gallery when they logged out would otherwise hand the next guest the
             screen they left open. */}
         {view === "photos" && !isGuest(user) && <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading photos…</div>}><PhotosView items={media} year={getTournamentYear()} uid={fbUser?.uid || null} isDirector={!!user.isDirector} isGuest={!!user.isGuest} canPost={!user.isGuest && !!fbUser?.uid && photoUploadsAllowed(photoConfig)} uploadsBlockedReason={photoUploadsAllowed(photoConfig) ? "" : uploadsDisabledReason(photoConfig)} onUpload={onUploadPhoto} onDelete={onDeletePhoto} notify={notify} /></Suspense>}
-        {view === "skins" && <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading betting…</div>}><BettingView players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} numRounds={numRounds} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} marketBets={marketBets} onSaveMarketBet={onSaveMarketBet} leaderboard={getLeaderboard} finalizedRounds={finalizedRounds} pairingsData={pairingsData} firstTeeAt={firstTeeAt} marketNudge={marketNudge} teeTimesData={teeTimesData} roundDates={roundDates} inactivePlayers={inactivePlayers} onAddMarketOutsider={user.isDirector ? onAddMarketOutsider : undefined} /></Suspense>}
+        {view === "skins" && <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading betting…</div>}><BettingView players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} numRounds={numRounds} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} marketBets={marketBets} onSaveMarketBet={onSaveMarketBet} leaderboard={getLeaderboard} finalizedRounds={finalizedRounds} pairingsData={pairingsData} firstTeeAt={firstTeeAt} marketNudge={marketNudge} teeTimesData={teeTimesData} roundDates={roundDates} inactivePlayers={inactivePlayers} onAddMarketOutsider={user.isDirector ? onAddMarketOutsider : undefined} sideBets={sideBets} authUid={fbUser?.uid || null} onAddSideBet={onAddSideBet} onDeleteSideBet={onDeleteSideBet} onSettleSideBet={onSettleSideBet} /></Suspense>}
         {view === "groups" && <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading pairings…</div>}><GroupsView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} pairingsData={pairingsData} teeTimesData={teeTimesData} getPlayerTee={getPlayerTee} user={user} /></Suspense>}
         {view === "admin" && (canAdminHere ? <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading admin…</div>}><AdminView registry={registry} activePlayers={activePlayers} marketPool={marketPool} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} rebuyIds={rebuyIds} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} deletePlayer={deletePlayer} editionsHolding={editionsHolding} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
               setTeeTimesData(prev => {

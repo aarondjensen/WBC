@@ -190,6 +190,64 @@ await check("anon can read the published market result", () =>
 await check("member CANNOT publish the market result", () =>
   assertFails(setDoc(doc(mike, "wbc_market_result/mr_wbc_2026"), { bets: [] })));
 
+// ── The side bet ledger ──
+// A wager the app records and does not run (src/lib/sideBets.js). It is world-
+// readable, unlike the books above — a side bet names both its sides on its own
+// row, so there is nothing to seal — and the three things worth pinning are the
+// three the screen's affordances mirror: an author cannot be forged, a bet is
+// only editable by the person who logged it, and the ONE thing a member may
+// write on a document they do not own is a `settled_by` mark on a bet they are
+// actually in.
+//
+// Runs before mike is made a director further down, or every refusal inverts.
+await env.withSecurityRulesDisabled(async (ctx) => {
+  const f = ctx.firestore();
+  // Aaron's bet against Mike: Mike is a side of it and did not write it.
+  await setDoc(doc(f, "wbc_side_bets/sb_theirs"), {
+    id: "sb_theirs", tournament_id: "wbc_2026", created_by: "uid_aaron",
+    player_a: "aaron_j", player_b: "mike_r", amount: 20, settled_by: [],
+  });
+  // A bet between two other men entirely.
+  await setDoc(doc(f, "wbc_side_bets/sb_others"), {
+    id: "sb_others", tournament_id: "wbc_2026", created_by: "uid_aaron",
+    player_a: "aaron_j", player_b: "carl_x", amount: 20, settled_by: [],
+  });
+});
+const sideBet = (over = {}) => ({
+  tournament_id: "wbc_2026", created_by: "uid_mike",
+  player_a: "mike_r", player_b: "aaron_j", amount: 20, settled_by: [], ...over,
+});
+await check("member can log a side bet", () =>
+  assertSucceeds(setDoc(doc(mike, "wbc_side_bets/sb_mine"), sideBet({ id: "sb_mine" }))));
+await check("member CANNOT log one under somebody else's name", () =>
+  assertFails(setDoc(doc(mike, "wbc_side_bets/sb_forged"), sideBet({ id: "sb_forged", created_by: "uid_aaron" }))));
+await check("member can fix the terms of their own bet", () =>
+  assertSucceeds(setDoc(doc(mike, "wbc_side_bets/sb_mine"), { detail: "front nine, straight up" }, { merge: true })));
+await check("member CANNOT become the author of a bet by editing it", () =>
+  assertFails(setDoc(doc(mike, "wbc_side_bets/sb_mine"), { created_by: "uid_aaron" }, { merge: true })));
+await check("member CANNOT rewrite a bet somebody else logged", () =>
+  assertFails(setDoc(doc(mike, "wbc_side_bets/sb_theirs"), { amount: 5 }, { merge: true })));
+// The one door that lets a member write a document they do not own — and the
+// reason the door exists at all: a bet is settled when BOTH sides say it is.
+await check("the other side of a bet CAN mark it paid", () =>
+  assertSucceeds(setDoc(doc(mike, "wbc_side_bets/sb_theirs"), { settled_by: ["mike_r"] }, { merge: true })));
+await check("a bystander CANNOT mark somebody else's bet paid", () =>
+  assertFails(setDoc(doc(mike, "wbc_side_bets/sb_others"), { settled_by: ["mike_r"] }, { merge: true })));
+// The door is one field wide. Anything riding along with the mark is an edit
+// to a bet the caller does not own, which is the thing above.
+await check("a settle mark CANNOT smuggle another field through with it", () =>
+  assertFails(setDoc(doc(mike, "wbc_side_bets/sb_theirs"), { settled_by: ["mike_r"], amount: 1 }, { merge: true })));
+// Deliberately not "either player in the bet" — the other side of a bet you
+// dispute is not yours to erase. lib/sideBets canDeleteSideBet mirrors this.
+await check("member CANNOT delete a bet they did not log", () =>
+  assertFails(deleteDoc(doc(mike, "wbc_side_bets/sb_theirs"))));
+await check("member can delete their own bet", () =>
+  assertSucceeds(deleteDoc(doc(mike, "wbc_side_bets/sb_mine"))));
+await check("anon can read the ledger", () =>
+  assertSucceeds(getDoc(doc(anon, "wbc_side_bets/sb_theirs"))));
+await check("anon CANNOT log a bet", () =>
+  assertFails(setDoc(doc(anon, "wbc_side_bets/sb_anon"), sideBet({ id: "sb_anon" }))));
+
 // ── The photo library ──
 // Posting is a member write, like scoring. The three things worth pinning are
 // that a member cannot post under another name, cannot quietly become the
@@ -348,6 +406,14 @@ await check("director can remove a photo somebody else posted", () =>
 await check("director can clear the budget circuit breaker by hand", () =>
   assertSucceeds(setDoc(doc(aaron, "wbc_config/photos"), { uploadsDisabled: false })));
 
+// The ledger's director half: correcting a bet somebody typed wrong, and
+// removing one that should never have been logged. Same reasoning as the
+// photos — an argument about a bet is the director's to settle.
+await check("director can correct a bet somebody else logged", () =>
+  assertSucceeds(setDoc(doc(aaron, "wbc_side_bets/sb_others"), { amount: 40 }, { merge: true })));
+await check("director can remove a bet somebody else logged", () =>
+  assertSucceeds(deleteDoc(doc(aaron, "wbc_side_bets/sb_others"))));
+
 // ══════════════════════════════════════════════════════════════════
 //  A LOCKED EDITION
 // ══════════════════════════════════════════════════════════════════
@@ -404,6 +470,24 @@ await check("member CANNOT sign a card in a locked year", () =>
   assertFails(setDoc(doc(carl, "wbc_scorecard_sigs/sig_locked"), { tournament_id: "wbc_2019", groupKey: "g1" })));
 await check("member CANNOT tag a CTP in a locked year", () =>
   assertFails(setDoc(doc(carl, "skins/ctp_locked"), { tournament_id: "wbc_2019", skin_type: "ctp", hole: 7 })));
+// The side bet ledger answers to the padlock like everything else. It is the
+// one collection that does NOT close when a tournament merely finishes — see
+// canWriteLedger, and the finished-year block below — so the padlock is the
+// only thing that stops a member writing into 2019, and it has to hold.
+await env.withSecurityRulesDisabled(async (ctx) => {
+  const f = ctx.firestore();
+  // Carl's claim, so he is a player and not merely an account: the settle door
+  // is gated on the phone being one of the two names on the bet.
+  await setDoc(doc(f, "wbc_users/uid_carl"), { uid: "uid_carl", player_id: "carl_x" });
+  await setDoc(doc(f, "wbc_side_bets/sb_locked"), {
+    id: "sb_locked", tournament_id: "wbc_2019", created_by: "uid_aaron",
+    player_a: "aaron_j", player_b: "carl_x", amount: 20, settled_by: [],
+  });
+});
+await check("member CANNOT log a side bet in a locked year", () =>
+  assertFails(setDoc(doc(carl, "wbc_side_bets/sb_locked_new"), { id: "sb_locked_new", tournament_id: "wbc_2019", created_by: "uid_carl", player_a: "carl_x", player_b: "aaron_j", amount: 20, settled_by: [] })));
+await check("member CANNOT mark one paid in a locked year either", () =>
+  assertFails(setDoc(doc(carl, "wbc_side_bets/sb_locked"), { settled_by: ["carl_x"] }, { merge: true })));
 
 // Deleting out of a frozen year is an edit to it.
 await check("member CANNOT delete out of a locked year", () =>
@@ -493,6 +577,23 @@ await check("member CANNOT edit a card that is already in a finished year", () =
   assertFails(setDoc(doc(carl, "hole_scores/hs_2014_1"), { score: 9 }, { merge: true })));
 await check("member CANNOT bet in a finished year", () =>
   assertFails(setDoc(doc(carl, "skins/ctp_2014"), { tournament_id: "wbc_2014", skin_type: "ctp", hole: 7 })));
+
+// ── …EXCEPT the side bet ledger, which outlives the golf ──
+// The one deliberate exception in this file, and the direction matters: bets
+// are squared up in the car park after the last card is in, so a ledger that
+// went read-only when the tournament finished would go read-only exactly when
+// the money starts moving. See canWriteLedger in firestore.rules. The padlock
+// still stops it — asserted in the locked block above.
+await env.withSecurityRulesDisabled(async (ctx) => {
+  await setDoc(doc(ctx.firestore(), "wbc_side_bets/sb_2014"), {
+    id: "sb_2014", tournament_id: "wbc_2014", created_by: "uid_aaron",
+    player_a: "aaron_j", player_b: "carl_x", amount: 20, settled_by: [],
+  });
+});
+await check("member CAN still mark a side bet paid in a FINISHED year", () =>
+  assertSucceeds(setDoc(doc(carl, "wbc_side_bets/sb_2014"), { settled_by: ["carl_x"] }, { merge: true })));
+await check("member CAN still log a side bet in a FINISHED year", () =>
+  assertSucceeds(setDoc(doc(carl, "wbc_side_bets/sb_2014_new"), { id: "sb_2014_new", tournament_id: "wbc_2014", created_by: "uid_carl", player_a: "carl_x", player_b: "aaron_j", amount: 20, settled_by: [] })));
 
 // Both ends, so a row cannot be carried out of a finished year and edited.
 await check("member CANNOT move a row OUT of a finished year", () =>

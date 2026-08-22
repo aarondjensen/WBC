@@ -71,11 +71,24 @@ const baseProps = {
   marketNudge: false,
   teeTimesData: { 1: ["8:00 AM"], 2: ["8:00 AM"] },
   roundDates: { 1: "2026-08-26", 2: "2026-08-27" },
+  // The fifth tab, which is a ledger rather than a game — see components/
+  // SideBets. Its own suite covers what it says; what matters here is that it
+  // is mounted alongside the other four, since it is the newest thing on the
+  // tab and the one an import could most easily leave behind.
+  sideBets: [{
+    id: "sb1", tournament_id: "wbc_2026", created_by: "uid_aaron",
+    player_a: "aaron_j", player_b: "dave_s", amount: 20,
+    detail: "Low score on the back", settled_by: [], created_at: 1000,
+  }],
+  authUid: "uid_aaron",
+  onAddSideBet: vi.fn(),
+  onDeleteSideBet: vi.fn(),
+  onSettleSideBet: vi.fn(),
 };
 
 const mount = (extra = {}) => render(h(BettingView, { ...baseProps, ...extra }));
 
-const TABS = ["Skins", "CTP", "Low Net", "Market"];
+const TABS = ["Skins", "CTP", "Low Net", "Market", "Side"];
 
 describe("BettingView renders", () => {
   it("mounts on its default tab", () => {
@@ -116,6 +129,7 @@ describe("BettingView renders", () => {
   it("renders a tournament with no course, no cards and no money", () => {
     mount({
       tRounds: [], courses: [], holeData: {}, ctpData: {}, marketBets: [],
+      sideBets: [],
       pairingsData: {}, teeTimesData: {}, roundDates: {}, leaderboard: [],
       sideGames: {
         skins: { amount: 0, in: null, pot: 0, paid: [] },

@@ -373,6 +373,25 @@ service cloud.firestore {
         && (!enforcing() || (editionOpen() && editionRunning()) || isDirector());
     }
 
+    // ── A ledger outlives the golf ────────────────────────────────
+    // The gate above closes a year the moment its last round is finalized,
+    // which is right for a scorecard: the tournament is the record of an event
+    // and nobody should be posting a score into 2014.
+    //
+    // It is wrong for the side bet ledger, and by exactly one gate. Bets are
+    // squared up AFTER the golf — in the car park, at dinner, on the drive
+    // home — so a "paid" mark landing on a tournament whose last card is in is
+    // the normal case, not an edit to a finished event. Under canWriteEdition()
+    // the ledger would go read-only at the precise moment the money starts
+    // moving.
+    //
+    // So this answers to the PADLOCK only: a director who froze a year freezes
+    // its ledger with it, and a year that merely finished still takes a mark.
+    // See wbc_side_bets below, and src/lib/sideBets.js.
+    function canWriteLedger() {
+      return canWrite() && (!enforcing() || editionOpen() || isDirector());
+    }
+
     // ── Which PLAYER is holding this phone ────────────────────────
     // The uid identifies an account; the tournament is played by a player_id,
     // and wbc_users/{uid} is the map between them (written at the claim
@@ -695,6 +714,57 @@ service cloud.firestore {
     // the market too.
     match /wbc_market_result/{doc} { allow read: if isOpen();
                                      allow write: if canAdmin(); }
+
+    // ── Side bets ─────────────────────────────────────────────────
+    // One document per wager two players agreed between themselves. The app
+    // records it and scores nothing — see src/lib/sideBets.js — so unlike the
+    // market above there is no pot, no payout and nothing to seal: a side bet
+    // names both its sides on its own row, and a reader learns nothing from it
+    // they could act on. Read is open, like the leaderboard.
+    //
+    // Three things this block does, and each of them is the same shape as the
+    // photo library's:
+    //
+    //   1. `create` pins created_by to the caller's own uid. It is the field
+    //      the delete rule trusts, so it has to be unforgeable at the moment
+    //      it is written. Note what it does NOT pin: which two PLAYERS the bet
+    //      is between. Somebody standing at the bar writing down two other
+    //      men's bet is a real thing, and the ledger is public, so a bet
+    //      nobody agreed to is a bet with two names on it in front of
+    //      everybody who would know better.
+    //
+    //   2. `update` has three doors. A director may correct anything. The
+    //      author may edit their own bet, and cannot reassign it. And ANY
+    //      member may write `settled_by` and nothing else — which is what lets
+    //      the other side of a bet mark it paid on a document they do not own.
+    //      That last door is narrowed by myPlayerId(): the phone has to be one
+    //      of the two players named on the row, which is a check the market
+    //      already leans on and one Bourbon Cup's version of this file could
+    //      not make.
+    //
+    //   3. `delete` is the author's or a director's. Deliberately NOT the
+    //      opponent's: the other side of a bet you dispute is not yours to
+    //      erase — that is an argument to have on the tee, and the director
+    //      settles those here as everywhere else. lib/sideBets canDeleteSideBet
+    //      mirrors this, and sideBets.test.js pins it.
+    // canWriteLedger() rather than canWriteEdition() throughout, for the reason
+    // written out above it: a bet is settled after the golf is over.
+    match /wbc_side_bets/{doc} {
+      allow read: if isOpen();
+      allow create: if canWriteLedger()
+                    && request.resource.data.created_by == request.auth.uid;
+      allow update: if canAdmin()
+                    || (canWriteLedger()
+                        && resource.data.created_by == request.auth.uid
+                        && request.resource.data.created_by == resource.data.created_by)
+                    || (canWriteLedger()
+                        && request.resource.data.diff(resource.data).affectedKeys()
+                             .hasOnly(['settled_by'])
+                        && myPlayerId() in [resource.data.get('player_a', ''),
+                                            resource.data.get('player_b', '')]);
+      allow delete: if canAdmin()
+                    || (canWriteLedger() && resource.data.created_by == request.auth.uid);
+    }
 
     // ── Runtime switches ──────────────────────────────────────────
     // Today this holds exactly one document: wbc_config/photos, the photo
