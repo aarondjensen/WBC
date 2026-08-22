@@ -955,11 +955,14 @@ export function BettingView({
              wanted them is most of the way to not telling them at all. */
           options={[["skins", "Skins"], ["ctp", "CTP"], ["lownet", "Low Net"],
                     ["market", "Market", marketNudge ? K.danger : undefined],
-                    /* "Side", not "Side Bet". Five segments across a phone is
-                       already the most this strip can hold — the full label
-                       shunted Low Net, Market and Side Bet into one unbroken
-                       run of capitals with no air between them, which is a
-                       strip you have to read rather than glance at. */
+                    /* "Side", not "Side Bet". Five segments is the most this
+                       strip holds, and the labels are what the width goes on:
+                       the short one leaves every tab 7px of air a side on a
+                       320px phone, the full one leaves 4 — which is a tab
+                       touching its neighbour's divider. The tab it opens says
+                       SIDE BETS at the top of the empty state and on every row
+                       under it, so the word is one tap away rather than
+                       missing. */
                     ["side", "Side"]]}
           value={tab} onChange={setTab}
         />
