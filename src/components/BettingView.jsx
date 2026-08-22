@@ -23,6 +23,7 @@ import { K, FS, R, ALPHA, MOTION, FONT } from "../theme";
 import { SegmentedToggle, StickyTop, SectionLabel, Card, Btn } from "./ui";
 import { ConfirmModal } from "./Popup";
 import { BuyInTracker } from "./BuyIns";
+import { SideBets } from "./SideBets";
 import { useConfirm } from "../lib/useConfirm";
 import { CTP_MAX_FT, SIDE_GAME_KEYS, SIDE_GAME_LABELS } from "../constants";
 import { fmtPar, teeTimeToMinutes, minutesToTimeStr } from "../lib/format";
@@ -79,6 +80,15 @@ export function BettingView({
   // added — see MARKET-ONLY PLAYERS below. Both optional: without them the
   // Betting tab is exactly this year's field's.
   inactivePlayers = [], onAddMarketOutsider,
+  // ── The fifth game, which is not a game ──
+  // The side bet ledger. Optional in the same way the two props above are:
+  // without a handler to write with there is nothing to add, and the tab
+  // reads as the record of what other people have going. See components/
+  // SideBets and lib/sideBets. `authUid` is the AUTH uid rather than the
+  // roster id — it is what firestore.rules pins `created_by` to and what the
+  // delete rule compares against, so the screen has to decide who may remove
+  // a bet off the same field the rules will judge it by.
+  sideBets = [], authUid = null, onAddSideBet, onDeleteSideBet, onSettleSideBet,
 }) {
   const [tab, setTab] = useState("skins");
   const [expandedPlayer, setExpandedPlayer] = useState(null);
@@ -944,7 +954,13 @@ export function BettingView({
              Betting tab and then leaving them to guess which of four games
              wanted them is most of the way to not telling them at all. */
           options={[["skins", "Skins"], ["ctp", "CTP"], ["lownet", "Low Net"],
-                    ["market", "Market", marketNudge ? K.danger : undefined]]}
+                    ["market", "Market", marketNudge ? K.danger : undefined],
+                    /* "Side", not "Side Bet". Five segments across a phone is
+                       already the most this strip can hold — the full label
+                       shunted Low Net, Market and Side Bet into one unbroken
+                       run of capitals with no air between them, which is a
+                       strip you have to read rather than glance at. */
+                    ["side", "Side"]]}
           value={tab} onChange={setTab}
         />
       </StickyTop>
@@ -1884,6 +1900,30 @@ export function BettingView({
             </Card>
           )}
         </div>
+      )}
+
+      {/* ── The one tab with no pot ──
+          Everything above is counted from the director's buy-in sheet and
+          paid out of one pile. A side bet is two men and a handshake, so
+          there is no pot card here, no BUY-INS drawer under it and nothing
+          for a director to tick off — which is exactly why it belongs on this
+          tab rather than being a game of its own: it is money riding on the
+          same weekend, and the Betting tab is where a player looks for that.
+
+          `players` rather than `marketPool`: a side bet is settled between two
+          people at the course, and somebody who is only in the market is not
+          at the course. */}
+      {tab === "side" && (
+        <SideBets
+          players={players}
+          bets={sideBets}
+          user={user}
+          authUid={authUid}
+          onAddBet={onAddSideBet}
+          onDeleteBet={onDeleteSideBet}
+          onSettleBet={onSettleSideBet}
+          confirm={confirm}
+        />
       )}
 
       <ConfirmModal modal={confirmModal} />
