@@ -111,28 +111,78 @@ export function SegRule({ compact = false }) {
 //
 // `badge` on an option renders a small trailing dot, which is how the Rounds
 // tab shows a round is fully set up without adding a second row of text.
+//
+// ── The rule between two unselected segments ──
+// The thumb says which segment is SELECTED, and with two or three of them that
+// is the whole job: one raised pill, one or two labels beside it, and plenty of
+// track between them. It stops being the whole job at four. The Betting tab
+// runs five — SKINS · CTP · LOW NET · MARKET · SIDE — and the four that are not
+// selected sat on one unbroken field in one weight at one colour, so they read
+// as a band of capitals rather than as four tabs. Nothing said where one ended
+// and the next began, and the app speaks entirely in caps (see index.css), so
+// there are no descenders or word shapes doing that job either.
+//
+// A hairline on the boundary does it, and it is drawn ONLY between two
+// unselected segments. Either side of the thumb it is suppressed: the thumb is
+// already an edge there, and a rule laid against a raised pill reads as a seam
+// on the pill rather than as a divider. Which means a two-option toggle — the
+// six of these that are Gross/Net, All/Me, one window or the other — has its
+// single boundary against the thumb whichever way it is set, and is left
+// exactly as it was.
 export function SegmentedToggle({ options, value, onChange, variant = "segmented", letterSpacing, style, compact = false }) {
   const tracked = variant === "segmented";
+  // ── A switch splits in half; a TAB STRIP splits by its labels ──
+  // Two options is a switch — Gross/Net, All/Me, one window or the other — and
+  // half the track each is the whole idea of it: the thumb covers exactly one
+  // side, and which side is the answer.
+  //
+  // Four or five is a tab strip, and equal halves stop being a kindness there.
+  // Five equal boxes across a phone are 70px each, and the labels in them run
+  // from 26px (CTP) to 60px (LOW NET) — so the space around a label ranges from
+  // 22px a side to 5px, and the strip reads as one crowded band with two words
+  // floating in it rather than as five tabs. Growing each segment from its own
+  // label instead hands every one of them the SAME gutter, which is what makes
+  // them separate at a glance.
+  const strip = tracked && options.length > 2;
   const track = tracked ? segTrack({ compact }) : { gap: 6 };
   const btn = (on) => (tracked
     ? segThumb(on, { compact })
     : { ...segThumb(on, { compact, sunken: true }), borderRadius: R.sm, border: `1px solid ${on ? "transparent" : K.bdr}` });
   return (
     <div style={{ display: "flex", ...track, ...style }}>
-      {options.map(([k, label, badge]) => {
+      {options.map(([k, label, badge], i) => {
         const on = value === k;
+        // The pills variant already has a gap and an edge per button, so it
+        // needs no rule; only the tracked one runs its segments together.
+        const divider = tracked && i > 0 && !on && value !== options[i - 1][0];
         return (
           <button
             key={k}
             onClick={onChange ? () => onChange(k) : undefined}
             style={{
-              flex: 1, padding: tracked ? (compact ? "5px 0" : "8px 0") : "8px 4px",
+              // `1 1 auto` rather than a padded `1`: the leftover track is
+              // shared out equally ON TOP of each label, so the gutters match
+              // whatever the labels are. Fixed padding would do it on a roomy
+              // screen and ellipsize LOW NET on a narrow one, because padding
+              // is width a label cannot borrow back.
+              flex: strip ? "1 1 auto" : 1,
+              padding: tracked ? (compact ? "5px 0" : "8px 0") : "8px 4px",
               fontSize: compact ? FS.label : FS.small, fontWeight: 700, cursor: "pointer",
               fontFamily: FONT, display: "flex", alignItems: "center",
               justifyContent: "center", gap: 5, minWidth: 0, ...btn(on),
               ...(letterSpacing != null ? { letterSpacing } : {}),
             }}
           >
+            {/* Inset from both ends rather than run edge to edge: a full-height
+                line turns the track into a row of cells, which is a table and
+                not a control. Percentages so it scales with `compact` on its
+                own. */}
+            {divider && (
+              <span style={{
+                position: "absolute", left: 0, top: "26%", bottom: "26%",
+                width: 1, background: `${K.t3}${ALPHA.line}`,
+              }} />
+            )}
             <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
             {/* A dot beside the label. A BOOLEAN reads as done/not-done in
                 the accent; a COLOUR STRING is a filled dot in that colour,
