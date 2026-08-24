@@ -42,6 +42,9 @@ import { editionClosedToMembers } from "./lib/editionLifecycle";
 import { liveEdition, editionBannerShowing } from "./lib/editionHome";
 import { holdForAuth } from "./lib/authHold";
 import { docIds } from "./lib/editionId";
+// The one-round team game, and the button it puts in the header — see
+// lib/scramble.
+import { mergeScramble, scrambleLive, SCRAMBLE_BUTTON } from "./lib/scramble";
 import { scopeFor, scopedRegistry } from "./lib/playerScope";
 // The small conversions every screen does — see lib/format.
 import { teeTimeToMinutes } from "./lib/format";
@@ -100,6 +103,15 @@ const PhotosView = lazy(() => import("./components/PhotosView"));
 // JavaScript, and one person in the field opens it. Lazy, so the other eleven
 // never download it to read a leaderboard. See components/AdminView.
 const AdminView = lazy(() => import("./components/AdminView").then(m => ({ default: m.AdminView })));
+// ── The scramble, in two chunks nobody fetches unless there is one ──
+// Neither screen exists for most tournaments and neither is on the critical
+// path: the setup console is a director's, reached from the More menu, and the
+// card is reached from a header button that is not on screen until the switch
+// is thrown. The setup screen is warmed with the other menu sheets; the card
+// is warmed the moment the scramble goes on, which is a whole round's warning
+// before anybody stands on a tee box with it.
+const ScrambleSetup = lazy(() => import("./components/ScrambleSetup").then(m => ({ default: m.ScrambleSetup })));
+const ScrambleScoring = lazy(() => import("./components/ScrambleScoring").then(m => ({ default: m.ScrambleScoring })));
 import { photoUploadsAllowed, uploadsDisabledReason } from "./lib/media";
 import { returningPlayers, returningLine } from "./lib/returningPlayers";
 import { WBC_LOGO, WBC_FAVICON, clampRounds, SIDE_GAME_KEYS, defaultTournamentName } from "./constants";
@@ -737,6 +749,9 @@ export default function WBCApp() {
     };
   }, []);
   const [view, setView] = useState("leaderboard");
+  // Where the OG/YG/NG button was tapped from, so tapping it again puts the
+  // app back rather than dropping somebody on the leaderboard.
+  const scrambleReturn = useRef("leaderboard");
   const [round, setRound] = useState(1);
   // ── The director's crown ──
   // Which group the Scoring tab is pointed at, reported up by OnCourseScoring,
@@ -876,6 +891,12 @@ export default function WBCApp() {
     market: { amount: 0, in: null, paid: [] },
     rebuy: { amount: 0, in: null, paid: [] },
   });
+  // ── The scramble ──
+  // One round, three teams, one ball each — the whole game is a single object
+  // on tournament_state, normalized on the way in so no screen ever reads a
+  // half-written one. See lib/scramble for what it holds and why it is filed
+  // there rather than in a collection of its own.
+  const [scramble, setScramble] = useState(() => mergeScramble(null));
   const [pairingsData, setPairingsData] = useState({});
   const [teeData, setTeeData] = useState({});
   // Recorded course handicaps, for imported editions only — empty for the
@@ -1218,6 +1239,7 @@ export default function WBCApp() {
         if (docs[0].pairing_strategy) setPairingStrategy(docs[0].pairing_strategy);
         if (docs[0].meta) setTournamentMeta(docs[0].meta);
         if (docs[0].side_games) setSideGames(mergeSideGames(docs[0].side_games));
+        if (docs[0].scramble) setScramble(mergeScramble(docs[0].scramble));
       }
     }));
 
@@ -1451,6 +1473,18 @@ export default function WBCApp() {
     });
   }, [photosOpened]);
 
+  // ── The scramble card, warmed the moment there is a scramble ──
+  // Its chunk is fetched on the first tap of a button that appears the instant
+  // a director throws the switch — which is normally a round or a night before
+  // anybody actually taps it, and always somewhere with a signal, because the
+  // director is the one who just used one. A tee box is not where that fetch
+  // should happen. Same argument as the tab warm on the More menu; the trigger is
+  // different because the button is.
+  useEffect(() => {
+    if (!scrambleLive(scramble)) return;
+    return warmChunks([() => import("./components/ScrambleScoring")]);
+  }, [scramble]);
+
   // Save tournament state to Firestore
   // Written on its own rather than through saveTournamentState: that helper
   // takes seven positional arguments and rewrites all of them, so threading an
@@ -1565,6 +1599,11 @@ export default function WBCApp() {
     setOwnBets([]); setAllBets(null); setPublishedBets(null);
     setSideBets([]);
     setSideGames(mergeSideGames(null));
+    // The scramble goes with the scorecards it sat beside: its own three cards
+    // are gone with the tournament_state delete above, and a switch left on
+    // with no course and no teams would put the OG/YG/NG button in the header
+    // over an empty screen.
+    setScramble(mergeScramble(null));
     setPairingsData({});
     setTeeData({});
     setTeeTimesData({});
@@ -2574,6 +2613,41 @@ export default function WBCApp() {
     });
   };
 
+  // ── The scramble's two writes ────────────────────────────────────
+  // Both are a MERGE of one branch of tournament_state.scramble, for exactly
+  // the reason the side games above are: db.upsert is setDoc(merge:true) and
+  // Firestore merges maps field by field, so a write of one team's hole leaves
+  // the other two cards — and the switch, and the course — untouched. That is
+  // what makes three teams scoring at once safe on one document.
+  //
+  // The ROSTERS are arrays and are therefore replaced wholesale, which is what
+  // taking a player off a team has to do. See lib/scramble.
+  //
+  // Local state first in both, because a phone on a tee box may be posting
+  // into a queue that will not drain until it has a bar again.
+  const onUpdateScramble = async (patch) => {
+    setScramble(prev => mergeScramble({ ...prev, ...patch }));
+    await db.upsert("tournament_state", {
+      id: `ts_${TOURNAMENT_ID}`,
+      tournament_id: TOURNAMENT_ID,
+      scramble: patch,
+      updated_at: new Date().toISOString(),
+    });
+  };
+
+  const onSaveScrambleHole = async (teamKey, holeIdx, score) => {
+    setScramble(prev => mergeScramble({
+      ...prev,
+      scores: { ...prev.scores, [teamKey]: { ...(prev.scores[teamKey] || {}), [holeIdx]: score } },
+    }));
+    await db.upsert("tournament_state", {
+      id: `ts_${TOURNAMENT_ID}`,
+      tournament_id: TOURNAMENT_ID,
+      scramble: { scores: { [teamKey]: { [holeIdx]: score } } },
+      updated_at: new Date().toISOString(),
+    });
+  };
+
   // ── Putting somebody in the market who is not playing ─────────────
   // The registry row is written FIRST, and whether or not he already has one:
   // the app resolves a sign-in by looking the claimed id up in the registry,
@@ -3215,6 +3289,66 @@ export default function WBCApp() {
     }).opening.open;
   })();
 
+  // ── The app header's right-hand cluster ────────────────────────────
+  // Two controls, neither of which is always there, so this is built as a list
+  // and handed over only when it has something in it — AppHeader draws its
+  // absolute corner box on `right` being truthy, and an empty fragment is
+  // truthy.
+  //
+  // The scramble button comes FIRST so the director's crown keeps the corner
+  // it has always had; see components/GroupSwitcher for why that one lives up
+  // here at all.
+  const scrambleOn = scrambleLive(scramble);
+  const onScrambleCard = view === "scrambleScoring";
+  const headerControls = [
+    // ── OG/YG/NG ──
+    // The scramble's only door. It is in the HEADER rather than the nav bar
+    // because the bar is full — five slots, five destinations — and because
+    // this one is temporary: it appears when a director throws the switch and
+    // goes when they throw it back, which is not something a permanent tab
+    // can do. Everybody gets it, not just the director: the whole field scores
+    // the scramble, and the setup screen behind the More menu is the part that
+    // is the director's.
+    //
+    // It is a TOGGLE. The nav bar's five tabs are all still there to leave by,
+    // but the button somebody arrived through is the one their thumb goes back
+    // to, and a second tap that did nothing would read as the app being stuck.
+    scrambleOn ? (
+      <button key="scramble"
+        onClick={() => {
+          if (onScrambleCard) { setView(scrambleReturn.current); return; }
+          scrambleReturn.current = view;
+          setView("scrambleScoring");
+        }}
+        title={onScrambleCard ? "Back" : "Open the scramble card"}
+        aria-label={onScrambleCard ? "Close the scramble card" : "Open the scramble card"}
+        aria-pressed={onScrambleCard}
+        style={{
+          display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+          padding: "6px 8px", borderRadius: R.sm, cursor: "pointer",
+          background: onScrambleCard ? K.acc : K.card,
+          border: `1px solid ${onScrambleCard ? K.acc : K.acc + ALPHA.line}`,
+          color: onScrambleCard ? K.bg : K.acc,
+          fontSize: FS.micro, fontWeight: 800, letterSpacing: 0.5, lineHeight: 1,
+        }}>{SCRAMBLE_BUTTON}</button>
+    ) : null,
+    user.isDirector && view === "scoring" && switchableGroupList.length > 1 ? (
+      <GroupSwitcher
+        key="groups"
+        groups={switchableGroupList}
+        currentKey={scoringGroup ? groupKeyOf(scoringGroup.round, scoringGroup.ids) : null}
+        live={liveRound(finalizedRounds, numRounds)}
+        nameOf={pid => allPlayers.find(p => p.id === pid)?.name || pid}
+        progressOf={g => groupProgress(g.round, g.ids, holeData, finalizedRounds)}
+        onPick={g => {
+          pickSeq.current += 1;
+          setDirectorPick({ seq: pickSeq.current, round: g.round, ids: g.ids });
+          setRound(g.round);
+        }}
+      />
+    ) : null,
+  ].filter(Boolean);
+
   const navItems = [
     { key: "groups", label: "Pairings", icon: "pairings" },
     { key: "scoring", label: "Scoring", icon: "score" },
@@ -3343,20 +3477,7 @@ export default function WBCApp() {
            Up here it costs the scoring screen nothing at all — not a row,
            not a corner of one. */
         countdownAt={firstTeeAt}
-        right={user.isDirector && view === "scoring" && switchableGroupList.length > 1 && (
-          <GroupSwitcher
-            groups={switchableGroupList}
-            currentKey={scoringGroup ? groupKeyOf(scoringGroup.round, scoringGroup.ids) : null}
-            live={liveRound(finalizedRounds, numRounds)}
-            nameOf={pid => allPlayers.find(p => p.id === pid)?.name || pid}
-            progressOf={g => groupProgress(g.round, g.ids, holeData, finalizedRounds)}
-            onPick={g => {
-              pickSeq.current += 1;
-              setDirectorPick({ seq: pickSeq.current, round: g.round, ids: g.ids });
-              setRound(g.round);
-            }}
-          />
-        )}
+        right={headerControls.length ? headerControls : null}
       />
 
       <MoreMenu
@@ -3366,10 +3487,12 @@ export default function WBCApp() {
         isGuest={isGuest(user)}
         adminFlag={adminActionNeeded && user.isDirector}
         notifFlag={notifPerm !== "granted" && !user.isGuest}
+        scrambleOn={scrambleOn}
         activeYear={getTournamentYear()}
         navH={navH}
         onSelect={(key) => {
           if (key === "admin") { setView("admin"); return; }
+          if (key === "scramble") { setView("scramble"); return; }
           if (key === "players") { setView("players"); return; }
           if (key === "photos") { setView("photos"); return; }
           if (key === "editions") { setEditionsOpen(true); return; }
@@ -3547,8 +3670,12 @@ export default function WBCApp() {
           round pills would be a control with nothing on the screen to steer.
           Photos is the same case from the other direction: the gallery carries
           its own round headings and shows every round at once, so a selector
-          that picks one would contradict the screen under it. */}
-      {view !== "admin" && view !== "scoring" && view !== "leaderboard" && view !== "players" && view !== "photos" && (
+          that picks one would contradict the screen under it. The two scramble
+          screens are the strongest version of the same objection: the scramble
+          is ONE round and it is not one of these four, so a strip offering Rd 1
+          to Rd 4 above it would be pointing at the tournament while the screen
+          under it is not. */}
+      {view !== "admin" && view !== "scramble" && view !== "scrambleScoring" && view !== "scoring" && view !== "leaderboard" && view !== "players" && view !== "photos" && (
       <div style={{ display: "flex", gap: 6, padding: "10px 20px", borderBottom: `1px solid ${K.bdr}` }}>
         {Array.from({ length: NUM_ROUNDS }, (_, i) => i + 1).map(r => {
           const tr = tRounds.find(t => t.round_number === r);
@@ -3574,12 +3701,16 @@ export default function WBCApp() {
       {/* Pairings joins the two views that lay out to the height they have
           rather than to the height of what is in them — the tab sizes its own
           type from that measurement, so it needs a floor to measure against. */}
-      <div className="wbc-app-body" style={{ padding: (view === "leaderboard" || view === "admin") ? "14px 20px 0 20px" : "14px 20px", flex: 1, overflowY: "auto", overflowX: "hidden", display: (view === "leaderboard" || view === "admin" || view === "groups") ? "flex" : "block", flexDirection: "column", minHeight: 0, paddingBottom: (view === "leaderboard" || view === "admin") ? "28px" : 0 }}>
+      {/* The scramble's console lays out as the Admin console does — it is the
+          same screen with one round in it, down to the StickyTop the tab bar
+          pins in, and that needs the same flex column and the same bottom
+          padding under it. */}
+      <div className="wbc-app-body" style={{ padding: (view === "leaderboard" || view === "admin" || view === "scramble") ? "14px 20px 0 20px" : "14px 20px", flex: 1, overflowY: "auto", overflowX: "hidden", display: (view === "leaderboard" || view === "admin" || view === "scramble" || view === "groups") ? "flex" : "block", flexDirection: "column", minHeight: 0, paddingBottom: (view === "leaderboard" || view === "admin" || view === "scramble") ? "28px" : 0 }}>
         {view === "leaderboard" && <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} finalizedRounds={finalizedRounds} skinWins={skinWins} pairingsData={pairingsData} teeTimesData={teeTimesData} loaded={storageLoaded} />}
         {scoringOpened && (
         <div style={{ display: view === "scoring" ? "block" : "none", paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
           <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading scoring…</div>}>
-          <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeTimesData={teeTimesData} roundDates={roundDates} scoringOpen={scoringOpen} setTee={setTee} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={onSignScorecard} onAttestScorecard={onAttestScorecard} onUnsignScorecard={onUnsignScorecard} onFinalizeRound={finalizeGroup} onUnfinalizeRound={onUnfinalizeGroup} onGoToAdminCourses={(rnd) => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); setAdminSettingsRound(rnd || null); }} markPlayerWD={markPlayerWD} ctpData={ctpData} onSetCtp={onSetCtp} onConfirmCtp={onConfirmCtp} directorPick={directorPick} onGroupChange={setScoringGroup} onSetRound={setRound} />
+          <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeTimesData={teeTimesData} roundDates={roundDates} scoringOpen={scoringOpen} setTee={setTee} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={onSignScorecard} onAttestScorecard={onAttestScorecard} onUnsignScorecard={onUnsignScorecard} onFinalizeRound={finalizeGroup} onUnfinalizeRound={onUnfinalizeGroup} onGoToAdminCourses={(rnd) => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); setAdminSettingsRound(rnd || null); }} markPlayerWD={markPlayerWD} ctpData={ctpData} onSetCtp={onSetCtp} onConfirmCtp={onConfirmCtp} directorPick={directorPick} onGroupChange={setScoringGroup} onSetRound={setRound} /* How far the scoring screen's "already scored" bar has to stop short of the right edge to leave the header's live controls tappable: the crown alone, or the crown and the scramble's OG/YG/NG button beside it. */ headerInset={scrambleOn ? 146 : 88} />
           </Suspense>
         </div>
         )}
@@ -3595,6 +3726,28 @@ export default function WBCApp() {
         {view === "photos" && !isGuest(user) && <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading photos…</div>}><PhotosView items={media} year={getTournamentYear()} uid={fbUser?.uid || null} isDirector={!!user.isDirector} isGuest={!!user.isGuest} canPost={!user.isGuest && !!fbUser?.uid && photoUploadsAllowed(photoConfig)} uploadsBlockedReason={photoUploadsAllowed(photoConfig) ? "" : uploadsDisabledReason(photoConfig)} onUpload={onUploadPhoto} onDelete={onDeletePhoto} notify={notify} /></Suspense>}
         {view === "skins" && <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading betting…</div>}><BettingView players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} numRounds={numRounds} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} marketBets={marketBets} onSaveMarketBet={onSaveMarketBet} leaderboard={getLeaderboard} finalizedRounds={finalizedRounds} pairingsData={pairingsData} firstTeeAt={firstTeeAt} marketNudge={marketNudge} teeTimesData={teeTimesData} roundDates={roundDates} inactivePlayers={inactivePlayers} onAddMarketOutsider={user.isDirector ? onAddMarketOutsider : undefined} sideBets={sideBets} authUid={fbUser?.uid || null} onAddSideBet={onAddSideBet} onDeleteSideBet={onDeleteSideBet} onSettleSideBet={onSettleSideBet} /></Suspense>}
         {view === "groups" && <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading pairings…</div>}><GroupsView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} pairingsData={pairingsData} teeTimesData={teeTimesData} getPlayerTee={getPlayerTee} user={user} /></Suspense>}
+        {/* The scramble's console. Director-only, and gated on the same flag
+            the Admin tab is: the menu row that leads here is only drawn for a
+            director (components/MoreMenu), and `view` survives a sign-out, so
+            this is the door that row is not the only way through. */}
+        {view === "scramble" && (canAdminHere ? <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading scramble…</div>}><ScrambleSetup scramble={scramble} onUpdate={onUpdateScramble} players={activePlayers} courses={courseList} notify={notify} onOpenScoring={() => { scrambleReturn.current = "scramble"; setView("scrambleScoring"); }} /></Suspense> : (
+          <div style={{ textAlign: "center", padding: "40px 20px" }}>
+            <div style={{ fontSize: FS.jumbo, marginBottom: 12 }}>🔒</div>
+            <div style={{ fontSize: FS.lead, fontWeight: 700, color: K.t1 }}>Directors Only</div>
+          </div>
+        ))}
+        {/* The scramble card. Open to the whole field — that is the point of
+            the header button — but only while the switch is on, because the
+            view outlives the button that opened it: a director turning the
+            scramble off with somebody standing on this screen has to take the
+            screen with it. */}
+        {view === "scrambleScoring" && (scrambleOn ? <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading scramble…</div>}><ScrambleScoring scramble={scramble} players={allPlayers} courses={courseList} user={user} onSaveHole={onSaveScrambleHole} onGoToSetup={() => setView("scramble")} /></Suspense> : (
+          <div style={{ textAlign: "center", padding: "40px 20px" }}>
+            <div style={{ fontSize: FS.jumbo, marginBottom: 12 }}>🏌️</div>
+            <div style={{ fontSize: FS.lead, fontWeight: 700, color: K.t1 }}>No scramble running</div>
+            <div style={{ fontSize: FS.small, color: K.t3, marginTop: 6 }}>Your director has not started one.</div>
+          </div>
+        ))}
         {view === "admin" && (canAdminHere ? <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading admin…</div>}><AdminView registry={registry} activePlayers={activePlayers} marketPool={marketPool} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} rebuyIds={rebuyIds} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} deletePlayer={deletePlayer} editionsHolding={editionsHolding} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
               setTeeTimesData(prev => {
                 const next = typeof updater === "function" ? updater(prev) : updater;
@@ -3641,7 +3794,7 @@ export default function WBCApp() {
           // More reads active while its menu is open OR while one of the views
           // it leads to (Admin, Players) is the one on screen — otherwise
           // opening either would leave the whole bar looking unselected.
-          const active = item.key === "more" ? (menuOpen || view === "admin" || view === "players" || view === "photos") : view === item.key;
+          const active = item.key === "more" ? (menuOpen || view === "admin" || view === "scramble" || view === "players" || view === "photos") : view === item.key;
           const clr = active ? K.acc : K.t3;
           const iconSz = 18;
           const navIcon = () => {
