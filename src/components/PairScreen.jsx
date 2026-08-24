@@ -72,8 +72,18 @@ const Step = ({ n, children, done = false }) => (
  * different axes and outlive each other: the app claims on every foreground,
  * so a bounced screen still cycles through "checking" and "not-yet" while its
  * instructions have to stay put.
+ *
+ * ── "provider", and the one sentence it changes ────────────────────
+ * Apple lands here on the first tap and always will — the form POST home is
+ * Apple's rule and iOS's, and no build fixes it. Google lands here only on a
+ * phone where its redirect has already come back empty, which is a fact about
+ * that phone rather than about Google.
+ *
+ * Two different reasons deserve two different sentences, and the Apple one
+ * read as a lie to a player who had just tapped Google. The steps below are
+ * the same either way, so it is one line of copy and nothing else.
  */
-export function PairWaitScreen({ url, status = "idle", bounced = false, error = "", onOpen, onCheck, onCancel }) {
+export function PairWaitScreen({ url, status = "idle", bounced = false, provider = "apple", error = "", onOpen, onCheck, onCancel }) {
   const busy = status === "checking";
   // null = not tried, true = copied, false = the browser refused. The third
   // state matters: a button that says "copied" and did not would strand
@@ -96,7 +106,9 @@ export function PairWaitScreen({ url, status = "idle", bounced = false, error = 
         <p style={{ color: K.t2, fontSize: FS.small, margin: "0 0 20px", lineHeight: 1.5 }}>
           {bounced
             ? "Your iPhone kept that link inside the app instead of opening Safari. Copy it and paste it into Safari yourself — everything after that is the same."
-            : "Apple won't complete a sign-in inside a home-screen app — that's an iPhone rule, not a WBC one. Sign in once in Safari and this app picks it up. You only do this the first time."}
+            : provider === "google"
+              ? "Sign in with Google didn't make it back into the home-screen app on this phone. Signing in over in Safari does work, and this app picks it up from there — same account, same name on the roster. You only do this the first time."
+              : "Apple won't complete a sign-in inside a home-screen app — that's an iPhone rule, not a WBC one. Sign in once in Safari and this app picks it up. You only do this the first time."}
         </p>
 
         <div style={{ background: K.card, border: `1px solid ${K.bdr}`, borderRadius: R.lg, padding: "16px 14px 6px", marginBottom: 16 }}>
