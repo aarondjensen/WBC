@@ -33,6 +33,23 @@ describe("PairWaitScreen — the home-screen app's half", () => {
     expect(screen.getByRole("link", { name: /Open Safari/i })).toBeTruthy();
   });
 
+  // Two providers reach this screen for two different reasons, and the Apple
+  // sentence is simply untrue for the player who tapped Google — his phone is
+  // the problem, not Apple's rule. Saying the wrong one is how a screen that
+  // works reads as a screen that is confused.
+  it("gives Google its own reason for being here", () => {
+    render(h(PairWaitScreen, { url: URL_, provider: "google", onCheck: () => {}, onCancel: () => {} }));
+    expect(screen.getByText(/didn't make it back into the home-screen app/i)).toBeTruthy();
+    expect(screen.queryByText(/Apple won't complete a sign-in/i)).toBe(null);
+  });
+
+  // …and Apple keeps the one it had. Defaulting matters: the bounced path sets
+  // no provider at all.
+  it("keeps Apple's reason as the default", () => {
+    render(h(PairWaitScreen, { url: URL_, onCheck: () => {}, onCancel: () => {} }));
+    expect(screen.getByText(/Apple won't complete a sign-in/i)).toBeTruthy();
+  });
+
   // The link is the whole mechanism: a target=_blank anchor is what hands a
   // URL to Safari from inside a home-screen app.
   it("hands the pairing URL to a new tab", () => {

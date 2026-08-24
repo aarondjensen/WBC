@@ -52,6 +52,7 @@ import { editionSlug, editionYear } from "./lib/editionId";
 import { bootEdition, bootEditionMoved, defaultEdition } from "./lib/editionHome";
 import {
   REDIRECT_MARK_KEY, encodeRedirectMark, decodeRedirectMark, emptyRedirectMessage,
+  REDIRECT_FAIL_KEY, withRedirectFailure, hasRedirectFailed,
 } from "./lib/authRedirect";
 import { PAIR_ID_BYTES, encodePairId, isPairId, pairingErrorMessage } from "./lib/authPairing";
 
@@ -727,6 +728,28 @@ const takeRedirectMark = () => {
   } catch { return null; }
 };
 
+// ─── The device that has already proved the trip does not come home ─────
+// Both halves of the ledger in lib/authRedirect, which is where the reasoning
+// lives. Written only once an empty return has SETTLED into a real failure —
+// App.jsx holds an empty return for a couple of seconds first, because Firebase
+// can apply the credential during its own init and hand the app an empty
+// getRedirectResult on the way past. Writing this on the empty return alone
+// would send the next sign-in to Safari on behalf of somebody who was already
+// in.
+export const rememberRedirectFailure = (providerId) => {
+  try {
+    localStorage.setItem(
+      REDIRECT_FAIL_KEY,
+      withRedirectFailure(localStorage.getItem(REDIRECT_FAIL_KEY), providerId),
+    );
+  } catch { /* blocked storage */ }
+};
+
+export const redirectFailedBefore = (providerId) => {
+  try { return hasRedirectFailed(localStorage.getItem(REDIRECT_FAIL_KEY), providerId); }
+  catch { return false; }
+};
+
 // Popup failures worth retrying as a redirect rather than showing to the user.
 // `popup-blocked` is a blocker extension or a browser that wanted a more
 // direct gesture; `operation-not-supported-in-this-environment` is a webview
@@ -817,6 +840,10 @@ export const consumeRedirectResult = async () => {
       // with a test that it never points at the other provider.
       const err = new Error(emptyRedirectMessage(attempted, isStandalonePWA()));
       err.code = "app/redirect-empty";
+      // Which button it was about. The caller writes it to the ledger once it
+      // is sure this really is a failure, and the next tap of that button
+      // takes the Safari route instead.
+      err.provider = attempted;
       throw err;
     }
     return null;

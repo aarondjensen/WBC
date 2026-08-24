@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   encodeRedirectMark, decodeRedirectMark, emptyRedirectMessage,
+  decodeRedirectFailures, withRedirectFailure, hasRedirectFailed,
   REDIRECT_MARK_TTL_MS,
 } from "./authRedirect";
 
@@ -43,6 +44,61 @@ describe("the redirect mark", () => {
   });
 });
 
+// ══════════════════════════════════════════════════════════════════
+//  The ledger of providers that do not come home on this device
+// ══════════════════════════════════════════════════════════════════
+//
+// What decides whether the Google button attempts a redirect at all. Getting
+// it wrong in the "yes it failed" direction sends somebody through Safari who
+// did not need to; getting it wrong the other way puts the player in the
+// screenshot back where he was, tapping a button that cannot finish.
+describe("the redirect-failure ledger", () => {
+  it("remembers the provider that came home empty", () => {
+    const raw = withRedirectFailure(null, "google");
+    expect(hasRedirectFailed(raw, "google")).toBe(true);
+  });
+
+  // The whole point of it being per-provider: Apple failing says nothing about
+  // Google, and the Google button should still take the fast route.
+  it("says nothing about the other provider", () => {
+    const raw = withRedirectFailure(null, "apple");
+    expect(hasRedirectFailed(raw, "google")).toBe(false);
+  });
+
+  it("holds both once both have failed", () => {
+    const raw = withRedirectFailure(withRedirectFailure(null, "apple"), "google");
+    expect(hasRedirectFailed(raw, "apple")).toBe(true);
+    expect(hasRedirectFailed(raw, "google")).toBe(true);
+  });
+
+  it("does not grow every time the same provider fails again", () => {
+    let raw = null;
+    for (let i = 0; i < 5; i++) raw = withRedirectFailure(raw, "google");
+    expect(decodeRedirectFailures(raw)).toEqual(["google"]);
+  });
+
+  // An empty ledger is the answer that tries the direct route, so every
+  // unreadable value has to land there rather than stranding a whole device on
+  // the Safari path forever.
+  it("reads anything that is not ours as an empty ledger", () => {
+    for (const raw of [null, "", "{not json", "{}", '"google"', "7"]) {
+      expect(decodeRedirectFailures(raw)).toEqual([]);
+      expect(hasRedirectFailed(raw, "google")).toBe(false);
+    }
+  });
+
+  it("is never true for a provider nobody named", () => {
+    const raw = withRedirectFailure(null, "google");
+    expect(hasRedirectFailed(raw, "")).toBe(false);
+    expect(hasRedirectFailed(raw, null)).toBe(false);
+  });
+
+  it("survives a write with no provider in it", () => {
+    const raw = withRedirectFailure(withRedirectFailure(null, "google"), "");
+    expect(hasRedirectFailed(raw, "google")).toBe(true);
+  });
+});
+
 describe("what an empty return says", () => {
   it("names the button that was pressed", () => {
     expect(emptyRedirectMessage("apple", true)).toContain("Sign in with Apple");
@@ -69,5 +125,21 @@ describe("what an empty return says", () => {
 
   it("warns a home-screen app about ending up with two accounts", () => {
     expect(emptyRedirectMessage("apple", true)).toContain("second account");
+  });
+
+  // The message is a promise about what the next tap does, and the app keeps
+  // it: the empty return goes in the ledger above, so in an installed app that
+  // button takes the Safari route from then on. If one of the two ever changes
+  // without the other, this is what says so.
+  it("tells a home-screen app the next tap finishes in Safari", () => {
+    for (const provider of ["apple", "google"]) {
+      expect(emptyRedirectMessage(provider, true)).toContain("Safari");
+    }
+  });
+
+  // In a browser tab nothing reroutes, so it must not promise a detour that
+  // is not coming.
+  it("promises no such thing in an ordinary browser tab", () => {
+    expect(emptyRedirectMessage("google", false)).not.toContain("Safari");
   });
 });

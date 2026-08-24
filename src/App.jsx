@@ -1,5 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, lazy, Suspense } from "react";
-import { _app, _auth, onAuthStateChanged, doGoogleSignIn, doAppleSignIn, doSignOut, consumeRedirectResult, deleteAccount, newPairId, offerPairing, claimPairing, USERS_COLLECTION, NATIVE_APPLE_ENABLED, APPLE_PROVIDER_ENABLED, isNativePlatform, isAndroidNative, AUTH_PROVIDERS_ENABLED, TOURNAMENT_ID, getEditionSlug, getTournamentYear, isDefaultEdition, rememberDirector, rememberSignedIn, hadAuthSession, getHomeEditionId, getActiveTournamentId } from "./firebase";
+import { _app, _auth, onAuthStateChanged, doGoogleSignIn, doAppleSignIn, doSignOut, consumeRedirectResult, rememberRedirectFailure, redirectFailedBefore, deleteAccount, newPairId, offerPairing, claimPairing, USERS_COLLECTION, NATIVE_APPLE_ENABLED, APPLE_PROVIDER_ENABLED, isNativePlatform, isAndroidNative, AUTH_PROVIDERS_ENABLED, TOURNAMENT_ID, getEditionSlug, getTournamentYear, isDefaultEdition, rememberDirector, rememberSignedIn, hadAuthSession, getHomeEditionId, getActiveTournamentId } from "./firebase";
 import { readMembership, isDirectorAccount, resolveMember, setDirector, subscribeMemberships } from "./lib/accounts";
 // The fourth way in — no account, no password, no roster spot, no writes.
 import { guestUser, isGuest, setGuestWrites, GUEST_NOTICE } from "./lib/guestMode";
@@ -517,12 +517,15 @@ export default function WBCApp() {
 
   // Tapping Apple in the home-screen app starts this instead of a sign-in that
   // provably cannot finish there.
-  const startPairing = useCallback(() => {
+  // The provider is carried through so the screen can say why it is asking —
+  // Apple because Apple never comes home, Google because it didn't come home
+  // HERE. Same three steps either way; different first sentence.
+  const startPairing = useCallback((provider = "apple") => {
     setAuthMsg("");
     let id;
     try { id = newPairId(); } catch (e) { setAuthMsg(e?.message || "Couldn't start pairing."); return; }
     try { localStorage.setItem(PAIR_KEY, encodePairing(id, Date.now())); } catch { /* blocked storage */ }
-    setPairWait({ id, url: pairingUrl(window.location.origin, id), status: "idle", bounced: false, error: "" });
+    setPairWait({ id, url: pairingUrl(window.location.origin, id), status: "idle", bounced: false, provider, error: "" });
   }, []);
 
   // Coming back to the app is the signal that Safari is finished with — iOS
@@ -1948,13 +1951,24 @@ export default function WBCApp() {
     // says nobody is signed in. `armed` survives until an answer arrives; the
     // timer is for the case where the listener's first answer is null and the
     // user lands a beat later, which is the ordering this cannot control.
+    //
+    // Once it HAS settled into a failure it is also written down: on this
+    // device, that provider's round trip does not come home, so the next tap
+    // of that button goes the Safari way instead of back into the same dead
+    // end. See lib/authRedirect for why that is per-device and sticky.
     let armed = "";
+    let armedProvider = "";
     let settle = null;
     consumeRedirectResult().catch(e => {
       if (e?.code === "app/redirect-empty") {
         if (_auth?.currentUser) return;   // already in — nothing to report
         armed = e.message;
-        settle = setTimeout(() => { if (armed && !_auth?.currentUser) setAuthMsg(armed); }, 2500);
+        armedProvider = e.provider || "";
+        settle = setTimeout(() => {
+          if (!armed || _auth?.currentUser) return;
+          rememberRedirectFailure(armedProvider);
+          setAuthMsg(armed);
+        }, 2500);
         return;
       }
       setAuthMsg(e?.message || "Sign-in failed.");
@@ -2053,10 +2067,27 @@ export default function WBCApp() {
   const onSetDirector = useCallback(async (uid, on) => setDirector(uid, on), []);
 
   // Provider sign-in handlers for the login screen.
+  // ── Google, in an installed home-screen app ──
+  // The redirect first, every time, because for almost everybody it works:
+  // Firebase asks Google for `response_type=id_token`, the trip home is a GET,
+  // and a GET comes back into the app.
+  //
+  // Almost. A player photographed the empty-return message after tapping this
+  // button in the home-screen app — twice, which is what the message asked of
+  // him. On a phone where the return leg goes missing, telling him to tap
+  // again is telling him to do the thing that just failed, and it is the only
+  // thing the app had to say. So an empty return is written down (see the auth
+  // effect above), and from then on this button takes the Safari route Apple
+  // takes: it ends at the same Firebase account, and it does not depend on how
+  // iOS routes a return leg.
   const handleGoogleSignIn = useCallback(async () => {
     setAuthMsg("");
+    if (!isNativePlatform() && isStandalonePWA() && redirectFailedBefore("google")) {
+      startPairing("google");
+      return;
+    }
     try { await doGoogleSignIn(); } catch (e) { setAuthMsg(e?.message || "Google sign-in failed."); }
-  }, []);
+  }, [startPairing]);
   // ── Apple, in an installed home-screen app ──
   // Not a sign-in, because one provably cannot finish there: Firebase asks
   // Apple for scopes we never requested, any scope forces a form POST on the
@@ -2064,12 +2095,12 @@ export default function WBCApp() {
   // back. So the button starts a PAIRING instead — sign in where sign-in
   // works, and carry the result across. See lib/authPairing.
   //
-  // Google is deliberately left alone: its trip home is a GET, which comes
-  // back into the app, and changing a flow that works to match one that
-  // doesn't would be the wrong trade.
+  // Google still tries the redirect first — its trip home is a GET, which
+  // comes back into the app — and only falls back to this same pairing route
+  // on a device where that has provably failed. See handleGoogleSignIn.
   const handleAppleSignIn = useCallback(async () => {
     setAuthMsg("");
-    if (!isNativePlatform() && isStandalonePWA()) { startPairing(); return; }
+    if (!isNativePlatform() && isStandalonePWA()) { startPairing("apple"); return; }
     try { await doAppleSignIn(); } catch (e) { setAuthMsg(e?.message || "Apple sign-in failed."); }
   }, [startPairing]);
 
@@ -3103,6 +3134,7 @@ export default function WBCApp() {
           url={pairWait.url}
           status={pairWait.status}
           bounced={pairWait.bounced}
+          provider={pairWait.provider}
           error={pairWait.error}
           onCheck={() => takePairing(pairWait.id)}
           onCancel={cancelPairing}
