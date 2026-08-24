@@ -25,13 +25,22 @@
 import { K, FONT, FS, R, ALPHA, MOTION, SHADOW } from "../theme";
 import { useSheetDrag } from "../lib/useSheetDrag";
 
-export function MoreMenu({ open, onClose, onSelect, isDirector, isGuest, adminFlag, notifFlag, activeYear, navH = 62 }) {
+export function MoreMenu({ open, onClose, onSelect, isDirector, isGuest, adminFlag, notifFlag, scrambleOn, activeYear, navH = 62 }) {
   const { dragY, handlers } = useSheetDrag({ onClose });
 
   if (!open) return null;
 
   const items = [
     ...(isDirector ? [{ key: "admin", label: "Admin Settings", flag: adminFlag }] : []),
+    // The scramble's own console — a course, three teams and the switch that
+    // puts OG/YG/NG in the app header. Directly under Admin because it is the
+    // same kind of thing done to the same tournament, and DIRECTOR-ONLY for
+    // now: setting the game up is the director's job, and once it is on
+    // everybody reaches the card from the header rather than from here. The
+    // value on the row is the switch's own state, so the menu says whether the
+    // scramble is running without opening it — the same job the active year
+    // does two rows down.
+    ...(isDirector ? [{ key: "scramble", label: "Scramble", value: scrambleOn ? "ON" : null }] : []),
     // The record book: every player's WBC Index and the rounds behind it. It
     // sits with the EVENT rather than with the person because it is about the
     // tournament's history, not about the phone holding it — and above the

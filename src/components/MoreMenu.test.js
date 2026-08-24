@@ -48,6 +48,25 @@ describe("MoreMenu", () => {
     expect(screen.getByText("Admin Settings")).toBeTruthy();
   });
 
+  // Director-only for now — setting the game up is the director's job, and
+  // once it is running everybody reaches the card from the header button
+  // instead of from here.
+  it("gives a director the scramble, and nobody else", () => {
+    mount({ isDirector: true });
+    expect(screen.getByText("Scramble")).toBeTruthy();
+    cleanup();
+    mount();
+    expect(screen.queryByText("Scramble")).toBeNull();
+  });
+
+  it("says on the row whether the scramble is running", () => {
+    mount({ isDirector: true, scrambleOn: true });
+    expect(screen.getByText("ON")).toBeTruthy();
+    cleanup();
+    mount({ isDirector: true, scrambleOn: false });
+    expect(screen.queryByText("ON")).toBeNull();
+  });
+
   // Everything else behind this menu is the tournament — scores, groups,
   // indexes, years. The gallery is the sixteen of them off the course, and a
   // guest is a stranger.

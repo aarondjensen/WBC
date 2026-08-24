@@ -21,8 +21,10 @@
 // What is left here is the screen: what is on it, when each prompt appears,
 // and the transitions between holes.
 //
-// ScoreButtonRow, HoleStateBar and holeBarBtn came with it. Nothing else in
-// the app draws them, and they were only in App.jsx because this was.
+// HoleStateBar and holeBarBtn came with it. Nothing else in the app draws
+// them, and they were only in App.jsx because this was. ScoreButtonRow went
+// on to a file of its own once the scramble's scoring screen needed the same
+// control — see components/ScoreButtonRow.
 
 import { useState, useEffect, useRef } from "react";
 import { K, ON_ACC, FS, R, ALPHA, MOTION, FONT, SHADOW } from "../theme";
@@ -30,6 +32,7 @@ import { Btn } from "./ui";
 import { Popup, ConfirmModal } from "./Popup";
 import { TeeColorSwatch } from "./TeeColorSwatch";
 import { ScoreCell } from "./ScoreCell";
+import { ScoreButtonRow } from "./ScoreButtonRow";
 import { GroupSwitcher } from "./GroupSwitcher";
 import { OffRoundBanner } from "./OffRoundBanner";
 import { HEADER_SAFE_PAD } from "./AppHeader";
@@ -38,80 +41,13 @@ import { NUM_ROUNDS } from "../lib/rounds";
 import { shortName } from "../lib/playerNames";
 import { fmtPar, teeTimeToMinutes, minutesToTimeStr, fmtRoundDate } from "../lib/format";
 import { isScoringOpen, SCORING_LEAD_MIN } from "../lib/scoringGate";
-import { tapScore, tapNudge, tapBigAction } from "../lib/haptics";
-import { scoreWindow, nudgeUpTarget, nudgeDownTarget, scoreTerm } from "../lib/scoreEntry";
+import { tapNudge, tapBigAction } from "../lib/haptics";
 import { calcCH, courseHandicapFor, buildStrokesMap, computeRoundLine, WD_SCORE } from "../lib/individualBoard";
 import { openingHole, nineComplete } from "../lib/holeAdvance";
 import { groupKey as groupKeyOf, sameGroup, liveRound } from "../lib/groupSwitch";
 import { useConfirm } from "../lib/useConfirm";
 import { groupTrouble, roundTrouble, describeTrouble, blocksScoring } from "../lib/roundSetup";
 import { groupTeeOrder, tagAheadOfPlay } from "../lib/ctp";
-
-// Labels sit beneath the 5 par-relative buttons [par-1, par, par+1, par+2, par+3].
-const SCORE_LABELS = ["Birdie", "Par", "Bogey", "Double", "Triple"];
-
-// `scoreTerm` — what a score is CALLED — lives in lib/scoreEntry with the rest
-// of the score-entry rules, and is imported at the top of this file.
-
-// ═══════════════════════════════════════════════════════════════
-//  ScoreButtonRow — par-relative score control (ported from league)
-// ═══════════════════════════════════════════════════════════════
-// 5 par-relative buttons that recenter around par, flanked by −/+ nudge
-// buttons. Birdie/Par/Bogey/Double/Triple labels render beneath. Tapping the
-// selected score again clears it (onPick(0)). 44px touch targets per Apple HIG.
-// `forName` is the player this row belongs to, used only to name the buttons
-// for a screen reader. On screen the name is already the card's heading and
-// repeating it would be noise; announced, "5, bogey" with no idea whose card
-// it is is the difference between usable and not.
-function ScoreButtonRow({ score, par, onPick, forName = "" }) {
-  // Window and ± targets live in lib/scoreEntry — see the header there for
-  // why a cold + opens past the top of the row rather than on a bogey.
-  const { btns, shifted } = scoreWindow(par, score);
-  // A shifted window would mislabel its buttons (an ace on a par 3 is not a
-  // "Birdie"), so the labels drop out but keep their 12px slot — the row
-  // height has to stay put.
-  const showLabels = !shifted;
-  const boxSize = 32;
-  const handleNudge = (val) => { tapNudge(); onPick(Math.max(1, val)); };
-  return (
-    <div style={{ display: "flex", gap: 4, alignItems: "flex-start" }}>
-      <button onClick={() => handleNudge(nudgeDownTarget(score, par))} aria-label={`One lower${forName ? " for " + forName : ""}`} style={{ width: 36, height: 44, borderRadius: R.sm, background: K.inp, border: "none", color: K.t3, fontSize: FS.body, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>−</button>
-      {btns.map((btn, idx) => {
-        const isCur = btn === score; const sd = btn - par;
-        const isPar = btn === par;
-        const showParAnchor = isPar && !isCur;
-        const ringClr = sd < 0 ? K.danger : K.bg;
-        return (
-          <div key={btn} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, minWidth: 0 }}>
-            {/* A rung above FS.body, unlike the ± either side of it. This is
-                the number the whole screen exists to read and to hit, it sits
-                in a 44px box with room to spare, and it is read at arm's
-                length in sun. Nothing reflows: the box height is fixed. */}
-            <button
-              onClick={() => { tapScore(); onPick(isCur ? 0 : btn); }}
-              // The visible label under the button is dropped on a shifted
-              // window (an ace on a par 3 is not a "Birdie"), and the ± keys
-              // have no text at all — so the name is built from par here
-              // rather than read off the DOM.
-              aria-label={`${forName ? forName + ", " : ""}${btn}${scoreTerm(btn, par) ? ", " + scoreTerm(btn, par) : ""}${isCur ? " — posted, tap to clear" : ""}`}
-              aria-pressed={isCur}
-              style={{ width: "100%", height: 44, borderRadius: R.sm, cursor: "pointer", fontSize: FS.lead, fontWeight: 800, border: "none", background: isCur ? K.acc : K.inp, color: isCur ? K.bg : K.t2, position: "relative", transition: `all ${MOTION}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
-              {/* Selected-state rings: circles under par, squares over par */}
-              {isCur && sd !== 0 && <div style={{ position: "absolute", width: boxSize, height: boxSize, left: "50%", top: "50%", transform: "translate(-50%, -50%)" }}><div style={{ position: "absolute", inset: 0, borderRadius: sd < 0 ? "50%" : R.xs, border: `1.5px solid ${ringClr}` }} />{Math.abs(sd) >= 2 && <div style={{ position: "absolute", inset: 3, borderRadius: sd < 0 ? "50%" : R.xs, border: `1px solid ${ringClr}` }} />}</div>}
-              {/* Resting-state faint outlines on non-par, non-selected buttons */}
-              {!isCur && sd !== 0 && <div style={{ position: "absolute", width: boxSize, height: boxSize, left: "50%", top: "50%", transform: "translate(-50%, -50%)", opacity: 0.15 }}><div style={{ position: "absolute", inset: 0, borderRadius: sd < 0 ? "50%" : R.xs, border: `1.25px solid ${sd < 0 ? K.danger : K.t2}` }} />{Math.abs(sd) >= 2 && <div style={{ position: "absolute", inset: 3, borderRadius: sd < 0 ? "50%" : R.xs, border: `1px solid ${sd < 0 ? K.danger : K.t2}` }} />}</div>}
-              <span style={{ position: "relative", zIndex: 1 }}>{btn}</span>
-            </button>
-            <div style={{ fontSize: FS.micro, color: showParAnchor ? K.t2 : K.t3, fontWeight: showParAnchor ? 700 : 600, letterSpacing: 0.4, lineHeight: 1, height: 12 }}>
-              {showLabels ? SCORE_LABELS[idx] : ""}
-            </div>
-          </div>
-        );
-      })}
-      <button onClick={() => handleNudge(nudgeUpTarget(score, par))} aria-label={`One higher${forName ? " for " + forName : ""}`} style={{ width: 36, height: 44, borderRadius: R.sm, background: K.inp, border: "none", color: K.t3, fontSize: FS.body, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>+</button>
-    </div>
-  );
-}
 
 // ═══════════════════════════════════════════════════════════════
 //  Popup — shared modal chrome (backdrop + centered card)
@@ -131,11 +67,13 @@ function ScoreButtonRow({ score, par, onPick, forName = "" }) {
 // It rides ON the app header for the reason the other bars here do: the header
 // is a logo and a caption, so nothing under it is worth tapping, while the
 // hole strip below it is exactly what a scorer reaches for while this is up.
-// It stops 88px short of the right edge to leave the director's group switcher
-// — the one live control on that band — uncovered.
-const HoleStateBar = ({ glyph, label, children }) => (
+// It stops short of the right edge to leave the live controls on that band —
+// the director's group switcher, and the scramble's OG/YG/NG button when one
+// is running — uncovered. `rightInset` is how far, because how many of them
+// there are is the shell's business rather than this screen's.
+const HoleStateBar = ({ glyph, label, rightInset = 88, children }) => (
   <div style={{
-    position: "fixed", top: `calc(${HEADER_SAFE_PAD} + 6px)`, left: 12, right: 88,
+    position: "fixed", top: `calc(${HEADER_SAFE_PAD} + 6px)`, left: 12, right: rightInset,
     display: "flex", alignItems: "center", gap: 8,
     background: K.warn + ALPHA.tint, backdropFilter: "blur(8px)",
     border: `1.5px solid ${K.warn}`, borderRadius: R.lg, padding: "8px 12px",
@@ -156,7 +94,7 @@ const holeBarBtn = (fill) => ({
   color: ON_ACC, fontSize: FS.label, fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap",
 });
 
-export function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPlayers, onSaveHole, notify, pairingsData, teeTimesData, roundDates, scoringOpen, setTee, getPlayerTee, getPlayerCH = () => null, finalizedRounds, scorecardSigs, onSignScorecard, onAttestScorecard, onUnsignScorecard, onFinalizeRound, onUnfinalizeRound, onGoToAdminCourses, markPlayerWD, ctpData, onSetCtp, onConfirmCtp, directorPick, onGroupChange, onSetRound }) {
+export function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPlayers, onSaveHole, notify, pairingsData, teeTimesData, roundDates, scoringOpen, setTee, getPlayerTee, getPlayerCH = () => null, finalizedRounds, scorecardSigs, onSignScorecard, onAttestScorecard, onUnsignScorecard, onFinalizeRound, onUnfinalizeRound, onGoToAdminCourses, markPlayerWD, ctpData, onSetCtp, onConfirmCtp, directorPick, onGroupChange, onSetRound, headerInset = 88 }) {
   const [group, setGroup] = useState(null);
   const [currentHole, setCurrentHole] = useState(0);
   const [manualOverride, setManualOverride] = useState(false);
@@ -1773,7 +1711,7 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
           "Resume Hole 18 →" shortens to "Hole 18 →" — the row has three things
           on it now, and the green button is self-evidently the way onward. */}
       {onCompletedHole && (
-        <HoleStateBar glyph="✓" label={`Hole ${currentHole + 1} already scored`}>
+        <HoleStateBar glyph="✓" rightInset={headerInset} label={`Hole ${currentHole + 1} already scored`}>
           <button onClick={() => setEditingCompleted(true)} style={holeBarBtn(K.warn)}>✏️ Edit</button>
           <button onClick={returnToPlay} style={holeBarBtn(K.acc)}>Hole {findNextIncompleteHole() + 1} →</button>
         </HoleStateBar>
@@ -1784,7 +1722,7 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
           inline strip above the cards, which scrolled away exactly when you
           were deepest into the thing it was warning you about. */}
       {editingCompleted && (
-        <HoleStateBar glyph="✎" label={`Editing hole ${currentHole + 1}`}>
+        <HoleStateBar glyph="✎" rightInset={headerInset} label={`Editing hole ${currentHole + 1}`}>
           <button onClick={returnToPlay} style={holeBarBtn(K.acc)}>Hole {findNextIncompleteHole() + 1} →</button>
         </HoleStateBar>
       )}
