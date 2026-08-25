@@ -83,6 +83,11 @@ const CoursePreviewPortal = ({ children }) => {
   return createPortal(children, document.body);
 };
 
+// Width of the HI and CH columns in the player-tee list. Wide enough for a
+// two-digit index with a decimal ("18.4") at FS.lead, so the numbers line up
+// down the list instead of drifting with the name beside them.
+const CH_COL_W = 40;
+
 const TEE_PALETTE = ["#60a5fa","#f59e0b","#a78bfa","#34d399","#fb923c","#f472b6","#38bdf8","#e879f9"];
 
 const TeeDot = ({ color }) => (
@@ -692,6 +697,24 @@ function TeeAssigner({ activePlayers, tRounds, courses, teeData, setTeeBulk, fin
           </button>
           <div style={{ overflow: "hidden", display: openTees ? "block" : "none" }}>
             <div>
+            {/* HI and CH are columns, headed once, not a run of prose on every
+                row. The director reads them DOWN — who is off what, who moved
+                — and a label repeated forty times is forty things in the way of
+                that. They also carry the row's largest type: the numbers are
+                what this screen is for, and they were the smallest thing on it. */}
+            <div style={{
+              padding: "3px 12px", display: "flex", alignItems: "center", gap: 6,
+              borderBottom: `1px solid ${K.bdr}${ALPHA.hair}`,
+            }}>
+              <span style={{ flex: 1, minWidth: 0 }} />
+              {["HI", "CH"].map(h => (
+                <span key={h} style={{
+                  width: CH_COL_W, textAlign: "right", fontSize: FS.micro, fontWeight: 700,
+                  color: K.t3, textTransform: "uppercase", letterSpacing: "0.06em",
+                }}>{h}</span>
+              ))}
+              <span style={{ width: tees.length * 34 + Math.max(0, tees.length - 1) * 2, flexShrink: 0 }} />
+            </div>
             {activePlayers.map((p, i) => {
               // No fallback to the default tee. This row used to read
               // `assignments[p.id] || defaultTee?.name`, which drew the default
@@ -705,21 +728,35 @@ function TeeAssigner({ activePlayers, tRounds, courses, teeData, setTeeBulk, fin
               const ch = teeObj ? calcCH(p.handicap_index, teeObj.slope, teeObj.rating, teeObj.par) : null;
               return (
                 <div key={p.id} style={{
-                  padding: "5px 12px", display: "flex", justifyContent: "space-between", alignItems: "center",
+                  padding: "5px 12px", display: "flex", alignItems: "center", gap: 6,
                   borderBottom: i < activePlayers.length - 1 ? `1px solid ${K.bdr}${ALPHA.wash}` : "none",
                 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                    <span style={{ fontWeight: 600, fontSize: FS.small, color: teeObj ? K.t1 : K.danger }}>{p.name}</span>
-                    <span style={{ fontSize: FS.micro, color: K.t2, display: "flex", alignItems: "center", gap: 3 }}>
-                      HI {p.handicap_index} · CH {teeObj ? ch : <span style={{ color: K.danger, fontWeight: 700 }}>no tee</span>}
-                      {chDeltas[p.id] !== undefined && (
-                        <span style={{ fontSize: FS.micro, fontWeight: 700, color: chDeltas[p.id] > 0 ? K.ok : K.danger, display: "flex", alignItems: "center", gap: 1 }}>
-                          {chDeltas[p.id] > 0 ? "▲" : "▼"}{Math.abs(chDeltas[p.id])}
-                        </span>
-                      )}
-                    </span>
-                  </div>
-                  <div style={{ display: "flex", gap: 2 }}>
+                  <span style={{
+                    flex: 1, minWidth: 0, fontWeight: 600, fontSize: FS.small, color: teeObj ? K.t1 : K.danger,
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  }}>{p.name}</span>
+                  <span style={{
+                    width: CH_COL_W, flexShrink: 0, textAlign: "right",
+                    fontSize: FS.lead, fontWeight: 600, color: K.t2, fontVariantNumeric: "tabular-nums",
+                  }}>{p.handicap_index}</span>
+                  <span style={{
+                    width: CH_COL_W, flexShrink: 0, display: "flex", alignItems: "center",
+                    justifyContent: "flex-end", gap: 2,
+                  }}>
+                    {/* The delta rides inside the CH column so a tee change
+                        moves the number the director is watching, not a note
+                        beside it. */}
+                    {chDeltas[p.id] !== undefined && (
+                      <span style={{ fontSize: FS.micro, fontWeight: 700, color: chDeltas[p.id] > 0 ? K.ok : K.danger, lineHeight: 1 }}>
+                        {chDeltas[p.id] > 0 ? "▲" : "▼"}{Math.abs(chDeltas[p.id])}
+                      </span>
+                    )}
+                    <span style={{
+                      fontSize: FS.lead, fontWeight: 700, fontVariantNumeric: "tabular-nums",
+                      color: teeObj ? K.t1 : K.danger,
+                    }}>{teeObj ? ch : "—"}</span>
+                  </span>
+                  <div style={{ display: "flex", gap: 2, flexShrink: 0 }}>
                     {[...tees].sort((a, b) => (parseFloat(b.slope) || 0) - (parseFloat(a.slope) || 0)).map(tee => {
                       const isActive = currentTee === tee.name;
                       return (
