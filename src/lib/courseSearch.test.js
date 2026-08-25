@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { stateMatches, decodeHtml, hasRealSlope, parseRapidAPI, fetchCourseTees } from "./courseSearch";
+import { stateMatches, decodeHtml, hasRealSlope, parseRapidAPI, fetchCourseTees, searchCourses, SAVED_COURSES_TIMEOUT_MS } from "./courseSearch";
 
 describe("stateMatches", () => {
   it("matches a state to itself", () => {
@@ -213,5 +213,127 @@ describe("fetchCourseTees", () => {
   it("is empty rather than throwing when the network is down", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("offline"); }));
     await expect(fetchCourseTees("Treetops Resort", "MI")).resolves.toEqual([]);
+  });
+});
+
+// ── searchCourses ──────────────────────────────────────────────────
+// The order of the two sources and what happens when one of them fails. Both
+// loaders are injected, so nothing here touches Firestore or the network —
+// which is the point: the failure modes below are exactly the ones that are
+// impossible to produce on purpose against the real thing.
+describe("searchCourses", () => {
+  const saved = (name, over = {}) => ({ id: "sb_" + name, name, slope: 130, tee_boxes: [{ name: "Blue", slope: 130 }], ...over });
+  const api = (name, over = {}) => ({ id: "rapid_" + name, name, slope: 128, tee_boxes: [{ name: "Blue", slope: 128 }], ...over });
+  const loaders = (savedRows, apiRows) => ({
+    loadSaved: async () => savedRows,
+    loadApi: async () => apiRows,
+  });
+
+  it("says nothing at all until there is enough to search on", async () => {
+    const loadSaved = vi.fn();
+    expect(await searchCourses("t", { loadSaved })).toEqual([]);
+    expect(await searchCourses("  ", { loadSaved })).toEqual([]);
+    expect(await searchCourses(undefined, { loadSaved })).toEqual([]);
+    expect(loadSaved).not.toHaveBeenCalled();
+  });
+
+  it("puts the courses this app already holds above the API's", async () => {
+    const out = await searchCourses("tree", loaders([saved("Treetops")], [api("Black Forest")]));
+    expect(out.map(c => c.name)).toEqual(["Treetops", "Black Forest"]);
+  });
+
+  it("drops the API's copy of a course we already have corrected", async () => {
+    const out = await searchCourses("tree", loaders([saved("Treetops")], [api("TREETOPS"), api("Elk Ridge")]));
+    expect(out.map(c => c.name)).toEqual(["Treetops", "Elk Ridge"]);
+    expect(out[0].id).toBe("sb_Treetops");
+  });
+
+  it("still answers from the API when the library read throws", async () => {
+    const out = await searchCourses("tree", {
+      loadSaved: async () => { throw new Error("offline"); },
+      loadApi: async () => [api("Treetops")],
+    });
+    expect(out.map(c => c.name)).toEqual(["Treetops"]);
+  });
+
+  it("still answers from the library when the API throws", async () => {
+    const out = await searchCourses("tree", {
+      loadSaved: async () => [saved("Treetops")],
+      loadApi: async () => { throw new Error("502"); },
+    });
+    expect(out.map(c => c.name)).toEqual(["Treetops"]);
+  });
+
+  it("returns nothing rather than throwing when both are gone", async () => {
+    const out = await searchCourses("tree", {
+      loadSaved: async () => { throw new Error("offline"); },
+      loadApi: async () => { throw new Error("offline"); },
+    });
+    expect(out).toEqual([]);
+  });
+
+  it("survives a loader that answers with nothing at all", async () => {
+    expect(await searchCourses("tree", loaders(null, undefined))).toEqual([]);
+  });
+
+  // 113 on every tee is the API saying it does not know, and a tournament must
+  // not be played off ratings nobody measured without somebody noticing.
+  it("flags a course the API had no real ratings for", async () => {
+    const out = await searchCourses("tree", loaders([], [
+      api("Unknown Muni", { slope: 113, tee_boxes: [{ name: "White", slope: 113 }] }),
+      api("Treetops"),
+    ]));
+    expect(out.find(c => c.name === "Unknown Muni")._incompleteData).toBe(true);
+    expect(out.find(c => c.name === "Treetops")._incompleteData).toBe(false);
+  });
+
+  it("hands the query and the state filter down to both loaders", async () => {
+    const loadSaved = vi.fn(async () => []);
+    const loadApi = vi.fn(async () => []);
+    await searchCourses("  treetops  ", { state: "MI", loadSaved, loadApi });
+    expect(loadSaved).toHaveBeenCalledWith("treetops", "MI");
+    expect(loadApi).toHaveBeenCalledWith("treetops", "MI");
+  });
+});
+
+// ── The failure this repo has had before, in a different collection ────
+// A Firestore read made with no signal does not fail. It does not resolve
+// either — it waits for a connection that is not coming (see lib/db). The
+// library read used to be awaited before the API was even asked, so one bar in
+// a car park was a search field that spun forever with the API's perfectly
+// good answers never requested.
+describe("searchCourses under a bad signal", () => {
+  const never = () => new Promise(() => {});
+  const api = (name) => ({ id: "rapid_" + name, name, slope: 128, tee_boxes: [{ name: "Blue", slope: 128 }] });
+
+  it("asks both sources at once rather than one after the other", async () => {
+    let savedAnswered = false;
+    let askedWhileLibraryStillReading = null;
+    const out = await searchCourses("tree", {
+      loadSaved: async () => { await new Promise(r => setTimeout(r, 20)); savedAnswered = true; return []; },
+      loadApi: async () => { askedWhileLibraryStillReading = !savedAnswered; return [api("Treetops")]; },
+    });
+    // Chained, the API would only be asked after the library had answered.
+    expect(askedWhileLibraryStillReading).toBe(true);
+    expect(out.map(c => c.name)).toEqual(["Treetops"]);
+  });
+
+  it("goes on without the library when that read never answers", async () => {
+    vi.useFakeTimers();
+    try {
+      const p = searchCourses("tree", { loadSaved: never, loadApi: async () => [api("Treetops")] });
+      await vi.advanceTimersByTimeAsync(SAVED_COURSES_TIMEOUT_MS + 1);
+      expect((await p).map(c => c.name)).toEqual(["Treetops"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("survives a loader that throws synchronously rather than rejecting", async () => {
+    const out = await searchCourses("tree", {
+      loadSaved: () => { throw new Error("boom"); },
+      loadApi: () => [api("Treetops")],
+    });
+    expect(out.map(c => c.name)).toEqual(["Treetops"]);
   });
 });
