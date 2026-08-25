@@ -60,8 +60,25 @@ npm test           # vitest watch mode
 npm run lint       # eslint
 ```
 
-Firestore rules have their own suite in `firestore.rules.test.mjs` — run it when
-touching `firestore.rules`.
+### The two suites that need the emulator
+
+```sh
+npm run test:rules       # firestore.rules.test.mjs — run when touching firestore.rules
+npm run test:ctp-claims  # firestore.ctpClaims.test.mjs — the CTP claims map
+```
+
+Both need `firebase-tools` on the PATH (`npm i -g firebase-tools`) and a JRE;
+the scripts start and stop the emulator themselves.
+
+Neither is a vitest suite — each is a plain node script with its own runner, so
+`vitest run firestore.rules.test.mjs` matches nothing and silently reports no
+tests. That is how the rules suite went months unrunnable by the command that
+was written down for it. Use the npm scripts.
+
+`test:ctp-claims` guards the one thing lib/ctp's unit tests cannot: closest-to-
+the-pin stores one claim per group in a map and derives the winner from all of
+them, which only works because Firestore merges a map key by key. Every unit
+test would still pass if that stopped being true.
 
 ### Testing something that has to re-render
 
