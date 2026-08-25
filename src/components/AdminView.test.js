@@ -315,6 +315,28 @@ describe("AdminView renders", () => {
     expect(screen.getAllByText("\u2014").length).toBe(4);
   });
 
+  // ── Set-all says what it did ──
+  // Tapping a tee tile moves the WHOLE field, which is the biggest swing in
+  // strokes the console can make, and it used to happen in silence: only the
+  // per-player buttons flashed the change. The maths is in lib/chDeltas with
+  // its own suite; what this holds is that the tile is wired to it.
+  it("flashes the course-handicap change when the whole field is moved", () => {
+    mount({ teeData: { 1: { aaron_j: "Blue", dave_s: "Blue", matt_r: "White", pete_l: "White" } } });
+    fireEvent.click(screen.getByText("Player tees"));
+    fireEvent.click(screen.getByTitle("Put every player on White"));
+    // Aaron (12) and Dave (8) come off Blue and each drop three strokes.
+    // Matt and Pete are already on White and Test One has no tee, so three of
+    // the five rows say nothing — nothing happened to them.
+    expect(screen.getAllByText("\u25bc3").length).toBe(2);
+  });
+
+  it("says nothing for a set-all onto the tee the field is already playing", () => {
+    mount({ teeData: { 1: { aaron_j: "Blue", dave_s: "Blue", matt_r: "Blue", pete_l: "Blue", test_one: "Blue" } } });
+    fireEvent.click(screen.getByText("Player tees"));
+    fireEvent.click(screen.getByTitle("Put every player on Blue"));
+    expect(screen.queryByText(/[\u25b2\u25bc]\d/)).toBeNull();
+  });
+
   it("opens on the tab the shell asks for", () => {
     // Admin is reachable from a nudge elsewhere in the app — "set this round's
     // course" jumps straight here — and that routing crosses the chunk
