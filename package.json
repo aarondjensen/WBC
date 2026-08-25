@@ -12,6 +12,8 @@
     "preview": "vite preview",
     "test": "vitest",
     "test:run": "vitest run",
+    "test:rules": "firebase emulators:exec --only firestore --project wbc-rules-test \"FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 node firestore.rules.test.mjs\"",
+    "test:ctp-claims": "firebase emulators:exec --only firestore --project wbc-ctp-test \"FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 node firestore.ctpClaims.test.mjs\"",
     "build:history": "node scripts/build-history.mjs",
     "import:history": "node scripts/import-history.mjs",
     "ingest:photos": "node scripts/ingest-photos.mjs",
