@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { groupKey, roundOfGroupKey, sameGroup, liveRound, switchableGroups, groupProgress, roundFinalized } from "./groupSwitch";
+import { groupKey, roundOfGroupKey, sameGroup, liveRound, switchableGroups, groupProgress, roundFinalized, unfinalizeKeys, isGroupKey } from "./groupSwitch";
 
 // n holes posted for a player, as holeData files them: `${pid}_${round}`.
 const card = (n, s = 4) => Object.fromEntries(Array.from({ length: n }, (_, i) => [i, s]));
@@ -158,5 +158,49 @@ describe("roundFinalized", () => {
 
   it("survives missing arguments", () => {
     expect(roundFinalized(null, null, 1)).toBe(false);
+  });
+});
+
+describe("unfinalizeKeys", () => {
+  const gk = groupKey(1, ["a", "b", "c", "d"]);
+
+  it("takes the group's own key when that is what is locking it", () => {
+    expect(unfinalizeKeys({ [gk]: true }, gk)).toEqual([gk]);
+  });
+
+  // The one this exists for: Admin's "Round N Complete" prompt writes a bare
+  // round number, so no group in that round carries a key of its own, and
+  // deleting the group key alone left the card locked and the button dead.
+  it("takes the ROUND's key when the round was closed out from Admin", () => {
+    expect(unfinalizeKeys({ 1: true }, gk)).toEqual(["1"]);
+  });
+
+  it("takes both when both are set", () => {
+    expect(unfinalizeKeys({ 1: true, [gk]: true }, gk).sort()).toEqual([gk, "1"].sort());
+  });
+
+  it("answers with just the number when handed a bare round", () => {
+    expect(unfinalizeKeys({ 1: true }, 1)).toEqual(["1"]);
+    expect(unfinalizeKeys({ 1: true }, "1")).toEqual(["1"]);
+  });
+
+  it("leaves another round's finalization alone", () => {
+    expect(unfinalizeKeys({ 2: true }, gk)).toEqual([]);
+    expect(unfinalizeKeys({ 2: true }, groupKey(2, ["a", "b"]))).toEqual(["2"]);
+  });
+
+  it("is empty when nothing is locking this card, so a caller can skip the write", () => {
+    expect(unfinalizeKeys({}, gk)).toEqual([]);
+    expect(unfinalizeKeys(null, gk)).toEqual([]);
+    expect(unfinalizeKeys({ [groupKey(1, ["e", "f"])]: true }, gk)).toEqual([]);
+  });
+});
+
+describe("isGroupKey", () => {
+  it("tells a card's key from a round's", () => {
+    expect(isGroupKey(groupKey(1, ["a", "b"]))).toBe(true);
+    expect(isGroupKey(1)).toBe(false);
+    expect(isGroupKey("1")).toBe(false);
+    expect(isGroupKey(null)).toBe(false);
   });
 });

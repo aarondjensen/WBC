@@ -310,9 +310,21 @@ service cloud.firestore {
     // rule must not freeze the tournament it deploys into.
     //
     // A round finalized by every group signing its own card stores a GROUP KEY
-    // rather than a round number and so does not appear here. That is the safe
-    // direction: such a year reads as unfinished and keeps taking writes, and
-    // a director closing it out properly is what makes it final.
+    // (`1_aaron_j,dave_s,mike_r`) rather than a round number, and those must
+    // NOT be counted. This is the direction that has to be got right, because
+    // getting it wrong is silent and lands mid-tournament: twelve players is
+    // three groups, so a four-round year reaches four keys when the first
+    // group of ROUND TWO signs its card, and counting them would refuse every
+    // member write for the rest of the week — on a tee box, with nothing on
+    // screen saying why, because the app's own copy of this test
+    // (lib/editionLifecycle editionClosedToMembers) counts round numbers only
+    // and so would show no lock banner.
+    //
+    // Rules have no filter, so the numeric keys are counted by taking the
+    // group keys away: every key that is NOT one of the bare round numbers a
+    // tournament can have. A year finished only by its groups signing off
+    // therefore still reads as unfinished and keeps taking writes, and a
+    // director closing it out from Admin is what makes it final.
     //
     // Costs one more document read per member write, same bargain as the lock
     // above and the same arithmetic: repeated get() on one path inside a single
@@ -323,16 +335,33 @@ service cloud.firestore {
                .data.get('meta', {}).get('rounds', 0);
     }
 
-    function stateFinalized(tid) {
+    // Rounds are 3 or 4 (src/constants ROUND_CHOICES) and this list is
+    // deliberately longer than that: it is what a key is measured against, not
+    // a claim about how many rounds there are, and a year that somehow grew a
+    // fifth round must not have that round's key silently read as a group's.
+    function roundKeys() {
+      return ['1', '2', '3', '4', '5', '6', '7', '8', '9'];
+    }
+
+    // The group keys in the map: everything left once the bare round numbers
+    // are taken out.
+    function stateGroupKeys(tid) {
       return get(/databases/$(database)/documents/tournament_state/$('ts_' + tid))
-               .data.get('finalized_rounds', {}).keys().size();
+               .data.get('finalized_rounds', {}).keys().removeAll(roundKeys()).size();
+    }
+
+    // The rounds a director has closed out, which is the only count that ends
+    // a year.
+    function stateFinalizedRounds(tid) {
+      return get(/databases/$(database)/documents/tournament_state/$('ts_' + tid))
+               .data.get('finalized_rounds', {}).keys().size() - stateGroupKeys(tid);
     }
 
     function editionFinished(tid) {
       return tid != ''
         && exists(/databases/$(database)/documents/tournament_state/$('ts_' + tid))
         && stateRounds(tid) > 0
-        && stateFinalized(tid) >= stateRounds(tid);
+        && stateFinalizedRounds(tid) >= stateRounds(tid);
     }
 
     // Both ends again, for the reason editionOpen() checks both: otherwise a

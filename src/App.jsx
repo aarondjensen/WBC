@@ -55,7 +55,7 @@ import { registryRows, roundRows, courseIdsOf, stitchCourses } from "./lib/stati
 import { getDefaultTee } from "./lib/defaultTee";
 import { missingTees } from "./lib/roundSetup";
 import { indexFor, matchHistoryName } from "./lib/handicap";
-import { groupKey as groupKeyOf, roundOfGroupKey, liveRound, roundFinalized, switchableGroups, groupProgress } from "./lib/groupSwitch";
+import { groupKey as groupKeyOf, roundOfGroupKey, liveRound, roundFinalized, switchableGroups, groupProgress, unfinalizeKeys, isGroupKey } from "./lib/groupSwitch";
 import { AppHeader } from "./components/AppHeader";
 import { GroupSwitcher } from "./components/GroupSwitcher";
 import { MoreMenu } from "./components/MoreMenu";
@@ -2848,8 +2848,11 @@ export default function WBCApp() {
     });
   };
 
-  // Finalizing a group, and the two ways in: it is the last thing a signature
-  // or the last attestation does, and it is also its own button.
+  // Writing one finalization key, whichever kind it is. For a group it is the
+  // last thing a signature or the last attestation does, and it is also its own
+  // button; Admin's whole-round finalize comes through here too (see
+  // finalizeFromAdmin below) so that both kinds of key take the same path to
+  // tournament_state and the same edge check on the way to the field.
   const finalizeGroup = async (key) => {
     const nf = { ...finalizedRounds, [key]: true };
     setFinalizedRounds(nf);
@@ -2894,37 +2897,40 @@ export default function WBCApp() {
     await publishRoundFinalized(nf, key);
   };
 
-  const onUnfinalizeGroup = async (key) => {
+  // ── The undo, for either kind of key ──
+  // Both un-finalize buttons in the app hand this a GROUP key — the locked
+  // scorecard's own, and the per-card row in Admin's sheet — but the lock they
+  // are clearing is often the ROUND's, because the round was closed out from
+  // Admin and no group key was ever written. lib/groupSwitch unfinalizeKeys is
+  // what knows that; see the note there for why it answers with a list.
+  const unfinalizeRound = async (key) => {
+    // The signature goes first and unconditionally, as it always has: a card
+    // can carry one without being finalized, and this is the control that
+    // clears it. Only a GROUP has one — handed a bare round number there is no
+    // card to unsign, and the id would name a document nobody ever wrote.
+    if (isGroupKey(key)) {
+      setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; });
+      pendingSigsRef.current.delete(key);
+      await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition()));
+    }
     const nf = { ...finalizedRounds };
-    delete nf[key];
+    const cleared = unfinalizeKeys(nf, key);
+    if (cleared.length === 0) return;
+    cleared.forEach(k => { delete nf[k]; });
     setFinalizedRounds(nf);
-    setScorecardSigs(prev => { const ns = { ...prev }; delete ns[key]; return ns; });
-    pendingSigsRef.current.delete(key);
-    await db.deleteDoc("wbc_scorecard_sigs", docIds.scorecardSig(_e(), key, isDefaultEdition()));
     await saveTournamentState(nf);
     await publishRoundFinalized(nf, key);
   };
 
-  // Admin's whole-round finalize. It goes through the same publish path a
-  // group signing off does — the only difference is which key lands in
-  // finalizedRounds, a bare round number rather than a group's.
-  const finalizeWholeRound = async (rnd) => {
-    const nf = { ...finalizedRounds, [rnd]: true };
-    setFinalizedRounds(nf);
-    await saveTournamentState(nf);
-    await publishRoundFinalized(nf, rnd);
-    if (rnd < NUM_ROUNDS) setRound(rnd + 1);
-  };
-
-  // Admin's undo, which can be handed either kind of key: a round number from
-  // the round panel, or a group key from the per-card list beside it.
-  const unfinalizeFromAdmin = async (key) => {
-    if (!/^\d+$/.test(String(key))) return onUnfinalizeGroup(key);
-    const nf = { ...finalizedRounds };
-    delete nf[key];
-    setFinalizedRounds(nf);
-    await saveTournamentState(nf);
-    await publishRoundFinalized(nf, key);
+  // Admin finalizes with either kind of key too: a bare round number from the
+  // "Round N Complete" prompt, a group key from the per-card sheet. The write
+  // is the same one a group signing off does — the only thing that turns on
+  // WHICH key it is, is the advance, which belongs to a whole round being
+  // closed and not to one card in it.
+  const finalizeFromAdmin = async (key) => {
+    await finalizeGroup(key);
+    const rnd = /^\d+$/.test(String(key)) ? parseInt(key, 10) : null;
+    if (rnd && rnd < NUM_ROUNDS) setRound(rnd + 1);
   };
 
   const setPairings = async (rnd, rawGroups) => {
@@ -3742,7 +3748,7 @@ export default function WBCApp() {
         {scoringOpened && (
         <div style={{ display: view === "scoring" ? "block" : "none", paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
           <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading scoring…</div>}>
-          <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeTimesData={teeTimesData} roundDates={roundDates} scoringOpen={scoringOpen} setTee={setTee} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={onSignScorecard} onAttestScorecard={onAttestScorecard} onUnsignScorecard={onUnsignScorecard} onFinalizeRound={finalizeGroup} onUnfinalizeRound={onUnfinalizeGroup} onGoToAdminCourses={(rnd) => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); setAdminSettingsRound(rnd || null); }} markPlayerWD={markPlayerWD} ctpData={ctpData} onSetCtp={onSetCtp} onConfirmCtp={onConfirmCtp} directorPick={directorPick} onGroupChange={setScoringGroup} onSetRound={setRound} /* How far the scoring screen's "already scored" bar has to stop short of the right edge to leave the header's live controls tappable: the crown alone, or the crown and the scramble's OG/YG/NG button beside it. */ headerInset={scrambleOn ? 146 : 88} />
+          <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeTimesData={teeTimesData} roundDates={roundDates} scoringOpen={scoringOpen} setTee={setTee} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={onSignScorecard} onAttestScorecard={onAttestScorecard} onUnsignScorecard={onUnsignScorecard} onFinalizeRound={finalizeGroup} onUnfinalizeRound={unfinalizeRound} onGoToAdminCourses={(rnd) => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); setAdminSettingsRound(rnd || null); }} markPlayerWD={markPlayerWD} ctpData={ctpData} onSetCtp={onSetCtp} onConfirmCtp={onConfirmCtp} directorPick={directorPick} onGroupChange={setScoringGroup} onSetRound={setRound} /* How far the scoring screen's "already scored" bar has to stop short of the right edge to leave the header's live controls tappable: the crown alone, or the crown and the scramble's OG/YG/NG button beside it. */ headerInset={scrambleOn ? 146 : 88} />
           </Suspense>
         </div>
         )}
@@ -3806,7 +3812,7 @@ export default function WBCApp() {
                 if (rows.length) db.upsertMany("pairings", rows);
                 return next;
               });
-            }} roundDates={roundDates} onSetRoundDate={async (rnd, dateStr) => { const next = { ...roundDates }; if (dateStr) next[rnd] = dateStr; else delete next[rnd]; setRoundDates(next); await saveTournamentState(finalizedRounds, teesSaved, teesModified, next, scoringOpen); }} scoringOpen={scoringOpen} onSetScoringOpen={async (rnd, open) => { const next = { ...scoringOpen }; if (open) next[rnd] = true; else delete next[rnd]; setScoringOpen(next); await saveTournamentState(finalizedRounds, teesSaved, teesModified, roundDates, next); }} pairingStrategy={pairingStrategy} onSetPairingStrategy={async (rnd, cfg) => { const next = { ...pairingStrategy }; if (cfg) next[rnd] = cfg; else delete next[rnd]; setPairingStrategy(next); await saveTournamentState(finalizedRounds, teesSaved, teesModified, roundDates, scoringOpen, next); }} leaderboard={getLeaderboard} holeData={holeData} finalizedRounds={finalizedRounds} onDiscardRoundScores={onDiscardRoundScores} onFinalizeRound={finalizeWholeRound} onUnfinalizeRound={unfinalizeFromAdmin} notify={notify} getPlayerTee={getPlayerTee} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} externalSettingsRound={adminSettingsRound} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); setAdminSettingsRound(null); }} teesSaved={teesSaved} onTeesSave={async r => { const next = { ...teesSaved, [r]: true }; const nextMod = { ...teesModified, [r]: false }; setTeesSaved(next); setTeesModified(nextMod); await saveTournamentState(finalizedRounds, next, nextMod); }} teesModified={teesModified} onTeesModify={async r => { const nextMod = { ...teesModified, [r]: true }; setTeesModified(nextMod); await saveTournamentState(finalizedRounds, teesSaved, nextMod); }} memberships={memberships} onSetDirector={onSetDirector} claims={claims} authUid={fbUser?.uid || null} tournamentMeta={tournamentMeta} onSaveTournamentMeta={saveTournamentMeta} demoOnly={sandboxAdmin} /></Suspense> : (
+            }} roundDates={roundDates} onSetRoundDate={async (rnd, dateStr) => { const next = { ...roundDates }; if (dateStr) next[rnd] = dateStr; else delete next[rnd]; setRoundDates(next); await saveTournamentState(finalizedRounds, teesSaved, teesModified, next, scoringOpen); }} scoringOpen={scoringOpen} onSetScoringOpen={async (rnd, open) => { const next = { ...scoringOpen }; if (open) next[rnd] = true; else delete next[rnd]; setScoringOpen(next); await saveTournamentState(finalizedRounds, teesSaved, teesModified, roundDates, next); }} pairingStrategy={pairingStrategy} onSetPairingStrategy={async (rnd, cfg) => { const next = { ...pairingStrategy }; if (cfg) next[rnd] = cfg; else delete next[rnd]; setPairingStrategy(next); await saveTournamentState(finalizedRounds, teesSaved, teesModified, roundDates, scoringOpen, next); }} leaderboard={getLeaderboard} holeData={holeData} finalizedRounds={finalizedRounds} onDiscardRoundScores={onDiscardRoundScores} onFinalizeRound={finalizeFromAdmin} onUnfinalizeRound={unfinalizeRound} notify={notify} getPlayerTee={getPlayerTee} startFresh={startFresh} externalSettingsOpen={adminSettingsOpen} externalSettingsTab={adminSettingsTab} externalSettingsRound={adminSettingsRound} onExternalSettingsHandled={() => { setAdminSettingsOpen(false); setAdminSettingsTab("players"); setAdminSettingsRound(null); }} teesSaved={teesSaved} onTeesSave={async r => { const next = { ...teesSaved, [r]: true }; const nextMod = { ...teesModified, [r]: false }; setTeesSaved(next); setTeesModified(nextMod); await saveTournamentState(finalizedRounds, next, nextMod); }} teesModified={teesModified} onTeesModify={async r => { const nextMod = { ...teesModified, [r]: true }; setTeesModified(nextMod); await saveTournamentState(finalizedRounds, teesSaved, nextMod); }} memberships={memberships} onSetDirector={onSetDirector} claims={claims} authUid={fbUser?.uid || null} tournamentMeta={tournamentMeta} onSaveTournamentMeta={saveTournamentMeta} demoOnly={sandboxAdmin} /></Suspense> : (
           <div style={{ textAlign: "center", padding: "40px 20px" }}>
             <div style={{ fontSize: FS.jumbo, marginBottom: 12 }}>🔒</div>
             <div style={{ fontSize: FS.lead, fontWeight: 700, color: K.t1 }}>Directors Only</div>

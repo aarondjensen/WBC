@@ -77,6 +77,39 @@ export function roundFinalized(finalizedRounds, pairingsData, round) {
   return groups.every(ids => !!fr[groupKey(round, ids)]);
 }
 
+// ── Undoing it ─────────────────────────────────────────────────────
+// Which keys have to come OUT of `finalizedRounds` to unlock this card.
+//
+// It is a list rather than one key because the map is keyed two ways and the
+// lock a director is looking at may not be the one they think they are
+// clearing. A round closed from Admin stores a BARE ROUND NUMBER, and every
+// group in it then reads as finalized without carrying a key of its own — so
+// "↩ Unfinalize" on such a group used to delete a group key that was never
+// there, save an unchanged map, and leave the card locked with nothing on
+// screen to say the tap had done nothing at all.
+//
+// So: take the card's own key if it has one, and take the round's number too
+// if THAT is what is holding it shut. Clearing the round number reopens the
+// round's other groups as well, which is the honest answer — a whole-round
+// finalize is a fact about the round, and undoing it is a round-level act.
+// Anything still carrying its own group key stays locked, as it should.
+//
+// Handed a bare round number it answers with just that number: the same
+// function serves both kinds of key, so no caller has to know which it holds.
+export function unfinalizeKeys(finalizedRounds, key) {
+  const fr = finalizedRounds || {};
+  const k = String(key ?? "");
+  const out = fr[k] ? [k] : [];
+  const rnd = roundOfGroupKey(k);
+  if (rnd != null && String(rnd) !== k && fr[rnd]) out.push(String(rnd));
+  return out;
+}
+
+// Is this one of the group keys, as opposed to a bare round number? The two
+// live in the same map and only one of them has a scorecard signature filed
+// against it, so a caller about to delete that signature has to ask.
+export const isGroupKey = (key) => String(key ?? "").includes("_");
+
 // Every group in every round, rounds ascending, each round keeping the order
 // the pairings came in. Rounds are the outer axis because that is the axis a
 // director crosses deliberately — a group is picked out of a round, never the
