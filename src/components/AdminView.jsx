@@ -84,9 +84,15 @@ const CoursePreviewPortal = ({ children }) => {
 };
 
 // Width of the HI and CH columns in the player-tee list. Wide enough for a
-// two-digit index with a decimal ("18.4") at FS.lead, so the numbers line up
-// down the list instead of drifting with the name beside them.
+// two-digit index with a decimal ("18.4") at the name's own size, so the
+// numbers line up down the list instead of drifting with the name beside them.
 const CH_COL_W = 40;
+
+// The per-player tee buttons. Written down because the column heads above the
+// list reserve exactly this much room to sit clear of them — a gap changed in
+// one place and not the other slides HI and CH off their columns.
+const TEE_BTN_W = 34;
+const TEE_BTN_GAP = 6;
 
 const TEE_PALETTE = ["#60a5fa","#f59e0b","#a78bfa","#34d399","#fb923c","#f472b6","#38bdf8","#e879f9"];
 
@@ -700,8 +706,8 @@ function TeeAssigner({ activePlayers, tRounds, courses, teeData, setTeeBulk, fin
             {/* HI and CH are columns, headed once, not a run of prose on every
                 row. The director reads them DOWN — who is off what, who moved
                 — and a label repeated forty times is forty things in the way of
-                that. They also carry the row's largest type: the numbers are
-                what this screen is for, and they were the smallest thing on it. */}
+                that. They read at the name's own size — they were a footnote
+                under it, and they are half of what the row says. */}
             <div style={{
               padding: "3px 12px", display: "flex", alignItems: "center", gap: 6,
               borderBottom: `1px solid ${K.bdr}${ALPHA.hair}`,
@@ -713,7 +719,7 @@ function TeeAssigner({ activePlayers, tRounds, courses, teeData, setTeeBulk, fin
                   color: K.t3, textTransform: "uppercase", letterSpacing: "0.06em",
                 }}>{h}</span>
               ))}
-              <span style={{ width: tees.length * 34 + Math.max(0, tees.length - 1) * 2, flexShrink: 0 }} />
+              <span style={{ width: tees.length * TEE_BTN_W + Math.max(0, tees.length - 1) * TEE_BTN_GAP, flexShrink: 0 }} />
             </div>
             {activePlayers.map((p, i) => {
               // No fallback to the default tee. This row used to read
@@ -737,7 +743,7 @@ function TeeAssigner({ activePlayers, tRounds, courses, teeData, setTeeBulk, fin
                   }}>{p.name}</span>
                   <span style={{
                     width: CH_COL_W, flexShrink: 0, textAlign: "right",
-                    fontSize: FS.lead, fontWeight: 600, color: K.t2, fontVariantNumeric: "tabular-nums",
+                    fontSize: FS.small, fontWeight: 600, color: K.t2, fontVariantNumeric: "tabular-nums",
                   }}>{p.handicap_index}</span>
                   <span style={{
                     width: CH_COL_W, flexShrink: 0, display: "flex", alignItems: "center",
@@ -752,16 +758,16 @@ function TeeAssigner({ activePlayers, tRounds, courses, teeData, setTeeBulk, fin
                       </span>
                     )}
                     <span style={{
-                      fontSize: FS.lead, fontWeight: 700, fontVariantNumeric: "tabular-nums",
+                      fontSize: FS.small, fontWeight: 700, fontVariantNumeric: "tabular-nums",
                       color: teeObj ? K.t1 : K.danger,
                     }}>{teeObj ? ch : "—"}</span>
                   </span>
-                  <div style={{ display: "flex", gap: 2, flexShrink: 0 }}>
+                  <div style={{ display: "flex", gap: TEE_BTN_GAP, flexShrink: 0 }}>
                     {[...tees].sort((a, b) => (parseFloat(b.slope) || 0) - (parseFloat(a.slope) || 0)).map(tee => {
                       const isActive = currentTee === tee.name;
                       return (
                         <button key={tee.name} onClick={() => assign(p.id, tee.name)} style={{
-                          width: 34, padding: "4px 3px 3px", borderRadius: R.sm, cursor: "pointer",
+                          width: TEE_BTN_W, padding: "4px 3px 3px", borderRadius: R.sm, cursor: "pointer",
                           display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
                           background: isActive ? K.acc + ALPHA.tint : K.inp,
                           border: isActive ? `1.5px solid ${K.acc}` : `1px solid ${K.bdr}`,
