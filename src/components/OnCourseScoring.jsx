@@ -47,7 +47,7 @@ import { openingHole, nineComplete } from "../lib/holeAdvance";
 import { groupKey as groupKeyOf, sameGroup, liveRound } from "../lib/groupSwitch";
 import { useConfirm } from "../lib/useConfirm";
 import { groupTrouble, roundTrouble, describeTrouble, blocksScoring } from "../lib/roundSetup";
-import { groupTeeOrder, tagAheadOfPlay } from "../lib/ctp";
+import { groupTeeOrder, tagAheadOfPlay, canTakePin, tieVerdict } from "../lib/ctp";
 
 // ═══════════════════════════════════════════════════════════════
 //  Popup — shared modal chrome (backdrop + centered card)
@@ -94,7 +94,7 @@ const holeBarBtn = (fill) => ({
   color: ON_ACC, fontSize: FS.label, fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap",
 });
 
-export function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPlayers, onSaveHole, notify, pairingsData, teeTimesData, roundDates, scoringOpen, setTee, getPlayerTee, getPlayerCH = () => null, finalizedRounds, scorecardSigs, onSignScorecard, onAttestScorecard, onUnsignScorecard, onFinalizeRound, onUnfinalizeRound, onGoToAdminCourses, markPlayerWD, ctpData, onSetCtp, onConfirmCtp, directorPick, onGroupChange, onSetRound, headerInset = 88 }) {
+export function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPlayers, onSaveHole, notify, pairingsData, teeTimesData, roundDates, scoringOpen, setTee, getPlayerTee, getPlayerCH = () => null, finalizedRounds, scorecardSigs, onSignScorecard, onAttestScorecard, onUnsignScorecard, onFinalizeRound, onUnfinalizeRound, onGoToAdminCourses, markPlayerWD, ctpData, onSetCtp, onConfirmCtp, onPassCtp, ctpField = null, directorPick, onGroupChange, onSetRound, headerInset = 88 }) {
   const [group, setGroup] = useState(null);
   const [currentHole, setCurrentHole] = useState(0);
   const [manualOverride, setManualOverride] = useState(false);
@@ -115,8 +115,24 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
   // the bug: the first group to answer consumed the key and every later group was
   // silently skipped. A standing tag from an earlier group NO LONGER suppresses the
   // prompt — it's surfaced as the "current CTP" number to beat.
+  //
+  // ── Stamped when the prompt is ANSWERED, not when it opens ──
+  // It used to be stamped by the effect that opened the popup, which made the
+  // guard mean "we have shown this once" rather than "this group has answered"
+  // — and those two came apart in the one case that mattered. The prompt could
+  // be closed without an answer (a thumb on the backdrop of the sheet stacked
+  // over it, a card finalized on a par 3, the app reloading between the score
+  // going in and the question being read), and once the key was consumed there
+  // was no way back to it on the course at all: walking to the hole lands on a
+  // completed hole, and the guard blocked the effect regardless. The pin was
+  // gone, and only a director with the Betting tab open could put it back.
+  //
+  // Stamped on the answer instead, the guard says what it means, and closing
+  // the popup without answering simply leaves the question open — the group
+  // can walk back to the hole and be asked again. reopenCtp below is the
+  // deliberate way to do that.
   const [showCtpForHole, setShowCtpForHole] = useState(null);
-  const promptedCtpKeys = useRef({});
+  const answeredCtpKeys = useRef({});
   const [ctpPickPlayer, setCtpPickPlayer] = useState("");
   // NULL until the group sets one. A seeded default is a number nobody chose,
   // and it would ride onto the card as though somebody had paced it off — so
@@ -391,15 +407,27 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
   })();
 
   // When all 18 complete and not finalized, auto-show finalize prompt (only once)
+  //
+  // ── It waits for the pin question, the way the front-9 check does ──
+  // The sign-the-card sheet draws at zIndex 1000 and the CTP popup at 350, so
+  // when a card was COMPLETED on a par 3 the two opened in the same commit and
+  // the scorecard covered the question completely: it was on screen, under an
+  // opaque sheet, and the group never saw it. Then it was gone — the session
+  // guard had been consumed and signing locks the screen — so the pin was lost
+  // with every check in the app green.
+  //
+  // It is not only a par-3 eighteenth. The commoner path is a group that
+  // skipped a hole and back-fills a par 3 as the last thing they enter, which
+  // completes the card on the same commit that asks the question.
   const shownFinalizeRef = useRef(false);
   const groupKeySig = JSON.stringify(group);
   useEffect(() => {
     if (!group) return;
+    if (showCtpForHole !== null) return;
     const groupKey = `${round}_${group.slice().sort().join(",")}`;
     const isFinalized = finalizedRounds[groupKey] || finalizedRounds[round];
     const isSignedNow = !!(scorecardSigs || {})[groupKey];
     if (allRoundComplete && !isFinalized && !isSignedNow && !shownFinalizeRef.current) {
-      shownFinalizeRef.current = true;
       setCurrentHole(17);
       setNavSourceSynced("manual");
       // CANCELLED if this stops being true before it fires. The 400ms is there
@@ -409,7 +437,14 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
       // ref below, but the prompt still opens — against a card that is now
       // visibly empty. Returning the clear is what makes the guard above mean
       // anything, since a ref reset cannot recall a timeout already in flight.
-      const t = setTimeout(() => setShowFinalize(true), 400);
+      //
+      // The ref is stamped when the sheet is RAISED, not when it is
+      // scheduled, and that distinction is what makes the guard above safe. A
+      // card completed on a par 3 schedules this and then immediately cancels
+      // it, because the pin question opens in the same commit and re-runs the
+      // effect — so a ref stamped up front would record a sheet that never
+      // appeared, and the card could never offer itself for signing at all.
+      const t = setTimeout(() => { shownFinalizeRef.current = true; setShowFinalize(true); }, 400);
       return () => clearTimeout(t);
     }
     if (!allRoundComplete) shownFinalizeRef.current = false;
@@ -418,8 +453,12 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
     // finalizedRounds would re-evaluate this every time anybody signed anything,
     // and the ref guard is what stops the prompt reappearing rather than the
     // dependency list.
+    //
+    // showCtpForHole IS a dependency, and has to be: the guard above holds the
+    // sheet back while the pin question is open, so this must run again when
+    // that question closes or the card would never offer to be signed at all.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allRoundComplete, groupKeySig, round]);
+  }, [allRoundComplete, groupKeySig, round, showCtpForHole]);
 
   // Prompt for CTP when a par-3 completes for THIS group. Blocks the auto-advance
   // below until the group tags a winner or passes. Only prompts during fresh scoring —
@@ -430,24 +469,31 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
   // earlier group must NOT suppress this: every group gets asked, sees the standing
   // distance, and either beats it or passes. The only suppression is the per-group
   // session guard, so a group isn't re-nagged when it revisits its own hole.
+  // The key this group's answer to this pin is filed under, for the session
+  // guard. Null when there is no group to file it against.
+  const ctpAnswerKey = (holeNum) =>
+    group ? `${round}_${holeNum}_${group.slice().sort().join(",")}` : null;
+
+  // Open the question for a hole, wheel parked on the standing distance so
+  // "beat it" means scrolling up rather than hunting from a cold 10 ft.
+  const openCtp = (holeIdx) => {
+    const leader = ((ctpData || {})[round] || {})[holeIdx + 1];
+    setCtpPickPlayer("");
+    setCtpFeet(null);
+    ctpWheelTouched.current = false;
+    setCtpFeetStart(leader?.distanceFt ? Math.max(1, Math.min(CTP_MAX_FT, leader.distanceFt)) : 10);
+    setShowCtpForHole(holeIdx);
+  };
+
   useEffect(() => {
     if (!group || isGroupFinalized) return;
     if (editingCompleted) return;
     if (par !== 3) return;
     if (!allScored) return;
     const holeNum = currentHole + 1;
-    const key = `${round}_${holeNum}_${group.slice().sort().join(",")}`;
-    if (promptedCtpKeys.current[key]) return;
+    if (answeredCtpKeys.current[ctpAnswerKey(holeNum)]) return;
     if (showCtpForHole === currentHole) return;
-    promptedCtpKeys.current[key] = true;
-    const leader = ((ctpData || {})[round] || {})[holeNum];
-    // Seed the wheel at the standing distance so "beat it" means scrolling up, not
-    // hunting from a cold 10 ft default.
-    setCtpPickPlayer("");
-    setCtpFeet(null);
-    ctpWheelTouched.current = false;
-    setCtpFeetStart(leader?.distanceFt ? Math.max(1, Math.min(CTP_MAX_FT, leader.distanceFt)) : 10);
-    setShowCtpForHole(currentHole);
+    openCtp(currentHole);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allScored, par, currentHole, round, ctpData, editingCompleted, isGroupFinalized]);
 
@@ -1006,6 +1052,28 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
           <button onClick={() => goToHole(Math.min(17, currentHole + 1))} disabled={currentHole === 17}
             style={{ width: 34, height: 34, borderRadius: R.md, background: K.inp, border: `1px solid ${K.bdr}`, color: currentHole === 17 ? K.t3 + ALPHA.hair : K.t1, fontSize: FS.lead, cursor: "pointer", fontWeight: 700 }}>›</button>
         </div>
+        {/* ── Asking the pin question again ──────────────────────────
+            A par 3 that has been scored and is not signed off gets this. It is
+            the way back to a question the group answered wrong, or never
+            answered at all: a thumb on the wrong button, a phone that locked
+            between the score going in and the popup being read, a hole
+            back-filled at the end of the round. Before it existed the only
+            correction was a director on the Betting tab — which means finding
+            the director — and a director's override carries no group, so the
+            next group's out-of-order warning went quiet for that pin too.
+            Only on a par 3 the group has actually finished, and never on a
+            card that is signed or finalized: those are the states where a pin
+            is settled and re-asking would be offering to move money. */}
+        {par === 3 && allScored && !isSigned && !isGroupFinalized && showCtpForHole === null && (
+          <button onClick={() => { tapNudge(); openCtp(currentHole); }}
+            style={{
+              marginTop: 8, width: "100%", padding: "7px 0", borderRadius: R.md,
+              background: "transparent", border: `1px solid ${K.bdr}`, color: K.t3,
+              fontSize: FS.label, fontWeight: 700, letterSpacing: 0.5, cursor: "pointer",
+            }}>
+            🎯 {((ctpData || {})[round] || {})[currentHole + 1]?.playerId ? "Closest to pin" : "Set closest to pin"}
+          </button>
+        )}
       </div>
 
       {/* No CTP row rides above the players on a par 3. The prompt that fires
@@ -1341,35 +1409,61 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
         const leader = ((ctpData || {})[round] || {})[holeNum];
         const leaderPl = leader ? players.find(p => p.id === leader.playerId) : null;
         const leaderDist = leader ? (leader.distanceFt ? `${leader.distanceFt} ft` : (leader.distance || "")) : "";
-        const closeAndAdvance = () => { setShowCtpForHole(null); setCtpPickPlayer(""); };
+        // Closing WITHOUT stamping the guard. Only an answer marks the pin
+        // answered, so a popup that closes any other way leaves the question
+        // open and the group can be asked again. See answeredCtpKeys.
+        const closeCtp = () => { setShowCtpForHole(null); setCtpPickPlayer(""); };
+        const answerAndClose = () => {
+          answeredCtpKeys.current[ctpAnswerKey(holeNum)] = true;
+          closeCtp();
+        };
         // Was this tag made by a group PLAYING BEHIND us? A group that walks
         // off a par 3 to make its tee time and puts the hole in fifteen
         // minutes later is shown a "current CTP" that did not exist when they
         // were on the green. Without saying so, the number reads as the group
-        // ahead of them — and the tie rule, which hands the pin to whoever
-        // tagged first, quietly runs backwards. See lib/ctp.
+        // ahead of them. See lib/ctp.
         const myTeeOrder = groupTeeOrder(pairingsData, round, group);
+        const myGroup = { key: _groupKey, order: myTeeOrder };
         const outOfOrder = leader ? tagAheadOfPlay({
           leaderOrder: leader.taggedGroupOrder,
           leaderKey: leader.taggedGroupKey,
           myOrder: myTeeOrder,
           myKey: _groupKey,
         }) : null;
-        // Beating the standing tag is a strictly-shorter distance. Equal isn't closer —
-        // ties keep the earlier group's tag (first to hole it holds the pin).
+        // Strictly closer always takes the pin. A TIE now goes to whoever
+        // PLAYED THE HOLE FIRST — the lower tee order — rather than to
+        // whoever's phone wrote first, which on a course is whoever had signal
+        // and is exactly backwards for the group that walked off to make its
+        // tee time. Decided in lib/ctp so the prompt and the board settle it
+        // the same way; a prompt offering a tag the board then refuses would be
+        // worse than either rule.
+        //
         // Undecided is not "beats it": until a distance is chosen there is
         // nothing to compare, so the question simply has not been answered.
         const chosen = ctpFeet != null;
-        const beatsLeader = !leader || !leader.distanceFt || (chosen && ctpFeet < leader.distanceFt);
+        const beatsLeader = canTakePin({
+          leaderFt: leader?.distanceFt ?? null, leaderOrder: leader?.taggedGroupOrder ?? null,
+          myFt: chosen ? ctpFeet : null, myOrder: myTeeOrder,
+        });
+        const tie = tieVerdict({
+          leaderFt: leader?.distanceFt ?? null, leaderOrder: leader?.taggedGroupOrder ?? null,
+          myFt: chosen ? ctpFeet : null, myOrder: myTeeOrder, leaderName: leaderPl?.name,
+        });
         // BOTH halves, deliberately. A name with no distance is a claim
         // nobody measured, and it would go onto the card looking like one
         // somebody did.
         const canTag = !!ctpPickPlayer && chosen && beatsLeader;
-        const save = async () => {
+        // NOT AWAITED, and that is the fix rather than an oversight: setDoc
+        // does not settle until the server acknowledges, so out of signal this
+        // sat on an open popup with no spinner and no backdrop to escape by.
+        // The write queues in the persistent cache; the popup closing is the
+        // acknowledgement, the same bargain score entry already makes. See the
+        // note in lib/connection about everything that awaited a write.
+        const save = () => {
           if (!canTag) return;
           tapBigAction();
-          try { await onSetCtp?.(round, holeNum, ctpPickPlayer, ctpFeet, { key: _groupKey, order: myTeeOrder }); } catch {}
-          closeAndAdvance();
+          try { onSetCtp?.(round, holeNum, ctpPickPlayer, ctpFeet, myGroup); } catch { /* queued or refused; the answer stands either way */ }
+          answerAndClose();
         };
         // Wheel: park it on ctpFeetStart when the scroll node mounts, then derive feet
         // from scroll position. Snap stride === CTP_WHEEL_ITEM so a settle always lands
@@ -1391,7 +1485,7 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
           setCtpFeet(prev => (prev === v ? prev : v));
         };
         return (
-          <Popup onClose={closeAndAdvance} maxWidth={360} noBackdropClose innerStyle={{ background: K.card, border: `1px solid ${K.acc + ALPHA.hair}` }} padding={0} zIndex={350}>
+          <Popup onClose={closeCtp} maxWidth={360} noBackdropClose innerStyle={{ background: K.card, border: `1px solid ${K.acc + ALPHA.hair}` }} padding={0} zIndex={350}>
             <div style={{ background: K.acc + ALPHA.wash, borderBottom: `1px solid ${K.acc}${ALPHA.hair}`, padding: "14px 20px", textAlign: "center" }}>
               <div style={{ fontSize: FS.hero, marginBottom: 4 }}>🎯</div>
               <div style={{ fontSize: FS.body, fontWeight: 800, color: K.acc, letterSpacing: 0.3 }}>Closest to Pin</div>
@@ -1424,7 +1518,7 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
                       <span style={{ fontSize: FS.label }}>⏱</span>
                       <span style={{ fontSize: FS.label, color: K.t2, lineHeight: 1.45, minWidth: 0 }}>
                         <span style={{ fontWeight: 800, color: K.warn }}>{outOfOrder.label} tagged this after you finished.</span>
-                        {" "}Tag it if you were closer — a tie stays theirs.
+                        {" "}Tag it if you were closer — and a tie is yours, because you played it first.
                       </span>
                     </div>
                   )}
@@ -1446,6 +1540,16 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
                     const pl = players.find(p => p.id === pid);
                     if (!pl) return null;
                     const sel = ctpPickPlayer === pid;
+                    // Is this man actually in the CTP game? A null buy-in list
+                    // means the director has never tagged anybody, and that
+                    // means everybody — the same rule lib/sideGames reads it
+                    // by. He is still offered either way, because the document
+                    // is the hole's answer and the group on the green know who
+                    // was closest; but a pin tagged to somebody who never
+                    // bought in pays nothing, and the group finding that out
+                    // four holes later from a director is too late to record
+                    // the ball that should have had it.
+                    const inGame = ctpField == null || ctpField.includes(pid);
                     return (
                       <button key={pid}
                         onClick={() => {
@@ -1462,21 +1566,43 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
                           border: `1px solid ${sel ? K.acc : K.bdr}`,
                           color: sel ? K.acc : K.t2,
                           fontSize: FS.small, fontWeight: 700, cursor: "pointer", textAlign: "center",
-                        }}>{pl.name}</button>
+                        }}>
+                        {pl.name}
+                        {!inGame && (
+                          <span style={{ display: "block", fontSize: FS.micro, fontWeight: 700, color: K.t3, letterSpacing: 0.4, marginTop: 2 }}>NOT IN CTP</span>
+                        )}
+                      </button>
                     );
                   })}
                 </div>
+                {/* Said once, under the names, rather than argued on each
+                    button. The group can still tag him — they saw the shot —
+                    and this is the moment they can also decide to tag the next
+                    ball instead, which is the choice they never used to be
+                    offered. */}
+                {ctpPickPlayer && ctpField != null && !ctpField.includes(ctpPickPlayer) && (
+                  <div style={{ fontSize: FS.label, color: K.warn, marginBottom: 8, lineHeight: 1.45 }}>
+                    {shortName(players.find(p => p.id === ctpPickPlayer)) || "He"} is not in the CTP game — this pin will pay nothing.
+                  </div>
+                )}
                 {/* Passing is an ANSWER, not a dismissal. A group that walks
                     off without getting inside the standing tag is saying it is
                     right, and recording that is what lets the Betting tab tell
                     "nobody has been asked" apart from "everybody has been
-                    asked and it stands". The last group to confirm is the one
-                    that settles the pin. */}
+                    asked and it stands".
+                    BOTH answers are now written down. The untagged case used
+                    to write nothing at all, which made a hole every group
+                    played and nobody got close to indistinguishable from a
+                    hole the prompt never reached — both showed "no winner
+                    yet". Not awaited, for the same reason the tag is not. */}
                 <Btn variant="secondary" size="sm" block
-                  onClick={async () => {
+                  onClick={() => {
                     tapNudge();
-                    if (leader) { try { await onConfirmCtp?.(round, holeNum, user?.id); } catch { /* the pass still closes */ } }
-                    closeAndAdvance();
+                    try {
+                      if (leader) onConfirmCtp?.(round, holeNum, myGroup);
+                      else onPassCtp?.(round, holeNum, myGroup);
+                    } catch { /* queued or refused; the answer stands either way */ }
+                    answerAndClose();
                   }}
                   style={{ color: K.t3 }}>
                   {leader ? `Confirm — ${leaderPl?.name || "the standing CTP"} keeps it` : "None of us — skip"}
@@ -1522,11 +1648,19 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
                       Spin the wheel to set how close {shortName(players.find(p => p.id === ctpPickPlayer)) || "they"} was.
                     </div>
                   )}
-                  {chosen && !beatsLeader && (
+                  {/* A tie is no longer a flat refusal: it goes to whoever
+                      played the hole first, so a group that was ahead of the
+                      standing tag CAN take it — and is told why, because
+                      "tied" reading as both a win and a loss on different
+                      holes is worse than either without the sentence. */}
+                  {chosen && tie && (
+                    <div style={{ fontSize: FS.label, color: tie.canTake ? K.acc : K.warn, textAlign: "center", marginBottom: 8, lineHeight: 1.4 }}>
+                      {tie.text}
+                    </div>
+                  )}
+                  {chosen && !tie && !beatsLeader && (
                     <div style={{ fontSize: FS.label, color: K.warn, textAlign: "center", marginBottom: 8, lineHeight: 1.4 }}>
-                      {ctpFeet === leader.distanceFt
-                        ? `Tied with ${leaderPl?.name || "the current CTP"} — the earlier tag holds.`
-                        : `Not inside ${leaderDist} — ${leaderPl?.name || "the current CTP"} keeps it.`}
+                      Not inside {leaderDist} — {leaderPl?.name || "the current CTP"} keeps it.
                     </div>
                   )}
 
@@ -1688,7 +1822,12 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
           caption: nothing to tap, and nothing that changes in the second and
           a half this covers it. Offset from the same safe-area inset the
           header uses so it stays centred on that band on a notched phone. */}
-      {allScored && currentHole < 17 && navSource === "auto" && !editingCompleted && (
+      {/* Not while the pin question is up. The advance effect above already
+          stops for it; this banner did not, so on every par 3 the group was
+          told the app was moving on at the exact moment it was refusing to —
+          which is the reading that has somebody dismiss the question to get
+          the screen unstuck. */}
+      {allScored && currentHole < 17 && navSource === "auto" && !editingCompleted && showCtpForHole === null && (
         <div style={{ position: "fixed", top: `calc(${HEADER_SAFE_PAD} + 9px)`, left: "50%", transform: "translateX(-50%)", background: K.acc, color: K.bg, padding: "12px 48px", borderRadius: R.lg, fontSize: FS.small, fontWeight: 700, zIndex: 1000, whiteSpace: "nowrap", minWidth: 280, textAlign: "center", boxShadow: "0 8px 32px rgba(0,0,0,0.4)", animation: "toastDown 0.3s ease", pointerEvents: "none" }}>
           ✓ Hole {currentHole + 1} saved — advancing...
         </div>

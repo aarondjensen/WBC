@@ -42,6 +42,7 @@ import { editionClosedToMembers } from "./lib/editionLifecycle";
 import { liveEdition, editionBannerShowing } from "./lib/editionHome";
 import { holdForAuth } from "./lib/authHold";
 import { docIds } from "./lib/editionId";
+import { resolvePin, OVERRIDE_KEY } from "./lib/ctp";
 // The one-round team game, and the button it puts in the header — see
 // lib/scramble.
 import { mergeScramble, scrambleLive, SCRAMBLE_BUTTON } from "./lib/scramble";
@@ -266,31 +267,39 @@ const rowsToCourseHandicaps = (rows) => {
 // CTP is TOURNAMENT-WIDE: exactly one winner per par-3 per round, held by whichever
 // group has tagged the closest ball so far. Later groups see the standing tag as the
 // number to beat and can claim it — see the CTP prompt in OnCourseScoring.
+// A row carries one CLAIM PER GROUP now, and the winner is derived from them
+// rather than stored — see lib/ctp for why a pin four phones write to cannot
+// hold the answer itself. `legacy` is the flat winner the document used to
+// carry, which still stands for pins tagged before this and for imported
+// years, and every field below it names is the shape those documents have.
+//
+// A row with NO winner is kept, which it was not before: a hole every group
+// passed on has no player and is still an answer, and dropping it made it
+// indistinguishable from a hole the prompt never reached.
 const rowsToCtp = (rows) => {
   const cd = {};
-  (rows || []).filter(r => r.skin_type === "ctp" && r.player_id).forEach(r => {
+  (rows || []).filter(r => r.skin_type === "ctp").forEach(r => {
     const rnd = roundOf(r);
     if (!cd[rnd]) cd[rnd] = {};
     const ft = (r.distance_ft === 0 || r.distance_ft) ? r.distance_ft : null;
-    cd[rnd][r.hole_number] = {
-      playerId: r.player_id,
-      distanceFt: ft,
-      distance: r.distance || (ft ? `${ft} ft` : ""),
-      taggedByName: r.tagged_by_name || "",
-      // WHICH GROUP tagged it, and where that group tees off. The name alone
-      // says who typed; this says where they were in the field, which is the
-      // only way a group entering late can be told that the number in front
-      // of them came from BEHIND them. Null on a director's override and on
-      // any tag written before this was recorded — see lib/ctp, where an
-      // unknown order deliberately says nothing.
-      taggedGroupKey: r.tagged_group_key || null,
-      taggedGroupOrder: Number.isInteger(r.tagged_group_order) ? r.tagged_group_order : null,
-      // Who has walked off this green, seen the standing tag and let it
-      // stand. See onConfirmCtp — it is the other half of the on-course
-      // prompt, and the only record that a group answered rather than
-      // never being asked.
-      confirmedBy: Array.isArray(r.confirmed_by) ? r.confirmed_by : [],
-    };
+    cd[rnd][r.hole_number] = resolvePin({
+      claims: r.claims,
+      legacy: {
+        playerId: r.player_id || null,
+        distanceFt: ft,
+        distance: r.distance || (ft ? `${ft} ft` : ""),
+        taggedByName: r.tagged_by_name || "",
+        // WHICH GROUP tagged it, and where that group tees off. The name alone
+        // says who typed; this says where they were in the field, which is the
+        // only way a group entering late can be told that the number in front
+        // of them came from BEHIND them. Null on a director's override and on
+        // any tag written before this was recorded — see lib/ctp, where an
+        // unknown order deliberately says nothing.
+        taggedGroupKey: r.tagged_group_key || null,
+        taggedGroupOrder: Number.isInteger(r.tagged_group_order) ? r.tagged_group_order : null,
+        confirmedBy: Array.isArray(r.confirmed_by) ? r.confirmed_by : [],
+      },
+    });
   });
   return cd;
 };
@@ -2569,50 +2578,74 @@ export default function WBCApp() {
     return wins;
   }, [activePlayers, holeData, tRounds, courseList, numRounds, sideGames]);
 
-  // Tag / re-tag the tournament-wide CTP for a par 3. One doc per round+hole, so a
-  // closer ball from a later group overwrites the standing tag.
+  // ── Answering the pin ────────────────────────────────────────────
+  // Every answer a group can give — tag, confirm, pass, and the director's
+  // override — goes through here, and every one of them writes ONE KEY in the
+  // document's `claims` map: the group's own. Firestore merges a map key by
+  // key, so two groups answering the same pin at the same moment write two
+  // different keys and neither can erase the other. The winner is derived from
+  // the claims when they are read back (lib/ctp resolvePin), never stored.
   //
-  // distance_ft is written EXPLICITLY (null when unknown) rather than omitted: db.upsert
-  // uses setDoc(merge:true), so an omitted field would silently retain the previous
-  // player's distance and attach it to the new winner. The tagging GROUP is written the
-  // same way and for the same reason: a director's override off the Betting tab carries
-  // no group, and inheriting the last group's tee order would have the prompt telling
-  // the next group the field is out of order on the strength of a stale field.
-  const onSetCtp = async (rnd, hole, pid, distanceFt = null, taggedGroup = null) => {
-    const ft = (distanceFt === null || distanceFt === undefined || distanceFt === "") ? null : Number(distanceFt);
-    const distance = ft ? `${ft} ft` : "";
-    const taggedByName = user?.name || "";
-    const taggedGroupKey = taggedGroup?.key || null;
-    const taggedGroupOrder = Number.isInteger(taggedGroup?.order) ? taggedGroup.order : null;
-    setCtpData(prev => ({
-      ...prev,
-      [rnd]: { ...(prev[rnd] || {}), [hole]: { playerId: pid, distanceFt: ft, distance, taggedByName, taggedGroupKey, taggedGroupOrder, confirmedBy: [] } },
-    }));
-    // Store CTP as a skin type in the skins table.
-    // tournament_id was previously MISSING — which meant these docs were invisible to
-    // every tournament-scoped query (including Start Fresh's cleanup) and could never
-    // be loaded back. That's why CTPs evaporated on reload.
+  // That is the fix for three things at once, all of which were last-write-
+  // wins on a field four phones write to: a closer ball being overwritten by a
+  // longer one, a confirmation being erased by another group's, and a tie
+  // going to whoever had signal first rather than whoever played the hole
+  // first. See the long note in lib/ctp.
+  //
+  // NOTHING IS AWAITED at the call sites on the scoring screen, and this is
+  // why: setDoc's promise does not settle until the server acknowledges, so a
+  // phone in a hollow with one bar would sit on an open popup with no way past
+  // it. The write queues in the persistent cache and lands when signal does —
+  // the same bargain score entry already makes. See lib/connection.
+  const writeCtpClaim = async (rnd, hole, key, claim) => {
     const tr = tRounds.find(t => t.round_number === rnd);
     await db.upsert("skins", {
       id: docIds.ctp(_e(), rnd, hole),
+      // tournament_id was previously MISSING — which meant these docs were invisible to
+      // every tournament-scoped query (including Start Fresh's cleanup) and could never
+      // be loaded back. That's why CTPs evaporated on reload.
       tournament_id: TOURNAMENT_ID,
       tournament_round_id: tr?.id || null,
       round_number: rnd,
       hole_number: hole,
-      player_id: pid,
       skin_type: "ctp",
-      distance_ft: ft,
-      distance,
-      tagged_by: user?.id || null,
-      tagged_by_name: taggedByName,
-      tagged_group_key: taggedGroupKey,
-      tagged_group_order: taggedGroupOrder,
-      tagged_at: new Date().toISOString(),
-      // Cleared, not merged: a confirmation was agreement with a distance
-      // that has just been beaten, and carrying it onto the new tag would
-      // show groups signing off a number they never saw.
-      confirmed_by: [],
+      claims: {
+        [key]: {
+          ...claim,
+          by: user?.id || null,
+          by_name: user?.name || "",
+          at: new Date().toISOString(),
+        },
+      },
     }, "id");
+  };
+
+  // Apply the same claim to local state so the screen moves before the write
+  // lands. resolvePin is the one that decides what the pin now says — the
+  // group that just tagged does not necessarily hold it.
+  const applyCtpClaim = (rnd, hole, key, claim) => {
+    setCtpData(prev => {
+      const rec = ((prev[rnd] || {})[hole]) || {};
+      const claims = { ...(rec.claims || {}), [key]: { ...claim, by: user?.id || null, by_name: user?.name || "" } };
+      return { ...prev, [rnd]: { ...(prev[rnd] || {}), [hole]: resolvePin({ claims, legacy: rec }) } };
+    });
+  };
+
+  // Tag the pin. `taggedGroup` is the claiming group and its tee order; a
+  // director's override off the Betting tab has neither, and files under the
+  // override key instead — which beats every group claim under it, because
+  // that is what a correction is for.
+  const onSetCtp = async (rnd, hole, pid, distanceFt = null, taggedGroup = null) => {
+    const ft = (distanceFt === null || distanceFt === undefined || distanceFt === "") ? null : Number(distanceFt);
+    const key = taggedGroup?.key || OVERRIDE_KEY;
+    const claim = {
+      kind: taggedGroup?.key ? "tag" : "override",
+      player_id: pid,
+      distance_ft: ft,
+      order: Number.isInteger(taggedGroup?.order) ? taggedGroup.order : null,
+    };
+    applyCtpClaim(rnd, hole, key, claim);
+    await writeCtpClaim(rnd, hole, key, claim);
     // No toast. The prompt closing IS the acknowledgement, and this one fired
     // on a screen the group is about to walk away from — a banner over the
     // next hole's scores telling them what they just did.
@@ -2778,31 +2811,30 @@ export default function WBCApp() {
     if (!saved) throw new Error("That wasn't recorded.");
   };
 
-  // ── Confirming a standing CTP ────────────────────────────────────
-  // The other answer the on-course prompt can take. A group that walks off a
-  // par 3 without getting inside the standing tag is not saying nothing —
-  // they are saying the tag is right, and that is the only thing that turns
-  // "nobody has been asked" into "everybody has been asked and it stands".
+  // ── The answers that are not a tag ───────────────────────────────
+  // A group that walks off a par 3 without getting inside the standing tag is
+  // not saying nothing — they are saying the tag is right. And a group that
+  // finds a pin untagged and none of them close is not saying nothing either.
+  // Both are what turns "nobody has been asked" into "the field has been
+  // asked", and only the first of them used to be written down at all.
   //
-  // Additive and idempotent, so two phones in the same group confirming at
-  // once converge instead of racing. A merge write of ONLY this field: the
-  // winner, the distance and who tagged it belong to whoever tagged it.
-  const onConfirmCtp = async (rnd, hole, pid) => {
+  // Both file under the GROUP'S key, not the answerer's player id. Keying on
+  // the player was its own quiet bug: a director scoring two groups could only
+  // ever record one answer, because the second was read as a duplicate of the
+  // first and dropped.
+  const onAnswerCtp = async (rnd, hole, group, kind) => {
+    const key = group?.key;
+    if (!key) return;
     const rec = ((ctpData || {})[rnd] || {})[hole];
-    if (!rec?.playerId || !pid) return;
-    if ((rec.confirmedBy || []).includes(pid)) return;
-    const confirmedBy = [...new Set([...(rec.confirmedBy || []), pid])];
-    setCtpData(prev => ({
-      ...prev,
-      [rnd]: { ...(prev[rnd] || {}), [hole]: { ...rec, confirmedBy } },
-    }));
-    await db.upsert("skins", {
-      id: docIds.ctp(_e(), rnd, hole),
-      tournament_id: TOURNAMENT_ID,
-      confirmed_by: confirmedBy,
-    }, "id");
+    if (rec?.claims?.[key]?.kind === kind) return;   // already answered, idempotent
+    const claim = { kind, order: Number.isInteger(group?.order) ? group.order : null };
+    applyCtpClaim(rnd, hole, key, claim);
+    await writeCtpClaim(rnd, hole, key, claim);
     // Same as onSetCtp: the prompt closing is the acknowledgement.
   };
+
+  const onConfirmCtp = (rnd, hole, group) => onAnswerCtp(rnd, hole, group, "confirm");
+  const onPassCtp = (rnd, hole, group) => onAnswerCtp(rnd, hole, group, "pass");
 
   // ── The scorecard: signing, attesting, and calling a round done ──
   //
@@ -3748,7 +3780,7 @@ export default function WBCApp() {
         {scoringOpened && (
         <div style={{ display: view === "scoring" ? "block" : "none", paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
           <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading scoring…</div>}>
-          <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeTimesData={teeTimesData} roundDates={roundDates} scoringOpen={scoringOpen} setTee={setTee} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={onSignScorecard} onAttestScorecard={onAttestScorecard} onUnsignScorecard={onUnsignScorecard} onFinalizeRound={finalizeGroup} onUnfinalizeRound={unfinalizeRound} onGoToAdminCourses={(rnd) => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); setAdminSettingsRound(rnd || null); }} markPlayerWD={markPlayerWD} ctpData={ctpData} onSetCtp={onSetCtp} onConfirmCtp={onConfirmCtp} directorPick={directorPick} onGroupChange={setScoringGroup} onSetRound={setRound} /* How far the scoring screen's "already scored" bar has to stop short of the right edge to leave the header's live controls tappable: the crown alone, or the crown and the scramble's OG/YG/NG button beside it. */ headerInset={scrambleOn ? 146 : 88} />
+          <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeTimesData={teeTimesData} roundDates={roundDates} scoringOpen={scoringOpen} setTee={setTee} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={onSignScorecard} onAttestScorecard={onAttestScorecard} onUnsignScorecard={onUnsignScorecard} onFinalizeRound={finalizeGroup} onUnfinalizeRound={unfinalizeRound} onGoToAdminCourses={(rnd) => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); setAdminSettingsRound(rnd || null); }} markPlayerWD={markPlayerWD} ctpData={ctpData} onSetCtp={onSetCtp} onConfirmCtp={onConfirmCtp} onPassCtp={onPassCtp} ctpField={sideGames?.ctp?.in ?? null} directorPick={directorPick} onGroupChange={setScoringGroup} onSetRound={setRound} /* How far the scoring screen's "already scored" bar has to stop short of the right edge to leave the header's live controls tappable: the crown alone, or the crown and the scramble's OG/YG/NG button beside it. */ headerInset={scrambleOn ? 146 : 88} />
           </Suspense>
         </div>
         )}
