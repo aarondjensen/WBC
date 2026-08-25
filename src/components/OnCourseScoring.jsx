@@ -47,7 +47,7 @@ import { openingHole, nineComplete } from "../lib/holeAdvance";
 import { groupKey as groupKeyOf, sameGroup, liveRound } from "../lib/groupSwitch";
 import { useConfirm } from "../lib/useConfirm";
 import { groupTrouble, roundTrouble, describeTrouble, blocksScoring } from "../lib/roundSetup";
-import { groupTeeOrder, tagAheadOfPlay, canTakePin } from "../lib/ctp";
+import { groupTeeOrder, tagAheadOfPlay, canTakePin, carryLabel } from "../lib/ctp";
 
 // ═══════════════════════════════════════════════════════════════
 //  Popup — shared modal chrome (backdrop + centered card)
@@ -94,7 +94,7 @@ const holeBarBtn = (fill) => ({
   color: ON_ACC, fontSize: FS.label, fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap",
 });
 
-export function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPlayers, onSaveHole, notify, pairingsData, teeTimesData, roundDates, scoringOpen, setTee, getPlayerTee, getPlayerCH = () => null, finalizedRounds, scorecardSigs, onSignScorecard, onAttestScorecard, onUnsignScorecard, onFinalizeRound, onUnfinalizeRound, onGoToAdminCourses, markPlayerWD, ctpData, onSetCtp, onConfirmCtp, onPassCtp, ctpField = null, directorPick, onGroupChange, onSetRound, headerInset = 88 }) {
+export function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPlayers, onSaveHole, notify, pairingsData, teeTimesData, roundDates, scoringOpen, setTee, getPlayerTee, getPlayerCH = () => null, finalizedRounds, scorecardSigs, onSignScorecard, onAttestScorecard, onUnsignScorecard, onFinalizeRound, onUnfinalizeRound, onGoToAdminCourses, markPlayerWD, ctpData, onSetCtp, onConfirmCtp, onPassCtp, ctpField = null, ctpByHole = null, directorPick, onGroupChange, onSetRound, headerInset = 88 }) {
   const [group, setGroup] = useState(null);
   const [currentHole, setCurrentHole] = useState(0);
   const [manualOverride, setManualOverride] = useState(false);
@@ -1488,6 +1488,31 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
               <div style={{ fontSize: FS.label, color: K.t3, marginTop: 2 }}>Hole {holeNum} · Par 3</div>
             </div>
             <div style={{ padding: "14px 16px" }}>
+
+              {/* ── What this pin is worth ──
+                  A par 3 nobody in the field hit rolls its share onto the next
+                  one, so this hole can be worth two or three ordinary pins.
+                  The group standing on the green is the only audience that can
+                  act on that, and until now the number lived on a tab nobody
+                  opens mid-round. Only when it is more than a single share:
+                  every par 3 announcing "1×" would be noise on the one that
+                  is not. The chain is derived in App.jsx so this and the
+                  Betting board cannot disagree about it. */}
+              {carryLabel(((ctpByHole || {})[round] || {})[holeNum]?.shares) && (
+                <div style={{
+                  display: "flex", alignItems: "center", gap: 8, marginBottom: 12,
+                  background: K.gold + ALPHA.wash, border: `1px solid ${K.gold}${ALPHA.line}`,
+                  borderRadius: R.md, padding: "8px 10px",
+                }}>
+                  <span style={{ fontSize: FS.body }}>🔥</span>
+                  <span style={{ flex: 1, minWidth: 0, fontSize: FS.label, color: K.t2, lineHeight: 1.45 }}>
+                    <span style={{ fontWeight: 800, color: K.gold }}>
+                      This pin is worth {carryLabel(ctpByHole[round][holeNum].shares)}.
+                    </span>
+                    {" "}Nobody hit the last {ctpByHole[round][holeNum].carriedIn === 1 ? "one" : `${ctpByHole[round][holeNum].carriedIn}`}, so it carried onto this hole.
+                  </span>
+                </div>
+              )}
 
               {/* Current-leader bar — the number to beat, tagged by an earlier group */}
               {leader && leaderPl && (

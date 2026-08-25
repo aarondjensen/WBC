@@ -515,6 +515,29 @@ describe("the CTP prompt", () => {
     expect(screen.queryByText(/advancing/)).toBeNull();
   });
 
+  // A par 3 nobody in the field hit rolls its share onto the next one, and the
+  // group on the green is the only audience that can do anything about it —
+  // the number used to live on a tab nobody opens mid-round.
+  it("tells the group when the pin has a carry riding on it", () => {
+    render(h(Live, {
+      start: par3Props.holeData,
+      ctpByHole: { 1: { 2: { shares: 3, carriedIn: 2 } } },
+    }));
+    postAll();
+    expect(screen.getByText(/This pin is worth 3×/)).toBeTruthy();
+    expect(screen.getByText(/Nobody hit the last 2/)).toBeTruthy();
+  });
+
+  it("says nothing about a carry on an ordinary pin", () => {
+    render(h(Live, {
+      start: par3Props.holeData,
+      ctpByHole: { 1: { 2: { shares: 1, carriedIn: 0 } } },
+    }));
+    postAll();
+    expect(screen.queryByText(/worth 1×/)).toBeNull();
+    expect(screen.queryByText(/carried onto this hole/)).toBeNull();
+  });
+
   it("is not raised on a hole the group is only looking at", () => {
     render(h(OnCourseScoring, { ...baseProps, holeData: cards(18) }));
     expect(ctpPrompt()).toBeNull();

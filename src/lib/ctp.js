@@ -246,3 +246,102 @@ export function canTakePin({ leaderFt, leaderOrder, myFt, myOrder }) {
   if (myOrder == null || leaderOrder == null) return false;
   return myOrder < leaderOrder;
 }
+
+// ══════════════════════════════════════════════════════════════════
+//  The carry: a pin nobody hit rolls onto the next one.
+// ══════════════════════════════════════════════════════════════════
+//
+// A par 3 where nobody in the field found the green pays nobody, and its share
+// of the pot used to simply sit there — the Betting tab counted it as money
+// going to no one, and a director worked out on Sunday what to do with it.
+//
+// It carries now, the way a pushed skin does. The unclaimed share moves to the
+// NEXT par 3 in the event, which is then worth double; two dry pins in a row
+// make the third worth triple, and so on. The sequence runs hole order within
+// a round and round order across the week — one chain for the whole event,
+// because the pot is already counted that way (see lib/sideGames on why CTP
+// divides by the par 3s that EXIST rather than the ones taken).
+//
+// ── The accounting, which is the point ──
+// Every par 3 puts exactly one share into the chain. A pin that is won takes
+// its own share plus everything carried into it; a pin that is not passes its
+// share along untouched. So the shares paid out plus the shares still carrying
+// always equal the number of par 3s, and once the last pin is decided the
+// whole pot has an owner. That is what closes the gap the tab used to report
+// as "$35.00 unclaimed".
+//
+// ── Three things count as nobody winning it ──
+//   • every group answered the prompt and none of them claimed it
+//   • the round finished with the pin untagged, whether or not everybody was
+//     asked — a round that is over has no more shots to hit
+//   • it was tagged to somebody who never bought into the CTP game. He hit it
+//     closest and the pin is his, but it pays nobody, and the share has to go
+//     somewhere rather than evaporate.
+//
+// ── A pin that is still out blocks the chain, and says so ──
+// Until a hole is decided nobody can know whether it takes the carry or passes
+// it on, so the pins after it cannot be priced. Rather than guess, the chain
+// stops at the first undecided pin: that one is shown as what it is worth if
+// somebody takes it, and everything after it reports the share it is certainly
+// worth and nothing more. Groups play in order, so in practice the undecided
+// pins are the ones at the end of the week.
+
+// `pins` is every par 3 in the event, IN PLAY ORDER, each as:
+//   { round, hole, playerId, inGame, answered, groupCount, roundFinal }
+//
+// Returns the same list, in the same order, each pin carrying:
+//   won        somebody in the game holds it
+//   decided    the hole has had its answer, one way or the other
+//   shares     what it pays, in shares of the base per-pin value
+//   carriedIn  how many of those shares arrived from earlier dry pins
+//   carriesTo  { round, hole } this pin's share went to, when it was dry
+//   pending    the chain stops here; `shares` is what it would pay if taken
+//   atLeast    priced behind an undecided pin, so `shares` is a floor
+//
+// and alongside them: `leftover` shares nobody won, `settled` when the chain
+// ran to the end, and `bonusPerPin` — the final carry split evenly over the
+// pins that were won, which is where a dry LAST par 3 sends its money.
+export function ctpLedger(rawPins) {
+  let carry = 0;
+  let blocked = false;
+
+  const pins = (rawPins || []).map(p => {
+    const won = !!p.playerId && p.inGame !== false;
+    const answeredAll = (p.groupCount || 0) > 0 && (p.answered || 0) >= p.groupCount;
+    const decided = !!p.playerId || !!p.roundFinal || answeredAll;
+    const base = { ...p, won, decided, carriedIn: 0, shares: 0 };
+
+    if (blocked) return { ...base, shares: won ? 1 : 0, atLeast: true };
+    if (!decided) { blocked = true; return { ...base, shares: 1 + carry, carriedIn: carry, pending: true }; }
+    if (won) { const c = carry; carry = 0; return { ...base, shares: 1 + c, carriedIn: c }; }
+    carry += 1;
+    return { ...base, carriedOut: true };
+  });
+
+  // Where a dry pin's share actually went: the next pin that took one. Walked
+  // backwards because that is the only direction the answer is known in.
+  let next = null;
+  for (let i = pins.length - 1; i >= 0; i--) {
+    if (pins[i].carriedOut) pins[i].carriesTo = next;
+    if (pins[i].shares > 0 && !pins[i].atLeast) next = { round: pins[i].round, hole: pins[i].hole };
+  }
+
+  // The last par 3 of the event going dry has nowhere to carry to, so the
+  // shares still in hand are split evenly over the pins that were won — the
+  // whole pot pays out rather than ending the week owned by nobody. Only once
+  // the chain has actually run to the end: a carry mid-tournament is still
+  // travelling, not left over.
+  const settled = !blocked;
+  const wonPins = pins.filter(p => p.won && p.shares > 0);
+  const leftover = settled ? carry : 0;
+  const bonusPerPin = settled && leftover > 0 && wonPins.length > 0 ? leftover / wonPins.length : 0;
+  pins.forEach(p => { p.totalShares = p.shares + (p.won && p.shares > 0 ? bonusPerPin : 0); });
+
+  return { pins, leftover, bonusPerPin, settled };
+}
+
+// What one pin is worth, said the way the board says it: "2×", "3×", or
+// nothing at all for a single share. A pin carrying a split of the final
+// leftover is not a round multiple and is not labelled one — its money shows
+// as money.
+export const carryLabel = (shares) => (shares > 1 ? `${shares}×` : null);

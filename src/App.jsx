@@ -42,7 +42,7 @@ import { editionClosedToMembers } from "./lib/editionLifecycle";
 import { liveEdition, editionBannerShowing } from "./lib/editionHome";
 import { holdForAuth } from "./lib/authHold";
 import { docIds } from "./lib/editionId";
-import { resolvePin, OVERRIDE_KEY } from "./lib/ctp";
+import { resolvePin, OVERRIDE_KEY, ctpLedger } from "./lib/ctp";
 // The one-round team game, and the button it puts in the header — see
 // lib/scramble.
 import { mergeScramble, scrambleLive, SCRAMBLE_BUTTON } from "./lib/scramble";
@@ -2578,6 +2578,48 @@ export default function WBCApp() {
     return wins;
   }, [activePlayers, holeData, tRounds, courseList, numRounds, sideGames]);
 
+  // ── Every par 3 in the event, in play order, with its carry worked out ──
+  //
+  // A pin nobody in the field hit rolls its share onto the next par 3, which is
+  // then worth double — see the note above ctpLedger in lib/ctp. Derived HERE
+  // rather than in the Betting tab because two screens need the answer: the tab
+  // pays it, and the on-course prompt tells the group standing on the green
+  // that this one is worth 2×. Two derivations of one chain is one more than
+  // the number that can be right — the same reason firstTeeAt is a prop.
+  const ctpChain = useMemo(() => {
+    const pins = [];
+    const inField = fieldFor(sideGames?.ctp?.in, activePlayers).map(p => p.id);
+    const everybody = sideGames?.ctp?.in == null;
+    for (let r = 1; r <= numRounds; r++) {
+      const tr = tRounds.find(t => t.round_number === r);
+      const rCourse = tr ? courseList.find(c => c.id === tr.course_id) : null;
+      if (!rCourse) continue;
+      const roundFinal = roundFinalized(finalizedRounds, pairingsData, r);
+      const groupCount = ((pairingsData || {})[r] || []).filter(g => g && g.length > 0).length;
+      (rCourse.hole_pars || []).forEach((par, i) => {
+        if (par !== 3) return;
+        const hole = i + 1;
+        const rec = ((ctpData || {})[r] || {})[hole] || {};
+        pins.push({
+          round: r, hole,
+          playerId: rec.playerId || null,
+          inGame: !rec.playerId || everybody || inField.includes(rec.playerId),
+          answered: (rec.answeredGroups || []).length,
+          groupCount, roundFinal,
+        });
+      });
+    }
+    return ctpLedger(pins);
+  }, [ctpData, tRounds, courseList, numRounds, sideGames, finalizedRounds, pairingsData, activePlayers]);
+
+  // The chain keyed by round and hole, for the two screens that ask about ONE
+  // pin rather than walking the whole event.
+  const ctpByHole = useMemo(() => {
+    const m = {};
+    ctpChain.pins.forEach(p => { (m[p.round] ||= {})[p.hole] = p; });
+    return m;
+  }, [ctpChain]);
+
   // ── Answering the pin ────────────────────────────────────────────
   // Every answer a group can give — tag, confirm, pass, and the director's
   // override — goes through here, and every one of them writes ONE KEY in the
@@ -3780,7 +3822,7 @@ export default function WBCApp() {
         {scoringOpened && (
         <div style={{ display: view === "scoring" ? "block" : "none", paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
           <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading scoring…</div>}>
-          <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeTimesData={teeTimesData} roundDates={roundDates} scoringOpen={scoringOpen} setTee={setTee} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={onSignScorecard} onAttestScorecard={onAttestScorecard} onUnsignScorecard={onUnsignScorecard} onFinalizeRound={finalizeGroup} onUnfinalizeRound={unfinalizeRound} onGoToAdminCourses={(rnd) => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); setAdminSettingsRound(rnd || null); }} markPlayerWD={markPlayerWD} ctpData={ctpData} onSetCtp={onSetCtp} onConfirmCtp={onConfirmCtp} onPassCtp={onPassCtp} ctpField={sideGames?.ctp?.in ?? null} directorPick={directorPick} onGroupChange={setScoringGroup} onSetRound={setRound} /* How far the scoring screen's "already scored" bar has to stop short of the right edge to leave the header's live controls tappable: the crown alone, or the crown and the scramble's OG/YG/NG button beside it. */ headerInset={scrambleOn ? 146 : 88} />
+          <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeTimesData={teeTimesData} roundDates={roundDates} scoringOpen={scoringOpen} setTee={setTee} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={onSignScorecard} onAttestScorecard={onAttestScorecard} onUnsignScorecard={onUnsignScorecard} onFinalizeRound={finalizeGroup} onUnfinalizeRound={unfinalizeRound} onGoToAdminCourses={(rnd) => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); setAdminSettingsRound(rnd || null); }} markPlayerWD={markPlayerWD} ctpData={ctpData} onSetCtp={onSetCtp} onConfirmCtp={onConfirmCtp} onPassCtp={onPassCtp} ctpField={sideGames?.ctp?.in ?? null} ctpByHole={ctpByHole} directorPick={directorPick} onGroupChange={setScoringGroup} onSetRound={setRound} /* How far the scoring screen's "already scored" bar has to stop short of the right edge to leave the header's live controls tappable: the crown alone, or the crown and the scramble's OG/YG/NG button beside it. */ headerInset={scrambleOn ? 146 : 88} />
           </Suspense>
         </div>
         )}
@@ -3794,7 +3836,7 @@ export default function WBCApp() {
             gallery when they logged out would otherwise hand the next guest the
             screen they left open. */}
         {view === "photos" && !isGuest(user) && <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading photos…</div>}><PhotosView items={media} year={getTournamentYear()} uid={fbUser?.uid || null} isDirector={!!user.isDirector} isGuest={!!user.isGuest} canPost={!user.isGuest && !!fbUser?.uid && photoUploadsAllowed(photoConfig)} uploadsBlockedReason={photoUploadsAllowed(photoConfig) ? "" : uploadsDisabledReason(photoConfig)} onUpload={onUploadPhoto} onDelete={onDeletePhoto} notify={notify} /></Suspense>}
-        {view === "skins" && <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading betting…</div>}><BettingView players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} numRounds={numRounds} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} marketBets={marketBets} onSaveMarketBet={onSaveMarketBet} leaderboard={getLeaderboard} finalizedRounds={finalizedRounds} pairingsData={pairingsData} firstTeeAt={firstTeeAt} marketNudge={marketNudge} teeTimesData={teeTimesData} roundDates={roundDates} inactivePlayers={inactivePlayers} onAddMarketOutsider={user.isDirector ? onAddMarketOutsider : undefined} sideBets={sideBets} authUid={fbUser?.uid || null} onAddSideBet={onAddSideBet} onDeleteSideBet={onDeleteSideBet} onSettleSideBet={onSettleSideBet} /></Suspense>}
+        {view === "skins" && <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading betting…</div>}><BettingView players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} ctpChain={ctpChain} user={user} numRounds={numRounds} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} marketBets={marketBets} onSaveMarketBet={onSaveMarketBet} leaderboard={getLeaderboard} finalizedRounds={finalizedRounds} pairingsData={pairingsData} firstTeeAt={firstTeeAt} marketNudge={marketNudge} teeTimesData={teeTimesData} roundDates={roundDates} inactivePlayers={inactivePlayers} onAddMarketOutsider={user.isDirector ? onAddMarketOutsider : undefined} sideBets={sideBets} authUid={fbUser?.uid || null} onAddSideBet={onAddSideBet} onDeleteSideBet={onDeleteSideBet} onSettleSideBet={onSettleSideBet} /></Suspense>}
         {view === "groups" && <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading pairings…</div>}><GroupsView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} pairingsData={pairingsData} teeTimesData={teeTimesData} getPlayerTee={getPlayerTee} user={user} /></Suspense>}
         {/* The scramble's console. Director-only, and gated on the same flag
             the Admin tab is: the menu row that leads here is only drawn for a

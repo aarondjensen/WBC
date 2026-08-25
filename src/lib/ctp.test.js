@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   groupTeeOrder, groupLabel, tagAheadOfPlay,
-  readClaims, winningClaim, resolvePin, canTakePin, OVERRIDE_KEY,
+  readClaims, winningClaim, resolvePin, canTakePin, OVERRIDE_KEY, ctpLedger, carryLabel,
 } from "./ctp";
 
 const PAIRINGS = {
@@ -229,5 +229,122 @@ describe("canTakePin", () => {
   it("keeps the standing tag when a tie cannot be settled on order", () => {
     expect(canTakePin({ leaderFt: 8, leaderOrder: null, myFt: 8, myOrder: 0 })).toBe(false);
     expect(canTakePin({ leaderFt: 8, leaderOrder: 0, myFt: 8, myOrder: null })).toBe(false);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════
+//  The carry.
+// ══════════════════════════════════════════════════════════════════
+
+// A par 3 in the chain. Defaults to a hole every group answered, since that is
+// what makes a pin DECIDED and the carry is entirely about decided pins.
+const pin = (round, hole, playerId = null, extra = {}) =>
+  ({ round, hole, playerId, inGame: true, answered: 2, groupCount: 2, roundFinal: false, ...extra });
+
+const sharesOf = (l) => l.pins.map(p => p.shares);
+
+describe("ctpLedger", () => {
+  it("pays one share a pin when every hole is taken", () => {
+    const l = ctpLedger([pin(1, 2, "a"), pin(1, 7, "b"), pin(1, 12, "a")]);
+    expect(sharesOf(l)).toEqual([1, 1, 1]);
+    expect(l.leftover).toBe(0);
+  });
+
+  // The rule this exists for.
+  it("rolls a dry pin onto the next one, which is then worth double", () => {
+    const l = ctpLedger([pin(1, 2), pin(1, 7, "b")]);
+    expect(sharesOf(l)).toEqual([0, 2]);
+    expect(l.pins[1].carriedIn).toBe(1);
+    expect(l.pins[0].carriesTo).toEqual({ round: 1, hole: 7 });
+  });
+
+  it("keeps stacking — two dry pins make the third worth triple", () => {
+    const l = ctpLedger([pin(1, 2), pin(1, 7), pin(1, 12, "c")]);
+    expect(sharesOf(l)).toEqual([0, 0, 3]);
+    expect(l.pins[0].carriesTo).toEqual({ round: 1, hole: 12 });
+    expect(l.pins[1].carriesTo).toEqual({ round: 1, hole: 12 });
+  });
+
+  it("starts the next pin fresh once a carry is taken", () => {
+    const l = ctpLedger([pin(1, 2), pin(1, 7, "b"), pin(1, 12, "c")]);
+    expect(sharesOf(l)).toEqual([0, 2, 1]);
+  });
+
+  // The chain is one sequence for the whole event, the way the pot is counted.
+  it("carries across the end of a round into the next one", () => {
+    const l = ctpLedger([pin(1, 17), pin(2, 2, "b")]);
+    expect(sharesOf(l)).toEqual([0, 2]);
+    expect(l.pins[0].carriesTo).toEqual({ round: 2, hole: 2 });
+  });
+
+  // Every par 3 puts exactly one share in, so the pot always has an owner.
+  it("never creates or loses a share", () => {
+    const l = ctpLedger([pin(1, 2), pin(1, 7, "b"), pin(1, 12), pin(1, 17), pin(2, 2, "c")]);
+    const paid = l.pins.reduce((n, p) => n + p.shares, 0);
+    expect(paid + l.leftover).toBe(5);
+  });
+
+  // ── What counts as nobody winning it ──
+  it("treats a round that finished untagged as decided, asked or not", () => {
+    const l = ctpLedger([pin(1, 2, null, { answered: 0, roundFinal: true }), pin(1, 7, "b")]);
+    expect(sharesOf(l)).toEqual([0, 2]);
+  });
+
+  // He hit it closest and the pin is his; it just pays nobody, and the share
+  // has to go somewhere rather than evaporate.
+  it("carries a pin tagged to somebody who never bought in", () => {
+    const l = ctpLedger([pin(1, 2, "outsider", { inGame: false }), pin(1, 7, "b")]);
+    expect(l.pins[0].won).toBe(false);
+    expect(sharesOf(l)).toEqual([0, 2]);
+  });
+
+  // ── A hole still out ──
+  it("stops the chain at a pin nobody has answered yet", () => {
+    const l = ctpLedger([pin(1, 2), pin(1, 7, null, { answered: 1 }), pin(1, 12, "c")]);
+    expect(l.pins[1].pending).toBe(true);
+    expect(l.pins[1].shares).toBe(2);          // what it is worth if taken
+    expect(l.pins[2].atLeast).toBe(true);      // priced behind it, so a floor
+    expect(l.pins[2].shares).toBe(1);
+    expect(l.settled).toBe(false);
+    expect(l.leftover).toBe(0);                // still travelling, not left over
+  });
+
+  it("does not send a carry to a pin behind an unresolved one", () => {
+    const l = ctpLedger([pin(1, 2), pin(1, 7, null, { answered: 1 })]);
+    expect(l.pins[0].carriesTo).toEqual({ round: 1, hole: 7 });
+  });
+
+  // ── The last pin of the week going dry ──
+  it("splits a final carry evenly over the pins that were won", () => {
+    const l = ctpLedger([pin(1, 2, "a"), pin(1, 7, "b"), pin(1, 12)]);
+    expect(l.leftover).toBe(1);
+    expect(l.bonusPerPin).toBe(0.5);
+    expect(l.pins.map(p => p.totalShares)).toEqual([1.5, 1.5, 0]);
+  });
+
+  it("still pays the whole pot when the last pin is dry", () => {
+    const l = ctpLedger([pin(1, 2, "a"), pin(1, 7), pin(1, 12)]);
+    const paid = l.pins.reduce((n, p) => n + p.totalShares, 0);
+    expect(paid).toBe(3);
+  });
+
+  it("leaves the money unclaimed when nobody won a single pin", () => {
+    const l = ctpLedger([pin(1, 2), pin(1, 7)]);
+    expect(l.leftover).toBe(2);
+    expect(l.bonusPerPin).toBe(0);
+  });
+
+  it("has nothing to say about an event with no par 3s", () => {
+    expect(ctpLedger([]).pins).toEqual([]);
+    expect(ctpLedger().leftover).toBe(0);
+  });
+});
+
+describe("carryLabel", () => {
+  it("names a multiplied pin and stays quiet about a single share", () => {
+    expect(carryLabel(3)).toBe("3×");
+    expect(carryLabel(2)).toBe("2×");
+    expect(carryLabel(1)).toBe(null);
+    expect(carryLabel(0)).toBe(null);
   });
 });
