@@ -631,6 +631,87 @@ await check("a round still open: still writable", async () => {
   return assertSucceeds(setDoc(doc(carl, "hole_scores/hs_2009"), { tournament_id: "wbc_2009", score: 4 }));
 });
 
+// ── Group keys are not rounds ────────────────────────────────────
+// The map is keyed two ways: a round the director closed out from Admin
+// stores a bare NUMBER, and a card its group signed and attested stores a
+// GROUP KEY. Only the first kind ends a year, and counting the second kind
+// closes a tournament in the middle of the week it is being played.
+//
+// Twelve players is three groups, so these are the exact shapes a live WBC
+// passes through: three keys at the end of round one, four when the first
+// group of round two signs. Both must keep taking scores, and the second is
+// the one that used to fail — silently, on a tee box, with no lock banner,
+// because the app counts these keys correctly and only the rules did not.
+const gk = (r, ids) => `${r}_${[...ids].sort().join(",")}`;
+await check("a round finished by its groups signing off: still writable", async () => {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), "tournament_state/ts_wbc_2021"), {
+      tournament_id: "wbc_2021", meta: { rounds: 4 },
+      finalized_rounds: {
+        [gk(1, ["a", "b", "c", "d"])]: true,
+        [gk(1, ["e", "f", "g", "h"])]: true,
+        [gk(1, ["i", "j", "k", "l"])]: true,
+      },
+    });
+  });
+  return assertSucceeds(setDoc(doc(carl, "hole_scores/hs_2021"), { tournament_id: "wbc_2021", score: 4 }));
+});
+await check("group keys past the round count: STILL writable — they are not rounds", async () => {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), "tournament_state/ts_wbc_2022"), {
+      tournament_id: "wbc_2022", meta: { rounds: 4 },
+      finalized_rounds: {
+        [gk(1, ["a", "b", "c", "d"])]: true,
+        [gk(1, ["e", "f", "g", "h"])]: true,
+        [gk(1, ["i", "j", "k", "l"])]: true,
+        [gk(2, ["a", "b", "c", "d"])]: true,
+        [gk(2, ["e", "f", "g", "h"])]: true,
+      },
+    });
+  });
+  return assertSucceeds(setDoc(doc(carl, "hole_scores/hs_2022"), { tournament_id: "wbc_2022", score: 4 }));
+});
+// And the mixture, which is what a real year holds by the end: the rounds the
+// director closed out, plus the cards of the round still being played. Three
+// numbers is not four rounds however many group keys sit beside them.
+await check("three rounds closed and the fourth being played: still writable", async () => {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), "tournament_state/ts_wbc_2023"), {
+      tournament_id: "wbc_2023", meta: { rounds: 4 },
+      finalized_rounds: {
+        1: true, 2: true, 3: true,
+        [gk(4, ["a", "b", "c", "d"])]: true,
+        [gk(4, ["e", "f", "g", "h"])]: true,
+      },
+    });
+  });
+  return assertSucceeds(setDoc(doc(carl, "hole_scores/hs_2023"), { tournament_id: "wbc_2023", score: 4 }));
+});
+// The other direction still has to bite: the director closing the last round
+// out is what ends the year, group keys beside it or not.
+await check("the last round closed out: shut, group keys beside it or not", async () => {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), "tournament_state/ts_wbc_2024"), {
+      tournament_id: "wbc_2024", meta: { rounds: 4 },
+      finalized_rounds: {
+        1: true, 2: true, 3: true, 4: true,
+        [gk(4, ["a", "b", "c", "d"])]: true,
+      },
+    });
+  });
+  return assertFails(setDoc(doc(carl, "hole_scores/hs_2024"), { tournament_id: "wbc_2024", score: 4 }));
+});
+// A three-round year, which the WBC has played three times (2010, 2011, 2022).
+await check("a three-round year closes on its third round", async () => {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), "tournament_state/ts_wbc_2011"), {
+      tournament_id: "wbc_2011", meta: { rounds: 3 },
+      finalized_rounds: { 1: true, 2: true, 3: true },
+    });
+  });
+  return assertFails(setDoc(doc(carl, "hole_scores/hs_2011"), { tournament_id: "wbc_2011", score: 4 }));
+});
+
 // Reading is untouched, the same way freezing is not hiding.
 await check("a finished year is still readable by a guest", () =>
   assertSucceeds(getDoc(doc(anon, "hole_scores/hs_2014_1"))));
