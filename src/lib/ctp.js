@@ -246,15 +246,3 @@ export function canTakePin({ leaderFt, leaderOrder, myFt, myOrder }) {
   if (myOrder == null || leaderOrder == null) return false;
   return myOrder < leaderOrder;
 }
-
-// Why the Tag button is dead, or why it is alive on a tie — the prompt prints
-// this under the wheel, and it has to come from the same rule that decides it.
-// Null when there is nothing to explain.
-export function tieVerdict({ leaderFt, leaderOrder, myFt, myOrder, leaderName }) {
-  if (myFt == null || leaderFt == null || myFt !== leaderFt) return null;
-  const who = leaderName || "the current CTP";
-  if (canTakePin({ leaderFt, leaderOrder, myFt, myOrder })) {
-    return { canTake: true, text: `Tied with ${who} — you played it first, so it's yours.` };
-  }
-  return { canTake: false, text: `Tied with ${who} — they played it first and keep it.` };
-}

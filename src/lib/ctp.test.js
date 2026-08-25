@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   groupTeeOrder, groupLabel, tagAheadOfPlay,
-  readClaims, winningClaim, resolvePin, canTakePin, tieVerdict, OVERRIDE_KEY,
+  readClaims, winningClaim, resolvePin, canTakePin, OVERRIDE_KEY,
 } from "./ctp";
 
 const PAIRINGS = {
@@ -229,22 +229,5 @@ describe("canTakePin", () => {
   it("keeps the standing tag when a tie cannot be settled on order", () => {
     expect(canTakePin({ leaderFt: 8, leaderOrder: null, myFt: 8, myOrder: 0 })).toBe(false);
     expect(canTakePin({ leaderFt: 8, leaderOrder: 0, myFt: 8, myOrder: null })).toBe(false);
-  });
-});
-
-describe("tieVerdict", () => {
-  it("says nothing unless the two distances are actually equal", () => {
-    expect(tieVerdict({ leaderFt: 8, myFt: 7, myOrder: 0 })).toBe(null);
-    expect(tieVerdict({ leaderFt: null, myFt: 7, myOrder: 0 })).toBe(null);
-    expect(tieVerdict({ leaderFt: 8, myFt: null, myOrder: 0 })).toBe(null);
-  });
-
-  it("explains a tie the group wins, and one it loses", () => {
-    const won = tieVerdict({ leaderFt: 8, leaderOrder: 2, myFt: 8, myOrder: 0, leaderName: "Greg B" });
-    expect(won.canTake).toBe(true);
-    expect(won.text).toMatch(/you played it first/i);
-    const lost = tieVerdict({ leaderFt: 8, leaderOrder: 0, myFt: 8, myOrder: 2, leaderName: "Greg B" });
-    expect(lost.canTake).toBe(false);
-    expect(lost.text).toMatch(/Greg B/);
   });
 });

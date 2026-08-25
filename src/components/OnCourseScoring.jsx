@@ -47,7 +47,7 @@ import { openingHole, nineComplete } from "../lib/holeAdvance";
 import { groupKey as groupKeyOf, sameGroup, liveRound } from "../lib/groupSwitch";
 import { useConfirm } from "../lib/useConfirm";
 import { groupTrouble, roundTrouble, describeTrouble, blocksScoring } from "../lib/roundSetup";
-import { groupTeeOrder, tagAheadOfPlay, canTakePin, tieVerdict } from "../lib/ctp";
+import { groupTeeOrder, tagAheadOfPlay, canTakePin } from "../lib/ctp";
 
 // ═══════════════════════════════════════════════════════════════
 //  Popup — shared modal chrome (backdrop + centered card)
@@ -1445,10 +1445,6 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
           leaderFt: leader?.distanceFt ?? null, leaderOrder: leader?.taggedGroupOrder ?? null,
           myFt: chosen ? ctpFeet : null, myOrder: myTeeOrder,
         });
-        const tie = tieVerdict({
-          leaderFt: leader?.distanceFt ?? null, leaderOrder: leader?.taggedGroupOrder ?? null,
-          myFt: chosen ? ctpFeet : null, myOrder: myTeeOrder, leaderName: leaderPl?.name,
-        });
         // BOTH halves, deliberately. A name with no distance is a claim
         // nobody measured, and it would go onto the card looking like one
         // somebody did.
@@ -1518,7 +1514,7 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
                       <span style={{ fontSize: FS.label }}>⏱</span>
                       <span style={{ fontSize: FS.label, color: K.t2, lineHeight: 1.45, minWidth: 0 }}>
                         <span style={{ fontWeight: 800, color: K.warn }}>{outOfOrder.label} tagged this after you finished.</span>
-                        {" "}Tag it if you were closer — and a tie is yours, because you played it first.
+                        {" "}Tag it if you were closer.
                       </span>
                     </div>
                   )}
@@ -1648,17 +1644,13 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
                       Spin the wheel to set how close {shortName(players.find(p => p.id === ctpPickPlayer)) || "they"} was.
                     </div>
                   )}
-                  {/* A tie is no longer a flat refusal: it goes to whoever
-                      played the hole first, so a group that was ahead of the
-                      standing tag CAN take it — and is told why, because
-                      "tied" reading as both a win and a loss on different
-                      holes is worse than either without the sentence. */}
-                  {chosen && tie && (
-                    <div style={{ fontSize: FS.label, color: tie.canTake ? K.acc : K.warn, textAlign: "center", marginBottom: 8, lineHeight: 1.4 }}>
-                      {tie.text}
-                    </div>
-                  )}
-                  {chosen && !tie && !beatsLeader && (
+                  {/* One line, whether the distance is longer or level. A tie
+                      the group WINS needs no line at all — the button is live
+                      and tagging it is the answer — and a tie they lose is not
+                      inside the standing number either, so it reads the same
+                      way round as any other miss. The rule itself is in
+                      lib/ctp; the screen does not argue it on the green. */}
+                  {chosen && !beatsLeader && (
                     <div style={{ fontSize: FS.label, color: K.warn, textAlign: "center", marginBottom: 8, lineHeight: 1.4 }}>
                       Not inside {leaderDist} — {leaderPl?.name || "the current CTP"} keeps it.
                     </div>
