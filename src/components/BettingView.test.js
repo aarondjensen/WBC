@@ -360,3 +360,75 @@ describe("the skins card mid-round", () => {
     expect(scoreCells().filter(t => t.includes("00"))).toHaveLength(0);
   });
 });
+
+// ══════════════════════════════════════════════════════════════════
+//  The CTP board: what the pot does not say by itself.
+// ══════════════════════════════════════════════════════════════════
+//
+// The pot divides by the par 3s that EXIST, which is right — a pin's value has
+// to be fixed before anybody tees off (see lib/sideGames). The consequence
+// nothing on this screen used to state is that the winners' column and the pot
+// do not have to add up: a pin nobody claims, and a pin tagged to somebody who
+// never bought in, are both a share that pays to nobody.
+describe("the CTP tab's arithmetic", () => {
+  const openCtp = () => fireEvent.click(screen.getByText("CTP"));
+  // The tab opens on the last round anybody has posted to, which in this
+  // fixture is round 2. The pins under test are in round 1.
+  const openCtpRound1 = () => { openCtp(); fireEvent.click(screen.getByText("Rd 1")); };
+  const asDirector = { user: { id: "aaron_j", name: "Aaron J", isDirector: true } };
+
+  it("says how much of the pot is going to nobody", () => {
+    // Two rounds on a course with four par 3s each: eight pins, one tagged.
+    mount(asDirector);
+    openCtp();
+    expect(screen.getByText(/unclaimed/)).toBeTruthy();
+    expect(screen.getByText(/1 of 8 pins taken/)).toBeTruthy();
+  });
+
+  it("says so plainly when every pin has been taken", () => {
+    const every = { 1: {}, 2: {} };
+    [1, 2].forEach(r => [2, 7, 12, 17].forEach(h => {
+      every[r][h] = { playerId: "aaron_j", distanceFt: 5, distance: "5 ft", confirmedBy: [], answeredGroups: [] };
+    }));
+    mount({ ...asDirector, ctpData: every });
+    openCtp();
+    expect(screen.getByText(/All 8 pins taken/)).toBeTruthy();
+    expect(screen.queryByText(/unclaimed/)).toBeNull();
+  });
+
+  // A pin tagged to somebody outside the game consumes one of the eight and
+  // pays nothing, so it counts as unclaimed money — which is exactly the case
+  // a director would otherwise find by counting cash on Sunday.
+  it("counts a pin tagged to somebody outside the game as unclaimed", () => {
+    mount({
+      ...asDirector,
+      sideGames: { ...baseProps.sideGames, ctp: { amount: 10, in: ["dave_s"], paid: [] } },
+    });
+    openCtpRound1();
+    expect(screen.getByText(/0 of 8 pins taken/)).toBeTruthy();
+    expect(screen.getByText(/Not in the CTP game/)).toBeTruthy();
+  });
+
+  // Every answer the on-course prompt takes — tag, confirm and pass alike —
+  // files a claim under its group's key, so the board can say how much of the
+  // field has actually walked off the green.
+  it("says how many groups have been asked", () => {
+    mount({
+      ctpData: { 1: { 2: { playerId: "aaron_j", distanceFt: 9, distance: "9 ft", confirmedBy: [], answeredGroups: ["1_aaron_j,dave_s"] } } },
+    });
+    openCtpRound1();
+    expect(screen.getByText("Every group asked")).toBeTruthy();
+  });
+
+  // The distinction a pass being written down buys: a hole the whole field
+  // played and nobody got close to is not a hole nobody was asked about.
+  it("tells a pin nobody was close to apart from one nobody was asked about", () => {
+    mount({
+      ctpData: { 1: { 2: { playerId: null, distanceFt: null, confirmedBy: [], answeredGroups: ["1_aaron_j,dave_s"] } } },
+    });
+    openCtpRound1();
+    expect(screen.getByText("Nobody was close")).toBeTruthy();
+    // The other three par 3s have had nobody near them.
+    expect(screen.queryAllByText("No winner yet").length).toBe(3);
+  });
+});

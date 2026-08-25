@@ -272,6 +272,16 @@ export function BettingView({
   // settles as the schedule fills in.
   const par3Count = roundList.reduce((n, r) => n + par3sFor(r).length, 0);
   const perPin = perUnit(ctpPot, par3Count);
+  // ── What the pot has actually paid out ─────────────────────────
+  // Dividing by the pins that EXIST is right, and it has a consequence nothing
+  // on this screen used to state: a pin nobody claims, and a pin tagged to
+  // somebody who never bought in, are both a share of the pot that is never
+  // assigned to anybody. The board showed every winner what he was owed and
+  // never showed the director that the two columns do not add up — so the
+  // money left over was found by counting cash on Sunday, if at all.
+  const ctpClaimed = ctpTags.length;
+  const ctpUnclaimed = Math.max(0, par3Count - ctpClaimed);
+  const ctpUnpaid = ctpUnclaimed * perPin;
   // A pin is PROVISIONAL while its round is live — a group still out can get
   // inside it — and FINAL the moment the round is done, which is the last
   // group signing its card or the director finalizing from Admin. Derived
@@ -527,7 +537,11 @@ export function BettingView({
   // All three cards open the SAME sheet. The buy-ins were never really three
   // lists; they were one table the director was being made to read a column
   // at a time.
-  const potCard = ({ label, pot, rightTop, rightBottom, summary, typed = false, columns = null }) => (
+  // `note` is a line UNDER the numbers, for the thing a pot card's arithmetic
+  // does not say by itself. CTP is the case it exists for: its pot divides by
+  // the pins that exist, so the winners' column and the pot do not have to
+  // add up, and the difference is money nobody has been assigned.
+  const potCard = ({ label, pot, rightTop, rightBottom, summary, note = null, typed = false, columns = null }) => (
     <>
       <div style={{ background: K.card, borderRadius: R.lg, marginBottom: showBuyIns ? 0 : 10, border: `1px solid ${K.bdr}`, overflow: "hidden" }}>
         <div style={{ padding: "12px 14px", display: "flex", alignItems: "center", gap: 10 }}>
@@ -576,6 +590,11 @@ export function BettingView({
             </div>
           )}
         </div>
+        {note && (
+          <div style={{ padding: "7px 14px", borderTop: `1px solid ${K.bdr}`, fontSize: FS.label, color: K.t3, lineHeight: 1.45 }}>
+            {note}
+          </div>
+        )}
         {user?.isDirector && (
           <div
             onClick={() => setShowBuyIns(v => !v)}
@@ -1062,6 +1081,19 @@ export function BettingView({
                   // progress bar for something nobody is waiting on.
                   rightTop: `${par3Count} total`,
                   rightBottom: `${money(perPin)} / pin`,
+                  // The one thing the two numbers above do not say: what is
+                  // left. A pin nobody claims and a pin tagged to somebody
+                  // outside the game are both a share that pays to nobody, and
+                  // a director counting cash needs that figure before Sunday
+                  // rather than by subtraction afterwards.
+                  note: ctpPot > 0 && ctpUnclaimed > 0 ? (
+                    <>
+                      <b style={{ color: K.warn, fontWeight: 800 }}>{money(ctpUnpaid)} unclaimed</b>
+                      {` · ${ctpClaimed} of ${par3Count} pins taken by players in the game`}
+                    </>
+                  ) : ctpPot > 0 ? (
+                    <><b style={{ color: K.acc, fontWeight: 800 }}>All {par3Count} pins taken</b>{` · the pot is fully assigned`}</>
+                  ) : null,
                 })}
 
                 {/* CTP LEADERS, with each row opening that player's own pins.
@@ -1137,6 +1169,11 @@ export function BettingView({
                 {(() => {
                   const { course } = roundSetup(ctpShownRound);
                   const par3s = par3sFor(ctpShownRound);
+                  // How many groups the round HAS, so "3 of 4 asked" means
+                  // something. Empty slots are skipped the same way the group
+                  // switcher skips them — a group with nobody in it is not a
+                  // group that can answer.
+                  const groupsInRound = ((pairingsData || {})[ctpShownRound] || []).filter(g => g && g.length > 0).length;
                   if (par3s.length === 0) return (
                     <Card style={{ padding: 14, textAlign: "center", color: K.t3, fontSize: FS.small }}>
                       No par 3s on {course?.name || "this course"}.
@@ -1162,6 +1199,12 @@ export function BettingView({
                         const confirmers = (rec?.confirmedBy || [])
                           .map(pid => players.find(p => p.id === pid)?.name)
                           .filter(Boolean);
+                        // How much of the field has actually been asked. Every
+                        // answer the on-course prompt takes — tag, confirm and
+                        // pass alike — files a claim under its group's key, so
+                        // this counts groups that have walked off the green
+                        // rather than groups that agreed. See lib/ctp.
+                        const answered = (rec?.answeredGroups || []).length;
                         return (
                           <Card key={hole} style={{ border: `1px solid ${winner ? K.acc + ALPHA.line : K.bdr}` }}>
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
@@ -1174,7 +1217,16 @@ export function BettingView({
                                   <span style={{ fontSize: FS.body, fontWeight: 700, color: K.acc, whiteSpace: "nowrap" }}>🎯 {winner.name}</span>
                                   {dist && <span style={{ fontSize: FS.small, fontWeight: 800, color: K.warn }}>{dist}</span>}
                                 </span>
-                              ) : <span style={{ fontSize: FS.small, color: K.t3 }}>No winner yet</span>}
+                              ) : (
+                                /* "No winner yet" and "the field played it and
+                                   nobody was close" used to be the same
+                                   sentence, because a pass wrote nothing down.
+                                   It does now, so the pin can say which of the
+                                   two it is. */
+                                <span style={{ fontSize: FS.small, color: K.t3 }}>
+                                  {answered > 0 && answered >= groupsInRound ? "Nobody was close" : "No winner yet"}
+                                </span>
+                              )}
                             </div>
 
                             {/* The pin's standing. A tagged hole in a live
@@ -1200,6 +1252,19 @@ export function BettingView({
                                     Confirmed by {confirmers.join(", ")}
                                   </span>
                                 )}
+                              </div>
+                            )}
+
+                            {/* How much of the field has walked off this green.
+                                A pin standing at 6 ft with one group still out
+                                is a different thing from the same pin with
+                                everybody in, and until now the screen said the
+                                same thing about both. */}
+                            {groupsInRound > 0 && (answered > 0 || winner) && (
+                              <div style={{ fontSize: FS.label, color: answered >= groupsInRound ? K.acc : K.t3, marginTop: 4 }}>
+                                {answered >= groupsInRound
+                                  ? "Every group asked"
+                                  : `${answered} of ${groupsInRound} groups asked`}
                               </div>
                             )}
 

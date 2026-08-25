@@ -15,7 +15,7 @@
 // with no course assigned at all.
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { render, screen, cleanup, fireEvent, act } from "@testing-library/react";
-import { createElement as h } from "react";
+import { createElement as h, useState } from "react";
 import { OnCourseScoring } from "./OnCourseScoring";
 import { localDateISO } from "../lib/format";
 
@@ -338,5 +338,185 @@ describe("the finish prompt and a half-loaded round", () => {
       await advance();
       expect(signPrompt()).toBeTruthy();
     } finally { vi.useRealTimers(); }
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════
+//  The closest-to-the-pin prompt.
+// ══════════════════════════════════════════════════════════════════
+//
+// The one thing in this feature nothing had ever exercised. lib/ctp.test.js
+// covers the rules — who beats whom, how a tie settles — and the rules were
+// never where CTP broke. It broke in WHEN THE PROMPT FIRES, three times:
+//
+//   • the session guard was keyed without the group, so the first group to
+//     answer silenced every group behind it
+//   • a stuck editingCompleted flag did the same thing by a second route
+//   • the sign-the-card sheet draws at zIndex 1000 and this at 350, so a card
+//     completed ON a par 3 buried the question under an opaque sheet — and the
+//     guard had already been consumed, so it never came back
+//
+// All three shipped with unit tests, lint and a build green, because the
+// prompt is a popup behind a state machine and nothing had ever driven it.
+//
+// COURSE's hole_pars puts a par 3 at index 1 (hole 2), which is the hole these
+// drive: post hole 1 for everybody, leave hole 2 open, and the screen lands on
+// it the way a group walking up to a par 3 does.
+
+const par3Props = {
+  ...baseProps,
+  holeData: Object.fromEntries(PLAYERS.map(p => [`${p.id}_1`, { 0: 4 }])),
+};
+
+// A live component that keeps its own scores, so posting a hole moves the
+// screen the way it does on a tee box. A stubbed onSaveHole would leave the
+// card unchanged and the prompt would never fire at all.
+const Live = ({ start, ...extra }) => {
+  const [holeData, setHoleData] = useState(start);
+  return h(OnCourseScoring, {
+    ...par3Props, ...extra, holeData,
+    onSaveHole: (pid, rnd, hole, val) => setHoleData(prev => ({
+      ...prev, [`${pid}_${rnd}`]: { ...(prev[`${pid}_${rnd}`] || {}), [hole]: val },
+    })),
+  });
+};
+
+const ctpPrompt = () => screen.queryByText("Closest to Pin");
+// The score buttons carry the only stable names on this screen — the visible
+// digits repeat all over the card, the aria-label does not.
+const postHole = (name, score = 3) =>
+  fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${name}, ${score},`) }));
+const postAll = (score = 3) => PLAYERS.forEach(p => postHole(p.name, score));
+
+describe("the CTP prompt", () => {
+  it("asks the group who was closest when a par 3 completes", () => {
+    render(h(Live, { start: par3Props.holeData }));
+    expect(ctpPrompt()).toBeNull();
+    postAll();
+    expect(ctpPrompt()).toBeTruthy();
+    expect(screen.getByText("Who was closest?")).toBeTruthy();
+  });
+
+  // The regression the comments describe twice. CTP is tournament-wide, so a
+  // standing tag from an earlier group must NOT suppress the question — it is
+  // the number to beat, and every group gets asked.
+  it("still asks a later group when another group has already tagged it", () => {
+    render(h(Live, {
+      start: par3Props.holeData,
+      ctpData: { 1: { 2: { playerId: "dave_s", distanceFt: 12, distance: "12 ft", taggedByName: "Dave S", confirmedBy: [], answeredGroups: ["1_x"] } } },
+    }));
+    postAll();
+    expect(ctpPrompt()).toBeTruthy();
+    expect(screen.getByText("Current CTP")).toBeTruthy();
+    expect(screen.getByText("Who was closer?")).toBeTruthy();
+  });
+
+  // C1. A card finished ON a par 3 opened both this and the sign-the-card
+  // sheet in the same commit, and the sheet — 650 z-index higher — covered the
+  // question completely. The group never saw it and the guard was already
+  // spent, so the pin was lost with every check green.
+  it("holds the scorecard back until the pin question is answered", async () => {
+    vi.useFakeTimers();
+    try {
+      // Everything in but the par 3, so posting it completes the card.
+      const start = Object.fromEntries(PLAYERS.map(p => [`${p.id}_1`,
+        Object.fromEntries(Array.from({ length: 18 }, (_, i) => [i, 4]).filter(([i]) => i !== 1))]));
+      render(h(Live, { start }));
+      postAll(4);
+      await advance();
+      expect(ctpPrompt()).toBeTruthy();
+      expect(signPrompt()).toBeNull();
+      // Answering it lets the card through.
+      fireEvent.click(screen.getByText("None of us — skip"));
+      await advance();
+      expect(ctpPrompt()).toBeNull();
+      expect(signPrompt()).toBeTruthy();
+    } finally { vi.useRealTimers(); }
+  });
+
+  // C2. The guard is stamped on the ANSWER now, so a question closed without
+  // one can be asked again — and a par 3 the group has finished carries the
+  // way back to it.
+  it("offers the question again on a par 3 the group has already scored", () => {
+    const onSetCtp = vi.fn();
+    render(h(Live, { start: par3Props.holeData, onSetCtp }));
+    postAll();
+    fireEvent.click(screen.getByText("None of us — skip"));
+    expect(ctpPrompt()).toBeNull();
+    fireEvent.click(screen.getByText(/Set closest to pin/));
+    expect(ctpPrompt()).toBeTruthy();
+  });
+
+  // The other half of the guard: an answer really does settle it, so a group
+  // walking back over its own par 3 is not nagged for a question it answered.
+  it("does not re-ask a group that has answered", () => {
+    render(h(Live, { start: par3Props.holeData }));
+    postAll();
+    fireEvent.click(screen.getByText("None of us — skip"));
+    expect(ctpPrompt()).toBeNull();
+    // Change a score on the hole and put it back — the effect re-evaluates
+    // and must stay quiet.
+    postHole("Aaron J", 4);
+    postHole("Aaron J", 3);
+    expect(ctpPrompt()).toBeNull();
+  });
+
+  it("records a pass as an answer rather than writing nothing at all", () => {
+    const onPassCtp = vi.fn();
+    render(h(Live, { start: par3Props.holeData, onPassCtp }));
+    postAll();
+    fireEvent.click(screen.getByText("None of us — skip"));
+    expect(onPassCtp).toHaveBeenCalledWith(1, 2, { key: "1_aaron_j,dave_s", order: 0 });
+  });
+
+  it("confirms a standing tag with the group, not with whoever is holding the phone", () => {
+    const onConfirmCtp = vi.fn();
+    render(h(Live, {
+      start: par3Props.holeData, onConfirmCtp,
+      ctpData: { 1: { 2: { playerId: "dave_s", distanceFt: 12, distance: "12 ft", taggedByName: "Dave S", confirmedBy: [] } } },
+    }));
+    postAll();
+    fireEvent.click(screen.getByText(/^Confirm —/));
+    expect(onConfirmCtp).toHaveBeenCalledWith(1, 2, { key: "1_aaron_j,dave_s", order: 0 });
+  });
+
+  it("tags the pin with the claiming group and its tee order", () => {
+    const onSetCtp = vi.fn();
+    render(h(Live, { start: par3Props.holeData, onSetCtp }));
+    postAll();
+    fireEvent.click(screen.getByText("Aaron J", { selector: "button" }));
+    // The wheel is null until it is spun, so Tag stays dead — a distance
+    // nobody chose must never ride onto the card looking like one they did.
+    expect(screen.getByText("Tag CTP").closest("button").disabled).toBe(true);
+    expect(screen.getByText(/Spin the wheel/)).toBeTruthy();
+  });
+
+  // R3. The buy-in list lives in Betting, so a group used to tag a man who was
+  // not in the game and find out four holes later from a director.
+  it("marks a player who is not in the CTP game", () => {
+    render(h(Live, { start: par3Props.holeData, ctpField: ["aaron_j"] }));
+    postAll();
+    expect(screen.getByText("NOT IN CTP")).toBeTruthy();
+    fireEvent.click(screen.getByText("Dave S", { selector: "button" }));
+    expect(screen.getByText(/not in the CTP game/)).toBeTruthy();
+  });
+
+  it("says nothing about buy-ins when the director has never set any", () => {
+    render(h(Live, { start: par3Props.holeData, ctpField: null }));
+    postAll();
+    expect(screen.queryByText("NOT IN CTP")).toBeNull();
+  });
+
+  // C4. The advance effect stops for this popup; the banner did not, so the
+  // group was told the app was moving on while it was refusing to.
+  it("does not claim to be advancing while it is waiting for an answer", () => {
+    render(h(Live, { start: par3Props.holeData }));
+    postAll();
+    expect(screen.queryByText(/advancing/)).toBeNull();
+  });
+
+  it("is not raised on a hole the group is only looking at", () => {
+    render(h(OnCourseScoring, { ...baseProps, holeData: cards(18) }));
+    expect(ctpPrompt()).toBeNull();
   });
 });

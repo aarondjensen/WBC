@@ -63,13 +63,16 @@ export const TROPHY_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 
 export const TROPHY_SVG_URL = `data:image/svg+xml;utf8,${encodeURIComponent(TROPHY_SVG)}`;
 
 // ── How far a closest-to-the-pin can be ─────────────────────────────
-// The top of the distance wheel. 60 feet is past the point where anybody is
-// claiming a pin, and a wheel that runs to 200 is a wheel nobody can reach the
-// useful end of. Shared because the on-course prompt and the director's
+// The top of the distance wheel. It was 60, which is short: on a long par 3
+// into wind the closest ball on the green can be further than that, and the
+// wheel recorded it as 60 — a measured number standing in for one nobody could
+// enter. 99 is past the point where anybody is claiming a pin, still two
+// digits wide so the wheel rows keep their size, and a wheel that runs to 200
+// is a wheel nobody can reach the useful end of. Shared because the on-course prompt and the director's
 // override in the Betting tab are separate files that must offer the same
 // range — an override that could not reproduce a tagged distance would be a
 // correction tool that cannot correct.
-export const CTP_MAX_FT = 60;
+export const CTP_MAX_FT = 99;
 
 // ── The side games, named once ──────────────────────────────────────
 // Which games exist and what they are called. Here rather than in App.jsx
