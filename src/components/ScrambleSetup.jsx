@@ -24,23 +24,37 @@
 // Everything it writes goes through one `onUpdate(patch)` up to the shell,
 // which merges it onto tournament_state.scramble. Nothing here talks to
 // Firestore.
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { K, FS, R, ALPHA, MOTION, DIM_PLACED } from "../theme";
 import { StickyTop, SectionLabel, Card, Btn, Toggle } from "./ui";
 import { shortName } from "../lib/playerNames";
 import { fmtPar } from "../lib/format";
+import { searchCourses, MIN_COURSE_QUERY, COURSE_SEARCH_DEBOUNCE_MS, STATE_NAMES } from "../lib/courseSearch";
 import {
   SCRAMBLE_TEAMS, SCRAMBLE_BUTTON, mergeScramble, teamOf, assignToTeam,
   unassignedIds, teamPlayers, autoSplit, teamLine, scrambleBlockers, canTurnOn, emptyTeams,
 } from "../lib/scramble";
 
-export function ScrambleSetup({ scramble, onUpdate, players = [], courses = [], notify, onOpenScoring }) {
+export function ScrambleSetup({ scramble, onUpdate, onAddCourse, players = [], courses = [], notify, onOpenScoring }) {
   const sc = mergeScramble(scramble);
   // The player waiting to be placed. Same two-tap gesture the pairings editor
   // uses — tap a name, tap a team — because a drag is not a gesture that works
   // one-handed on a phone.
   const [selected, setSelected] = useState(null);
   const courseCard = useRef(null);
+  // ── Finding a course that is not on the tournament yet ──
+  // The same search Admin → Rounds runs, through the same function — see
+  // searchCourses in lib/courseSearch. What is different is what happens to
+  // the result: there it is assigned to one of the four rounds, here it is
+  // saved to the library and becomes the scramble's course. Nothing about the
+  // scramble touches a tournament round.
+  const searchBox = useRef(null);
+  const searchTimer = useRef(null);
+  const [query, setQuery] = useState("");
+  const [stateFilter, setStateFilter] = useState("");
+  const [results, setResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [adding, setAdding] = useState(null);
 
   const course = courses.find(c => c.id === sc.courseId) || null;
   const holePars = course ? (course.hole_pars || []) : [];
@@ -72,6 +86,64 @@ export function ScrambleSetup({ scramble, onUpdate, players = [], courses = [], 
   const tapTeam = (key) => {
     if (!selected) return;
     setTeams(assignToTeam(sc.teams, selected, key));
+  };
+
+  // ── The search itself ──
+  // Debounced through lib/courseSearch's own constant, so this field and
+  // Admin's ask the API at the same rate. A query shorter than the minimum
+  // clears the results rather than searching for a letter.
+  const runSearch = (q, st) => {
+    setQuery(q);
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    if (q.trim().length < MIN_COURSE_QUERY) { setResults([]); setSearching(false); return; }
+    setSearching(true);
+    searchTimer.current = setTimeout(async () => {
+      searchTimer.current = null;
+      const found = await searchCourses(q, { state: st });
+      setResults(found);
+      setSearching(false);
+    }, COURSE_SEARCH_DEBOUNCE_MS);
+  };
+  useEffect(() => () => { if (searchTimer.current) clearTimeout(searchTimer.current); }, []);
+
+  // Bring the course card into view AND put the caret in its search field.
+  // The scroll on its own is what made the chip look dead: on a screen that
+  // already fits, scrollIntoView moves nothing and the tap has no result.
+  // The FOCUS goes first and the scroll second, and both are guarded. Focus is
+  // the half that matters — it is the visible result on a screen with nothing
+  // to scroll — and putting the scroll first meant a host without
+  // scrollIntoView (an older webview, jsdom) threw before the caret ever
+  // moved, which is the same dead button by another route.
+  // preventScroll, because focus() would otherwise jump the element into view
+  // instantly and fight the smooth scroll that follows it.
+  const openCourseSearch = () => {
+    try { searchBox.current?.focus({ preventScroll: true }); } catch { searchBox.current?.focus(); }
+    if (typeof courseCard.current?.scrollIntoView === "function") {
+      courseCard.current.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  };
+
+  // ── Adding what the search found ──
+  // The course goes into the shared library first — the same write Admin's
+  // picker makes, so it is a course this app HAS from then on, reachable from
+  // every screen and every year — and only then becomes the scramble's. In
+  // that order because the scramble stores a course ID: pointing at one before
+  // it exists would be a scramble on a course nothing can look up.
+  //
+  // A result that is already on the tournament is re-saved rather than
+  // special-cased. It is the same document, and the API's copy may have tees
+  // the saved one is missing.
+  const addAndPick = async (c) => {
+    if (!onAddCourse || adding) return;
+    setAdding(c.id);
+    try {
+      await onAddCourse(c);
+      onUpdate({ courseId: c.id });
+      setQuery("");
+      setResults([]);
+    } finally {
+      setAdding(null);
+    }
   };
 
   const toggleOn = () => {
@@ -116,7 +188,14 @@ export function ScrambleSetup({ scramble, onUpdate, players = [], courses = [], 
                 ))}
               </div>
             </div>
-            <button onClick={() => courseCard.current?.scrollIntoView({ behavior: "smooth", block: "center" })} style={{
+            {/* The chip under the pill is where Admin keeps a round's play
+                date, and it does the same job here: it names what is set and
+                it is the way to set it. It used to only SCROLL, which on a
+                screen that already fits does nothing at all — so it reads as a
+                dead button. It puts the caret in the course search now, which
+                is visibly something on any screen and is the thing somebody
+                tapping "+ course" is actually asking for. */}
+            <button onClick={openCourseSearch} style={{
               width: "100%", padding: "4px 2px", borderRadius: R.sm, cursor: "pointer",
               background: course ? K.acc + ALPHA.wash : "transparent",
               border: `1px solid ${course ? K.acc + ALPHA.hair : K.warn + ALPHA.line}`,
@@ -171,20 +250,24 @@ export function ScrambleSetup({ scramble, onUpdate, players = [], courses = [], 
       </Card>
 
       {/* ── The course ─────────────────────────────────────────────
-          Picked from the courses this edition already holds, not searched for.
-          Adding a course to the tournament is Admin → Rounds' job and it is a
-          different, much larger control (the API search, the tee boxes, the
-          hole-by-hole editor); a second copy of it here would be a second
-          place courses come from. */}
+          Two ways in, because a director setting up a scramble is in one of
+          two situations and only one of them was served before: the course is
+          already on this tournament (it is one of the four rounds' courses, or
+          was added for an earlier scramble) — tap it; or it is somewhere the
+          app has never heard of, which is the common case, because a scramble
+          is usually played somewhere other than the tournament's own courses.
+
+          The second case used to end at "add one in Admin → Rounds", which is
+          not true of Admin's course picker: everything there assigns to a
+          ROUND, and a scramble is not one of the four. So the search lives
+          here too. It is lib/courseSearch's, the same one Admin runs, and what
+          it adds goes into the shared course library exactly as Admin's does —
+          one place courses come from, two places they can be added. */}
       <div ref={courseCard}>
         <SectionLabel>Course</SectionLabel>
         <Card style={{ marginBottom: 12 }} pad={10}>
-          {courses.length === 0 ? (
-            <div style={{ fontSize: FS.label, color: K.t3, lineHeight: 1.5 }}>
-              No courses on this tournament yet. Add one in Admin → Rounds and it will show up here.
-            </div>
-          ) : (<>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4 }}>
+          {courses.length > 0 && (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, marginBottom: 10 }}>
               {courses.map(c => {
                 const on = c.id === sc.courseId;
                 return (
@@ -201,12 +284,79 @@ export function ScrambleSetup({ scramble, onUpdate, players = [], courses = [], 
                 );
               })}
             </div>
-            {scored && (
-              <div style={{ marginTop: 8, fontSize: FS.label, fontWeight: 600, color: K.warn, lineHeight: 1.5 }}>
-                Cards have been started. Changing the course now re-reads every hole&apos;s par under scores posted against the old one.
-              </div>
+          )}
+
+          {/* The state filter earns its 62px: course names repeat all over the
+              country, and "Timber Ridge" unfiltered is a page of them. Same
+              control Admin's picker carries, same list. */}
+          <div style={{ display: "flex", gap: 6 }}>
+            <select value={stateFilter} onChange={e => { setStateFilter(e.target.value); runSearch(query, e.target.value); }}
+              aria-label="State"
+              style={{ width: 62, padding: "8px 5px", background: K.inp, border: `1px solid ${K.acc}${ALPHA.hair}`, borderRadius: R.sm, color: K.t1, fontSize: FS.small, flexShrink: 0 }}>
+              <option value="">All</option>
+              {Object.keys(STATE_NAMES).map(st => <option key={st} value={st}>{st}</option>)}
+            </select>
+            <input
+              ref={searchBox}
+              value={query}
+              onChange={e => runSearch(e.target.value, stateFilter)}
+              placeholder="Search for a course…"
+              aria-label="Search for a course"
+              style={{ flex: 1, minWidth: 0, padding: "8px 11px", background: K.inp, border: `1px solid ${K.acc}${ALPHA.hair}`, borderRadius: R.sm, color: K.t1, fontSize: FS.lead, boxSizing: "border-box" }}
+            />
+            {query !== "" && (
+              <button onClick={() => runSearch("", stateFilter)} aria-label="Clear the search" style={{
+                flexShrink: 0, padding: "0 10px", borderRadius: R.sm, background: "transparent",
+                border: `1px solid ${K.bdr}`, color: K.t3, fontSize: FS.small, cursor: "pointer",
+              }}>✕</button>
             )}
-          </>)}
+          </div>
+
+          {searching && <div style={{ marginTop: 8, fontSize: FS.label, color: K.t3 }}>Searching…</div>}
+
+          {!searching && results.length > 0 && (
+            <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
+              {results.map(c => {
+                const already = courses.some(x => x.id === c.id);
+                const busy = adding === c.id;
+                return (
+                  <button key={c.id} disabled={busy} onClick={() => addAndPick(c)} style={{
+                    display: "flex", alignItems: "center", gap: 8, textAlign: "left",
+                    padding: "8px 10px", borderRadius: R.sm, cursor: busy ? "default" : "pointer",
+                    background: K.hover, border: `1px solid ${K.bdr}`, color: K.t1, opacity: busy ? DIM_PLACED : 1,
+                  }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: FS.small, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.name}</div>
+                      <div style={{ fontSize: FS.micro, color: K.t3, marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {[[c.city, c.state].filter(Boolean).join(", "), c.par ? `Par ${c.par}` : "", already ? "Already added" : c._source].filter(Boolean).join(" · ")}
+                      </div>
+                    </div>
+                    <span style={{ flexShrink: 0, fontSize: FS.micro, fontWeight: 800, color: K.acc, letterSpacing: 0.5 }}>
+                      {busy ? "…" : already ? "USE" : "+ ADD"}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {!searching && query.trim().length >= MIN_COURSE_QUERY && results.length === 0 && (
+            <div style={{ marginTop: 8, fontSize: FS.label, color: K.t3, lineHeight: 1.5 }}>
+              Nothing found for &ldquo;{query.trim()}&rdquo;{stateFilter ? ` in ${stateFilter}` : ""}. Try the course&apos;s town, or widen the state filter.
+            </div>
+          )}
+
+          {!searching && query.trim().length < MIN_COURSE_QUERY && courses.length === 0 && (
+            <div style={{ marginTop: 8, fontSize: FS.label, color: K.t3, lineHeight: 1.5 }}>
+              No courses on this tournament yet — search for the one the scramble is played on.
+            </div>
+          )}
+
+          {scored && (
+            <div style={{ marginTop: 8, fontSize: FS.label, fontWeight: 600, color: K.warn, lineHeight: 1.5 }}>
+              Cards have been started. Changing the course now re-reads every hole&apos;s par under scores posted against the old one.
+            </div>
+          )}
         </Card>
       </div>
 

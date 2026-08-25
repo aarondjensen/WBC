@@ -40,14 +40,13 @@ import { useDirtyForm } from "../lib/useDirtyForm";
 import { pairingScoreImpact, orphanedScores, describeScored, totalHoles, holesEntered } from "../lib/scoreGuard";
 import { groupsForRound, assignToGroup, removeFromGroup as removeFromGroupPure, clearGroup, swapIntoGroup } from "../lib/pairings";
 import { PAIRING_MODES, PAIRING_MODE_LABEL, resolvePairingCfg, buildPriorPartners, optimizeAvoidRepeats, groupByLeaderboard } from "../lib/pairingDraw";
-import { stateMatches, hasRealSlope, parseRapidAPI, fetchCourseTees } from "../lib/courseSearch";
+import { parseRapidAPI, fetchCourseTees, searchCourses, MIN_COURSE_QUERY, COURSE_SEARCH_DEBOUNCE_MS } from "../lib/courseSearch";
 import { apiUrl } from "../lib/apiBase";
 import { Popup, ConfirmModal } from "./Popup";
 import { isHistoryCourseId } from "../lib/historyImport";
 import { localDateISO, fmtRoundDate } from "../lib/format";
 import { SCORING_LEAD_MIN } from "../lib/scoringGate";
 import { NUM_ROUNDS, roundDateChoices } from "../lib/rounds";
-import { db } from "../lib/db";
 import { toDisplayName, isGeneratedName, shortName, fullName, splitName } from "../lib/playerNames";
 import { missingTees, describeMissingTees, pairingsTrouble } from "../lib/roundSetup";
 import { indexFor, matchHistoryName } from "../lib/handicap";
@@ -1752,72 +1751,17 @@ export function AdminView({ registry, activePlayers, marketPool, sideGames, onUp
   const doCourseSearch = (query, stateOverride) => {
     setCourseSearch(query);
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
-    if (!query.trim() || query.trim().length < 2) { setSearchResults([]); return; }
+    if (!query.trim() || query.trim().length < MIN_COURSE_QUERY) { setSearchResults([]); return; }
     searchTimerRef.current = setTimeout(async () => {
       setSearchLoading(true);
-      const stateFilter = stateOverride !== undefined ? stateOverride : courseStateFilter;
-      try {
-        const q = query.trim();
-        const stateParam = stateFilter ? `&state=${encodeURIComponent(stateFilter)}` : "";
-        let results = [];
-
-
-        // 1. Firestore FIRST — local WBC history takes priority
-        let sbCourseNames = new Set();
-        try {
-          const qLower = q.toLowerCase();
-          const rows = await db.get("courses");
-          if (rows?.length) {
-            const filtered = rows.filter(r => {
-              const nameMatch = (r.name || "").toLowerCase().includes(qLower);
-              const cityMatch = (r.city || "").toLowerCase().includes(qLower);
-              const stateOk = stateFilter ? stateMatches(r.state, stateFilter) : true;
-              return (nameMatch || cityMatch) && stateOk;
-            }).slice(0, 40);
-            const courseIds = filtered.map(r => r.id).filter(Boolean);
-            const tbRows = courseIds.length
-              ? await db.get("tee_boxes", [{ field: "course_id", op: "in", value: courseIds }])
-              : [];
-            const sbCourses = filtered.map((c) => ({
-              ...c, hole_pars: c.hole_pars || [], hole_handicaps: c.hole_handicaps || [],
-              _source: "WBC History",
-              tee_boxes: (tbRows || []).filter(t => t.course_id === c.id).map((t, ti) => {
-                const tbSlope = parseInt(t.slope), courseSlope = parseInt(c.slope);
-                const slope = (tbSlope === 113 && courseSlope && courseSlope !== 113) ? courseSlope : t.slope;
-                return { ...t, slope, color: resolveTeeColor(t, ti) };
-              }),
-            }));
-            for (const sbC of sbCourses) {
-              results.push(sbC);
-              sbCourseNames.add(sbC.name.toLowerCase());
-            }
-          }
-        } catch(e) { console.log("[Firestore] failed:", e); }
-
-        // 2. RapidAPI — only for courses NOT already in local DB
-        let apiResults = [];
-        try {
-          const r = await fetch(apiUrl(`/api/courses2?search=${encodeURIComponent(q)}${stateParam}`));
-          if (r.ok) {
-            const data = await r.json();
-            const raw = Array.isArray(data) ? data : (data.courses || data.data || []);
-            apiResults = parseRapidAPI(raw, stateFilter).filter(c => !sbCourseNames.has(c.name.toLowerCase()));
-            results = [...results, ...apiResults];
-          }
-        } catch(e) { console.log("[RapidAPI] failed:", e); }
-
-        // 3. Flag courses the API had no real ratings for — a row of 113s is
-        //    the API saying "I don't know", and a tournament must not be
-        //    played off handicaps computed from it without somebody noticing.
-        results = results.map(c => ({ ...c, _incompleteData: !hasRealSlope(c) }));
-
-        setSearchResults(results);
-      } catch (err) {
-        console.log("Course search failed:", err);
-        setSearchResults([]);
-      }
+      // Where to look and in what order is lib/courseSearch's, with a test —
+      // the scramble's setup screen runs the same search, and this is the one
+      // copy of it. See searchCourses.
+      setSearchResults(await searchCourses(query, {
+        state: stateOverride !== undefined ? stateOverride : courseStateFilter,
+      }));
       setSearchLoading(false);
-    }, 400);
+    }, COURSE_SEARCH_DEBOUNCE_MS);
   };
 
   const addCourseToLibrary = (c) => {

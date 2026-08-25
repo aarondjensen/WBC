@@ -18,12 +18,21 @@
 // the control with consequences: throwing it is what puts the OG/YG/NG button
 // in front of the whole field, and it must not be throwable over a scramble
 // with no course or no teams.
-import { describe, it, expect, afterEach, vi } from "vitest";
-import { render, screen, cleanup, fireEvent } from "@testing-library/react";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
+import { render, screen, cleanup, fireEvent, act } from "@testing-library/react";
 import { createElement as h } from "react";
 import { ScrambleSetup } from "./ScrambleSetup";
+import { searchCourses } from "../lib/courseSearch";
+
+// The course search reaches Firestore and a public API. Neither belongs in a
+// mount test, and what this screen owns is what it DOES with the answer.
+vi.mock("../lib/courseSearch", async (importOriginal) => ({
+  ...(await importOriginal()),
+  searchCourses: vi.fn(async () => []),
+}));
 
 afterEach(cleanup);
+beforeEach(() => { searchCourses.mockClear(); searchCourses.mockResolvedValue([]); });
 
 const COURSE = {
   id: "c1", name: "Treetops", par: 72, slope: 130, rating: 72.4,
@@ -45,6 +54,7 @@ const baseProps = () => ({
   courses: [COURSE],
   notify: vi.fn(),
   onOpenScoring: vi.fn(),
+  onAddCourse: vi.fn(async () => {}),
 });
 
 const READY = {
@@ -71,9 +81,10 @@ describe("ScrambleSetup renders", () => {
     expect(screen.getByText("Open the scramble card →")).toBeTruthy();
   });
 
-  it("mounts an edition with no courses on it yet", () => {
+  it("mounts an edition with no courses on it yet, and offers the search", () => {
     render(h(ScrambleSetup, { ...baseProps(), courses: [] }));
     expect(screen.getByText(/No courses on this tournament yet/)).toBeTruthy();
+    expect(screen.getByLabelText("Search for a course")).toBeTruthy();
   });
 
   it("mounts an edition with no players on it yet", () => {
@@ -175,5 +186,97 @@ describe("the course", () => {
     const tiles = screen.getAllByText("Treetops");
     fireEvent.click(tiles[tiles.length - 1]);
     expect(props.onUpdate).toHaveBeenLastCalledWith({ courseId: null });
+  });
+});
+
+// ── The bug this section exists for ────────────────────────────────
+// "+ course" used to only call scrollIntoView, which does nothing at all on a
+// screen that already fits — so the button read as dead, and behind it was a
+// card that could only ever list courses somebody had added in Admin. A
+// scramble is normally played somewhere the tournament's own four rounds are
+// not, so that was the common case, and it had no answer.
+describe("adding the course the scramble is played on", () => {
+  // Debounced, so every search here has to be let through the timer.
+  const type = async (value) => {
+    fireEvent.change(screen.getByLabelText("Search for a course"), { target: { value } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+  };
+
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  const RESULT = {
+    id: "rapid_9", name: "Elk Ridge", city: "Atlanta", state: "MI", par: 72,
+    hole_pars: Array(18).fill(4), hole_handicaps: Array.from({ length: 18 }, (_, i) => i + 1),
+    tee_boxes: [{ name: "Blue", slope: 137, rating: 73.2 }], _source: "RapidAPI",
+  };
+
+  it("puts the caret in the search when the round pill's course chip is tapped", () => {
+    render(h(ScrambleSetup, { ...baseProps(), courses: [] }));
+    fireEvent.click(screen.getByText("+ course"));
+    expect(document.activeElement).toBe(screen.getByLabelText("Search for a course"));
+  });
+
+  it("waits for a real query rather than searching on one letter", async () => {
+    render(h(ScrambleSetup, baseProps()));
+    await type("t");
+    expect(searchCourses).not.toHaveBeenCalled();
+    await type("tre");
+    expect(searchCourses).toHaveBeenCalledWith("tre", { state: "" });
+  });
+
+  it("narrows by state", async () => {
+    render(h(ScrambleSetup, baseProps()));
+    await type("ridge");
+    fireEvent.change(screen.getByLabelText("State"), { target: { value: "MI" } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(searchCourses).toHaveBeenLastCalledWith("ridge", { state: "MI" });
+  });
+
+  it("adds what it finds to the course library AND makes it the scramble's", async () => {
+    const props = baseProps();
+    searchCourses.mockResolvedValue([RESULT]);
+    render(h(ScrambleSetup, props));
+    await type("elk");
+    fireEvent.click(screen.getByText("Elk Ridge"));
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    // The library write comes FIRST — the scramble stores an id, so pointing
+    // at one before it exists would be a course nothing can look up.
+    expect(props.onAddCourse).toHaveBeenCalledWith(RESULT);
+    expect(props.onUpdate).toHaveBeenCalledWith({ courseId: "rapid_9" });
+  });
+
+  it("clears the query once a course is added, so the picker is what you see next", async () => {
+    searchCourses.mockResolvedValue([RESULT]);
+    render(h(ScrambleSetup, baseProps()));
+    await type("elk");
+    fireEvent.click(screen.getByText("Elk Ridge"));
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(screen.getByLabelText("Search for a course").value).toBe("");
+    expect(screen.queryByText("Elk Ridge")).toBeNull();
+  });
+
+  it("says so when nothing matched, rather than showing an empty card", async () => {
+    render(h(ScrambleSetup, baseProps()));
+    await type("zzzz");
+    expect(screen.getByText(/Nothing found for/)).toBeTruthy();
+  });
+
+  it("marks a result the tournament already holds", async () => {
+    searchCourses.mockResolvedValue([{ ...RESULT, id: "c1", name: "Treetops" }]);
+    render(h(ScrambleSetup, baseProps()));
+    await type("tree");
+    expect(screen.getByText(/Already added/)).toBeTruthy();
+    expect(screen.getByText("USE")).toBeTruthy();
+  });
+
+  it("empties the results when the search is cleared", async () => {
+    searchCourses.mockResolvedValue([RESULT]);
+    render(h(ScrambleSetup, baseProps()));
+    await type("elk");
+    expect(screen.getByText("Elk Ridge")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("Clear the search"));
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(screen.queryByText("Elk Ridge")).toBeNull();
   });
 });

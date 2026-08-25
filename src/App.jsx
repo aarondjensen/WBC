@@ -3762,7 +3762,7 @@ export default function WBCApp() {
             the Admin tab is: the menu row that leads here is only drawn for a
             director (components/MoreMenu), and `view` survives a sign-out, so
             this is the door that row is not the only way through. */}
-        {view === "scramble" && (canAdminHere ? <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading scramble…</div>}><ScrambleSetup scramble={scramble} onUpdate={onUpdateScramble} players={activePlayers} courses={courseList} notify={notify} onOpenScoring={() => { scrambleReturn.current = "scramble"; setView("scrambleScoring"); }} /></Suspense> : (
+        {view === "scramble" && (canAdminHere ? <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading scramble…</div>}><ScrambleSetup scramble={scramble} onUpdate={onUpdateScramble} onAddCourse={addCourse} players={activePlayers} courses={courseList} notify={notify} onOpenScoring={() => { scrambleReturn.current = "scramble"; setView("scrambleScoring"); }} /></Suspense> : (
           <div style={{ textAlign: "center", padding: "40px 20px" }}>
             <div style={{ fontSize: FS.jumbo, marginBottom: 12 }}>🔒</div>
             <div style={{ fontSize: FS.lead, fontWeight: 700, color: K.t1 }}>Directors Only</div>
