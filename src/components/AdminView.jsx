@@ -53,6 +53,7 @@ import { indexFor, matchHistoryName } from "../lib/handicap";
 import { returningPlayers, returningLine } from "../lib/returningPlayers";
 import { deleteVerdict, deletionLines } from "../lib/playerDelete";
 import { getDefaultTee } from "../lib/defaultTee";
+import { chDeltasFor, CH_DELTA_MS } from "../lib/chDeltas";
 import { TROPHY_SVG_URL, ROUND_CHOICES, clampRounds, SIDE_GAME_KEYS, SIDE_GAME_LABELS, defaultTournamentName } from "../constants";
 
 // Gap the tee sheet fills in with when the director types one group's time and
@@ -586,29 +587,40 @@ function TeeAssigner({ activePlayers, tRounds, courses, teeData, setTeeBulk, fin
   const assignments = (teeData || {})[editRound] || {};
   const [chDeltas, setChDeltas] = useState({});
 
-  const assign = (pid, teeName) => {
-    // Compute delta vs current CH
-    const oldTeeObj = tees.find(t => t.name === (assignments[pid] || getDefaultTee(tees)?.name || tees[0]?.name));
-    const newTeeObj = tees.find(t => t.name === teeName);
-    const player = activePlayers.find(p => p.id === pid);
-    if (oldTeeObj && newTeeObj && player) {
-      const oldCH = calcCH(player.handicap_index, oldTeeObj.slope, oldTeeObj.rating, oldTeeObj.par);
-      const newCH = calcCH(player.handicap_index, newTeeObj.slope, newTeeObj.rating, newTeeObj.par);
-      const delta = newCH - oldCH;
-      if (delta !== 0) {
-        setChDeltas(prev => ({ ...prev, [pid]: delta }));
-        setTimeout(() => setChDeltas(prev => { const n = {...prev}; delete n[pid]; return n; }), 3500);
-      }
-    }
-    setTeeBulk(editRound, { ...assignments, [pid]: teeName });
+  // One timer per player, so a second move for the same player restarts THAT
+  // badge rather than being cut short by the first move's timer still running.
+  const deltaTimers = useRef({});
+  useEffect(() => () => { Object.values(deltaTimers.current).forEach(clearTimeout); }, []);
+
+  // Flash what a move does to every course handicap it changes. Both ways of
+  // moving a tee go through here — one player, or the whole field off a tile —
+  // because they are the same event and the field-wide one is the bigger news.
+  const flashDeltas = (next) => {
+    const deltas = chDeltasFor(activePlayers, tees, assignments, next);
+    const ids = Object.keys(deltas);
+    if (ids.length === 0) return;
+    setChDeltas(prev => ({ ...prev, ...deltas }));
+    ids.forEach(id => {
+      clearTimeout(deltaTimers.current[id]);
+      deltaTimers.current[id] = setTimeout(() => {
+        delete deltaTimers.current[id];
+        setChDeltas(prev => { const n = { ...prev }; delete n[id]; return n; });
+      }, CH_DELTA_MS);
+    });
+  };
+
+  const commit = (next) => {
+    flashDeltas(next);
+    setTeeBulk(editRound, next);
     if (teesSaved && teesSaved[editRound]) onTeesModify && onTeesModify(editRound);
   };
+
+  const assign = (pid, teeName) => commit({ ...assignments, [pid]: teeName });
 
   const setAll = (teeName) => {
     const bulk = {};
     activePlayers.forEach(p => { bulk[p.id] = teeName; });
-    setTeeBulk(editRound, bulk);
-    if (teesSaved && teesSaved[editRound]) onTeesModify && onTeesModify(editRound);
+    commit(bulk);
   };
 
   // Per-player tees are folded away. Almost every field plays the tee the
