@@ -289,6 +289,32 @@ describe("AdminView renders", () => {
     expect(deletePlayer).not.toHaveBeenCalled();
   });
 
+  // ── The tee sheet's two numbers ──
+  // Index and course handicap are what the director is reading on this panel;
+  // they used to be a run of small prose on the end of each name ("HI 12 · CH
+  // 14"). They are columns now, headed once. What this guards is that the
+  // panel still opens and still prints both numbers per player — the heads
+  // and the values are separate elements, so a row that collapsed back into
+  // one string would fail here.
+  it("gives index and course handicap their own columns under Player tees", () => {
+    mount({ teeData: { 1: { aaron_j: "Blue", dave_s: "Blue", matt_r: "White", pete_l: "White", test_one: "Blue" } } });
+    fireEvent.click(screen.getByText("Player tees"));
+    expect(screen.getByText("HI")).toBeTruthy();
+    expect(screen.getByText("CH")).toBeTruthy();
+    // Aaron is a 12 off Blue (130/72.4/72) — the index and the handicap it
+    // computes to are two cells, not one sentence.
+    expect(screen.getByText("12")).toBeTruthy();
+    expect(screen.getByText("14")).toBeTruthy();
+    // Nobody is missing a tee, so no row falls back to the em dash.
+    expect(screen.queryByText("\u2014")).toBeNull();
+  });
+
+  it("prints an em dash for a player with no tee rather than a course handicap", () => {
+    mount({ teeData: { 1: { aaron_j: "Blue" } } });
+    fireEvent.click(screen.getByText("Player tees"));
+    expect(screen.getAllByText("\u2014").length).toBe(4);
+  });
+
   it("opens on the tab the shell asks for", () => {
     // Admin is reachable from a nudge elsewhere in the app — "set this round's
     // course" jumps straight here — and that routing crosses the chunk
