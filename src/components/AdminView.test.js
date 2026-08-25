@@ -30,6 +30,7 @@ vi.mock("../firebase", () => ({
 }));
 
 const { AdminView } = await import("./AdminView");
+const { unfinalizeKeys } = await import("../lib/groupSwitch");
 
 // jsdom implements no scrolling at all, and the round strip scrolls the
 // selected round into view on every change. Not a thing under test — but an
@@ -172,6 +173,55 @@ describe("AdminView renders", () => {
       fireEvent.click(screen.getByText(tab));
       expect(screen.getByText(tab)).toBeTruthy();
     }
+  });
+
+  // ── The way back out of a finalized round ──
+  // The sheet's "↩ Unfinalize" hands ONE key up to the app, and the lock it is
+  // clearing is not always that key: a round closed from the "Round N Complete"
+  // prompt stores a bare ROUND NUMBER, so its groups read as final without
+  // carrying a key of their own. This asserts the seam rather than the button —
+  // whatever key the sheet hands up has to be one that actually unlocks this
+  // card, which is what lib/groupSwitch unfinalizeKeys answers.
+  //
+  // That is the half nothing covered before: the sheet passed a group key that
+  // was never in the map, the app deleted nothing, and the card stayed locked
+  // with the tap doing nothing at all — green everywhere, because the button
+  // and what the app does with its key had never been asked about together.
+  const openFinalizeSheet = (props) => {
+    // The sheet is reached from the banner, which needs a round whose draw is
+    // complete and unfinalized — so round 2 is the one being closed out, and
+    // round 1 is the one already finalized by number.
+    mount({
+      finalizedRounds: { 1: true },
+      pairingsData: {
+        1: [["aaron_j", "dave_s", "matt_r", "pete_l"]],
+        2: [["aaron_j", "dave_s", "matt_r", "pete_l"]],
+      },
+      holeData: Object.fromEntries(PLAYERS.flatMap(p => [
+        [`${p.id}_1`, card(4)], [`${p.id}_2`, card(5)],
+      ])),
+      ...props,
+    });
+    fireEvent.click(screen.getByText(/Round ready to finalize/));
+  };
+
+  it("hands up a key that actually unlocks a round finalized from Admin", () => {
+    const onUnfinalizeRound = vi.fn();
+    openFinalizeSheet({ onUnfinalizeRound });
+    // Round 1's group is final — by the round's key, not its own.
+    const [unfinalize] = screen.getAllByText(/Unfinalize/);
+    fireEvent.click(unfinalize);
+    expect(onUnfinalizeRound).toHaveBeenCalled();
+    const key = onUnfinalizeRound.mock.calls[0][0];
+    expect(unfinalizeKeys({ 1: true }, key)).toEqual(["1"]);
+  });
+
+  it("still offers Finalize for the round being closed out", () => {
+    const onFinalizeRound = vi.fn();
+    openFinalizeSheet({ onFinalizeRound });
+    const finalize = screen.getAllByText(/Finalize$/).find(el => el.closest("button"));
+    fireEvent.click(finalize);
+    expect(onFinalizeRound).toHaveBeenCalled();
   });
 
   // ── The player editor ──
