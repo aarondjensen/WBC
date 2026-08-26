@@ -214,6 +214,25 @@ describe("OnCourseScoring for a guest", () => {
     render(h(OnCourseScoring, { ...baseProps, user: GUEST, pairingsData: {}, holeData: {} }));
     expect(document.body.textContent.length).toBeGreaterThan(0);
   });
+
+  // The one that cost a live round. A guest's taps land in local state and
+  // stop there (lib/guestMode), so the card fills in, the totals move and the
+  // leaderboard behind it re-ranks — on that device and no other. Somebody
+  // whose sign-in bounced and who came in through the Live Leaderboard button
+  // instead has no way to tell that apart from scoring, and the app-wide guest
+  // strip is a header and a nav bar away from the buttons being pressed.
+  it("says on the card itself that nothing typed here is saved", () => {
+    render(h(OnCourseScoring, { ...baseProps, user: GUEST }));
+    expect(screen.getByText("WATCHING — NOT SCORING")).toBeTruthy();
+    fireEvent.click(screen.getByText("Group 1"));
+    expect(screen.getByText(/Nothing typed here is saved/)).toBeTruthy();
+    expect(screen.getByText(/Sign in to post scores/)).toBeTruthy();
+  });
+
+  it("says none of it to a player whose scores really do post", () => {
+    mount();
+    expect(screen.queryByText("WATCHING — NOT SCORING")).toBeNull();
+  });
 });
 
 // ── Somebody who is not playing ────────────────────────────────────

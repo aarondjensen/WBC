@@ -9,7 +9,7 @@ const deferred = () => {
 
 describe("createWriteTracker", () => {
   it("starts empty", () => {
-    expect(createWriteTracker().state()).toEqual({ pending: 0, kinds: {}, since: null });
+    expect(createWriteTracker().state()).toEqual({ pending: 0, kinds: {}, since: null, refused: 0, refusedKinds: {} });
   });
 
   it("counts a write that has not landed", () => {
@@ -31,7 +31,7 @@ describe("createWriteTracker", () => {
     d.resolve();
     await d.promise;
     await Promise.resolve();
-    expect(t.state()).toEqual({ pending: 0, kinds: {}, since: null });
+    expect(t.state()).toEqual({ pending: 0, kinds: {}, since: null, refused: 0, refusedKinds: {} });
   });
 
   // A failed write is not a waiting write. Leaving it counted would keep the
@@ -131,6 +131,72 @@ describe("createWriteTracker — how long it has been waiting", () => {
   });
 });
 
+// ══════════════════════════════════════════════════════════════════
+//  Refusals — the write the server ANSWERED, and answered no.
+// ══════════════════════════════════════════════════════════════════
+//
+// The queue above is the app working; this is the app being told no, and the
+// difference matters to the person holding the phone. A queued score is on the
+// handset and lands with the next bar of signal. A refused one has been rolled
+// back out of the local cache, so it is on no device anywhere — and the card
+// on screen is the only place it ever existed.
+//
+// It is the shape of a real weekend: a phone that came up with a stored player
+// and no Firebase session behind it kept a scoring tab that worked perfectly,
+// and posted a round the rest of the field never saw. Nothing threw, nothing
+// queued, and the banner had no state for it.
+describe("createWriteTracker — a write that came back refused", () => {
+  const refuse = async (t, kind) => {
+    const d = deferred();
+    t.track(d.promise, kind);
+    d.reject(Object.assign(new Error("permission-denied"), { code: "permission-denied" }));
+    await d.promise.catch(() => {});
+    await Promise.resolve();
+  };
+
+  const land = async (t, kind) => {
+    const d = deferred();
+    t.track(d.promise, kind);
+    d.resolve();
+    await d.promise;
+    await Promise.resolve();
+  };
+
+  it("counts it, and says which collection it was", async () => {
+    const t = createWriteTracker();
+    await refuse(t, "hole_scores");
+    expect(t.state()).toMatchObject({ pending: 0, refused: 1, refusedKinds: { hole_scores: 1 } });
+  });
+
+  it("keeps counting as a signed-out phone posts a whole card", async () => {
+    const t = createWriteTracker();
+    for (let i = 0; i < 4; i++) await refuse(t, "hole_scores");
+    expect(t.state().refusedKinds.hole_scores).toBe(4);
+  });
+
+  // Sticky, because nothing retries a refusal. It clears when the same door
+  // works again — which is what happens once the account is sorted out and the
+  // score is typed in a second time.
+  it("stays up until a write of that kind lands", async () => {
+    const t = createWriteTracker();
+    await refuse(t, "hole_scores");
+    await land(t, "skins");
+    expect(t.state().refusedKinds.hole_scores).toBe(1);
+    await land(t, "hole_scores");
+    expect(t.state()).toMatchObject({ refused: 0, refusedKinds: {} });
+  });
+
+  it("tells a subscriber without ever publishing a healthy state in between", async () => {
+    const t = createWriteTracker();
+    const seen = [];
+    t.subscribe(s => seen.push({ pending: s.pending, refused: s.refused }));
+    await refuse(t, "hole_scores");
+    // start, handed over, settled — and the settle carries both facts at once.
+    expect(seen[seen.length - 1]).toEqual({ pending: 0, refused: 1 });
+    expect(seen.some(s => s.pending === 0 && s.refused === 0 && seen.indexOf(s) > 1)).toBe(false);
+  });
+});
+
 describe("syncStatus", () => {
   it("says nothing when online and up to date — the bar earns its space by being absent", () => {
     expect(syncStatus({ online: true, pending: 0, kinds: {} })).toBe(null);
@@ -200,5 +266,38 @@ describe("syncStatus", () => {
 
   it("has nothing to stall on once the queue drains", () => {
     expect(syncStatus({ online: true, pending: 0, kinds: {}, stalled: true })).toBe(null);
+  });
+
+  // ── The refused write ──
+  // The one state in here that is a failure rather than a fact, and the only
+  // one that asks the person for anything.
+  it("says a refused score did not save, and that nobody else has it", () => {
+    const s = syncStatus({ online: true, refused: 1, refusedKinds: { hole_scores: 1 } });
+    expect(s.key).toBe("refused-scores");
+    expect(s.tone).toBe("bad");
+    expect(s.label).toBe("1 score did not save — nobody else has it");
+    expect(s.hint).toBe("Check you're signed in");
+  });
+
+  it("counts them, because a signed-out phone refuses every hole it posts", () => {
+    expect(syncStatus({ online: true, refused: 5, refusedKinds: { hole_scores: 5 } }).label)
+      .toBe("5 scores did not save — nobody else has them");
+  });
+
+  it("falls back to 'changes' when the refusal was not a score", () => {
+    const s = syncStatus({ online: true, refused: 2, refusedKinds: { skins: 2 } });
+    expect(s.key).toBe("refused");
+    expect(s.label).toBe("2 changes did not save");
+  });
+
+  // A refusal outranks no-signal: "the board may be behind" is reassuring and
+  // wrong once the server has said no to something.
+  it("leads with the refusal even on a phone that is also offline", () => {
+    const s = syncStatus({ online: false, pending: 2, kinds: { hole_scores: 2 }, refused: 1, refusedKinds: { hole_scores: 1 } });
+    expect(s.key).toBe("refused-scores");
+  });
+
+  it("goes quiet again once nothing is refused", () => {
+    expect(syncStatus({ online: true, pending: 0, kinds: {}, refused: 0, refusedKinds: {} })).toBe(null);
   });
 });

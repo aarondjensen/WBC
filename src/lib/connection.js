@@ -43,8 +43,28 @@
 // anybody cares about is a hole.
 //
 // A rejected write decrements too. A write that FAILED is no longer waiting to
-// send; it is a different problem, and reporting it as still-in-flight forever
-// would be its own lie.
+// send; it is a different problem — and it is the one that has no voice
+// anywhere else, so this counts it separately as a REFUSAL.
+//
+// ── Refusals, and why they are worse than a queue ──────────────────
+// The offline case above is the app working: the score is on the phone, it
+// lands when signal does, and nothing is lost. A refusal is the opposite.
+// Firestore answered, it said no, and the local copy of that write is ROLLED
+// BACK — so the score is gone from the phone as well as absent from the board.
+// It happens when the rules refuse the write: a phone whose Firebase session
+// did not survive (Safari is where this shows up, and a stored player renders
+// the whole tournament with no account behind it), a membership that no longer
+// exists, a locked edition.
+//
+// Every one of those looked, from the tee, exactly like scoring normally. The
+// db layer catches the error and console.errors it, which is a message to
+// nobody: the phone shows a card being filled in and the rest of the field
+// sees nothing at all. That is the bug this half exists for.
+//
+// A refusal is STICKY. It does not retry itself and nothing drains it, so it
+// stays counted until a write of the same kind succeeds — which is what
+// happens the moment the account is sorted out and the score is typed again.
+//
 // `since` is the moment the queue last went from empty to non-empty, and null
 // while it is empty. It is here rather than in the hook that reads it because
 // "how long has this been outstanding" is a fact about the queue, and because
@@ -57,6 +77,7 @@
 // stuck does not make it less stuck.
 export function createWriteTracker(now = () => Date.now()) {
   const byKind = new Map();
+  const refusedByKind = new Map();
   const listeners = new Set();
   let since = null;
 
@@ -64,7 +85,10 @@ export function createWriteTracker(now = () => Date.now()) {
     let total = 0;
     const kinds = {};
     byKind.forEach((n, k) => { total += n; if (n > 0) kinds[k] = n; });
-    return { pending: total, kinds, since };
+    let refused = 0;
+    const refusedKinds = {};
+    refusedByKind.forEach((n, k) => { refused += n; if (n > 0) refusedKinds[k] = n; });
+    return { pending: total, kinds, since, refused, refusedKinds };
   };
 
   const emit = () => {
@@ -72,22 +96,34 @@ export function createWriteTracker(now = () => Date.now()) {
     listeners.forEach(fn => fn(s));
   };
 
-  const bump = (kind, delta) => {
+  // One settle is one emit, which is why the refusal is folded in here rather
+  // than counted by a second call: a listener that saw the queue drain and the
+  // refusal arrive as two states would paint the healthy one in between.
+  const bump = (kind, delta, refused) => {
     const wasEmpty = byKind.size === 0;
     const next = (byKind.get(kind) || 0) + delta;
     if (next <= 0) byKind.delete(kind);
     else byKind.set(kind, next);
     if (byKind.size === 0) since = null;
     else if (wasEmpty) since = now();
+    // A write that landed clears its collection's refusals: the same door
+    // works again, so whatever it was is over and the count would be a stale
+    // accusation. See the note above on why they are sticky until then.
+    if (refused === true) refusedByKind.set(kind, (refusedByKind.get(kind) || 0) + 1);
+    else if (refused === false) refusedByKind.delete(kind);
     emit();
   };
 
   return {
+    // The outcome is read from the PROMISE rather than reported by the caller,
+    // so every write in lib/db is covered by having gone through this door and
+    // anything written later inherits it. A caller that catches its own error
+    // — and they all do — never has to remember to say so.
     track(promise, kind = "other") {
-      bump(kind, 1);
+      bump(kind, 1, null);
       let settled = false;
-      const done = () => { if (settled) return; settled = true; bump(kind, -1); };
-      Promise.resolve(promise).then(done, done);
+      const done = (refused) => { if (settled) return; settled = true; bump(kind, -1, refused); };
+      Promise.resolve(promise).then(() => done(false), () => done(true));
       return promise;
     },
     state: snapshot,
@@ -117,10 +153,26 @@ export function createWriteTracker(now = () => Date.now()) {
 // phone that is merely out of range with nothing to send has nothing to be
 // reassured about, and a spectator reading a stale board is not scoring
 // anything, so both get the fact and no advice.
-export function syncStatus({ online, pending = 0, kinds = {}, stalled = false }) {
+export function syncStatus({ online, pending = 0, kinds = {}, stalled = false, refused = 0, refusedKinds = {} }) {
   const scores = kinds.hole_scores || 0;
   const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
   const holding = (key, label) => ({ key, tone: "warn", label, hint: "Keep scoring" });
+
+  // A REFUSAL outranks everything below it, including no signal. Those say
+  // "this phone is behind"; this one says "what you typed is gone", and it is
+  // the only state here that needs the person to do something — every other
+  // line in this function exists to tell them the opposite.
+  //
+  // The hint is where the answer nearly always is. A refusal on a tee box is
+  // an account that stopped being signed in, and the way back is the account
+  // sheet — so it says that rather than naming a rules predicate nobody in the
+  // field has heard of. A locked edition already has its own notice.
+  const refusedScores = refusedKinds.hole_scores || 0;
+  if (refused > 0) {
+    return refusedScores > 0
+      ? { key: "refused-scores", tone: "bad", label: `${plural(refusedScores, "score", "scores")} did not save — nobody else has ${refusedScores === 1 ? "it" : "them"}`, hint: "Check you're signed in" }
+      : { key: "refused", tone: "bad", label: `${plural(refused, "change", "changes")} did not save`, hint: "Check you're signed in" };
+  }
 
   if (!online) {
     if (scores > 0) return holding("offline-scores", `No signal — ${plural(scores, "score", "scores")} still on this phone`);

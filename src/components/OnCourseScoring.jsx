@@ -598,6 +598,40 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
     return { gross: line.gross, netToPar: line.netToPar, thru: line.thru };
   };
 
+  // ── The guest's line, on the one screen where it has to be said twice ──
+  // A guest gets this card because the tab would otherwise be a permanent
+  // "waiting for pairings" for somebody who is not waiting (see the picker
+  // below). What they were NOT told is what happens when they tap a number:
+  // the score goes gold, the running total moves, the leaderboard behind it
+  // re-ranks — and lib/guestMode stops the write one layer down, so it is on
+  // this device and nowhere else.
+  //
+  // The app-wide guest strip says as much, at the top of the app, in a row
+  // that is a header and a nav bar away from the buttons being pressed. That
+  // was enough for somebody browsing and not enough for somebody SCORING: a
+  // player whose sign-in bounced — Safari, where the redirect is at its most
+  // fragile — comes in through the Live Leaderboard button, finds a scoring
+  // tab that works, and posts a round nobody else ever sees. There is no
+  // error to catch anywhere in that story, which is why it has to be said
+  // here, on the card, where the typing is happening.
+  const guestNotice = user.isGuest ? (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 6, width: "100%",
+      marginBottom: 8, padding: "5px 10px", borderRadius: R.sm, flexShrink: 0,
+      background: `${K.danger}${ALPHA.wash}`, border: `1px solid ${K.danger}${ALPHA.line}`,
+    }}>
+      <span aria-hidden="true" style={{ fontSize: FS.small, lineHeight: 1 }}>👀</span>
+      <span style={{ minWidth: 0, flex: 1 }}>
+        <span style={{ display: "block", fontSize: FS.small, fontWeight: 800, letterSpacing: 0.5, color: K.danger }}>
+          WATCHING — NOT SCORING
+        </span>
+        <span style={{ display: "block", fontSize: FS.label, color: K.t3, lineHeight: 1.35 }}>
+          Nothing typed here is saved or seen by anyone else. Sign in to post scores.
+        </span>
+      </span>
+    </div>
+  ) : null;
+
   // ── The off-round banner ────────────────────────────────────────────
   // components/OffRoundBanner carries the look and the two hit targets; what
   // stays here is what they DO, since both act on this screen's own state.
@@ -696,6 +730,7 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
       return (
         <div style={{ padding: "16px 0" }}>
           {offRoundBanner}
+          {guestNotice}
           <div style={{ fontSize: FS.small, fontWeight: 700, color: K.t2, textTransform: "uppercase", letterSpacing: 1, marginBottom: 12 }}>{user.isGuest ? "Select Group to Watch" : "Select Group to Score"}</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {presetGroups.map((grp, gi) => {
@@ -940,6 +975,7 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
   return (
     <div>
       {offRoundBanner}
+      {guestNotice}
       {/* No header row here. The round, the course and the way back to the
           other groups all used to ride above the hole strips; the crown in the
           app header (components/GroupSwitcher) names the group and the round it
