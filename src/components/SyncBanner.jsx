@@ -24,11 +24,18 @@
 // it. This is a fact to be aware of, not a failure to acknowledge, so it says
 // what is true and takes no tap to get rid of — it goes on its own when the
 // writes land.
+//
+// ── Two tones, because there are two different facts ──
+// `warn` is the queue: amber, a cloud with a line through it, and the app is
+// working. `bad` is a REFUSAL — the server said no and the score is gone, not
+// waiting — and it takes the danger red and a warning triangle, because the
+// one thing it must not look like is the state it is not. See lib/connection.
 import { K, FS, ALPHA, FONT } from "../theme";
 
 export function SyncBanner({ status }) {
   if (!status) return null;
-  const ink = K.warn;
+  const bad = status.tone === "bad";
+  const ink = bad ? K.danger : K.warn;
   return (
     <div
       // aria-live, because the whole point is that this appears without
@@ -50,13 +57,24 @@ export function SyncBanner({ status }) {
         flexShrink: 0,
       }}
     >
-      {/* A slashed cloud. Drawn rather than an emoji so it takes the theme's
-          warn colour exactly, the same reason the header's mark is a mask. */}
+      {/* A slashed cloud for the queue, a warning triangle for a refusal. Drawn
+          rather than an emoji so they take the theme's colour exactly, the same
+          reason the header's mark is a mask. */}
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={ink}
-           strokeWidth="2" strokeLinecap="round" style={{ flexShrink: 0 }} aria-hidden="true">
-        <path d="M17.5 17H7a4 4 0 01-.7-7.94" />
-        <path d="M9.5 5.6A5 5 0 0117 9h.5a3.7 3.7 0 012.1 6.7" />
-        <line x1="3" y1="3" x2="21" y2="21" />
+           strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }} aria-hidden="true">
+        {bad ? (
+          <>
+            <path d="M12 3.5L21.5 20H2.5L12 3.5z" />
+            <line x1="12" y1="10" x2="12" y2="14" />
+            <line x1="12" y1="17" x2="12" y2="17" />
+          </>
+        ) : (
+          <>
+            <path d="M17.5 17H7a4 4 0 01-.7-7.94" />
+            <path d="M9.5 5.6A5 5 0 0117 9h.5a3.7 3.7 0 012.1 6.7" />
+            <line x1="3" y1="3" x2="21" y2="21" />
+          </>
+        )}
       </svg>
       <span style={{ flex: 1, minWidth: 0 }}>{status.label}</span>
       {/* The reassurance, present only when this phone is actually holding

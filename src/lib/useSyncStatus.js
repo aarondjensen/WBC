@@ -21,6 +21,10 @@
 // STALL_MS is deliberately several seconds. A score normally lands in well
 // under one, and a bar that blinks on every hole would be noise; something
 // still outstanding after four is worth a sentence.
+//
+// A REFUSED write needs none of that judgement and gets none: it is not a
+// timing question, the server has already answered no, and the banner says so
+// on the spot. See lib/connection.
 import { useEffect, useState } from "react";
 import { syncStatus } from "./connection";
 
@@ -31,7 +35,7 @@ const readOnline = () => {
   catch { return true; }
 };
 
-const EMPTY = { pending: 0, kinds: {}, since: null };
+const EMPTY = { pending: 0, kinds: {}, since: null, refused: 0, refusedKinds: {} };
 
 export function useSyncStatus(tracker) {
   const [online, setOnline] = useState(readOnline);
@@ -67,5 +71,8 @@ export function useSyncStatus(tracker) {
   }, [since]);
 
   const stalled = since != null && now - since >= STALL_MS;
-  return syncStatus({ online, pending: writes.pending, kinds: writes.kinds, stalled });
+  return syncStatus({
+    online, pending: writes.pending, kinds: writes.kinds, stalled,
+    refused: writes.refused, refusedKinds: writes.refusedKinds,
+  });
 }
