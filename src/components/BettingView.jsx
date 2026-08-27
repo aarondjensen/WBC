@@ -89,7 +89,7 @@ export function BettingView({
   // roster id — it is what firestore.rules pins `created_by` to and what the
   // delete rule compares against, so the screen has to decide who may remove
   // a bet off the same field the rules will judge it by.
-  sideBets = [], authUid = null, onAddSideBet, onDeleteSideBet, onSettleSideBet,
+  sideBets = [], authUid = null, onAddSideBet, onEditSideBet, onDeleteSideBet, onSettleSideBet,
 }) {
   const [tab, setTab] = useState("skins");
   const [expandedPlayer, setExpandedPlayer] = useState(null);
@@ -2069,6 +2069,7 @@ export function BettingView({
           user={user}
           authUid={authUid}
           onAddBet={onAddSideBet}
+          onEditBet={onEditSideBet}
           onDeleteBet={onDeleteSideBet}
           onSettleBet={onSettleSideBet}
           confirm={confirm}

@@ -11,7 +11,7 @@ import { fieldFor, computeSkins, toggleIn } from "./lib/sideGames";
 import { normalizeLots, openingSharesLeft, marketWindows, eligibleBets, rebuyers, teeOffAt, roundComplete, marketOutsiders } from "./lib/market";
 // Which books this phone may hold, and when a director publishes the reveal.
 import { betsToHold, shouldPublish, betsSignature } from "./lib/marketSeal";
-import { SIDE_BETS_COL, sideBetId, buildSideBet, toggleSettled } from "./lib/sideBets";
+import { SIDE_BETS_COL, sideBetId, buildSideBet, buildSideBetEdit, toggleSettled } from "./lib/sideBets";
 import { SyncBanner } from "./components/SyncBanner";
 import { LeaderboardView } from "./components/LeaderboardView";
 import { GateScreen } from "./components/GateScreen";
@@ -2873,6 +2873,19 @@ export default function WBCApp() {
     if (!saved) throw new Error("That bet wasn't saved.");
   };
 
+  // Correcting one that was written down wrong — the wrong Dave off a list of
+  // sixteen, twenty typed as two hundred, the detail describing the wrong nine.
+  // Open to the two players in the bet as well as its author and a director,
+  // which is wider than deleting deliberately: see lib/sideBets canEditSideBet.
+  //
+  // Throws like the add above, and for the same reason: a sheet that closes on
+  // an amount that was never written is the app showing terms nobody agreed to.
+  const onEditSideBet = async (bet, form) => {
+    if (!bet?.id) throw new Error("That bet wasn't saved.");
+    const saved = await db.upsert(SIDE_BETS_COL, buildSideBetEdit(bet, form));
+    if (!saved) throw new Error("That bet wasn't saved.");
+  };
+
   const onDeleteSideBet = async (bet) => {
     if (bet?.id) await db.deleteDoc(SIDE_BETS_COL, bet.id);
   };
@@ -3881,7 +3894,7 @@ export default function WBCApp() {
             gallery when they logged out would otherwise hand the next guest the
             screen they left open. */}
         {view === "photos" && !isGuest(user) && <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading photos…</div>}><PhotosView items={media} year={getTournamentYear()} uid={fbUser?.uid || null} isDirector={!!user.isDirector} isGuest={!!user.isGuest} canPost={!user.isGuest && !!fbUser?.uid && photoUploadsAllowed(photoConfig)} uploadsBlockedReason={photoUploadsAllowed(photoConfig) ? "" : uploadsDisabledReason(photoConfig)} onUpload={onUploadPhoto} onDelete={onDeletePhoto} notify={notify} /></Suspense>}
-        {view === "skins" && <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading betting…</div>}><BettingView players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} ctpChain={ctpChain} user={user} numRounds={numRounds} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} marketBets={marketBets} onSaveMarketBet={onSaveMarketBet} leaderboard={getLeaderboard} finalizedRounds={finalizedRounds} pairingsData={pairingsData} firstTeeAt={firstTeeAt} marketNudge={marketNudge} teeTimesData={teeTimesData} roundDates={roundDates} inactivePlayers={inactivePlayers} onAddMarketOutsider={user.isDirector ? onAddMarketOutsider : undefined} sideBets={sideBets} authUid={fbUser?.uid || null} onAddSideBet={onAddSideBet} onDeleteSideBet={onDeleteSideBet} onSettleSideBet={onSettleSideBet} /></Suspense>}
+        {view === "skins" && <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading betting…</div>}><BettingView players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} ctpChain={ctpChain} user={user} numRounds={numRounds} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} marketBets={marketBets} onSaveMarketBet={onSaveMarketBet} leaderboard={getLeaderboard} finalizedRounds={finalizedRounds} pairingsData={pairingsData} firstTeeAt={firstTeeAt} marketNudge={marketNudge} teeTimesData={teeTimesData} roundDates={roundDates} inactivePlayers={inactivePlayers} onAddMarketOutsider={user.isDirector ? onAddMarketOutsider : undefined} sideBets={sideBets} authUid={fbUser?.uid || null} onAddSideBet={onAddSideBet} onEditSideBet={onEditSideBet} onDeleteSideBet={onDeleteSideBet} onSettleSideBet={onSettleSideBet} /></Suspense>}
         {view === "groups" && <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading pairings…</div>}><GroupsView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} pairingsData={pairingsData} teeTimesData={teeTimesData} getPlayerTee={getPlayerTee} user={user} /></Suspense>}
         {/* The scramble's console. Director-only, and gated on the same flag
             the Admin tab is: the menu row that leads here is only drawn for a
