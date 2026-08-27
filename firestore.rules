@@ -782,15 +782,29 @@ service cloud.firestore {
       allow read: if isOpen();
       allow create: if canWriteLedger()
                     && request.resource.data.created_by == request.auth.uid;
+      // Three doors, and they are deliberately not the same width as the
+      // delete rule below. A director; the person who logged it; and EITHER
+      // PLAYER IN IT, who may correct the terms of a bet with their own name
+      // on it but may not erase it. Correcting a bet you dispute is an
+      // argument held in front of the whole field on a row both names are on;
+      // deleting one is that argument disappearing. See lib/sideBets
+      // canEditSideBet, which the screen's pencil mirrors.
+      //
+      // A player editing has to still be IN the bet afterwards, which is what
+      // stops the obvious abuse of this door: writing yourself out of a wager
+      // you have lost. Only the author and the director — who can already
+      // delete it outright — can move both sides.
       allow update: if canAdmin()
                     || (canWriteLedger()
                         && resource.data.created_by == request.auth.uid
                         && request.resource.data.created_by == resource.data.created_by)
                     || (canWriteLedger()
-                        && request.resource.data.diff(resource.data).affectedKeys()
-                             .hasOnly(['settled_by'])
                         && myPlayerId() in [resource.data.get('player_a', ''),
-                                            resource.data.get('player_b', '')]);
+                                            resource.data.get('player_b', '')]
+                        && myPlayerId() in [request.resource.data.get('player_a', ''),
+                                            request.resource.data.get('player_b', '')]
+                        && request.resource.data.created_by == resource.data.created_by
+                        && request.resource.data.tournament_id == resource.data.tournament_id);
       allow delete: if canAdmin()
                     || (canWriteLedger() && resource.data.created_by == request.auth.uid);
     }

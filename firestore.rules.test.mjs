@@ -193,11 +193,11 @@ await check("member CANNOT publish the market result", () =>
 // ── The side bet ledger ──
 // A wager the app records and does not run (src/lib/sideBets.js). It is world-
 // readable, unlike the books above — a side bet names both its sides on its own
-// row, so there is nothing to seal — and the three things worth pinning are the
-// three the screen's affordances mirror: an author cannot be forged, a bet is
-// only editable by the person who logged it, and the ONE thing a member may
-// write on a document they do not own is a `settled_by` mark on a bet they are
-// actually in.
+// row, so there is nothing to seal — and what is worth pinning is what the
+// screen's affordances mirror: an author cannot be forged; a bet is editable by
+// the person who logged it AND by either player in it; a player editing cannot
+// write themselves out of it; and somebody with no stake in a bet can do
+// nothing to it at all.
 //
 // Runs before mike is made a director further down, or every refusal inverts.
 await env.withSecurityRulesDisabled(async (ctx) => {
@@ -225,18 +225,30 @@ await check("member can fix the terms of their own bet", () =>
   assertSucceeds(setDoc(doc(mike, "wbc_side_bets/sb_mine"), { detail: "front nine, straight up" }, { merge: true })));
 await check("member CANNOT become the author of a bet by editing it", () =>
   assertFails(setDoc(doc(mike, "wbc_side_bets/sb_mine"), { created_by: "uid_aaron" }, { merge: true })));
-await check("member CANNOT rewrite a bet somebody else logged", () =>
-  assertFails(setDoc(doc(mike, "wbc_side_bets/sb_theirs"), { amount: 5 }, { merge: true })));
-// The one door that lets a member write a document they do not own — and the
-// reason the door exists at all: a bet is settled when BOTH sides say it is.
+// The door that lets a member write a document they did not create, and the
+// two reasons it exists: a bet is settled when BOTH sides say it is, and a bet
+// is written down one-handed on a tee box by whichever of the two got their
+// phone out first — so the terms arrive wrong, and the other side has to be
+// able to fix them. Correcting a bet with your own name on it is an argument
+// held in front of the whole field; erasing one is not, which is why delete
+// below stays narrow. lib/sideBets canEditSideBet mirrors this.
 await check("the other side of a bet CAN mark it paid", () =>
   assertSucceeds(setDoc(doc(mike, "wbc_side_bets/sb_theirs"), { settled_by: ["mike_r"] }, { merge: true })));
+await check("the other side of a bet CAN fix its terms", () =>
+  assertSucceeds(setDoc(doc(mike, "wbc_side_bets/sb_theirs"), { amount: 5, detail: "front nine" }, { merge: true })));
 await check("a bystander CANNOT mark somebody else's bet paid", () =>
   assertFails(setDoc(doc(mike, "wbc_side_bets/sb_others"), { settled_by: ["mike_r"] }, { merge: true })));
-// The door is one field wide. Anything riding along with the mark is an edit
-// to a bet the caller does not own, which is the thing above.
-await check("a settle mark CANNOT smuggle another field through with it", () =>
-  assertFails(setDoc(doc(mike, "wbc_side_bets/sb_theirs"), { settled_by: ["mike_r"], amount: 1 }, { merge: true })));
+await check("a bystander CANNOT rewrite a bet they are not in", () =>
+  assertFails(setDoc(doc(mike, "wbc_side_bets/sb_others"), { amount: 5 }, { merge: true })));
+// The obvious abuse of the wider door, and the one thing the rule checks that
+// the screen cannot: a player editing has to still be IN the bet afterwards.
+// Otherwise a wager you have lost is one edit away from being somebody else's.
+await check("a player CANNOT write themselves out of a bet", () =>
+  assertFails(setDoc(doc(mike, "wbc_side_bets/sb_theirs"), { player_b: "carl_x" }, { merge: true })));
+await check("a player CANNOT become the author of a bet they are only in", () =>
+  assertFails(setDoc(doc(mike, "wbc_side_bets/sb_theirs"), { created_by: "uid_mike" }, { merge: true })));
+await check("a player CANNOT move a bet into another tournament", () =>
+  assertFails(setDoc(doc(mike, "wbc_side_bets/sb_theirs"), { tournament_id: "wbc_2019" }, { merge: true })));
 // Deliberately not "either player in the bet" — the other side of a bet you
 // dispute is not yours to erase. lib/sideBets canDeleteSideBet mirrors this.
 await check("member CANNOT delete a bet they did not log", () =>
