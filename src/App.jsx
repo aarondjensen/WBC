@@ -34,6 +34,8 @@ import { NotificationPrompt } from "./components/NotificationPrompt";
 import { registerForPush, getCachedSubscriptionStatus, getNotificationPermissionState, isStandalonePWA } from "./lib/notifications";
 import { PAIR_KEY, encodePairing, decodePairing, readPairParam, stripPairParam, pairingUrl } from "./lib/authPairing";
 import { shouldPromptForPush, wasPrompted, markPrompted, PUSH_PROMPT_DELAY_MS } from "./lib/notificationPrompt";
+import { pendingAttestations } from "./lib/pendingAttest";
+import { AttestBanner } from "./components/AttestBanner";
 import { rowsToPairings, dedupeGroups } from "./lib/pairings";
 import { EditionBanner } from "./components/EditionBanner";
 import { warmEditions, cachedEditions } from "./lib/editions";
@@ -1793,19 +1795,56 @@ export default function WBCApp() {
     registerForPush(user.id);
   }, [user]);
 
-  // App badge = scorecards this player still owes an attestation on. This is
-  // the source of truth that reconciles the SW's optimistic badge increments.
+  // ── What this player still owes, and the badge that counts it ──
+  //
+  // ONE list, from lib/pendingAttest, feeding both the app badge and the
+  // AttestBanner. It used to be counted right here by a rule of its own, and
+  // that rule was not the rule the Scoring screen uses to decide whether to
+  // put an attest button on the screen at all — so the icon could carry a red
+  // bubble for a card that was finalized, in a round the app had moved past,
+  // or belonging to a player who had since withdrawn, none of which the app
+  // could show anybody anywhere. That module's header lists all three.
+  //
+  // Deriving both from the same call is what makes them agree: the number on
+  // the home screen is now, by construction, the number of rows the app can
+  // put on screen — and the banner is how you clear it.
+  const attestTodo = useMemo(() => (
+    user && !user.isGuest
+      ? pendingAttestations({ scorecardSigs, finalizedRounds, playerId: user.id, tPlayers })
+      : []
+  ), [scorecardSigs, finalizedRounds, user, tPlayers]);
+
+  // The badge itself. This is also what reconciles the service worker's
+  // optimistic increments — the SW adds one per attest_ready push without
+  // knowing what has been attested or finalized since, and this corrects it.
+  //
+  // A guest or a signed-out phone now clears to ZERO rather than returning
+  // early: bailing left the badge sitting on the icon with nothing behind it
+  // that could ever take it off again.
   useEffect(() => {
-    if (!user || user.isGuest) return;
-    let count = 0;
-    Object.values(scorecardSigs || {}).forEach(s => {
-      if ((s.present || []).includes(user.id) && s.signedBy !== user.id && !(s.attestedBy || []).includes(user.id)) count++;
-    });
+    const count = attestTodo.length;
     try {
       if (navigator.setAppBadge) { count > 0 ? navigator.setAppBadge(count) : (navigator.clearAppBadge && navigator.clearAppBadge()); }
-      navigator.serviceWorker?.controller?.postMessage({ type: "SET_BADGE", count });
+      // `ready`, not `controller`. A page is not controlled until a worker has
+      // claimed it, which on a cold start has not happened yet — so this
+      // message went nowhere on exactly the launch that matters, the SW kept
+      // its stale stored count, and the next push incremented from a number
+      // that was already wrong. `ready` resolves with the active worker
+      // whether or not it has claimed us.
+      navigator.serviceWorker?.ready
+        ?.then(reg => reg.active?.postMessage({ type: "SET_BADGE", count }))
+        ?.catch(() => {});
     } catch {}
-  }, [scorecardSigs, user]);
+  }, [attestTodo]);
+
+  // Where the banner's button goes: the round holding the card, with Scoring
+  // on screen. Scoring's own tab button jumps to the first UNFINALIZED round,
+  // which is the reason a card left behind in an earlier round was unreachable
+  // by tapping around — this is the one control that can land on it.
+  const goToAttest = useCallback((rnd) => {
+    if (rnd) setRound(prev => (prev === rnd ? prev : rnd));
+    setView("scoring");
+  }, []);
 
   // Deep-link: a notification tap lands on /#scoring or /#leaderboard.
   useEffect(() => {
@@ -3592,6 +3631,12 @@ export default function WBCApp() {
         right={headerControls.length ? headerControls : null}
       />
 
+      {/* The in-app half of the app-icon badge. Under the header rather than
+          inside a tab, because the badge is not about a tab — it is about the
+          player, and it has to be answerable from wherever the app opened.
+          See components/AttestBanner. */}
+      <AttestBanner items={attestTodo} onGo={goToAttest} />
+
       <MoreMenu
         open={menuOpen}
         onClose={() => setMenuOpen(false)}
@@ -3974,6 +4019,7 @@ export default function WBCApp() {
               {navIcon()}
               {(item.key === "more"
                   ? ((adminActionNeeded && user.isDirector) || (notifPerm !== "granted" && !user.isGuest))
+                  : item.key === "scoring" ? attestTodo.length > 0
                   : item.key === "skins" && marketNudge) && (
                 <span aria-hidden="true" style={{
                   position: "absolute", top: 6, right: "50%", marginRight: -14,
