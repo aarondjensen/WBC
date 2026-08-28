@@ -237,3 +237,33 @@ export const buildSideBetEdit = (bet, { playerA, playerB, amount, detail }) => {
     : settledBy(bet).filter(id => [next.player_a, next.player_b].includes(id));
   return next;
 };
+
+// ── Running it back ───────────────────────────────────────────────
+// A settled bet is the end of one wager and, at a golf tournament, very often
+// the start of the next one: the money changes hands on the 18th green and
+// somebody says "again tomorrow, double". Retyping it is four fields and two
+// name pickers on a phone in a car park, which is exactly the friction that
+// sends a bet back onto a napkin.
+//
+// A REPEAT IS A NEW BET, not a resurrection of the old one. The settled row
+// stays settled and stays on the board — it is the record that the first
+// wager was paid, and reopening it to run it again would erase the one thing
+// the ledger is for. Nothing links the two rows either: a chain of rematches
+// is a thing to read down the list, not a structure the ledger has to carry.
+//
+// Only on a bet that is actually finished. A live bet already exists; the
+// button on it would be a way to accidentally have the same wager twice.
+export const canRepeatSideBet = (bet, { uid, pid }) =>
+  !!uid && isSettled(bet) && inSideBet(bet, pid);
+
+// The same terms, in the shape the form holds them — a string amount, because
+// that is what an input has and Number() is buildSideBet's job. It seeds the
+// sheet rather than writing anything: the rematch is usually the same bet
+// with the stakes moved, and the tap that opens it is not the tap that agrees
+// to it.
+export const repeatSideBetSeed = (bet) => ({
+  playerA: bet?.player_a || "",
+  playerB: bet?.player_b || "",
+  amount: bet?.amount == null ? "" : String(bet.amount),
+  detail: String(bet?.detail || ""),
+});

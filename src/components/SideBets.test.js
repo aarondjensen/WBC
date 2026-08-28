@@ -318,3 +318,83 @@ describe("editing a bet", () => {
     console.error.mockRestore();
   });
 });
+
+// ── Running it back ───────────────────────────────────────────────
+// A settled bet is very often the start of the next one. The failure to avoid
+// is a rematch that eats the record of the first: the settled row must stay
+// settled and stay on the board, and the repeat must arrive as a NEW bet.
+describe("repeating a settled bet", () => {
+  const settled = (over = {}) => bet({ settled_by: ["aaron_j", "dave_s"], ...over });
+
+  it("offers it to a player on a bet both sides have paid", () => {
+    mount({ bets: [settled()] });
+    expect(screen.getByText("RUN IT BACK")).toBeTruthy();
+    // Beside REOPEN, not instead of it.
+    expect(screen.getByText("REOPEN")).toBeTruthy();
+  });
+
+  it("does not offer it while the bet is still live", () => {
+    mount({ bets: [bet()] });
+    expect(screen.queryByText("RUN IT BACK")).toBeNull();
+  });
+
+  it("does not offer it on a bet only one side has marked", () => {
+    mount({ bets: [bet({ settled_by: ["dave_s"] })] });
+    expect(screen.queryByText("RUN IT BACK")).toBeNull();
+  });
+
+  // Somebody else's rematch is not yours to arrange.
+  it("does not offer it to a bystander reading the row", () => {
+    mount({ bets: [settled()], user: { id: "gus_p", name: "Gus P", isDirector: false }, authUid: "uid_gus" });
+    expect(screen.getByText("SETTLED ✓")).toBeTruthy();
+    expect(screen.queryByText("RUN IT BACK")).toBeNull();
+  });
+
+  it("does not offer it to a signed-out reader", () => {
+    mount({ bets: [settled()], authUid: null, user: null });
+    expect(screen.queryByText("RUN IT BACK")).toBeNull();
+  });
+
+  const openRepeat = (extra = {}) => {
+    mount({ bets: [settled()], ...extra });
+    fireEvent.click(screen.getByText("RUN IT BACK"));
+  };
+
+  it("opens the sheet on the same terms, as a new bet", () => {
+    openRepeat();
+    expect(screen.getByText("Run it back")).toBeTruthy();
+    const [a, b] = document.querySelectorAll("select");
+    expect(a.value).toBe("aaron_j");
+    expect(b.value).toBe("dave_s");
+    expect(document.querySelector("input[type=number]").value).toBe("20");
+    expect(document.querySelector("textarea").value).toBe("Low score on the back, straight up.");
+    // The button that saves a NEW bet, not the one that patches the old.
+    expect(screen.getByText("Add bet")).toBeTruthy();
+  });
+
+  // The whole point of a sheet rather than a one-tap repeat: the rematch is
+  // usually the same bet with the stakes moved.
+  it("lets the stakes move before the rematch is agreed", () => {
+    const onAddBet = vi.fn();
+    openRepeat({ onAddBet });
+    fireEvent.change(document.querySelector("input[type=number]"), { target: { value: "40" } });
+    fireEvent.click(screen.getByText("Add bet"));
+    expect(onAddBet).toHaveBeenCalledWith({
+      playerA: "aaron_j", playerB: "dave_s", amount: "40",
+      detail: "Low score on the back, straight up.",
+    });
+  });
+
+  // The settled row is the record that the first wager was paid. A repeat that
+  // patched it would erase the one thing the ledger is for.
+  it("writes a new bet and leaves the settled one alone", () => {
+    const onAddBet = vi.fn();
+    const onEditBet = vi.fn();
+    const onSettleBet = vi.fn();
+    openRepeat({ onAddBet, onEditBet, onSettleBet });
+    fireEvent.click(screen.getByText("Add bet"));
+    expect(onAddBet).toHaveBeenCalled();
+    expect(onEditBet).not.toHaveBeenCalled();
+    expect(onSettleBet).not.toHaveBeenCalled();
+  });
+});
