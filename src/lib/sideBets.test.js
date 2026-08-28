@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   sideBetId, sideBetError, buildSideBet, sortSideBets,
-  inSideBet, sideBetTotals, canDeleteSideBet, canEditSideBet, buildSideBetEdit, MAX_DETAIL,
+  inSideBet, sideBetTotals, canDeleteSideBet, canEditSideBet, buildSideBetEdit,
+  canRepeatSideBet, repeatSideBetSeed, MAX_DETAIL,
   settledBy, hasSettled, isSettled, toggleSettled, settleState,
 } from "./sideBets";
 
@@ -296,5 +297,52 @@ describe("buildSideBetEdit", () => {
   // A mark left over from an earlier edit, belonging to nobody in the bet.
   it("drops a mark that is not one of the two sides", () => {
     expect(edit({}, { settled_by: ["aaron_j", "gus_p"] }).settled_by).toEqual(["aaron_j"]);
+  });
+});
+
+// ── Running it back ───────────────────────────────────────────────
+// The money changes hands on the 18th green and somebody says "again
+// tomorrow, double". A repeat is a NEW bet on the old terms — the settled row
+// is the record that the first one was paid and must survive the rematch.
+describe("canRepeatSideBet", () => {
+  const done = (over = {}) => bet({ settled_by: ["aaron_j", "dave_s"], ...over });
+
+  it("offers it to either player once the bet is settled", () => {
+    expect(canRepeatSideBet(done(), { uid: "uid_a", pid: "aaron_j" })).toBe(true);
+    expect(canRepeatSideBet(done(), { uid: "uid_b", pid: "dave_s" })).toBe(true);
+  });
+  // A live bet already exists. A button on it is a way to have the same wager
+  // twice by accident.
+  it("refuses a bet that is not finished", () => {
+    expect(canRepeatSideBet(bet(), { uid: "uid_a", pid: "aaron_j" })).toBe(false);
+    expect(canRepeatSideBet(bet({ settled_by: ["aaron_j"] }), { uid: "uid_a", pid: "aaron_j" })).toBe(false);
+  });
+  // Somebody else's rematch is not yours to arrange — unlike correcting a bet,
+  // which is an argument you are a side of.
+  it("refuses somebody who was not in it", () => {
+    expect(canRepeatSideBet(done(), { uid: "uid_z", pid: "gus_p" })).toBe(false);
+  });
+  it("refuses a signed-out reader", () => {
+    expect(canRepeatSideBet(done(), { uid: null, pid: "aaron_j" })).toBe(false);
+  });
+});
+
+describe("repeatSideBetSeed", () => {
+  const seeded = repeatSideBetSeed(bet({ amount: 20, detail: "front nine", settled_by: ["aaron_j", "dave_s"] }));
+
+  it("carries the same two players and the same terms", () => {
+    expect(seeded).toEqual({ playerA: "aaron_j", playerB: "dave_s", amount: "20", detail: "front nine" });
+  });
+  // The form holds an amount as a string; the number is buildSideBet's job.
+  it("hands the amount over as the form's own kind of value", () => {
+    expect(seeded.amount).toBe("20");
+  });
+  // Nothing of the settled bet's own identity comes along — the rematch is a
+  // new row, and a stray id or a stray mark would make it the old one.
+  it("carries no id, no author and no paid marks", () => {
+    expect(Object.keys(seeded).sort()).toEqual(["amount", "detail", "playerA", "playerB"]);
+  });
+  it("survives a bet with no terms written on it", () => {
+    expect(repeatSideBetSeed(bet({ detail: undefined })).detail).toBe("");
   });
 });
