@@ -67,13 +67,11 @@ import { groupTeeOrder, tagAheadOfPlay, canTakePin, carryLabel } from "../lib/ct
 // It rides ON the app header for the reason the other bars here do: the header
 // is a logo and a caption, so nothing under it is worth tapping, while the
 // hole strip below it is exactly what a scorer reaches for while this is up.
-// It stops short of the right edge to leave the live controls on that band —
-// the director's group switcher, and the scramble's OG/YG/NG button when one
-// is running — uncovered. `rightInset` is how far, because how many of them
-// there are is the shell's business rather than this screen's.
-const HoleStateBar = ({ glyph, label, rightInset = 88, children }) => (
+// It stops 88px short of the right edge to leave the director's group switcher
+// — the one live control on that band — uncovered.
+const HoleStateBar = ({ glyph, label, children }) => (
   <div style={{
-    position: "fixed", top: `calc(${HEADER_SAFE_PAD} + 6px)`, left: 12, right: rightInset,
+    position: "fixed", top: `calc(${HEADER_SAFE_PAD} + 6px)`, left: 12, right: 88,
     display: "flex", alignItems: "center", gap: 8,
     background: K.warn + ALPHA.tint, backdropFilter: "blur(8px)",
     border: `1.5px solid ${K.warn}`, borderRadius: R.lg, padding: "8px 12px",
@@ -94,7 +92,7 @@ const holeBarBtn = (fill) => ({
   color: ON_ACC, fontSize: FS.label, fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap",
 });
 
-export function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPlayers, onSaveHole, notify, pairingsData, teeTimesData, roundDates, scoringOpen, setTee, getPlayerTee, getPlayerCH = () => null, finalizedRounds, scorecardSigs, onSignScorecard, onAttestScorecard, onUnsignScorecard, onFinalizeRound, onUnfinalizeRound, onGoToAdminCourses, markPlayerWD, ctpData, onSetCtp, onConfirmCtp, onPassCtp, ctpField = null, ctpByHole = null, directorPick, onGroupChange, onSetRound, headerInset = 88 }) {
+export function OnCourseScoring({ user, players, round, tRounds, courses, holeData, tPlayers, onSaveHole, notify, pairingsData, teeTimesData, roundDates, scoringOpen, setTee, getPlayerTee, getPlayerCH = () => null, finalizedRounds, scorecardSigs, onSignScorecard, onAttestScorecard, onUnsignScorecard, onFinalizeRound, onUnfinalizeRound, onGoToAdminCourses, markPlayerWD, ctpData, onSetCtp, onConfirmCtp, onPassCtp, ctpField = null, ctpByHole = null, directorPick, onGroupChange, onSetRound }) {
   const [group, setGroup] = useState(null);
   const [currentHole, setCurrentHole] = useState(0);
   const [manualOverride, setManualOverride] = useState(false);
@@ -1903,7 +1901,7 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
           "Resume Hole 18 →" shortens to "Hole 18 →" — the row has three things
           on it now, and the green button is self-evidently the way onward. */}
       {onCompletedHole && (
-        <HoleStateBar glyph="✓" rightInset={headerInset} label={`Hole ${currentHole + 1} already scored`}>
+        <HoleStateBar glyph="✓" label={`Hole ${currentHole + 1} already scored`}>
           <button onClick={() => setEditingCompleted(true)} style={holeBarBtn(K.warn)}>✏️ Edit</button>
           <button onClick={returnToPlay} style={holeBarBtn(K.acc)}>Hole {findNextIncompleteHole() + 1} →</button>
         </HoleStateBar>
@@ -1914,7 +1912,7 @@ export function OnCourseScoring({ user, players, round, tRounds, courses, holeDa
           inline strip above the cards, which scrolled away exactly when you
           were deepest into the thing it was warning you about. */}
       {editingCompleted && (
-        <HoleStateBar glyph="✎" rightInset={headerInset} label={`Editing hole ${currentHole + 1}`}>
+        <HoleStateBar glyph="✎" label={`Editing hole ${currentHole + 1}`}>
           <button onClick={returnToPlay} style={holeBarBtn(K.acc)}>Hole {findNextIncompleteHole() + 1} →</button>
         </HoleStateBar>
       )}

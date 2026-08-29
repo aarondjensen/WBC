@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  SCRAMBLE_TEAMS, SCRAMBLE_TEAM_KEYS, SCRAMBLE_BUTTON, teamLabel,
+  SCRAMBLE_TEAMS, SCRAMBLE_TEAM_KEYS, teamLabel,
   mergeScramble, teamOf, assignToTeam, unassignedIds, teamPlayers, autoSplit,
   teamLine, scrambleStandings, scrambleBlockers, canTurnOn, scrambleLive, emptyTeams,
 } from "./scramble";
@@ -18,8 +18,8 @@ const PLAYERS = [
 const card = (n, s = 4) => Object.fromEntries(Array.from({ length: n }, (_, i) => [i, s]));
 
 describe("the three teams", () => {
-  it("names the header button after them, in order", () => {
-    expect(SCRAMBLE_BUTTON).toBe("OG/YG/NG");
+  it("is OG, YG and NG, in that order", () => {
+    expect(SCRAMBLE_TEAMS.map(t => t.label)).toEqual(["OG", "YG", "NG"]);
     expect(SCRAMBLE_TEAM_KEYS).toEqual(["og", "yg", "ng"]);
   });
 
