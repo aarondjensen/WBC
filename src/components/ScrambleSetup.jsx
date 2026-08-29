@@ -31,7 +31,7 @@ import { shortName } from "../lib/playerNames";
 import { fmtPar } from "../lib/format";
 import { searchCourses, MIN_COURSE_QUERY, COURSE_SEARCH_DEBOUNCE_MS, STATE_NAMES } from "../lib/courseSearch";
 import {
-  SCRAMBLE_TEAMS, SCRAMBLE_BUTTON, mergeScramble, teamOf, assignToTeam,
+  SCRAMBLE_TEAMS, mergeScramble, teamOf, assignToTeam,
   unassignedIds, teamPlayers, autoSplit, teamLine, scrambleBlockers, canTurnOn, emptyTeams,
 } from "../lib/scramble";
 
@@ -150,7 +150,7 @@ export function ScrambleSetup({ scramble, onUpdate, onAddCourse, players = [], c
     if (!sc.on && !ready) return;
     const next = !sc.on;
     onUpdate({ on: next });
-    if (notify) notify(next ? `Scramble is on — ${SCRAMBLE_BUTTON} is in the header` : "Scramble is off");
+    if (notify) notify(next ? "Scramble is on — it is in everyone's Scoring tab" : "Scramble is off");
   };
 
   return (
@@ -221,8 +221,8 @@ export function ScrambleSetup({ scramble, onUpdate, onAddCourse, players = [], c
             </div>
             <div style={{ fontSize: FS.label, color: K.t3, lineHeight: 1.5, marginTop: 3 }}>
               {sc.on
-                ? <>Everybody has <strong style={{ color: K.acc }}>{SCRAMBLE_BUTTON}</strong> in the app header. Tapping it opens the team card.</>
-                : <>Turning this on puts an <strong style={{ color: K.t2 }}>{SCRAMBLE_BUTTON}</strong> button in the app header for the whole field. It is the only way in to the scramble card.</>}
+                ? <>The whole field has a <strong style={{ color: K.acc }}>Scramble</strong> card in their Scoring tab, alongside the tournament round.</>
+                : <>Turning this on puts a <strong style={{ color: K.t2 }}>Scramble</strong> card in everybody&apos;s Scoring tab, beside the tournament round. It is the only way in to it.</>}
             </div>
           </div>
           <Toggle on={sc.on} busy={!sc.on && !ready} onChange={toggleOn} label="Scramble round" />

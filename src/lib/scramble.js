@@ -38,11 +38,6 @@ export const SCRAMBLE_TEAMS = [
 
 export const SCRAMBLE_TEAM_KEYS = SCRAMBLE_TEAMS.map(t => t.key);
 
-// The label on the button the scramble puts in the app header — the three team
-// names, in order, which is the only thing that could name a screen holding all
-// three cards. Built from the list above so the two can never disagree.
-export const SCRAMBLE_BUTTON = SCRAMBLE_TEAMS.map(t => t.label).join("/");
-
 export const SCRAMBLE_HOLES = 18;
 
 export const teamLabel = (key) => (SCRAMBLE_TEAMS.find(t => t.key === key) || {}).label || "";
