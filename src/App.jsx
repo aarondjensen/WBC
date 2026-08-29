@@ -54,7 +54,7 @@ import { teeTimeToMinutes } from "./lib/format";
 // How many rounds this event plays — a live binding. See lib/rounds.
 import { NUM_ROUNDS, setRoundCount } from "./lib/rounds";
 import { db, writes } from "./lib/db";
-import { registryRows, roundRows, courseIdsOf, stitchCourses } from "./lib/staticData";
+import { registryRows, roundRows, courseIdsOf, stitchCourses, mergeCourses } from "./lib/staticData";
 import { getDefaultTee } from "./lib/defaultTee";
 import { missingTees } from "./lib/roundSetup";
 import { indexFor, matchHistoryName } from "./lib/handicap";
@@ -918,6 +918,13 @@ export default function WBCApp() {
   // half-written one. See lib/scramble for what it holds and why it is filed
   // there rather than in a collection of its own.
   const [scramble, setScramble] = useState(() => mergeScramble(null));
+  // The scramble's course, held on its own because it is the one course NO
+  // round points at — see the fetch under the static load. In a ref as well as
+  // in state, because loadStaticData is built once and would otherwise close
+  // over the value the scramble had at mount, which is none.
+  const scrambleCourseId = scramble.courseId;
+  const scrambleCourseRef = useRef(null);
+  useEffect(() => { scrambleCourseRef.current = scrambleCourseId; }, [scrambleCourseId]);
   const [pairingsData, setPairingsData] = useState({});
   const [teeData, setTeeData] = useState({});
   // Recorded course handicaps, for imported editions only — empty for the
@@ -1093,10 +1100,14 @@ export default function WBCApp() {
     }
 
     const rounds = roundRows(trRows);
-    if (!rounds.length) return scoped;
-    setTRounds(rounds);
+    if (rounds.length) setTRounds(rounds);
 
-    const courseIds = courseIdsOf(rounds);
+    // The four rounds' courses, plus the scramble's. The scramble's is on no
+    // round — it is an id on tournament_state.scramble — so asking only what
+    // the rounds are played on left it out of every list but the director's,
+    // and a refresh would have dropped it back out of theirs. See the fetch
+    // below, which is what covers the scramble arriving after this has run.
+    const courseIds = courseIdsOf(rounds, [scrambleCourseRef.current]);
     if (!courseIds.length) return scoped;
     const [cRows, tbRows] = await Promise.all([
       read("courses", [{ field: "id", op: "in", value: courseIds }]),
@@ -1107,6 +1118,53 @@ export default function WBCApp() {
   }, []);
 
   const refreshStaticData = useCallback(() => loadStaticData(db.get), [loadStaticData]);
+
+  // ── The one course no round is played on ─────────────────────────
+  // The static load above asks for the courses the four ROUNDS use. A
+  // scramble is not one of the four: the director picks its course on the
+  // scramble console and what is stored is an id on tournament_state.scramble,
+  // which arrives here over a subscription long after that load has run.
+  //
+  // So on every phone but the director's — who has the course in state from
+  // the moment they added it — that id resolved against a list that had never
+  // been asked for it, and the scramble card read "No course set for the
+  // scramble" over a course that had been set for hours. This is what fetches
+  // it: the moment a scramble course id turns up that the list does not hold.
+  //
+  // Cache first and the server behind it, the same two passes the mount load
+  // makes, so a phone that has read this course before draws the card with no
+  // round trip at all and still takes the server's copy when it lands.
+  const scrambleCourseFetch = useRef(null);
+  useEffect(() => {
+    const id = scrambleCourseId;
+    if (!id || scrambleCourseFetch.current === id) return;
+    if (courseList.some(c => c.id === id)) return;
+    scrambleCourseFetch.current = id;
+    let alive = true;
+    (async () => {
+      try {
+        const pull = async (read) => {
+          const [cRows, tbRows] = await Promise.all([
+            read("courses", [{ field: "id", op: "==", value: id }]),
+            read("tee_boxes", [{ field: "course_id", op: "==", value: id }]),
+          ]);
+          if (!cRows?.length || !alive) return;
+          const found = stitchCourses(cRows, tbRows || []);
+          setCourseList(prev => sortCoursesByRound(mergeCourses(prev, found), tRounds));
+        };
+        await pull(db.getCached);
+        if (alive) await pull(db.get);
+      } catch (e) {
+        console.error("Scramble course load failed:", e);
+      } finally {
+        // Cleared whatever happened, so a course that could not be read — an
+        // offline launch, a document written a second ago — is asked for again
+        // on the next pull rather than never again this session.
+        if (scrambleCourseFetch.current === id) scrambleCourseFetch.current = null;
+      }
+    })();
+    return () => { alive = false; };
+  }, [scrambleCourseId, courseList, tRounds]);
 
   const { pullY, refreshing: pullRefreshing, PULL_THRESHOLD } = usePullToRefresh({
     hasNewBundle,
