@@ -84,6 +84,25 @@ describe("ScrambleScoring renders", () => {
     expect(screen.getByText(/Waiting on your tournament director/)).toBeTruthy();
   });
 
+  // The bug this closes: the scramble's course is on no round, so nothing in
+  // the static load asked for it and every phone but the director's resolved
+  // the id against a list that had never held it. The shell fetches it now
+  // (see App.jsx); until it lands, this screen says it is waiting rather than
+  // telling the field a course that has been set was never set.
+  it("says it is waiting when the course is set but has not loaded", () => {
+    render(h(ScrambleScoring, baseProps({ courses: [] })));
+    expect(screen.getByText(/Loading the scramble/)).toBeTruthy();
+    expect(screen.queryByText("No course set for the scramble")).toBeNull();
+  });
+
+  it("does not send a director to setup for a course that is only still loading", () => {
+    const props = baseProps({ courses: [], user: { id: "aaron_j", isDirector: true } });
+    render(h(ScrambleScoring, props));
+    expect(screen.queryByText(/Tap to set it up/)).toBeNull();
+    fireEvent.click(screen.getByText(/Loading the scramble/));
+    expect(props.onGoToSetup).not.toHaveBeenCalled();
+  });
+
   it("points a director at the setup screen from that empty state", () => {
     const props = baseProps({
       scramble: { ...SCRAMBLE, courseId: null },

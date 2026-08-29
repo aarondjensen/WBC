@@ -124,19 +124,38 @@ export function ScrambleScoring({ scramble, players = [], courses = [], user, on
   // ── The course has to be set before anything here means a number ──
   // Same empty state the tournament screen puts up, and the same door out of
   // it for the one person who can fix it.
+  //
+  // Two different empty states, though, and telling them apart is the whole
+  // difference between a screen that is waiting and one that is wrong. A
+  // scramble with NO courseId is a setup that is not finished. A scramble that
+  // names a course this phone does not hold is a course still on its way — the
+  // scramble's course is on no round, so the shell fetches it on its own after
+  // the scramble arrives (see App.jsx). Printing "No course set" over a course
+  // the director set an hour ago is what sent them looking for a setting they
+  // had already got right.
+  const awaitingCourse = !course && !!sc.courseId;
   if (!course) return (
     <div>
       <h2 style={{ fontFamily: FONT, fontSize: FS.title, margin: "0 0 14px", fontWeight: 800 }}>Scramble</h2>
       <div
-        onClick={user?.isDirector && onGoToSetup ? onGoToSetup : undefined}
-        style={{ background: K.card, borderRadius: R.xl, border: `1px dashed ${K.warn}${ALPHA.hair}`, padding: 32, textAlign: "center", cursor: user?.isDirector ? "pointer" : "default" }}
+        onClick={user?.isDirector && onGoToSetup && !awaitingCourse ? onGoToSetup : undefined}
+        style={{ background: K.card, borderRadius: R.xl, border: `1px dashed ${K.warn}${ALPHA.hair}`, padding: 32, textAlign: "center", cursor: user?.isDirector && !awaitingCourse ? "pointer" : "default" }}
       >
         <div style={{ fontSize: FS.display, marginBottom: 8 }}>🏌️</div>
-        <p style={{ color: K.warn, fontWeight: 600, margin: "0 0 4px" }}>No course set for the scramble</p>
-        {user?.isDirector
-          ? <p style={{ color: K.acc, fontSize: FS.small, margin: 0, fontWeight: 600 }}>Tap to set it up in More → Scramble →</p>
-          : <p style={{ color: K.t2, fontSize: FS.small, margin: 0 }}>Waiting on your tournament director.</p>
-        }
+        {awaitingCourse ? (
+          <>
+            <p style={{ color: K.t1, fontWeight: 600, margin: "0 0 4px" }}>Loading the scramble&apos;s course…</p>
+            <p style={{ color: K.t2, fontSize: FS.small, margin: 0 }}>Pull down to refresh if it does not arrive.</p>
+          </>
+        ) : (
+          <>
+            <p style={{ color: K.warn, fontWeight: 600, margin: "0 0 4px" }}>No course set for the scramble</p>
+            {user?.isDirector
+              ? <p style={{ color: K.acc, fontSize: FS.small, margin: 0, fontWeight: 600 }}>Tap to set it up in More → Scramble →</p>
+              : <p style={{ color: K.t2, fontSize: FS.small, margin: 0 }}>Waiting on your tournament director.</p>
+            }
+          </>
+        )}
       </div>
     </div>
   );
