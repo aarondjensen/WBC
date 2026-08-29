@@ -47,7 +47,7 @@ import { docIds } from "./lib/editionId";
 import { resolvePin, OVERRIDE_KEY, ctpLedger } from "./lib/ctp";
 // The one-round team game, and the button it puts in the header — see
 // lib/scramble.
-import { mergeScramble, scrambleLive } from "./lib/scramble";
+import { mergeScramble, scrambleLive, opensOnScramble } from "./lib/scramble";
 import { scopeFor, scopedRegistry } from "./lib/playerScope";
 // The small conversions every screen does — see lib/format.
 import { teeTimeToMinutes } from "./lib/format";
@@ -397,6 +397,11 @@ const BettingView = lazy(() => import("./components/BettingView"));
 
 
 // GateScreen moved to components/GateScreen.jsx — see the header there.
+
+// The tab the app opens on. Named because two things have to agree about it:
+// the state below starts here, and the scramble landing asks whether the phone
+// is still on it — see opensOnScramble in lib/scramble.
+const BOOT_VIEW = "leaderboard";
 
 const sortCoursesByRound = (list, rounds) => {
   return [...list].sort((a, b) => {
@@ -762,7 +767,15 @@ export default function WBCApp() {
       document.removeEventListener("visibilitychange", onVis);
     };
   }, []);
-  const [view, setView] = useState("leaderboard");
+  const [view, setView] = useState(BOOT_VIEW);
+  // Where the app has been pointed since it opened, readable from inside a
+  // subscription callback — which is registered once at mount and would
+  // otherwise close over the view this app opened on forever. Both of these
+  // exist for the scramble landing below: it must not overrule a notification
+  // tap, and it must not overrule a tab somebody has already tapped.
+  const viewRef = useRef(BOOT_VIEW);
+  useEffect(() => { viewRef.current = view; }, [view]);
+  const deepLinked = useRef(false);
   // ── Which card the Scoring tab is showing ──────────────────────────
   // Read only while a scramble is running; the switch that sets it is not
   // rendered otherwise, and neither is the scramble card.
@@ -1307,6 +1320,10 @@ export default function WBCApp() {
     // to seal and no advantage in reading one. See lib/sideBets.
     unsubs.push(db.subscribe(SIDE_BETS_COL, [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], setSideBets));
 
+    // Has the tournament's own document landed yet? The scramble landing below
+    // is the difference between "there is a scramble on" and "a scramble has
+    // just been switched on", and those are the same value arriving twice.
+    const firstStateSnapshot = { current: true };
     unsubs.push(db.subscribe("tournament_state", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
       if (docs?.length) {
         if (docs[0].finalized_rounds) setFinalizedRounds(docs[0].finalized_rounds);
@@ -1319,7 +1336,30 @@ export default function WBCApp() {
         if (docs[0].meta) setTournamentMeta(docs[0].meta);
         if (docs[0].side_games) setSideGames(mergeSideGames(docs[0].side_games));
         if (docs[0].scramble) setScramble(mergeScramble(docs[0].scramble));
+        // ── A scramble day opens on the Scoring tab ──────────────
+        // Not the leaderboard: a scramble is ONE round, switched on only while
+        // it is being played, so everybody opening the app during one is
+        // opening it to post a score. The Scoring tab already opens onto the
+        // scramble card rather than the tournament one (see scoringMode), so
+        // this is the whole of it.
+        //
+        // Only on the FIRST snapshot, and lib/scramble is where the rest of
+        // the guards are written down — the one that matters is that a
+        // director throwing the switch mid-round moves nobody off the card
+        // they are entering.
+        if (opensOnScramble(docs[0].scramble, {
+          firstSnapshot: firstStateSnapshot.current,
+          deepLinked: deepLinked.current,
+          atBootView: viewRef.current === BOOT_VIEW,
+        })) {
+          setScoringMode("scramble");
+          setView("scoring");
+        }
       }
+      // Outside the guard above: a tournament with no state document yet has
+      // no scramble either, and the one that turns up a minute later is a
+      // switch being thrown rather than a launch.
+      firstStateSnapshot.current = false;
     }));
 
     // Sign/attest lives in its own collection (one doc per group) so the
@@ -1916,7 +1956,9 @@ export default function WBCApp() {
     const applyHash = () => {
       const h = (window.location.hash || "").replace("#", "");
       const map = { scoring: "scoring", leaderboard: "leaderboard", board: "leaderboard", pairings: "groups", groups: "groups", betting: "skins", skins: "skins", admin: "admin", photos: "photos" };
-      if (map[h]) setView(map[h]);
+      // A notification names the screen it wants, and nothing the app works
+      // out for itself gets to overrule it. See the scramble landing.
+      if (map[h]) { deepLinked.current = true; setView(map[h]); }
     };
     applyHash();
     window.addEventListener("hashchange", applyHash);
