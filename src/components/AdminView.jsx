@@ -35,6 +35,7 @@ import { TeeColorSwatch } from "./TeeColorSwatch";
 import { AccessPanel } from "./AccessPanel";
 import { PlayerActivityPanel } from "./PlayerActivityPanel";
 import { resolveTeeColor, TEE_COLOR_MAP } from "../lib/teeColors";
+import { newTeeBox, orderTeesForEdit, unnamedTees, normalizeTees } from "../lib/teeEditor";
 import { useConfirm } from "../lib/useConfirm";
 import { useDirtyForm } from "../lib/useDirtyForm";
 import { pairingScoreImpact, orphanedScores, describeScored, totalHoles, holesEntered } from "../lib/scoreGuard";
@@ -2380,7 +2381,25 @@ export function AdminView({ liveRounds = EMPTY_LIVE_ROUNDS, registry, activePlay
       )}
       {editingCourse && (() => {
         const d = editingCourse.draft;
-        const saveEdit = () => { addCourse({ ...editingCourse.draft }); setEditingCourse(null); };
+        // Coerce on the way out. A tee typed in by hand has an empty string in
+        // every number and the write path stores what it is handed, so ""
+        // would land in Firestore as a slope. Refused outright when a tee has
+        // no name: the tee_boxes document id and every tee assignment are
+        // derived from that name, and two blank ones are one document.
+        const saveEdit = () => {
+          if (unnamedTees(d.tee_boxes).length) { notify("Every tee needs a name"); return; }
+          addCourse({ ...d, tee_boxes: normalizeTees(d.tee_boxes, d.par) });
+          setEditingCourse(null);
+        };
+        const addTee = () => {
+          setRefetch({ busy: false, msg: "" });
+          setEditingCourse(prev => ({ ...prev, draft: { ...prev.draft, tee_boxes: [...(prev.draft.tee_boxes || []), newTeeBox()] } }));
+        };
+        const setTee = (i, patch) => setEditingCourse(prev => {
+          const tbs = [...prev.draft.tee_boxes];
+          tbs[i] = { ...tbs[i], ...patch };
+          return { ...prev, draft: { ...prev.draft, tee_boxes: tbs } };
+        });
         const refetchTees = async () => {
           setRefetch({ busy: true, msg: "" });
           const tees = await fetchCourseTees(d.name, d.state);
@@ -2422,19 +2441,71 @@ export function AdminView({ liveRounds = EMPTY_LIVE_ROUNDS, registry, activePlay
                 </button>
               )}
               <div style={{ marginBottom: 16 }}><div style={{ fontSize: FS.label, color: K.t3, fontWeight: 600, textTransform: "uppercase", marginBottom: 4 }}>Course Name</div><input value={d.name || ""} onChange={e => setEditingCourse(prev => ({ ...prev, draft: { ...prev.draft, name: e.target.value } }))} style={{ width: "100%", padding: "9px 10px", background: K.inp, border: `1px solid ${ac}${ALPHA.hair}`, borderRadius: R.sm, color: K.t1, fontSize: FS.lead, boxSizing: "border-box" }} /></div>
-              {/* Pull the tees again. Sits with the tee boxes it refills, under
-                  the name it searches on — edit the name first if the import
-                  got it wrong, and this finds the right course. */}
+              {/* Two ways to fill a tee list, because refetching is not always
+                  one. Refetch sits under the name it searches on — edit the
+                  name first if the import got it wrong, and this finds the
+                  right course. But the APIs are routinely short a tee or two
+                  and a second fetch returns the same short list, so Add tee is
+                  the way out of that: a blank row to type the ones off the
+                  scorecard in the pro shop. */}
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
                 <span style={{ fontSize: FS.label, color: K.t3, fontWeight: 600, textTransform: "uppercase" }}>Tee boxes</span>
-                <Btn variant="secondary" size="sm" onClick={refetchTees} disabled={refetch.busy} style={{ color: ac, borderColor: ac + ALPHA.line }}>
-                  {refetch.busy ? "Fetching\u2026" : "Refetch tees"}
-                </Btn>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <Btn variant="secondary" size="sm" onClick={addTee} style={{ color: ac, borderColor: ac + ALPHA.line }}>+ Add tee</Btn>
+                  <Btn variant="secondary" size="sm" onClick={refetchTees} disabled={refetch.busy} style={{ color: ac, borderColor: ac + ALPHA.line }}>
+                    {refetch.busy ? "Fetching\u2026" : "Refetch tees"}
+                  </Btn>
+                </div>
               </div>
+              {(d.tee_boxes || []).length === 0 && (
+                <div style={{ fontSize: FS.label, color: K.warn, marginBottom: 8 }}>No tees on this course — add them by hand, or refetch.</div>
+              )}
               {refetch.msg && (
                 <div style={{ fontSize: FS.label, color: K.t3, marginBottom: 8 }}>{refetch.msg}</div>
               )}
-              {[...(d.tee_boxes||[])].sort((a,b) => (parseFloat(b.slope)||0)-(parseFloat(a.slope)||0)).map((tb, tbi) => { const sortedTbs = [...(d.tee_boxes||[])].sort((a,b) => (parseFloat(b.slope)||0)-(parseFloat(a.slope)||0)); const origIdx = d.tee_boxes.indexOf(sortedTbs[tbi]); return (<div key={tbi} style={{ background: K.card, border: `1px solid ${K.bdr}`, borderRadius: R.md, padding: "10px 12px", marginBottom: 8 }}><div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}><div style={{ display: "flex", alignItems: "center", gap: 8 }}><TeeColorSwatch color={tb.color} name={tb.name} size={12} /><span style={{ fontWeight: 700, fontSize: FS.body, color: K.t1 }}>{tb.name}</span></div><button onClick={() => setEditingCourse(prev => ({ ...prev, draft: { ...prev.draft, tee_boxes: prev.draft.tee_boxes.filter((_,i) => i !== origIdx) } }))} style={{ background: "transparent", border: "none", color: K.t3, cursor: "pointer", fontSize: FS.lead, lineHeight: 1, padding: "0 4px" }}>✕</button></div><div style={{ display: "flex", gap: 8 }}>{["rating","slope","par"].map(f => (<div key={f} style={{ flex: 1 }}><div style={{ fontSize: FS.micro, color: K.t3, textTransform: "uppercase", marginBottom: 3 }}>{f}</div><input inputMode="decimal" value={tb[f]||""} onChange={e => setEditingCourse(prev => { const tbs = [...prev.draft.tee_boxes]; tbs[origIdx] = {...tbs[origIdx],[f]:e.target.value}; return {...prev,draft:{...prev.draft,tee_boxes:tbs}}; })} style={{ width: "100%", padding: "7px 6px", background: K.inp, border: `1px solid ${ac}${ALPHA.hair}`, borderRadius: R.sm, color: K.t1, fontSize: FS.small, textAlign: "center", boxSizing: "border-box" }} /></div>))}</div></div>); })}
+              {/* Sorted from the tips down, and KEYED by the tee's index in
+                  the draft rather than by its position in that sort. The row a
+                  slope is being typed into moves as it is typed — keyed by
+                  position, the cursor would stay put while the values slid
+                  underneath it. See lib/teeEditor. */}
+              {orderTeesForEdit(d.tee_boxes).map(({ tee: tb, index }) => (
+                <div key={index} style={{ background: K.card, border: `1px solid ${K.bdr}`, borderRadius: R.md, padding: "10px 12px", marginBottom: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                    {/* The swatch IS the colour picker — an invisible select
+                        over it, the same way the manual-entry and preview
+                        editors do it. Naming an unnamed tee off the colour is
+                        the common case: pick Blue, and it is the blues. Going
+                        the other way is the common case too, so a tee with no
+                        colour picked previews the one its NAME resolves to —
+                        type "Gold" and the square is gold, which is what the
+                        card will look like once it saves. */}
+                    <div style={{ position: "relative", width: 16, height: 16, flexShrink: 0 }}>
+                      <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
+                        <TeeColorSwatch color={tb.color || resolveTeeColor({ name: tb.name, color: "" }, index)} name={tb.name} size={16} style={{ width: "100%", height: "100%" }} />
+                      </div>
+                      <select value={Object.entries(TEE_COLOR_MAP).find(([, v]) => v === (tb.color || ""))?.[0] || ""}
+                        onChange={e => { const key = e.target.value; setTee(index, { color: TEE_COLOR_MAP[key] || tb.color || "", name: tb.name || key.charAt(0).toUpperCase() + key.slice(1) }); }}
+                        style={{ position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0, cursor: "pointer", fontSize: FS.small }}>
+                        <option value="">—</option>
+                        {["Black","Blue","White","Gold","Red","Green","Silver","Yellow","Orange","Purple","Maroon","Teal","Platinum"].map(n => <option key={n} value={n.toLowerCase()}>{n}</option>)}
+                      </select>
+                    </div>
+                    <input value={tb.name || ""} onChange={e => setTee(index, { name: e.target.value })} placeholder="Tee name"
+                      style={{ flex: 1, minWidth: 0, padding: "5px 8px", background: K.inp, border: `1px solid ${tb.name ? ac + ALPHA.hair : K.warn}`, borderRadius: R.sm, color: K.t1, fontWeight: 700, fontSize: FS.body, boxSizing: "border-box" }} />
+                    <button onClick={() => setEditingCourse(prev => ({ ...prev, draft: { ...prev.draft, tee_boxes: prev.draft.tee_boxes.filter((_, i) => i !== index) } }))}
+                      style={{ background: "transparent", border: "none", color: K.t3, cursor: "pointer", fontSize: FS.lead, lineHeight: 1, padding: "0 4px", flexShrink: 0 }}>✕</button>
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    {["rating", "slope", "par", "yardage"].map(f => (
+                      <div key={f} style={{ flex: 1 }}>
+                        <div style={{ fontSize: FS.micro, color: K.t3, textTransform: "uppercase", marginBottom: 3 }}>{f === "yardage" ? "yards" : f}</div>
+                        <input inputMode="decimal" value={tb[f] ?? ""} onChange={e => setTee(index, { [f]: e.target.value })}
+                          style={{ width: "100%", padding: "7px 6px", background: K.inp, border: `1px solid ${ac}${ALPHA.hair}`, borderRadius: R.sm, color: K.t1, fontSize: FS.small, textAlign: "center", boxSizing: "border-box" }} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
               {[["Front", 0, 9], ["Back", 9, 9]].map(([label, start, count]) => { const pars = (d.hole_pars||[]).slice(start, start+count); const hcps = (d.hole_handicaps||[]).slice(start, start+count); return (<div key={label} style={{ marginBottom: 8 }}><div style={{ fontSize: FS.label, color: K.t3, fontWeight: 600, textTransform: "uppercase", marginBottom: 4 }}>{label} 9</div><div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 32px`, gap: 2, fontSize: FS.micro }}><div style={{ color: K.t3, fontWeight: 600, padding: "2px 0" }}>Hole</div>{Array.from({length:count},(_,i)=><div key={i} style={{ textAlign:"center", color:K.t2, fontWeight:700, padding:"2px 0" }}>{start+i+1}</div>)}<div /></div><div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 32px`, gap: 2, background: K.inp, borderRadius: R.sm, padding: "2px 0", marginBottom: 2 }}><div style={{ color: K.t3, fontWeight: 600, padding: "3px 2px", fontSize: FS.micro }}>Par</div>{Array.from({length:count},(_,i) => (<input key={i} inputMode="numeric" value={pars[i]??""} onChange={e => setEditingCourse(prev => { const hp=[...(prev.draft.hole_pars||[])]; hp[start+i]=parseInt(e.target.value)||0; return {...prev,draft:{...prev.draft,hole_pars:hp}}; })} style={inpStyle} />))}<div style={{ textAlign:"center", color:ac, fontWeight:800, padding:"3px 0", fontSize: FS.label }}>{pars.reduce((a,b)=>a+(+b||0),0)}</div></div><div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 32px`, gap: 2 }}><div style={{ color: K.t3, fontWeight: 600, padding: "2px 2px", fontSize: FS.micro }}>HCP</div>{Array.from({length:count},(_,i) => (<input key={i} inputMode="numeric" value={hcps[i]??""} onChange={e => setEditingCourse(prev => { const hh=[...(prev.draft.hole_handicaps||[])]; hh[start+i]=parseInt(e.target.value)||0; return {...prev,draft:{...prev.draft,hole_handicaps:hh}}; })} style={{...inpStyle, color:K.t3}} />))}<div /></div></div>); })}
             </div>
           </div>

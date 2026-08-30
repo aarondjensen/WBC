@@ -19,7 +19,7 @@
 // So: mount it, click through all four sub-tabs, and mount the states nobody
 // develops against — the empty tournament and the finished one.
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { render, screen, cleanup, fireEvent } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, within } from "@testing-library/react";
 import { createElement as h } from "react";
 
 vi.mock("../firebase", () => ({
@@ -335,6 +335,109 @@ describe("AdminView renders", () => {
     fireEvent.click(screen.getByText("Player tees"));
     fireEvent.click(screen.getByTitle("Put every player on Blue"));
     expect(screen.queryByText(/[\u25b2\u25bc]\d/)).toBeNull();
+  });
+
+  // ── The course editor's tee list ──
+  // The APIs are routinely short a tee. A course comes back with three when it
+  // has five, and Refetch returns the same three — so the editor has to let a
+  // director type one in, which for a long time it did not: the only controls
+  // on this screen were Refetch and a per-tee ✕, and a tee the API had never
+  // heard of could not be added from anywhere in the app.
+  const openCourseEditor = (props = {}) => {
+    mount(props);
+    fireEvent.click(screen.getByText("Edit"));
+    return screen.getByText("Edit Course");
+  };
+  // The editor's Save, not the round card's tee sign-off behind it — both say
+  // Save, and only one of them is on screen.
+  const saveCourse = () => fireEvent.click(within(screen.getByText("Edit Course").parentElement).getByText("Save"));
+
+  it("opens the course editor on the round's course", () => {
+    openCourseEditor();
+    expect(screen.getByDisplayValue("Treetops")).toBeTruthy();
+    // Both of the course's tees, sorted from the tips down.
+    expect(screen.getByDisplayValue("Blue")).toBeTruthy();
+    expect(screen.getByDisplayValue("White")).toBeTruthy();
+  });
+
+  it("adds a blank tee for the director to fill in", () => {
+    openCourseEditor();
+    expect(screen.getAllByPlaceholderText("Tee name").length).toBe(2);
+    fireEvent.click(screen.getByText("+ Add tee"));
+    const names = screen.getAllByPlaceholderText("Tee name");
+    expect(names.length).toBe(3);
+    // With no slope yet it sorts last — which is where the button that made
+    // it is. A new row appearing in the middle of the list is a row the
+    // director has to go looking for.
+    expect(names[2].value).toBe("");
+  });
+
+  it("refuses to save a tee with no name", () => {
+    // The tee_boxes document id and every tee assignment are derived from the
+    // name. Two blank ones are one document, and a blank one is a tee no
+    // player can be put on.
+    const addCourse = vi.fn(); const notify = vi.fn();
+    openCourseEditor({ addCourse, notify });
+    fireEvent.click(screen.getByText("+ Add tee"));
+    saveCourse();
+    expect(addCourse).not.toHaveBeenCalled();
+    expect(notify).toHaveBeenCalledWith("Every tee needs a name");
+  });
+
+  it("saves a hand-typed tee with its numbers as numbers", () => {
+    // Every field on a new tee starts empty, and the write path stores what it
+    // is handed — "" would land in Firestore as a slope.
+    const addCourse = vi.fn();
+    openCourseEditor({ addCourse });
+    fireEvent.click(screen.getByText("+ Add tee"));
+    const name = screen.getAllByPlaceholderText("Tee name")[2];
+    fireEvent.change(name, { target: { value: "Gold" } });
+    saveCourse();
+    expect(addCourse).toHaveBeenCalled();
+    const saved = addCourse.mock.calls[0][0].tee_boxes;
+    expect(saved.length).toBe(3);
+    const gold = saved.find(t => t.name === "Gold");
+    expect(gold).toMatchObject({ rating: 72.0, slope: 113, par: 72, yardage: 0 });
+    // And the tees that were already there keep their real numbers.
+    expect(saved.find(t => t.name === "Blue")).toMatchObject({ slope: 130, rating: 72.4 });
+  });
+
+  it("keeps the cursor in the row as a slope is typed into it", () => {
+    // The list sorts by slope descending and re-sorts on every keystroke, so a
+    // tee typed in at the bottom climbs to the top as its slope arrives. Keyed
+    // by POSITION rather than by the tee, the row would stay where it is and
+    // the values would slide under it — the director would be three keystrokes
+    // into 140 and suddenly editing the whites.
+    openCourseEditor();
+    fireEvent.click(screen.getByText("+ Add tee"));
+    const name = screen.getAllByPlaceholderText("Tee name")[2];
+    fireEvent.change(name, { target: { value: "Tips" } });
+    // rating, slope, par, yards — the four boxes under the name on that row.
+    const slope = within(name.closest("div").parentElement).getAllByRole("textbox")[2];
+    slope.focus();
+    fireEvent.change(slope, { target: { value: "140" } });
+    // It sorted to the top...
+    expect(screen.getAllByPlaceholderText("Tee name").map(i => i.value)).toEqual(["Tips", "Blue", "White"]);
+    // ...and the cursor went with it, still in the box holding 140.
+    expect(document.activeElement).toBe(slope);
+    expect(document.activeElement.value).toBe("140");
+    expect(within(slope.closest("div").parentElement.parentElement).getByPlaceholderText("Tee name").value).toBe("Tips");
+  });
+
+  it("removes a tee from the list it saves", () => {
+    const addCourse = vi.fn();
+    openCourseEditor({ addCourse });
+    // The ✕ on the White card — second in the list, sorted from the tips.
+    fireEvent.click(screen.getAllByText("✕")[1]);
+    saveCourse();
+    expect(addCourse.mock.calls[0][0].tee_boxes.map(t => t.name)).toEqual(["Blue"]);
+  });
+
+  it("renders a course the API returned no tees for", () => {
+    openCourseEditor({ courses: [{ ...COURSE, tee_boxes: [] }], getPlayerTee: () => null });
+    expect(screen.getByText(/No tees on this course/)).toBeTruthy();
+    fireEvent.click(screen.getByText("+ Add tee"));
+    expect(screen.getAllByPlaceholderText("Tee name").length).toBe(1);
   });
 
   it("opens on the tab the shell asks for", () => {

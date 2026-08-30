@@ -57,6 +57,7 @@ import { NUM_ROUNDS, setRoundCount } from "./lib/rounds";
 import { db, writes } from "./lib/db";
 import { registryRows, roundRows, courseIdsOf, stitchCourses, mergeCourses } from "./lib/staticData";
 import { getDefaultTee } from "./lib/defaultTee";
+import { teeBoxDocId, staleTeeBoxIds } from "./lib/teeEditor";
 import { missingTees } from "./lib/roundSetup";
 import { indexFor, matchHistoryName } from "./lib/handicap";
 import { groupKey as groupKeyOf, roundOfGroupKey, liveRound, roundFinalized, switchableGroups, groupProgress, unfinalizeKeys, isGroupKey } from "./lib/groupSwitch";
@@ -2428,7 +2429,7 @@ export default function WBCApp() {
         for (const tb of tee_boxes) {
           const { hole_yards: hy2, _source: _s2, color: _c2, ...tbData2 } = tb;
           const tbPayload2 = {
-            id: `tb_${course.id}_${(tb.name || "default").toLowerCase().replace(/\s+/g,"_")}`,
+            id: teeBoxDocId(course.id, tb.name),
             course_id: course.id,
             color: tb.color || _c2,
             name: tbData2.name, rating: tbData2.rating, slope: tbData2.slope,
@@ -2486,12 +2487,18 @@ export default function WBCApp() {
     // to "Unknown", so no course edit was ever attributed.
     const savedBy = user?.name || "Unknown";
     await db.upsert("courses", { ...courseData, updated_at: now, updated_by: savedBy }, "id");
+    // The tee list is REPLACED, not added to. A course's tees are read back
+    // out of the `tee_boxes` collection rather than off the course row, so a
+    // tee the director deleted in the editor used to reappear on the next
+    // load — gone from the row, still its own document — and a renamed one
+    // came back beside its replacement under the old name. `staleTeeBoxIds`
+    // names those documents and they go in the same batch as the writes, so
+    // the collection is never briefly missing the set. See lib/teeEditor.
     if (tee_boxes?.length) {
-      let tbErrors = 0;
-      for (const tb of tee_boxes) {
+      const rows = tee_boxes.map(tb => {
         const { color: _c, _source: _s, ...tbData } = tb;
         const tbPayload = {
-          id: `tb_${courseId}_${(tb.name || "default").toLowerCase().replace(/\s+/g,"_")}`,
+          id: teeBoxDocId(courseId, tb.name),
           course_id: courseId,
           color: tb.color,
           name: tbData.name,
@@ -2503,15 +2510,15 @@ export default function WBCApp() {
         if (Array.isArray(tb.hole_yards) && tb.hole_yards.some(y => y > 0)) {
           tbPayload.hole_yards = tb.hole_yards;
         }
-        try {
-          await db.upsert("tee_boxes", tbPayload);
-        } catch(tbErr) {
-          console.error("Tee box save failed:", tbErr, tbPayload);
-          tbErrors++;
-        }
-      }
-      if (tbErrors > 0) {
-        notify(`⚠ Course saved but ${tbErrors} tee box${tbErrors > 1 ? "es" : ""} failed to save — open and re-save to retry`);
+        return tbPayload;
+      });
+      // Only prune against a course we already hold — a course being added for
+      // the first time has nothing to prune, and pruning against an empty
+      // previous list would be a no-op anyway.
+      const previous = courseList.find(c => c.id === courseId);
+      const ok = await db.replaceMany("tee_boxes", rows, staleTeeBoxIds(courseId, previous?.tee_boxes, tee_boxes));
+      if (!ok) {
+        notify("⚠ Course saved but its tee boxes did not — open and re-save to retry");
       }
     }
     // Update local state with clean version (always, even if tee saves had errors)
