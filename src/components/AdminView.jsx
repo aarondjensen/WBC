@@ -49,7 +49,7 @@ import { localDateISO, fmtRoundDate } from "../lib/format";
 import { SCORING_LEAD_MIN } from "../lib/scoringGate";
 import { NUM_ROUNDS, roundDateChoices } from "../lib/rounds";
 import { toDisplayName, isGeneratedName, shortName, fullName, splitName } from "../lib/playerNames";
-import { missingTees, describeMissingTees, pairingsTrouble } from "../lib/roundSetup";
+import { missingTees, missingTeeNames, pairingsTrouble } from "../lib/roundSetup";
 import { indexFor, matchHistoryName, recentRoundSlots, WINDOW } from "../lib/handicap";
 import { EMPTY_LIVE_ROUNDS } from "../lib/liveHistory";
 import { returningPlayers, returningLine } from "../lib/returningPlayers";
@@ -3262,11 +3262,11 @@ export function AdminView({ liveRounds = EMPTY_LIVE_ROUNDS, registry, activePlay
                   <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
                     <span style={{ width: 6, height: 6, borderRadius: "50%", background: K.danger, flexShrink: 0 }} />
                     <span style={{ fontSize: FS.label, fontWeight: 800, color: K.danger, letterSpacing: 0.6, textTransform: "uppercase" }}>
-                      {st.noTee.length} {st.noTee.length === 1 ? "player has" : "players have"} no tee
+                      {st.noTee.length} {st.noTee.length === 1 ? "player has" : "players have"} no tee set
                     </span>
                   </div>
                   <div style={{ fontSize: FS.label, color: K.t2, lineHeight: 1.5 }}>
-                    {describeMissingTees(st.noTee, nameOfPid)}
+                    {missingTeeNames(st.noTee, nameOfPid)}
                   </div>
                   {fixTee && (
                     <button

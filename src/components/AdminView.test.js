@@ -337,6 +337,33 @@ describe("AdminView renders", () => {
     expect(screen.queryByText(/[\u25b2\u25bc]\d/)).toBeNull();
   });
 
+  // ── The two round-setup warnings say the least they can ──
+  // The banner counts and diagnoses; the line under it is the one thing only
+  // it can say. It used to repeat the count, restate the fault and then add an
+  // instruction, burying the names in the middle of three things already on
+  // screen.
+  it("names the players with no tee and says nothing else", () => {
+    // No per-round tee map, so the whole field is missing one.
+    mount({ teeData: {} });
+    expect(screen.getByText("5 players have no tee set")).toBeTruthy();
+    expect(screen.getByText("Test One, Aaron J, Dave S, Matt R, Pete L")).toBeTruthy();
+    // No instruction, no restated fault, no fallback described.
+    expect(screen.queryByText(/Assign a tee|before it starts/i)).toBeNull();
+  });
+
+  it("agrees the count's verb for a single player", () => {
+    mount({ teeData: { 1: { aaron_j: "Blue", dave_s: "Blue", matt_r: "Blue", pete_l: "Blue" } } });
+    const heading = screen.getByText("1 player has no tee set");
+    // Scoped to the banner — "Test One" is also a row in the tee sheet below it.
+    expect(within(heading.closest("div").parentElement).getByText("Test One")).toBeTruthy();
+  });
+
+  it("calls an undrawn round's problem pairings, not groups", () => {
+    mount({ pairingsData: {} });
+    expect(screen.getByText("No pairings set yet")).toBeTruthy();
+    expect(screen.queryByText(/groups drawn/i)).toBeNull();
+  });
+
   // ── One badge for "this round has no course", not two ──
   // The card under the round strip used to print "R4 unset" beside the course
   // name of whichever round was selected — a second copy of what the pills

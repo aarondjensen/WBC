@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { groupTrouble, roundTrouble, describeTrouble, blocksScoring, missingTees, describeMissingTees, GROUP_MAX, pairingsTrouble } from "./roundSetup";
+import { groupTrouble, roundTrouble, describeTrouble, blocksScoring, missingTees, missingTeeNames, GROUP_MAX, pairingsTrouble } from "./roundSetup";
 
 const roster = ["a", "b", "c", "d", "e", "f", "g", "h"];
 
@@ -197,35 +197,37 @@ describe("roundTrouble — tee assignments", () => {
   });
 });
 
-describe("describeMissingTees", () => {
+describe("missingTeeNames", () => {
   const nameOf = (pid) => ({ a: "Aaron", b: "Bob", c: "Carl" })[pid] || pid;
 
-  it("names the player and says what to do about it", () => {
-    const s = describeMissingTees(["a"], nameOf);
-    expect(s).toContain("Aaron");
-    expect(s).toContain("has no tee");
-    expect(s).toContain("Assign a tee");
+  it("is the names and nothing else", () => {
+    // The banner above it already counts them and says what is wrong. This
+    // line used to repeat both and then add an instruction; it is the list.
+    expect(missingTeeNames(["a", "b", "c"], nameOf)).toBe("Aaron, Bob, Carl");
+  });
+
+  it("is a bare name for one player", () => {
+    expect(missingTeeNames(["a"], nameOf)).toBe("Aaron");
   });
 
   // There is no default tee and leaving it unassigned is not an option, so the
   // warning must not describe what the app would fall back to — spelling that
   // out reads as offering it.
   it("does not describe a fallback", () => {
-    const s = describeMissingTees(["a", "b"], nameOf);
-    expect(s).not.toMatch(/default|rating|longest/i);
+    expect(missingTeeNames(["a", "b"], nameOf)).not.toMatch(/default|rating|longest/i);
   });
 
-  it("lists several names readably", () => {
-    expect(describeMissingTees(["a", "b", "c"], nameOf)).toContain("Aaron, Bob and Carl");
+  it("keeps the order it was given, which is roster order", () => {
+    expect(missingTeeNames(["c", "a"], nameOf)).toBe("Carl, Aaron");
   });
 
-  it("agrees its verb with the number of players", () => {
-    expect(describeMissingTees(["a"], nameOf)).toContain("has no tee");
-    expect(describeMissingTees(["a", "b"], nameOf)).toContain("have no tee");
+  it("falls back to the id when there is no name for it", () => {
+    expect(missingTeeNames(["zzz"], nameOf)).toBe("zzz");
   });
 
   it("is empty when nobody is missing one", () => {
-    expect(describeMissingTees([], nameOf)).toBe("");
+    expect(missingTeeNames([], nameOf)).toBe("");
+    expect(missingTeeNames()).toBe("");
   });
 });
 
@@ -297,8 +299,11 @@ describe("pairingsTrouble", () => {
   });
 
   it("says when nothing has been drawn at all", () => {
-    expect(pairingsTrouble({ ...sound, groups: [], rosterCount: 10 })).toMatch(/no groups/i);
-    expect(pairingsTrouble({ ...sound, groups: [[], []], rosterCount: 10 })).toMatch(/no groups/i);
+    // "Pairings", not "groups" — it is what the tab, the nav and the generate
+    // button all call them, and the badge should not be the one screen that
+    // uses a different word for the same thing.
+    expect(pairingsTrouble({ ...sound, groups: [], rosterCount: 10 })).toBe("No pairings set yet");
+    expect(pairingsTrouble({ ...sound, groups: [[], []], rosterCount: 10 })).toBe("No pairings set yet");
   });
 
   // Seats outnumber the roster with nobody doubled up — somebody in a group

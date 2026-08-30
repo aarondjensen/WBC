@@ -61,7 +61,7 @@ export function pairingsTrouble({ hasCourse, groups = [], teeTimes = [], rosterC
       : `${dupes.length} players are in two groups`;
   }
 
-  if (!groups.length || seated.length === 0) return "No groups drawn yet";
+  if (!groups.length || seated.length === 0) return "No pairings set yet";
   if (seated.length < rosterCount) return `${seated.length} of ${rosterCount} players drawn`;
   // Seats outnumber the roster with nobody doubled up: somebody in a group is
   // no longer on it.
@@ -171,24 +171,19 @@ export function roundTrouble({ groups = [], teeTimes = [], rosterIds = [], playe
 export const BLOCKING_CODES = ["empty", "oversized", "duplicate"];
 export const blocksScoring = (trouble) => !!trouble && BLOCKING_CODES.includes(trouble.code);
 
-// ── describeMissingTees ────────────────────────────────────────────
-// The warning itself. It names every player rather than counting them, because
-// the fix is per-player and a director reading "2 players" has to go and find
-// out which two.
+// ── missingTeeNames ────────────────────────────────────────────────
+// Who they are — a plain list, because the banner above it already says how
+// many and what is wrong with them. This used to be a sentence that repeated
+// the count, restated the fault and then told the director to fix it before
+// the round started; all three were already on screen, and the one thing only
+// this line can say — the names — was buried in the middle of them.
 //
-// It says nothing about what the app would do instead, on purpose. There is no
-// default tee and there is no acceptable answer other than assigning one, so
-// describing the fallback would be offering it — it reads as "here is what
-// happens if you leave this", which is not a choice on the table. The round
-// does not start until somebody has a tee.
-export function describeMissingTees(pids = [], nameOf = (pid) => pid) {
-  if (!pids.length) return "";
-  const names = pids.map(nameOf);
-  const list = names.length > 2
-    ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`
-    : names.join(" and ");
-  const one = names.length === 1;
-  return `${list} ${one ? "has" : "have"} no tee for this round. Assign ${one ? "a tee" : "tees"} before it starts.`;
+// It still says nothing about what the app would do INSTEAD of an assigned
+// tee, which is the point the old sentence was careful about and this keeps by
+// having no room for it. There is no default tee and no acceptable answer
+// other than assigning one, so describing the fallback would be offering it.
+export function missingTeeNames(pids = [], nameOf = (pid) => pid) {
+  return (pids || []).map(nameOf).join(", ");
 }
 
 // One sentence a director can act on. `nameOf` turns a player id into a name;
