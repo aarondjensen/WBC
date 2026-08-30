@@ -247,6 +247,68 @@ export function wbcIndex(rounds = [], { recentSlots = recentRoundSlots() } = {})
   };
 }
 
+// ── indexTimeline ──────────────────────────────────────────────────
+// What the index WAS, after each round of a career. Newest first, one entry
+// per round:  { key, year, round, index }
+//
+// The same arithmetic as `wbcIndex`, run again for every round with only that
+// round and the ones before it in front of it — which is what makes it a
+// history rather than a projection. A round is only ever measured against
+// rounds that had already been played when it was, so the number attached to a
+// round in 2015 is the number the player actually carried in 2015: window,
+// taper and all.
+//
+// `rounds` is a whole career, in any order; historyFor's shape, or indexFor's
+// `rounds`. An unrated round keeps its place and its index, which is the one it
+// inherited from the round before — it changed nothing, because it could not be
+// scored.
+//
+// recentSlots is deliberately empty: this asks what the number was, and the
+// asterisk — whether the window matches the tournament's own last twelve — is
+// a question about TODAY that means nothing at a point in the past. Passing it
+// also keeps a career of sixty rounds from deriving the tournament's slots
+// sixty times over.
+export function indexTimeline(rounds = []) {
+  const all = [...rounds].sort(newestFirst);
+  return all.map((r, i) => ({
+    key: r.key,
+    year: r.year,
+    round: r.round,
+    index: wbcIndex(all.slice(i), { recentSlots: [] }).index,
+  }));
+}
+
+// ── yearDeltas ─────────────────────────────────────────────────────
+// Where the index stood at the end of each year a player turned up, and how
+// far it moved over that year. Newest first:  { year, index, delta }
+//
+// The baseline is the last year they PLAYED, not the calendar year before —
+// somebody who misses two WBCs has not been getting quietly worse in the
+// meantime, and a delta against a year with no rounds in it would be dividing
+// three years of change into one. `delta` is null for the earliest year, which
+// has nothing to be measured against.
+//
+// A NEGATIVE delta is an improvement: the index is a handicap and the low
+// number is the better golfer. The view colours it accordingly.
+export function yearDeltas(rounds = []) {
+  const years = [];
+  const seen = new Set();
+  // Newest first, so the FIRST entry for a year is that year's last round —
+  // the index it finished on.
+  for (const r of indexTimeline(rounds)) {
+    if (seen.has(r.year)) continue;
+    seen.add(r.year);
+    years.push({ year: r.year, index: r.index });
+  }
+  return years.map((y, i) => {
+    const before = years[i + 1];
+    return {
+      ...y,
+      delta: y.index == null || before?.index == null ? null : tenth(y.index - before.index),
+    };
+  });
+}
+
 // ── editionRounds ──────────────────────────────────────────────────
 // A finished edition's rounds, in the shape the index math wants.
 //

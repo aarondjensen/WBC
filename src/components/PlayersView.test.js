@@ -107,6 +107,36 @@ describe("PlayersView", () => {
     expect(screen.getByText("15.7")).toBeTruthy();
   });
 
+  // ── The chart's one interaction ──
+  // The bars say what the rounds were; the line through them says what they
+  // did. Tapping a bar is how you read a point off that line, and it is the
+  // only thing on this screen that responds to a touch — so if it stops
+  // working, nothing else fails first.
+  it("names the round and the index it left behind when a bar is tapped", () => {
+    render(h(PlayersView, { players: PLAYERS, registry: REGISTRY, meId: "aaron_j", year: 2026 }));
+    act(() => screen.getByText(/Aaron Jensen/i).closest("button").click());
+
+    expect(screen.getByText(/Tap a round for the index/i)).toBeTruthy();
+    const bars = screen.getAllByLabelText(/differential/i);
+    expect(bars.length).toBeGreaterThan(0);
+
+    // The oldest bar in the window — the one whose point on the line is built
+    // from the fewest rounds, and so the one most likely to have no number.
+    const oldest = bars[bars.length - 1];
+    const [, year, rnd] = oldest.getAttribute("aria-label").match(/^(\d{4}) round (\d+)/);
+    act(() => oldest.click());
+
+    expect(screen.queryByText(/Tap a round for the index/i)).toBe(null);
+    const readout = screen.getByText("index").closest("div").textContent;
+    expect(readout).toMatch(new RegExp(`${year} R${rnd}`));
+    expect(readout).toMatch(/index\s*\d+\.\d/);
+
+    // Tapping the same bar again puts the hint back — a selection you cannot
+    // clear is a selection that outstays its welcome.
+    act(() => oldest.click());
+    expect(screen.getByText(/Tap a round for the index/i)).toBeTruthy();
+  });
+
   it("opens a player's detail without throwing", () => {
     render(h(PlayersView, { players: PLAYERS, registry: REGISTRY, meId: "aaron_j", year: 2026 }));
     const row = screen.getByText(/Aaron Jensen/i).closest("div");
