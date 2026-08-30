@@ -12,7 +12,8 @@
 // beats a stub that cannot throw the way Safari's private mode does.
 import { describe, it, expect, beforeEach } from "vitest";
 import {
-  liveRoundsFrom, readLiveRoundsCache, writeLiveRoundsCache,
+  liveRoundsFrom, liveRoundsHere, mergeLiveRounds,
+  readLiveRoundsCache, writeLiveRoundsCache,
   EMPTY_LIVE_ROUNDS, LIVE_ROUNDS_CACHE_KEY, LIVE_ROUNDS_CACHE_VERSION,
 } from "./liveHistory";
 
@@ -65,6 +66,110 @@ describe("liveRoundsFrom", () => {
   // that filled it in would hand its own state to the next one.
   it("hands out an empty bundle nobody can write into", () => {
     expect(() => { EMPTY_LIVE_ROUNDS.byPlayer.matt_v = []; }).toThrow();
+  });
+});
+
+// ── The year being played ─────────────────────────────────────────
+// Not read from Firestore at all: the app already holds this year's cards, and
+// the app OPENS into this year for everybody but a director building next one
+// (see lib/editionHome). Left out, the screen most people look at showed a
+// career that stopped before the tournament they had just played.
+describe("liveRoundsHere", () => {
+  const COURSES = [{
+    id: "treetops", name: "THE MASTERPIECE", rating: 71.4, slope: 134, par: 71,
+    tee_boxes: [{ name: "BLUE", rating: 70.1, slope: 128, par: 71 }],
+  }];
+  const T_ROUNDS = [
+    { round_number: 1, course_id: "treetops" },
+    { round_number: 2, course_id: "treetops" },
+  ];
+  const card = (strokes) => Object.fromEntries(Array.from({ length: 18 }, (_, i) => [i, strokes]));
+  const base = {
+    year: 2026, tRounds: T_ROUNDS, courses: COURSES,
+    field: ["matt_v", "aaron_j"],
+  };
+
+  it("turns this year's cards into rounds, off the tee each man played", () => {
+    const { byPlayer } = liveRoundsHere({
+      ...base,
+      holeData: { matt_v_1: card(5), aaron_j_1: card(4) },
+      teeData: { 1: { matt_v: "BLUE" } },
+    });
+    expect(byPlayer.matt_v[0].gross).toBe(90);
+    expect(byPlayer.matt_v[0].differential).toBe(17.6);   // (90 − 70.1) × 113 / 128, the BLUE tee
+    expect(byPlayer.aaron_j[0].differential).toBe(0.5);   // (72 − 71.4) × 113 / 134, the course
+  });
+
+  // The reason this is safe to run in the middle of a round: a card thru 11 is
+  // not a round anybody can be handicapped on.
+  it("ignores a card still being played", () => {
+    const half = Object.fromEntries(Array.from({ length: 11 }, (_, i) => [i, 5]));
+    const { byPlayer, slots } = liveRoundsHere({ ...base, holeData: { matt_v_1: half } });
+    expect(byPlayer).toEqual({});
+    expect(slots).toEqual([]);
+  });
+
+  it("reads a player id that has underscores in it", () => {
+    const { byPlayer } = liveRoundsHere({
+      ...base, field: ["mary_jo_s"], holeData: { mary_jo_s_2: card(5) },
+    });
+    expect(byPlayer.mary_jo_s[0].key).toBe("2026-2");
+  });
+
+  // The yardstick waits for the field. Without this the first group off the
+  // course turns every man still out there into an asterisk for an afternoon.
+  it("makes a round a slot only once every man in the field has posted it", () => {
+    const half = liveRoundsHere({ ...base, holeData: { matt_v_1: card(5) } });
+    expect(half.byPlayer.matt_v).toHaveLength(1);
+    expect(half.slots).toEqual([]);
+
+    const whole = liveRoundsHere({ ...base, holeData: { matt_v_1: card(5), aaron_j_1: card(4) } });
+    expect(whole.slots).toEqual(["2026-1"]);
+  });
+
+  it("claims no slots at all before the roster is known", () => {
+    const out = liveRoundsHere({ ...base, field: [], holeData: { matt_v_1: card(5) } });
+    expect(out.byPlayer.matt_v).toHaveLength(1);
+    expect(out.slots).toEqual([]);
+  });
+
+  it("survives being handed nothing", () => {
+    expect(liveRoundsHere()).toEqual({ byPlayer: {}, slots: [] });
+    expect(liveRoundsHere({ year: 2026 })).toEqual({ byPlayer: {}, slots: [] });
+  });
+});
+
+describe("mergeLiveRounds", () => {
+  const r = (year, n) => ({ year, round: n, key: `${year}-${n}`, differential: 12 });
+  const past = { byPlayer: { matt_v: [r(2026, 1)] }, slots: ["2026-1"] };
+  const here = { byPlayer: { matt_v: [r(2027, 1)], new_guy: [r(2027, 1)] }, slots: ["2027-1"] };
+
+  it("puts the two halves of the record together, newest first", () => {
+    const both = mergeLiveRounds(past, here);
+    expect(both.byPlayer.matt_v.map(x => x.key)).toEqual(["2027-1", "2026-1"]);
+    expect(both.byPlayer.new_guy.map(x => x.key)).toEqual(["2027-1"]);
+    expect(both.slots).toEqual(["2027-1", "2026-1"]);
+  });
+
+  it("counts a round once when both halves carry it", () => {
+    const both = mergeLiveRounds(past, past);
+    expect(both.byPlayer.matt_v).toHaveLength(1);
+    expect(both.slots).toEqual(["2026-1"]);
+  });
+
+  // A round somebody has finished counts for him straight away; the slot it
+  // would claim waits for the rest of the field. So the two lists are merged
+  // separately rather than one being derived from the other.
+  it("keeps a round whose slot the field has not earned yet", () => {
+    const both = mergeLiveRounds(past, { byPlayer: { matt_v: [r(2027, 1)] }, slots: [] });
+    expect(both.byPlayer.matt_v.map(x => x.key)).toEqual(["2027-1", "2026-1"]);
+    expect(both.slots).toEqual(["2026-1"]);
+  });
+
+  it("hands back the one bundle it was given, or nothing", () => {
+    expect(mergeLiveRounds(past)).toBe(past);
+    expect(mergeLiveRounds()).toBe(EMPTY_LIVE_ROUNDS);
+    expect(mergeLiveRounds(null, past)).toBe(past);
   });
 });
 

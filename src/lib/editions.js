@@ -465,9 +465,16 @@ export const cachedLiveRounds = () =>
 //
 // Which years: everything AFTER the bundle's last (so 2026 and later, today),
 // minus the sandbox, whose rounds are testers' practice and belong to nobody's
-// career, and minus the ACTIVE edition — the year being played is already
-// streaming into the app over a live listener, and its rounds are not part of
-// a career yet anyway. An index is what a golfer arrived with.
+// career, and minus the ACTIVE edition — which is NOT left out of the answer.
+// Its scores are already on the phone, streaming in over a live listener, so
+// it is built from memory by liveRoundsHere instead of read a second time
+// here. That matters more than it sounds: the app opens into the live
+// tournament for everybody but a director building next year, so the edition
+// on screen is normally the very year the bundled history is missing.
+//
+// The year is taken from the id where the stored field cannot answer —
+// `wbc_2026` is a 2026 edition whatever its document says, and it is the id
+// the rounds themselves are dated from.
 //
 // Cost, after the first load on a device: ONE count query per past year. The
 // cards themselves are re-read only when that count has moved. A year that
@@ -486,9 +493,13 @@ export const loadLiveRounds = async () => {
   // rather than an empty record. A network that failed is not a career that
   // vanished — the same rule the per-year read below follows.
   if (!known) return cachedLiveRounds();
+  // The stored field first, the digits in the id behind it, and zero rather
+  // than a guess if neither answers — an edition whose year cannot be
+  // established is one to leave alone, not one to date from today.
+  const yearOf = (e) => Number(e.year) || parseInt(String(e.id).replace(/\D/g, ""), 10) || 0;
   const years = known.filter(e =>
     e?.id && e.id !== activeId && !isSandboxEdition(e.id)
-    && Number(e.year) > HISTORY_LAST_YEAR);
+    && yearOf(e) > HISTORY_LAST_YEAR);
   if (!years.length) return EMPTY_LIVE_ROUNDS;
 
   const cache = readLiveRoundsCache();

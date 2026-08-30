@@ -39,6 +39,7 @@ import { AttestBanner } from "./components/AttestBanner";
 import { rowsToPairings, dedupeGroups } from "./lib/pairings";
 import { EditionBanner } from "./components/EditionBanner";
 import { warmEditions, cachedEditions, loadLiveRounds, cachedLiveRounds } from "./lib/editions";
+import { liveRoundsHere, mergeLiveRounds } from "./lib/liveHistory";
 import { lockNotice, isEditionLocked, canAdminEdition, demoOnlyAdmin } from "./lib/editionLock";
 import { editionClosedToMembers } from "./lib/editionLifecycle";
 import { liveEdition, editionBannerShowing } from "./lib/editionHome";
@@ -1540,19 +1541,23 @@ export default function WBCApp() {
   // who played last year could open next year's edition and find none of it on
   // his chart.
   //
-  // Loaded on the first open of a screen that shows an index, and seeded
-  // synchronously from what this device already knows, so the chart paints on
-  // the frame the tab opens. The load itself is one count query per past year
-  // in the ordinary case — see loadLiveRounds for what it costs and why the
-  // year being played is not part of it.
-  const [liveRounds, setLiveRounds] = useState(cachedLiveRounds);
+  // The PAST years are read from Firestore — once per device, then one count
+  // query a year to check they have not moved. Loaded on the first open of a
+  // screen that shows an index, and seeded synchronously from what this device
+  // already knows, so the chart paints on the frame the tab opens.
+  //
+  // The year being PLAYED is not in that read. Its scores are already on this
+  // phone, and `liveRounds` below folds them in for no reads at all — which is
+  // the half that matters most, because the app opens into the live tournament
+  // for everybody but a director building next year. See lib/liveHistory.
+  const [pastRounds, setPastRounds] = useState(cachedLiveRounds);
   const [careerOpened, setCareerOpened] = useState(false);
   useEffect(() => { if (view === "players" || view === "admin") setCareerOpened(true); }, [view]);
   useEffect(() => {
     if (!careerOpened) return;
     let live = true;
     loadLiveRounds()
-      .then(r => { if (live) setLiveRounds(r); })
+      .then(r => { if (live) setPastRounds(r); })
       .catch(e => console.error("Live rounds load failed:", e));
     return () => { live = false; };
   }, [careerOpened]);
@@ -2003,6 +2008,25 @@ export default function WBCApp() {
   // still see their edit. The difference is that React now knows when it
   // changed.
   const { allPlayers, activePlayers } = useRoster(tPlayers, registry);
+
+  // ── The record, both halves of it ─────────────────────────────────
+  // The years read from Firestore, plus THIS year built out of the cards
+  // already in memory: same shape, no reads. Only complete cards count — a
+  // round is a round when it is over — and a round joins the tournament's
+  // last-12 yardstick only once every man in the field has posted it, so the
+  // first group off the course does not asterisk everybody still out there.
+  //
+  // Gated on a screen that shows an index being on, so a tournament being
+  // scored is not rebuilding a career record on every stroke that lands. The
+  // view is read as well as the latch because the latch is set by an effect,
+  // one render behind — and one render behind is a chart that paints without
+  // this year and then redraws with it.
+  const careerVisible = careerOpened || view === "players" || view === "admin";
+  const liveRounds = useMemo(() => (careerVisible ? mergeLiveRounds(pastRounds, liveRoundsHere({
+    year: getTournamentYear(),
+    holeData, tRounds, courses: courseList, teeData,
+    field: activePlayers.map(p => p.id),
+  })) : pastRounds), [careerVisible, pastRounds, holeData, tRounds, courseList, teeData, activePlayers]);
 
   // ── Who is in the market without playing ──────────────────────────
   // The market is the one buy-in that needs no tee time: it is a bet on who
