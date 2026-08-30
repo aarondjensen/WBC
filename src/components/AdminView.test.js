@@ -337,6 +337,26 @@ describe("AdminView renders", () => {
     expect(screen.queryByText(/[\u25b2\u25bc]\d/)).toBeNull();
   });
 
+  // ── One badge for "this round has no course", not two ──
+  // The card under the round strip used to print "R4 unset" beside the course
+  // name of whichever round was selected — a second copy of what the pills
+  // already say, attached to a different round than the one it was about.
+  // teesDone and pairingsDone both require a course, so a round without one
+  // can only ever wear two hollow red dots, which is the badge.
+  it("leaves an unset round to its pill rather than naming it on the card", () => {
+    // Rounds 1 and 2 exist; round 2 has no course.
+    mount({ tRounds: [{ id: "r1", tournament_id: "wbc_2026", round_number: 1, course_id: "c1" }] });
+    expect(screen.getByText("Treetops")).toBeTruthy();
+    expect(screen.queryByText(/unset/i)).toBeNull();
+  });
+
+  it("still says Finalized on the card for a round that is closed", () => {
+    // Round 1 is closed; the console opens on round 2, so select round 1.
+    mount({ finalizedRounds: { 1: true } });
+    fireEvent.click(screen.getByText(/Rd 1/));
+    expect(screen.getByText("Finalized")).toBeTruthy();
+  });
+
   // ── The course editor's tee list ──
   // The APIs are routinely short a tee. A course comes back with three when it
   // has five, and Refetch returns the same three — so the editor has to let a

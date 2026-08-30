@@ -2541,7 +2541,6 @@ export function AdminView({ liveRounds = EMPTY_LIVE_ROUNDS, registry, activePlay
         const locked = st.finalized;
         const picking = !locked && (!assigned || pickingCourse);
         const closePicker = () => { setPickingCourse(false); doCourseSearch(""); setManualCourse(null); };
-        const unassignedRounds = Array.from({ length: numRounds }, (_, ri) => ri + 1).filter(r => !tRounds.find(t => t.round_number === r && t.course_id));
         return (
           <div style={{ background: K.card, borderRadius: R.lg, border: `1px solid ${assigned ? ac  + ALPHA.hair : K.bdr}`, overflow: "hidden", marginBottom: 12 }}>
 
@@ -2551,16 +2550,15 @@ export function AdminView({ liveRounds = EMPTY_LIVE_ROUNDS, registry, activePlay
                 <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: FS.body, fontWeight: 700, color: K.t1 }}>{assigned.name}</div>
-                    {/* Which rounds still have no course is the one thing the
-                        round pills above do NOT show (their dots are tees and
-                        pairings). The course's city and par used to lead this
-                        line; they are on the scorecard behind Edit, and this
-                        space is better spent on what the event still needs. */}
-                    {(locked || unassignedRounds.length > 0) && (
-                      <div style={{ fontSize: FS.label, color: K.t3 }}>
-                        {locked && <span style={{ fontWeight: 700 }}>Finalized</span>}
-                        {!locked && unassignedRounds.length > 0 && <span style={{ color: K.warn, fontWeight: 700 }}>R{unassignedRounds.join(", R")} unset</span>}
-                      </div>
+                    {/* This line used to also carry an "R4 unset" run naming
+                        every round with no course, on the theory that the round
+                        pills above did not show it. They do: teesDone and
+                        pairingsDone both require a course, so a round without
+                        one wears two hollow red dots and can never do anything
+                        else. The pills are the badge; a second copy of them in
+                        prose, under a different round's course, was noise. */}
+                    {locked && (
+                      <div style={{ fontSize: FS.label, color: K.t3, fontWeight: 700 }}>Finalized</div>
                     )}
                   </div>
                   {!locked && (
