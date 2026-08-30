@@ -4,7 +4,9 @@
 //
 // Every other screen in this app is about the tournament being played right
 // now. This one is about the fourteen careers behind it: 424 recorded rounds
-// from 2012 to 2025, turned into one number per player.
+// from 2012 to 2025, turned into one number per player — plus every round
+// played since, which arrives as `liveRounds` because the bundled record books
+// only move when somebody re-exports them. See lib/liveHistory.
 //
 // The number on its own would be a claim. A handicap that arrives without its
 // working invites exactly one response — "that can't be right" — and there is
@@ -40,17 +42,15 @@
 // bar. Anything added up there costs a row.
 //
 // The math lives in lib/handicap.js and the rounds in data/history.js (which is
-// generated — see scripts/build-history.mjs). This file only draws them.
+// generated — see scripts/build-history.mjs) and, for the years since it was
+// last generated, in Firestore. This file only draws them.
 
 import { Fragment, useMemo, useState } from "react";
 import { K, FONT, FS, R, ALPHA, MOTION } from "../theme";
 import { Btn, Card, SectionLabel } from "./ui";
 import { indexFor, matchHistoryName, recentRoundSlots, WINDOW, COUNTING } from "../lib/handicap";
+import { EMPTY_LIVE_ROUNDS } from "../lib/liveHistory";
 import { HISTORY_PLAYERS } from "../data/history";
-
-// The tournament's own last 12 rounds — the yardstick the asterisk is measured
-// against, and stable for the life of the bundle since the history is baked in.
-const RECENT_SET = new Set(recentRoundSlots());
 
 // The list's four columns: the name, the career index, what this year plays
 // off, and the chevron. Shared by the header and every row, so a heading can
@@ -85,7 +85,7 @@ const fmtDiff = (n) => (n == null ? "—" : n.toFixed(1));
 // is a round shot exactly to the course rating — so the picture stays honest
 // about how far apart the twelve rounds actually are. A round that beat the
 // rating pulls the floor below zero rather than clipping.
-function WindowChart({ idx }) {
+function WindowChart({ idx, recent }) {
   const cols = [...idx.window].reverse();
   if (!cols.length) return null;
 
@@ -106,7 +106,7 @@ function WindowChart({ idx }) {
 
   // Which of these rounds are outside the twelve the rest of the field is
   // measured on — the reason this player's index wears an asterisk.
-  const outsiders = cols.filter(c => !RECENT_SET.has(c.key)).length;
+  const outsiders = cols.filter(c => !recent.has(c.key)).length;
 
   const grid = { display: "grid", gridTemplateColumns: `repeat(${cols.length}, minmax(0, 1fr))`, gap: 3 };
 
@@ -154,7 +154,7 @@ function WindowChart({ idx }) {
         <div style={{ ...grid, marginTop: 4 }}>
           {cols.map(c => (
             <div key={c.key} style={{ display: "flex", justifyContent: "center", height: MARK }}>
-              {!RECENT_SET.has(c.key) && (
+              {!recent.has(c.key) && (
                 <span style={{ width: MARK, height: MARK, borderRadius: "50%", background: K.warn }} />
               )}
             </div>
@@ -226,7 +226,7 @@ function RoundRow({ r, inWindow, counting }) {
 }
 
 // ── PlayerDetail ───────────────────────────────────────────────────
-function PlayerDetail({ row, onBack, isDirector = false, onSetOverride = null }) {
+function PlayerDetail({ row, recent, onBack, isDirector = false, onSetOverride = null }) {
   const idx = row.idx;
   const hasRounds = !!idx && idx.window.length > 0;
   const [editing, setEditing] = useState(false);
@@ -378,7 +378,7 @@ function PlayerDetail({ row, onBack, isDirector = false, onSetOverride = null })
         <>
           <SectionLabel style={{ textAlign: "center" }}>The last {idx.window.length}</SectionLabel>
           <Card style={{ marginBottom: 12 }}>
-            <WindowChart idx={idx} />
+            <WindowChart idx={idx} recent={recent} />
           </Card>
         </>
       )}
@@ -488,10 +488,23 @@ function PlayerDetail({ row, onBack, isDirector = false, onSetOverride = null })
 //           registry holds men who are not in this year's field, so it is the
 //           list overrides are keyed against rather than the roster.
 // isDirector / onSetOverride — who may set a hand index, and how.
-export function PlayersView({ players = [], registry = [], meId = null, year = null, isDirector = false, onSetOverride = null }) {
+// liveRounds — the WBCs played since data/history.js was last generated, which
+//           live in Firestore rather than in the bundle: { byPlayer, slots }.
+//           Without them this screen showed a career that stopped at the last
+//           export — a man who played last year, and every man measured against
+//           a field that had not. See lib/liveHistory.
+export function PlayersView({ players = [], registry = [], meId = null, year = null, isDirector = false, onSetOverride = null, liveRounds = EMPTY_LIVE_ROUNDS }) {
   const [open, setOpen] = useState(null);
 
+  // The tournament's own last 12 rounds — the yardstick the asterisk is
+  // measured against. The bundled history plus whatever has been played since,
+  // so a year that is in Firestore and not in the bundle is a round everybody
+  // is measured on rather than a year that never happened.
+  const recentSlots = useMemo(() => recentRoundSlots(WINDOW, liveRounds?.slots), [liveRounds]);
+  const recentSet = useMemo(() => new Set(recentSlots), [recentSlots]);
+
   const rows = useMemo(() => {
+    const extraFor = (id) => (id && liveRounds?.byPlayer?.[id]) || [];
     const overrideOf = (id) => registry.find(p => p.id === id)?.index_override ?? null;
     // The roster first, each matched to its history by name.
     const fromRoster = players.map(p => {
@@ -509,7 +522,7 @@ export function PlayersView({ players = [], registry = [], meId = null, year = n
         // row the leaderboard reads, never derived from the index — see
         // PlayerRow for why.
         year: Number.isFinite(Number(p.handicap_index)) ? Number(p.handicap_index) : null,
-        idx: indexFor(historyName, { override }),
+        idx: indexFor(historyName, { override, extraRounds: extraFor(p.id), recentSlots }),
       };
     });
     // Then anybody in the record books who isn't in this year's field. The
@@ -535,9 +548,33 @@ export function PlayersView({ players = [], registry = [], meId = null, year = n
           isMe: false,
           override,
           year: null,
-          idx: indexFor(n, { override }),
+          idx: indexFor(n, { override, extraRounds: extraFor(reg?.id), recentSlots }),
         };
       });
+
+    // And the careers that are ONLY in the years the bundle has not caught up
+    // with. A man whose first WBC was last year is not in HISTORY_PLAYERS —
+    // that list is generated with the bundle — so the two halves above miss him
+    // entirely the moment he is left out of a field. He has rounds on record
+    // and an index computed from them; the record books should say so.
+    const listed = new Set([...fromRoster, ...fromHistory].map(r => r.pid).filter(Boolean));
+    const fromLive = (registry || [])
+      .filter(p => p?.id && !listed.has(p.id) && extraFor(p.id).length)
+      .map(p => ({
+        key: p.id,
+        pid: p.id,
+        name: p.name || p.id,
+        historyName: null,
+        inField: false,
+        isMe: false,
+        override: p.index_override ?? null,
+        year: null,
+        idx: indexFor(null, {
+          override: p.index_override ?? null,
+          extraRounds: extraFor(p.id),
+          recentSlots,
+        }),
+      }));
 
     // "Inactive" is only sayable once there is a roster to be absent from.
     // Before it loads — or in an edition that has not set one up — every player
@@ -549,10 +586,10 @@ export function PlayersView({ players = [], registry = [], meId = null, year = n
     // invited a reading that isn't there, and it moved a name every time a
     // round was posted. A list you look yourself up in should keep people where
     // you left them.
-    return [...fromRoster, ...fromHistory]
+    return [...fromRoster, ...fromHistory, ...fromLive]
       .map(r => ({ ...r, inField: r.inField || !knowsField }))
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [players, registry, meId]);
+  }, [players, registry, meId, liveRounds, recentSlots]);
 
   const active = rows.filter(r => r.inField);
   const inactive = rows.filter(r => !r.inField);
@@ -562,6 +599,7 @@ export function PlayersView({ players = [], registry = [], meId = null, year = n
     return (
       <PlayerDetail
         row={detail}
+        recent={recentSet}
         onBack={() => setOpen(null)}
         isDirector={isDirector}
         onSetOverride={detail.pid && onSetOverride ? (v) => onSetOverride(detail.pid, v) : null}

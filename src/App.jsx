@@ -38,7 +38,7 @@ import { pendingAttestations } from "./lib/pendingAttest";
 import { AttestBanner } from "./components/AttestBanner";
 import { rowsToPairings, dedupeGroups } from "./lib/pairings";
 import { EditionBanner } from "./components/EditionBanner";
-import { warmEditions, cachedEditions } from "./lib/editions";
+import { warmEditions, cachedEditions, loadLiveRounds, cachedLiveRounds } from "./lib/editions";
 import { lockNotice, isEditionLocked, canAdminEdition, demoOnlyAdmin } from "./lib/editionLock";
 import { editionClosedToMembers } from "./lib/editionLifecycle";
 import { liveEdition, editionBannerShowing } from "./lib/editionHome";
@@ -1531,6 +1531,31 @@ export default function WBCApp() {
 
   const [photosOpened, setPhotosOpened] = useState(false);
   useEffect(() => { if (view === "photos") setPhotosOpened(true); }, [view]);
+
+  // ── The rounds the bundled history has not caught up with ──
+  // data/history.js stops at the last export of data/rounds.csv; the WBCs
+  // played in this app since then are in Firestore. The Players tab and the
+  // player editor both compute a career index, and without these they compute
+  // it off a record that is a year or more out of date — which is how a man
+  // who played last year could open next year's edition and find none of it on
+  // his chart.
+  //
+  // Loaded on the first open of a screen that shows an index, and seeded
+  // synchronously from what this device already knows, so the chart paints on
+  // the frame the tab opens. The load itself is one count query per past year
+  // in the ordinary case — see loadLiveRounds for what it costs and why the
+  // year being played is not part of it.
+  const [liveRounds, setLiveRounds] = useState(cachedLiveRounds);
+  const [careerOpened, setCareerOpened] = useState(false);
+  useEffect(() => { if (view === "players" || view === "admin") setCareerOpened(true); }, [view]);
+  useEffect(() => {
+    if (!careerOpened) return;
+    let live = true;
+    loadLiveRounds()
+      .then(r => { if (live) setLiveRounds(r); })
+      .catch(e => console.error("Live rounds load failed:", e));
+    return () => { live = false; };
+  }, [careerOpened]);
 
   // ── The scoring screen mounts on its first open, and never unmounts ──
   // It is rendered under `display: none` rather than unmounted, so that a
@@ -3983,7 +4008,7 @@ export default function WBCApp() {
           )}
         </div>
         )}
-        {view === "players" && <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading players…</div>}><PlayersView players={allPlayers} registry={registry} meId={user?.id} year={getTournamentYear()} isDirector={!!user.isDirector} onSetOverride={setIndexOverride} /></Suspense>}
+        {view === "players" && <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading players…</div>}><PlayersView players={allPlayers} registry={registry} meId={user?.id} year={getTournamentYear()} isDirector={!!user.isDirector} onSetOverride={setIndexOverride} liveRounds={liveRounds} /></Suspense>}
         {/* Posting requires a real account: firestore.rules pins uploadedBy to
             the caller's uid, so a guest — who has no uid at all — could never
             have added to the library. It is not shown one either: the menu row
@@ -4005,7 +4030,7 @@ export default function WBCApp() {
             <div style={{ fontSize: FS.lead, fontWeight: 700, color: K.t1 }}>Directors Only</div>
           </div>
         ))}
-        {view === "admin" && (canAdminHere ? <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading admin…</div>}><AdminView registry={registry} activePlayers={activePlayers} marketPool={marketPool} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} rebuyIds={rebuyIds} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} deletePlayer={deletePlayer} editionsHolding={editionsHolding} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
+        {view === "admin" && (canAdminHere ? <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading admin…</div>}><AdminView liveRounds={liveRounds} registry={registry} activePlayers={activePlayers} marketPool={marketPool} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} rebuyIds={rebuyIds} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} deletePlayer={deletePlayer} editionsHolding={editionsHolding} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
               setTeeTimesData(prev => {
                 const next = typeof updater === "function" ? updater(prev) : updater;
                 // THE SHEET IS SAVED FIRST, and on its own document. Tee times

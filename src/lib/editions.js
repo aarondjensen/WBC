@@ -30,7 +30,10 @@ import {
   editionDoc, cloneMeta, cloneSideGames, cloneRosterRow, cloneRoundRow,
   SANDBOX_NAME, sandboxScoringOpen,
 } from "./editionClone";
-import { editionRounds, indexFor, matchHistoryName } from "./handicap";
+import { editionRounds, indexFor, matchHistoryName, HISTORY_LAST_YEAR } from "./handicap";
+import {
+  liveRoundsFrom, readLiveRoundsCache, writeLiveRoundsCache, EMPTY_LIVE_ROUNDS,
+} from "./liveHistory";
 import { editionYear, SANDBOX_EDITION_ID, isSandboxEdition } from "./editionId";
 import { editionState, deleteVerdict } from "./editionLifecycle";
 import {
@@ -392,31 +395,16 @@ export const setEditionLocked = async (id, locked) => {
 // expected to have confirmed that; see EditionSwitcher.
 //
 // options = { players, courses, rounds, tournamentName, buyIns } booleans.
-// ── freshIndexes ───────────────────────────────────────────────────
-// Every player's WBC Index recomputed to include the rounds of ONE edition,
-// keyed by player_id.
-//
-// The index math lives in lib/handicap and knows nothing about Firestore; this
-// is the read that feeds it. Five collections, once, for a director action that
-// happens once a year:
-//
-//   hole_scores      the cards themselves, one row per hole
-//   tournament_rounds  which course each round was played on
-//   courses / tee_boxes  the ratings those cards are measured against
-//   tee_assignments  which tee each player actually played
-//
-// Returns { [playerId]: { index, playedRounds } }. `playedRounds` is what tells
-// the caller whether this player has anything new to say — see rosterHandicap.
-export const freshIndexes = async (sourceId) => {
-  const year = editionYear(sourceId);
-  const f = (tid) => [{ field: "tournament_id", op: "==", value: tid }];
-  const [players, holeScores, tRounds, courses, teeBoxes, teeAssignments] = await Promise.all([
-    _get("players"),
-    _get("hole_scores", f(sourceId)),
-    _get("tournament_rounds", f(sourceId)),
+// ── One edition's cards, as rounds ─────────────────────────────────
+// The read behind both freshIndexes and loadLiveRounds. Four edition-scoped
+// collections and the two global ones the ratings live in, in one hop.
+const _editionRounds = async (id) => {
+  const [holeScores, tRounds, courses, teeBoxes, teeAssignments] = await Promise.all([
+    _get("hole_scores", _tidFilter(id)),
+    _get("tournament_rounds", _tidFilter(id)),
     _get("courses"),
     _get("tee_boxes"),
-    _get("tee_assignments", f(sourceId)),
+    _get("tee_assignments", _tidFilter(id)),
   ]);
 
   // Courses carry their tees in a separate collection, and the rating a round
@@ -427,7 +415,27 @@ export const freshIndexes = async (sourceId) => {
     tee_boxes: (teeBoxes || []).filter(t => t.course_id === c.id),
   }));
 
-  const byPlayer = editionRounds({ year, holeScores, tRounds, courses: withTees, teeAssignments });
+  return editionRounds({
+    year: editionYear(id), holeScores, tRounds, courses: withTees, teeAssignments,
+  });
+};
+
+// ── freshIndexes ───────────────────────────────────────────────────
+// Every player's WBC Index recomputed to include the rounds of ONE edition,
+// keyed by player_id.
+//
+// The index math lives in lib/handicap and knows nothing about Firestore;
+// _editionRounds above is the read that feeds it, and the career registry is
+// the one collection this adds to it — a round is keyed by player_id and an
+// index is computed off a history NAME, so the two have to be matched up.
+//
+// Returns { [playerId]: { index, playedRounds } }. `playedRounds` is what tells
+// the caller whether this player has anything new to say — see rosterHandicap.
+export const freshIndexes = async (sourceId) => {
+  const [players, byPlayer] = await Promise.all([
+    _get("players"),
+    _editionRounds(sourceId),
+  ]);
 
   const out = {};
   for (const p of players || []) {
@@ -440,6 +448,68 @@ export const freshIndexes = async (sourceId) => {
     out[p.id] = { index: idx.index, playedRounds: extraRounds.length };
   }
   return out;
+};
+
+// What this device already knows, read synchronously so the Players tab paints
+// its chart on the frame it opens rather than after a round trip. Replaced by
+// loadLiveRounds on the same open — and correct on its own for the years that
+// matter, since a finished tournament's cards do not change.
+export const cachedLiveRounds = () =>
+  liveRoundsFrom(readLiveRoundsCache(), { skip: getActiveTournamentId() });
+
+// ── The years the bundled history has not caught up with ───────────
+// Every round played in this app since data/history.js was last generated,
+// gathered into the one bundle the index math takes as `extraRounds` and
+// `recentSlots`. See lib/liveHistory for the shape and the cache; this is the
+// half that talks to Firestore.
+//
+// Which years: everything AFTER the bundle's last (so 2026 and later, today),
+// minus the sandbox, whose rounds are testers' practice and belong to nobody's
+// career, and minus the ACTIVE edition — the year being played is already
+// streaming into the app over a live listener, and its rounds are not part of
+// a career yet anyway. An index is what a golfer arrived with.
+//
+// Cost, after the first load on a device: ONE count query per past year. The
+// cards themselves are re-read only when that count has moved. A year that
+// cannot be read keeps whatever was cached for it rather than reporting
+// nothing — a network that failed is not a career that vanished.
+export const loadLiveRounds = async () => {
+  const activeId = getActiveTournamentId();
+  // The index itself is read fresh rather than taken from the picker's cache.
+  // That cache is only written when somebody opens Tournaments, and the year
+  // this is looking for is by definition a NEW one — a phone that has not
+  // opened the picker since it was created would go on showing careers that
+  // stop a year short, which is the bug being fixed. One small document per
+  // year, against the count-per-year below.
+  const known = await loadEditions().catch(() => cachedEditions());
+  // Neither readable nor remembered: hand back what this device already knows
+  // rather than an empty record. A network that failed is not a career that
+  // vanished — the same rule the per-year read below follows.
+  if (!known) return cachedLiveRounds();
+  const years = known.filter(e =>
+    e?.id && e.id !== activeId && !isSandboxEdition(e.id)
+    && Number(e.year) > HISTORY_LAST_YEAR);
+  if (!years.length) return EMPTY_LIVE_ROUNDS;
+
+  const cache = readLiveRoundsCache();
+  const next = {};
+  await Promise.all(years.map(async (e) => {
+    const held = cache[e.id] || null;
+    try {
+      const scores = await _count("hole_scores", e.id);
+      // An unchanged count is an unchanged year — see the note in
+      // lib/liveHistory for what that does and does not catch.
+      if (held && held.scores === scores) { next[e.id] = held; return; }
+      // A year with no scores in it is a real answer and worth remembering:
+      // an empty edition somebody created and never played costs one count
+      // per open rather than a read of a collection that has nothing in it.
+      next[e.id] = { scores, byPlayer: scores ? await _editionRounds(e.id) : {} };
+    } catch {
+      if (held) next[e.id] = held;
+    }
+  }));
+  writeLiveRoundsCache(next);
+  return liveRoundsFrom(next, { skip: activeId });
 };
 
 export const cloneEdition = async (sourceId, { year, name, id }, options = {}) => {

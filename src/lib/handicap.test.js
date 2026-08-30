@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   differential, wbcIndex, historyFor, indexFor, indexTable, matchHistoryName,
   recentRoundSlots, countingFor, editionRounds, mergeRounds, WINDOW, COUNTING,
+  HISTORY_LAST_YEAR,
 } from "./handicap";
 import { WD_SCORE } from "./individualBoard";
 
@@ -568,5 +569,82 @@ describe("indexFor with a just-finished edition", () => {
 
   it("still lets a hand-set index win", () => {
     expect(indexFor("Aaron J", { extraRounds: fresh, override: 20 }).index).toBe(20);
+  });
+});
+
+// ── The yardstick, once a year exists that the bundle has never heard of ──
+// A player's window is compared against the TOURNAMENT's last 12, and until
+// loadLiveRounds existed that list could only be read off the bundled history.
+// So the year everybody had just played was missing from both halves at once:
+// out of the window, and out of the thing the window is measured against.
+describe("recentRoundSlots with a year the bundle has not caught up with", () => {
+  const LAST_YEAR = ["2026-4", "2026-3", "2026-2", "2026-1"];
+
+  it("puts the newer rounds at the front and pushes the oldest out", () => {
+    const slots = recentRoundSlots(WINDOW, LAST_YEAR);
+    expect(slots).toHaveLength(WINDOW);
+    expect(slots.slice(0, 4)).toEqual(LAST_YEAR);
+    expect(slots).not.toContain("2023-4");
+  });
+
+  it("is the bundled history alone when nothing has been played since", () => {
+    expect(recentRoundSlots(WINDOW, [])).toEqual(recentRoundSlots());
+    expect(recentRoundSlots(WINDOW, null)).toEqual(recentRoundSlots());
+  });
+
+  it("counts a round once, however many ways it arrives", () => {
+    const slots = recentRoundSlots(WINDOW, ["2025-4", ...LAST_YEAR]);
+    expect(slots.filter(k => k === "2025-4")).toHaveLength(1);
+  });
+
+  it("knows where the bundled record books stop", () => {
+    expect(HISTORY_LAST_YEAR).toBe(2025);
+  });
+});
+
+// ── The two halves, together ──
+// The bug this is the regression test for: Matt V played the 2026 WBC, a
+// director created 2027, and his index was still built from 2014, 2015 and
+// 2024 — with none of 2026 on the chart, and no mark saying he had missed
+// 2025. `extraRounds` and `recentSlots` travel together for that reason.
+describe("indexFor with the live half of the record", () => {
+  const rounds = (year, diffs) => diffs.map((d, i) => ({
+    year, round: i + 1, key: `${year}-${i + 1}`, differential: d,
+  }));
+  const LAST_YEAR = rounds(2026, [14.2, 15.9, 16.4, 13.8]);
+  const SLOTS = recentRoundSlots(WINDOW, LAST_YEAR.map(r => r.key));
+
+  it("puts a returning player's newest rounds in his window", () => {
+    const p = indexFor("Matt V", { extraRounds: LAST_YEAR, recentSlots: SLOTS });
+    expect(p.window.slice(0, 4).map(r => r.key))
+      .toEqual(["2026-4", "2026-3", "2026-2", "2026-1"]);
+    expect(p.counting.some(r => r.year === 2026)).toBe(true);
+  });
+
+  // He is still asterisked — he has missed years and those rounds reach back a
+  // decade — but he is asterisked for the years he actually missed.
+  it("marks him against a field that played last year", () => {
+    const p = indexFor("Matt V", { extraRounds: LAST_YEAR, recentSlots: SLOTS });
+    expect(p.stale).toBe(true);
+    expect(p.missed).not.toContain("2026-1");
+    expect(p.missed).toContain("2025-1");
+  });
+
+  // And a man who was there for all of it is not marked at all — which he was
+  // not, before, since his own 2026 rounds could not be seen either.
+  it("leaves a player who has been to every one of them unmarked", () => {
+    const p = indexFor("Bob B", { extraRounds: LAST_YEAR, recentSlots: SLOTS });
+    expect(p.window).toHaveLength(WINDOW);
+    expect(p.missed).toEqual([]);
+    expect(p.stale).toBe(false);
+  });
+
+  // The failure the pairing is there to stop: rounds without the yardstick
+  // that goes with them reads as "played every round the tournament did".
+  it("marks a player who missed last year, when the yardstick knows it happened", () => {
+    const missed = indexFor("Bob B", { recentSlots: SLOTS });
+    expect(missed.missed).toEqual(["2026-4", "2026-3", "2026-2", "2026-1"]);
+    expect(missed.stale).toBe(true);
+    expect(indexFor("Bob B").stale).toBe(false);
   });
 });

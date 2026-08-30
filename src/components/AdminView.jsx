@@ -23,7 +23,7 @@
 //
 //   DEMO_PLAYERS   the career registry, arriving as the `registry` prop
 //   TOURNAMENT     only its default NAME was wanted; that is in constants now
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import { TOURNAMENT_ID, getTournamentYear } from "../firebase";
 import { accountsUnreadable, membershipForPlayer, playerIsDirector } from "../lib/accounts";
@@ -49,7 +49,8 @@ import { SCORING_LEAD_MIN } from "../lib/scoringGate";
 import { NUM_ROUNDS, roundDateChoices } from "../lib/rounds";
 import { toDisplayName, isGeneratedName, shortName, fullName, splitName } from "../lib/playerNames";
 import { missingTees, describeMissingTees, pairingsTrouble } from "../lib/roundSetup";
-import { indexFor, matchHistoryName } from "../lib/handicap";
+import { indexFor, matchHistoryName, recentRoundSlots, WINDOW } from "../lib/handicap";
+import { EMPTY_LIVE_ROUNDS } from "../lib/liveHistory";
 import { returningPlayers, returningLine } from "../lib/returningPlayers";
 import { deleteVerdict, deletionLines } from "../lib/playerDelete";
 import { getDefaultTee } from "../lib/defaultTee";
@@ -863,7 +864,7 @@ function PlayerRow({ player, isLast, onOpen, isDirector, account }) {
 // id off his record rather than deriving one. See lib/returningPlayers.
 function PlayerEditor({ editing, set, onClose, tPlayers, players, memberships, claims, authUid,
                         holeData, numRounds, onSave, onRemove, askDelete, notify, confirm, tournamentStarted,
-                        returning = [] }) {
+                        returning = [], indexOf = indexFor }) {
   if (!editing) return null;
   const isNew = !!editing.isNew;
   const p = isNew ? null : players.find(x => x.id === editing.pid);
@@ -881,9 +882,12 @@ function PlayerEditor({ editing, set, onClose, tPlayers, players, memberships, c
   const wbcRef = (() => {
     const subject = p || { name: editing.nick || defaultNick, first_name: editing.first, last_name: editing.last };
     const histName = matchHistoryName(subject);
-    if (!histName) return null;
-    const idx = indexFor(histName, { override: p?.index_override ?? null });
-    return idx.index == null ? null : idx;
+    // A name the record books have never heard of can still have rounds: last
+    // year's first-timer, whose whole career is in the years the bundled
+    // history has not caught up with. `indexOf` knows about those, so it is
+    // asked even when the name matches nothing — see lib/liveHistory.
+    const idx = indexOf(histName, p?.id, p?.index_override ?? null);
+    return idx?.index == null ? null : idx;
   })();
   const wbcDiffers = !!wbcRef && String(parseFloat(editing.hi) || 0) !== String(wbcRef.index);
   const showPicker = isNew && !editing.linked && returning.length > 0;
@@ -1020,7 +1024,12 @@ function PlayerEditor({ editing, set, onClose, tPlayers, players, memberships, c
   // decision is raised from two places — here, and the off-roster list on the
   // Players tab, where a demo player already moved to inactive has to be
   // reachable at all.
-  const canDelete = !isNew && !!askDelete && !matchHistoryName(p);
+  //
+  // "The record books know him" is now two records: the bundled history, and
+  // the WBCs played since it was last generated. A man whose only tournament
+  // is in the second half has a career too — `wbcRef` is what says so — and
+  // deleting him would take it with him.
+  const canDelete = !isNew && !!askDelete && !matchHistoryName(p) && !wbcRef;
 
   const doDelete = async () => {
     const done = await askDelete({
@@ -1601,7 +1610,7 @@ function TournamentPanel({ meta, onSave, notify, confirm, scoredRounds = [] }) {
 
 // AccessPanel moved to components/AccessPanel.jsx — see the header there.
 
-export function AdminView({ registry, activePlayers, marketPool, sideGames, onUpdateSideGames, rebuyIds, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, deletePlayer, editionsHolding, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, roundDates, onSetRoundDate, scoringOpen, onSetScoringOpen, pairingStrategy, onSetPairingStrategy, leaderboard, holeData, finalizedRounds, onFinalizeRound, onUnfinalizeRound, onDiscardRoundScores, notify, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, externalSettingsRound, onExternalSettingsHandled, teesSaved, onTeesSave, teesModified, onTeesModify, memberships, onSetDirector, claims, authUid, tournamentMeta, onSaveTournamentMeta, demoOnly = false }) {
+export function AdminView({ liveRounds = EMPTY_LIVE_ROUNDS, registry, activePlayers, marketPool, sideGames, onUpdateSideGames, rebuyIds, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, deletePlayer, editionsHolding, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, roundDates, onSetRoundDate, scoringOpen, onSetScoringOpen, pairingStrategy, onSetPairingStrategy, leaderboard, holeData, finalizedRounds, onFinalizeRound, onUnfinalizeRound, onDiscardRoundScores, notify, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, externalSettingsRound, onExternalSettingsHandled, teesSaved, onTeesSave, teesModified, onTeesModify, memberships, onSetDirector, claims, authUid, tournamentMeta, onSaveTournamentMeta, demoOnly = false }) {
   // ── The sandbox administrator ─────────────────────────────────────
   // `demoOnly` is a MEMBER who is an administrator only because of where they
   // are standing — a beta tester or a store reviewer inside the sandbox, see
@@ -1664,9 +1673,22 @@ export function AdminView({ registry, activePlayers, marketPool, sideGames, onUp
   // Who could be added back — the player registry plus the record books, minus
   // this edition's roster. Keyed off tPlayers, which is also what a registry
   // refresh nudges, so a name added on another phone reaches this list.
+  // ── A career index, both halves of it ──
+  // The bundled record books stop at the last export of data/history.js; the
+  // WBCs played in this app since are in `liveRounds`. Every index this console
+  // quotes — the reference beside the handicap field, the one offered for a
+  // returning golfer — is computed through here so the two can never disagree,
+  // and so neither disagrees with the Players tab. See lib/liveHistory.
+  const recentSlots = useMemo(() => recentRoundSlots(WINDOW, liveRounds?.slots), [liveRounds]);
+  const careerIndex = useCallback((historyName, pid, override = null) => indexFor(historyName, {
+    override,
+    extraRounds: (pid && liveRounds?.byPlayer?.[pid]) || [],
+    recentSlots,
+  }), [liveRounds, recentSlots]);
+
   const returningPool = useMemo(
-    () => returningPlayers({ registry, rosterIds: tPlayers.map(t => t.player_id) }),
-    [registry, tPlayers],
+    () => returningPlayers({ registry, rosterIds: tPlayers.map(t => t.player_id), indexOf: careerIndex }),
+    [registry, tPlayers, careerIndex],
   );
 
   // ── Records that exist for no reason ──
@@ -1679,7 +1701,7 @@ export function AdminView({ registry, activePlayers, marketPool, sideGames, onUp
   // editor opens off a ROSTER row, and one of the two ways to end up with junk
   // in the registry is to have moved it to inactive already.
   const deletablePool = useMemo(
-    () => (deletePlayer && editionsHolding ? returningPool.filter(r => !r.historyName) : []),
+    () => (deletePlayer && editionsHolding ? returningPool.filter(r => !r.historyName && !r.rounds) : []),
     [returningPool, deletePlayer, editionsHolding],
   );
 
@@ -3345,6 +3367,7 @@ export function AdminView({ registry, activePlayers, marketPool, sideGames, onUp
         onRemove={removePlayer}
         askDelete={askDelete}
         returning={returningPool}
+        indexOf={careerIndex}
         onSave={async (v) => {
           if (v.isNew) {
             await addPlayerToTournament(v.name, v.hi, { first_name: v.first, last_name: v.last }, v.pid);
