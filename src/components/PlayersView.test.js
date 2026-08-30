@@ -59,6 +59,54 @@ describe("PlayersView", () => {
   // Opening a row is the one interaction the tab has, and it renders a whole
   // second layer — the scoring window, the counting rounds — that nothing else
   // draws.
+  // ── The bug ──
+  // data/history.js stops at the last export of data/rounds.csv, and the WBC
+  // played since is in Firestore. Without it on screen, a man who played last
+  // year opened next year's edition and found none of it on his chart — and
+  // the app quoted him an index a year out of date beside a roster handicap
+  // that had been seeded from those very cards.
+  it("shows a round played since the record books were generated", () => {
+    const live = {
+      byPlayer: {
+        aaron_j: [{
+          year: 2026, round: 1, key: "2026-1", player: "aaron_j", gross: 84,
+          ch: null, net: null,
+          course: { name: "THE MASTERPIECE", rating: 71.4, slope: 134, par: 71 },
+          differential: 10.6,
+        }],
+      },
+      slots: ["2026-1"],
+    };
+    render(h(PlayersView, {
+      players: PLAYERS, registry: REGISTRY, meId: "aaron_j", year: 2027, liveRounds: live,
+    }));
+    act(() => screen.getByText(/Aaron Jensen/i).closest("button").click());
+    expect(screen.getAllByText(/THE MASTERPIECE/i).length).toBeGreaterThan(0);
+  });
+
+  // A first WBC played after the bundle was generated is a career the record
+  // books have never heard of. He is in the registry and nowhere else, so
+  // leaving him out of the roster is what used to make him disappear.
+  it("lists a career that exists only in the years since", () => {
+    render(h(PlayersView, {
+      players: PLAYERS, registry: [...REGISTRY, { id: "new_guy", name: "New Guy", index_override: null }],
+      meId: "aaron_j", year: 2027,
+      liveRounds: {
+        byPlayer: {
+          new_guy: [{
+            year: 2026, round: 1, key: "2026-1", player: "new_guy", gross: 90,
+            ch: null, net: null,
+            course: { name: "THE MASTERPIECE", rating: 71.4, slope: 134, par: 71 },
+            differential: 15.7,
+          }],
+        },
+        slots: ["2026-1"],
+      },
+    }));
+    expect(screen.getByText(/New Guy/i)).toBeTruthy();
+    expect(screen.getByText("15.7")).toBeTruthy();
+  });
+
   it("opens a player's detail without throwing", () => {
     render(h(PlayersView, { players: PLAYERS, registry: REGISTRY, meId: "aaron_j", year: 2026 }));
     const row = screen.getByText(/Aaron Jensen/i).closest("div");
