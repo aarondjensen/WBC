@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   differential, wbcIndex, historyFor, indexFor, indexTable, matchHistoryName,
   recentRoundSlots, countingFor, editionRounds, mergeRounds, WINDOW, COUNTING,
-  HISTORY_LAST_YEAR,
+  HISTORY_LAST_YEAR, indexTimeline, yearDeltas,
 } from "./handicap";
 import { WD_SCORE } from "./individualBoard";
 
@@ -646,5 +646,94 @@ describe("indexFor with the live half of the record", () => {
     expect(missed.missed).toEqual(["2026-4", "2026-3", "2026-2", "2026-1"]);
     expect(missed.stale).toBe(true);
     expect(indexFor("Bob B").stale).toBe(false);
+  });
+});
+
+// ── The index as it was ──
+// The chart on the detail page draws a line through these, so a career reads
+// as a shape rather than as twelve bars and one number. Each point is the same
+// arithmetic as the headline index, run with only the rounds that had been
+// played by then in front of it.
+describe("indexTimeline", () => {
+  const rd12 = (d) => d.map((x, i) => ({ year: 2020, round: i + 1, key: `2020-${i + 1}`, differential: x }));
+
+  it("gives every round the number the player carried after it", () => {
+    // Three rounds, best 1 of 3 at every step: 20, then 14, then still 14.
+    const line = indexTimeline(rd12([20, 14, 18]));
+    expect(line.map(t => t.key)).toEqual(["2020-3", "2020-2", "2020-1"]);
+    expect(line.map(t => t.index)).toEqual([14, 14, 20]);
+  });
+
+  it("measures a round against what was behind it, never in front of it", () => {
+    // The last round is the best of the career; the first round's point cannot
+    // know that, or the line would be a projection rather than a history.
+    const line = indexTimeline(rd12([18, 17, 2]));
+    expect(line[line.length - 1].index).toBe(18);
+  });
+
+  it("takes a career in any order", () => {
+    const jumbled = [
+      { year: 2020, round: 2, key: "2020-2", differential: 14 },
+      { year: 2019, round: 1, key: "2019-1", differential: 20 },
+      { year: 2020, round: 1, key: "2020-1", differential: 18 },
+    ];
+    expect(indexTimeline(jumbled).map(t => t.key)).toEqual(["2020-2", "2020-1", "2019-1"]);
+  });
+
+  it("keeps an unrated round in its place, on the number it inherited", () => {
+    const line = indexTimeline([
+      { year: 2020, round: 2, key: "2020-2", differential: null },
+      { year: 2020, round: 1, key: "2020-1", differential: 12 },
+    ]);
+    expect(line.map(t => t.index)).toEqual([12, 12]);
+  });
+
+  it("survives being handed nothing", () => {
+    expect(indexTimeline()).toEqual([]);
+    expect(indexTimeline([])).toEqual([]);
+  });
+
+  // Every point on the real chart has to be a number, or the line breaks.
+  it("draws a real career end to end", () => {
+    const line = indexTimeline(indexFor("Bob B").rounds);
+    expect(line.length).toBeGreaterThan(50);
+    expect(line.every(t => typeof t.index === "number")).toBe(true);
+    expect(line[0].index).toBe(indexFor("Bob B").index);
+  });
+});
+
+describe("yearDeltas", () => {
+  const year = (y, diffs) => diffs.map((d, i) => ({
+    year: y, round: i + 1, key: `${y}-${i + 1}`, differential: d,
+  }));
+
+  it("reports where each year finished and how far it moved", () => {
+    const rounds = [...year(2019, [20, 20]), ...year(2020, [12, 12])];
+    const out = yearDeltas(rounds);
+    expect(out.map(d => d.year)).toEqual([2020, 2019]);
+    expect(out[0].index).toBe(12);
+    expect(out[1].index).toBe(20);
+    // Down eight: the index is a handicap, so down is better.
+    expect(out[0].delta).toBe(-8);
+  });
+
+  it("leaves the earliest year with nothing to be measured against", () => {
+    expect(yearDeltas(year(2019, [20]))[0].delta).toBe(null);
+  });
+
+  // A man who misses two WBCs has not been getting worse in the meantime.
+  it("measures against the last year played, not the calendar year before", () => {
+    const rounds = [...year(2015, [20]), ...year(2024, [16])];
+    expect(yearDeltas(rounds)[0].delta).toBe(-4);
+  });
+
+  it("says a year that changed nothing changed nothing", () => {
+    const rounds = [...year(2019, [20]), ...year(2020, [24])];
+    // Best 1 of 2 is still the 20, so the year moved the index not at all.
+    expect(yearDeltas(rounds)[0].delta).toBe(0);
+  });
+
+  it("survives being handed nothing", () => {
+    expect(yearDeltas()).toEqual([]);
   });
 });

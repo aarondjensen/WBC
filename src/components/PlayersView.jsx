@@ -48,7 +48,7 @@
 import { Fragment, useMemo, useState } from "react";
 import { K, FONT, FS, R, ALPHA, MOTION } from "../theme";
 import { Btn, Card, SectionLabel } from "./ui";
-import { indexFor, matchHistoryName, recentRoundSlots, WINDOW, COUNTING } from "../lib/handicap";
+import { indexFor, matchHistoryName, recentRoundSlots, indexTimeline, yearDeltas, WINDOW, COUNTING } from "../lib/handicap";
 import { EMPTY_LIVE_ROUNDS } from "../lib/liveHistory";
 import { HISTORY_PLAYERS } from "../data/history";
 
@@ -85,15 +85,56 @@ const fmtDiff = (n) => (n == null ? "—" : n.toFixed(1));
 // is a round shot exactly to the course rating — so the picture stays honest
 // about how far apart the twelve rounds actually are. A round that beat the
 // rating pulls the floor below zero rather than clipping.
+//
+// ── The index line, and why it belongs on these bars ──────────────
+// Twelve bars say what the rounds were. They do not say what they DID, which
+// is the question a golfer actually has: am I getting better? So the index as
+// it stood after each round is drawn through them as a line (lib/handicap's
+// indexTimeline), and the year rail underneath carries the year-over-year
+// move — down is an improvement, because the low number is the better golfer.
+//
+// The line shares the bars' scale rather than getting an axis of its own. It
+// can: an index IS an average of differentials, so the two are the same units
+// and a line sitting low among tall bars is the true statement that the good
+// rounds are what the number is made of. A second axis would have implied two
+// quantities that merely correlate.
+//
+// Tapping a bar names the round and the number it left the player on. That is
+// the whole interaction — no hover, because this is a phone, and no tooltip
+// that covers the picture it is describing: the readout sits above the chart
+// in a row that is always there, so nothing moves when it fills in.
+//
+// ── One alignment detail ──────────────────────────────────────────
+// The grid has NO gap and the bars carry their own side padding instead. That
+// is what lets the line be positioned in percentages — with a gap, a column's
+// centre is not `(i + ½) / n` of the width, and the line would drift a couple
+// of pixels off its bars by the right-hand edge.
 function WindowChart({ idx, recent }) {
+  const [picked, setPicked] = useState(null);
   const cols = [...idx.window].reverse();
+
+  // The index after every round of the career, and what each year did to it.
+  // Off the whole career rather than the window: the oldest bar's point is the
+  // number the player carried then, which was built from rounds that have
+  // since dropped out of it.
+  const line = useMemo(() => new Map(indexTimeline(idx.rounds).map(t => [t.key, t.index])), [idx.rounds]);
+  const deltas = useMemo(() => new Map(yearDeltas(idx.rounds).map(d => [d.year, d])), [idx.rounds]);
+
   if (!cols.length) return null;
 
   const diffs = cols.map(c => c.differential);
-  const top = Math.max(...diffs);
-  const floor = Math.min(0, ...diffs);
+  const marks = cols.map(c => line.get(c.key)).filter(n => n != null);
+  // The line is included in the scale. It is normally inside the bars' range —
+  // an average of the best few of them — but early in a career it is built
+  // from rounds that have since dropped out of the window, and a point above
+  // the tallest bar would otherwise be drawn off the top of the chart.
+  const top = Math.max(...diffs, ...marks);
+  const floor = Math.min(0, ...diffs, ...marks);
   const H = 92;
-  const barH = (d) => Math.max(4, ((d - floor) / (top - floor || 1)) * H);
+  const span = top - floor || 1;
+  const barH = (d) => Math.max(4, ((d - floor) / span) * H);
+  const y = (v) => H - ((v - floor) / span) * H;
+  const x = (i) => ((i + 0.5) * 100) / cols.length;
 
   // Consecutive rounds from the same year share one label under the chart —
   // twelve repetitions of "2025" is noise, three spans is the shape of a career.
@@ -108,24 +149,121 @@ function WindowChart({ idx, recent }) {
   // measured on — the reason this player's index wears an asterisk.
   const outsiders = cols.filter(c => !recent.has(c.key)).length;
 
-  const grid = { display: "grid", gridTemplateColumns: `repeat(${cols.length}, minmax(0, 1fr))`, gap: 3 };
+  const at = picked == null ? -1 : cols.findIndex(c => c.key === picked);
+  const shown = at >= 0 ? cols[at] : null;
+  const shownIndex = shown ? line.get(shown.key) : null;
+
+  const grid = { display: "grid", gridTemplateColumns: `repeat(${cols.length}, minmax(0, 1fr))`, gap: 0 };
 
   return (
     <div>
-      <div style={{ ...grid, alignItems: "end", height: H }}>
-        {cols.map(c => {
-          const on = idx.countingKeys.has(c.key);
-          return (
-            <div key={c.key} style={{
-              height: barH(c.differential),
-              borderRadius: `${R.xs}px ${R.xs}px 0 0`,
-              background: on ? K.acc : `${K.acc}${ALPHA.wash}`,
-              border: `1px solid ${on ? "transparent" : `${K.acc}${ALPHA.line}`}`,
-              boxShadow: on ? `0 0 10px ${K.accGlow}` : "none",
-              transition: `height ${MOTION}`,
+      {/* The readout. Always present, so filling it in moves nothing on the
+          page — an empty row costs 18px and a chart that jumps under the thumb
+          that just tapped it costs more than that. */}
+      <div style={{
+        display: "flex", alignItems: "baseline", gap: 6, minHeight: 16, marginBottom: 8,
+        fontSize: FS.micro, color: K.t3, letterSpacing: 0.3,
+      }}>
+        {shown ? (
+          <>
+            <span style={{ fontWeight: 800, color: K.t2, flexShrink: 0 }}>
+              {shown.year} R{shown.round}
+            </span>
+            <span style={{
+              flex: 1, minWidth: 0, overflow: "hidden",
+              textOverflow: "ellipsis", whiteSpace: "nowrap",
+            }}>{shown.course?.name || ""}</span>
+            <span style={{ flexShrink: 0, textTransform: "uppercase", fontWeight: 700 }}>
+              index{" "}
+              <strong style={{ color: K.tourn, fontSize: FS.label }}>{fmtIndex(shownIndex)}</strong>
+            </span>
+          </>
+        ) : (
+          <span>Tap a round for the index it left behind.</span>
+        )}
+      </div>
+
+      <div style={{ position: "relative", height: H }}>
+        <div style={{ ...grid, alignItems: "end", height: H }}>
+          {cols.map(c => {
+            const on = idx.countingKeys.has(c.key);
+            const isPicked = c.key === picked;
+            return (
+              <button
+                key={c.key}
+                type="button"
+                onClick={() => setPicked(p => (p === c.key ? null : c.key))}
+                aria-label={`${c.year} round ${c.round}, differential ${fmtDiff(c.differential)}`}
+                style={{
+                  height: H, display: "flex", alignItems: "flex-end",
+                  padding: "0 1.5px", background: "transparent", border: "none",
+                  cursor: "pointer", WebkitTapHighlightColor: "transparent",
+                }}
+              >
+                <div style={{
+                  flex: 1,
+                  height: barH(c.differential),
+                  borderRadius: `${R.xs}px ${R.xs}px 0 0`,
+                  background: on ? K.acc : `${K.acc}${ALPHA.wash}`,
+                  border: `1px solid ${isPicked ? K.tourn : on ? "transparent" : `${K.acc}${ALPHA.line}`}`,
+                  // The ring as well as the border: a filled bar is already
+                  // solid accent, and a 1px edge on it is not a selection
+                  // anybody can see with a thumb over the chart.
+                  boxShadow: isPicked
+                    ? `0 0 0 2px ${K.tourn}${ALPHA.hair}`
+                    : on ? `0 0 10px ${K.accGlow}` : "none",
+                  transition: `height ${MOTION}`,
+                }} />
+              </button>
+            );
+          })}
+        </div>
+
+        {/* The index, through the rounds that made it. Percentages across,
+            pixels down — the viewBox is the chart's own height, so a point at
+            `y(v)` lands exactly where a bar of that value would end. The
+            stroke is told not to scale, or stretching 100 units across a phone
+            would draw a 2px line as a smear. */}
+        <svg
+          viewBox={`0 0 100 ${H}`}
+          preserveAspectRatio="none"
+          aria-hidden="true"
+          style={{ position: "absolute", inset: 0, width: "100%", height: H, pointerEvents: "none", overflow: "visible" }}
+        >
+          <polyline
+            points={cols.map((c, i) => [i, line.get(c.key)])
+              .filter(([, v]) => v != null)
+              .map(([i, v]) => `${x(i)},${y(v)}`)
+              .join(" ")}
+            fill="none"
+            stroke={K.tourn}
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            vectorEffect="non-scaling-stroke"
+          />
+        </svg>
+
+        {/* Where the tap landed: a dot on the line, over a hairline down to the
+            bar it belongs to. Positioned rather than drawn in the SVG so it
+            stays a circle — the stretched viewBox would make an ellipse of
+            it. */}
+        {shown && shownIndex != null && (
+          <>
+            <div style={{
+              position: "absolute", left: `${x(at)}%`, top: y(shownIndex),
+              bottom: 0, width: 0, borderLeft: `1px dotted ${K.tourn}${ALPHA.line}`,
+              pointerEvents: "none",
             }} />
-          );
-        })}
+            <div style={{
+              position: "absolute", left: `${x(at)}%`, top: y(shownIndex),
+              transform: "translate(-50%, -50%)",
+              width: MARK, height: MARK, borderRadius: "50%",
+              background: K.tourn, border: `2px solid ${K.card}`,
+              pointerEvents: "none",
+            }} />
+          </>
+        )}
       </div>
 
       {/* The differential under its own bar. This is the number the index is an
@@ -162,28 +300,52 @@ function WindowChart({ idx, recent }) {
         </div>
       )}
 
-      {/* The year rail. Same grid, so a span of three columns lines up with
-          exactly the three bars it names. */}
+      {/* The year rail, and what the year did. Same grid, so a span of three
+          columns lines up with exactly the three bars it names — and the
+          margin, which the columns no longer carry as a gap, is what keeps two
+          neighbouring years from running into one rule.
+
+          The move is the whole year's, even where the window only shows part
+          of it: a career does not stop at the edge of a chart, and "2014
+          −1.2" is a fact about 2014 rather than about the two bars visible. */}
       <div style={{ ...grid, marginTop: 6 }}>
-        {groups.map((g, i) => (
-          <div key={`${g.year}-${i}`} style={{
-            gridColumn: `span ${g.count}`,
-            borderTop: `1px solid ${K.bdr}`,
-            paddingTop: 4, textAlign: "center",
-            fontSize: FS.micro, fontWeight: 700, color: K.t3, letterSpacing: 0.5,
-          }}>{g.year}</div>
-        ))}
+        {groups.map((g, i) => {
+          const d = deltas.get(g.year);
+          const moved = d && d.delta != null && d.delta !== 0;
+          return (
+            <div key={`${g.year}-${i}`} style={{
+              gridColumn: `span ${g.count}`,
+              borderTop: `1px solid ${K.bdr}`,
+              margin: "0 1.5px", paddingTop: 4, textAlign: "center",
+              fontSize: FS.micro, fontWeight: 700, color: K.t3, letterSpacing: 0.5,
+            }}>
+              <div>{g.year}</div>
+              <div style={{
+                marginTop: 1, minHeight: 11,
+                color: !moved ? K.t3 : d.delta < 0 ? K.acc : K.warn,
+              }}>
+                {d?.delta == null ? "" : moved
+                  ? `${d.delta < 0 ? "▼" : "▲"}${Math.abs(d.delta).toFixed(1)}`
+                  : "0.0"}
+              </div>
+            </div>
+          );
+        })}
       </div>
 
-      {/* Only the two marks that mean something on their own. A third entry
-          used to name the hollow bars — "in the window, didn't count" — which
-          is what a bar IS when it is not filled: the absence of the first
-          entry, spelled out, taking a line to say nothing the picture had not
-          already said. */}
+      {/* Only the marks that mean something on their own. A fourth entry used
+          to name the hollow bars — "in the window, didn't count" — which is
+          what a bar IS when it is not filled: the absence of the first entry,
+          spelled out, taking a line to say nothing the picture had not already
+          said. */}
       <div style={{ display: "flex", flexWrap: "wrap", columnGap: 14, rowGap: 5, marginTop: 12, fontSize: FS.micro, color: K.t3 }}>
         <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
           <span style={{ width: MARK, height: MARK, borderRadius: R.xs, background: K.acc, flexShrink: 0 }} />
           included in index
+        </span>
+        <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          <span style={{ width: 14, height: 2, borderRadius: R.xs, background: K.tourn, flexShrink: 0 }} />
+          index after each round
         </span>
         {outsiders > 0 && (
           <span style={{ display: "flex", alignItems: "center", gap: 5, color: K.warn }}>
