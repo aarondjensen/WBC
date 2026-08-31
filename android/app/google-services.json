@@ -14,11 +14,27 @@
       },
       "oauth_client": [
         {
+          "client_id": "281900029443-3eettmrqf4htrekl3q93k5chm5m9ihp2.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.wannabecup.app",
+            "certificate_hash": "16a479fc6eedc61aeb7f47cdd9bd81fccc9c84c4"
+          }
+        },
+        {
           "client_id": "281900029443-guobmlrhtmma6cjomdevceuttl7jq4ed.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
             "package_name": "com.wannabecup.app",
             "certificate_hash": "efc2a38c42bb3c69dcefd22ad1e049c74b77939c"
+          }
+        },
+        {
+          "client_id": "281900029443-i5jt726qg1f23a4399s9hknmff6s4d5c.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.wannabecup.app",
+            "certificate_hash": "02dcdf192c16631ae968fb688f0e8f52d5b47be3"
           }
         },
         {
