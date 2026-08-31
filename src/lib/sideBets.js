@@ -184,3 +184,86 @@ export const sideBetTotals = (bets, pid) => {
 // the director is the one who settles those here as everywhere else.
 export const canDeleteSideBet = (bet, { uid, isDirector }) =>
   !!bet && (isDirector === true || (!!uid && bet.created_by === uid));
+
+// ── Editing ───────────────────────────────────────────────────────
+// A bet is written down on a tee box, one-handed, often by whichever of the
+// two got their phone out first — so the terms arrive wrong more often than
+// any other record in this app. Twenty becomes two hundred, the wrong Dave
+// gets picked off a list of sixteen, and the detail says "back" when the bet
+// was the front. Without an edit the fix is delete and retype, which only the
+// author can do at all, and which loses the settle marks and the row's place
+// in the ledger along with the typo.
+//
+// Who may: a director, the person who logged it, and — unlike deleting —
+// EITHER PLAYER IN IT. That asymmetry is deliberate. Deleting a bet you
+// dispute erases the argument; correcting one you are a side of is the
+// argument, held in front of the whole field, on a row both names are on.
+// Sixteen people at a golf course: visibility is the enforcement, exactly as
+// it is for who may log a bet in the first place.
+//
+// Mirrors the `update` clause in firestore.rules. An affordance the rules
+// would refuse is worse than no affordance.
+export const canEditSideBet = (bet, { uid, pid, isDirector }) =>
+  !!bet && !!uid && (isDirector === true
+    || bet.created_by === uid
+    || inSideBet(bet, pid));
+
+// The patch a save writes, from the same validated form the add sheet fills.
+// Deliberately NOT the whole document: `id` addresses the row, and everything
+// the caller has no business moving — `tournament_id`, `created_by`,
+// `created_at` — is absent rather than written back, so a merge cannot carry a
+// stale copy of it over the truth.
+export const buildSideBetEdit = (bet, { playerA, playerB, amount, detail }) => {
+  const next = {
+    id: bet.id,
+    player_a: playerA,
+    player_b: playerB,
+    amount: Number(amount),
+    detail: String(detail || "").trim().slice(0, MAX_DETAIL),
+  };
+  // WHO is in it and WHAT IT IS WORTH are the two things a "paid" mark was
+  // about. Move either and the marks are a claim about a bet that no longer
+  // exists — so they go, and both sides say it again against the new terms.
+  // A wording fix is not that: the detail getting clearer does not un-pay
+  // anybody, and clearing a settled row for a typo would be the app picking
+  // an argument nobody was having.
+  const moved = next.player_a !== bet.player_a
+    || next.player_b !== bet.player_b
+    || next.amount !== (Number(bet.amount) || 0);
+  // An array, and written every time — see toggleSettled for why a map would
+  // merge the removed marks straight back in.
+  next.settled_by = moved
+    ? []
+    : settledBy(bet).filter(id => [next.player_a, next.player_b].includes(id));
+  return next;
+};
+
+// ── Running it back ───────────────────────────────────────────────
+// A settled bet is the end of one wager and, at a golf tournament, very often
+// the start of the next one: the money changes hands on the 18th green and
+// somebody says "again tomorrow, double". Retyping it is four fields and two
+// name pickers on a phone in a car park, which is exactly the friction that
+// sends a bet back onto a napkin.
+//
+// A REPEAT IS A NEW BET, not a resurrection of the old one. The settled row
+// stays settled and stays on the board — it is the record that the first
+// wager was paid, and reopening it to run it again would erase the one thing
+// the ledger is for. Nothing links the two rows either: a chain of rematches
+// is a thing to read down the list, not a structure the ledger has to carry.
+//
+// Only on a bet that is actually finished. A live bet already exists; the
+// button on it would be a way to accidentally have the same wager twice.
+export const canRepeatSideBet = (bet, { uid, pid }) =>
+  !!uid && isSettled(bet) && inSideBet(bet, pid);
+
+// The same terms, in the shape the form holds them — a string amount, because
+// that is what an input has and Number() is buildSideBet's job. It seeds the
+// sheet rather than writing anything: the rematch is usually the same bet
+// with the stakes moved, and the tap that opens it is not the tap that agrees
+// to it.
+export const repeatSideBetSeed = (bet) => ({
+  playerA: bet?.player_a || "",
+  playerB: bet?.player_b || "",
+  amount: bet?.amount == null ? "" : String(bet.amount),
+  detail: String(bet?.detail || ""),
+});

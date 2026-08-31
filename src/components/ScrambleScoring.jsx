@@ -44,6 +44,11 @@ import {
 // nobody taps forward before it fires.
 const ADVANCE_MS = 900;
 
+// The mini leaderboard's columns: position, team, thru, to par. Declared once
+// because the header row and the team rows are separate elements and a grid
+// written out twice is a grid that ends up misaligned.
+const MINI_COLS = "22px 1fr 52px 44px";
+
 export function ScrambleScoring({ scramble, players = [], courses = [], user, onSaveHole, onGoToSetup }) {
   const sc = mergeScramble(scramble);
   const course = courses.find(c => c.id === sc.courseId) || null;
@@ -119,19 +124,38 @@ export function ScrambleScoring({ scramble, players = [], courses = [], user, on
   // ── The course has to be set before anything here means a number ──
   // Same empty state the tournament screen puts up, and the same door out of
   // it for the one person who can fix it.
+  //
+  // Two different empty states, though, and telling them apart is the whole
+  // difference between a screen that is waiting and one that is wrong. A
+  // scramble with NO courseId is a setup that is not finished. A scramble that
+  // names a course this phone does not hold is a course still on its way — the
+  // scramble's course is on no round, so the shell fetches it on its own after
+  // the scramble arrives (see App.jsx). Printing "No course set" over a course
+  // the director set an hour ago is what sent them looking for a setting they
+  // had already got right.
+  const awaitingCourse = !course && !!sc.courseId;
   if (!course) return (
     <div>
       <h2 style={{ fontFamily: FONT, fontSize: FS.title, margin: "0 0 14px", fontWeight: 800 }}>Scramble</h2>
       <div
-        onClick={user?.isDirector && onGoToSetup ? onGoToSetup : undefined}
-        style={{ background: K.card, borderRadius: R.xl, border: `1px dashed ${K.warn}${ALPHA.hair}`, padding: 32, textAlign: "center", cursor: user?.isDirector ? "pointer" : "default" }}
+        onClick={user?.isDirector && onGoToSetup && !awaitingCourse ? onGoToSetup : undefined}
+        style={{ background: K.card, borderRadius: R.xl, border: `1px dashed ${K.warn}${ALPHA.hair}`, padding: 32, textAlign: "center", cursor: user?.isDirector && !awaitingCourse ? "pointer" : "default" }}
       >
         <div style={{ fontSize: FS.display, marginBottom: 8 }}>🏌️</div>
-        <p style={{ color: K.warn, fontWeight: 600, margin: "0 0 4px" }}>No course set for the scramble</p>
-        {user?.isDirector
-          ? <p style={{ color: K.acc, fontSize: FS.small, margin: 0, fontWeight: 600 }}>Tap to set it up in More → Scramble →</p>
-          : <p style={{ color: K.t2, fontSize: FS.small, margin: 0 }}>Waiting on your tournament director.</p>
-        }
+        {awaitingCourse ? (
+          <>
+            <p style={{ color: K.t1, fontWeight: 600, margin: "0 0 4px" }}>Loading the scramble&apos;s course…</p>
+            <p style={{ color: K.t2, fontSize: FS.small, margin: 0 }}>Pull down to refresh if it does not arrive.</p>
+          </>
+        ) : (
+          <>
+            <p style={{ color: K.warn, fontWeight: 600, margin: "0 0 4px" }}>No course set for the scramble</p>
+            {user?.isDirector
+              ? <p style={{ color: K.acc, fontSize: FS.small, margin: 0, fontWeight: 600 }}>Tap to set it up in More → Scramble →</p>
+              : <p style={{ color: K.t2, fontSize: FS.small, margin: 0 }}>Waiting on your tournament director.</p>
+            }
+          </>
+        )}
       </div>
     </div>
   );
@@ -235,28 +259,57 @@ export function ScrambleScoring({ scramble, players = [], courses = [], user, on
         <ScoreButtonRow score={score} par={par} forName={teamLabel(team)} onPick={pickScore} />
       </div>
 
-      {/* ── Where the three of them stand ──────────────────────────
-          A scramble has no leaderboard tab of its own, and the answer is three
-          rows long — so it rides under the card it is computed from. */}
+      {/* ── The mini leaderboard ───────────────────────────────────
+          A scramble has no Board tab of its own and does not want one: the
+          whole field is three rows, and three rows fit under the card they are
+          computed from. Anything larger would be a fourth screen to build and
+          a fifth tab state to reason about, to say what fits here.
+
+          Laid out as a leaderboard rather than a list — position, who, thru,
+          to par, under a header row — because that is what it IS, and the app
+          already has one of those the eye knows how to read.
+
+          A row is a way into that team's card, so this doubles as a second
+          switcher for anybody who reads the standings before they realise the
+          tabs above are tappable. */}
       <SectionLabel style={{ marginTop: 14 }}>Scramble</SectionLabel>
       <Card pad={0} style={{ overflow: "hidden", marginBottom: 8 }}>
-        {standings.map((row, i) => (
-          <div key={row.key} onClick={() => { cancelAdvance(); setTeam(row.key); }} style={{
-            display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", cursor: "pointer",
-            borderTop: i === 0 ? "none" : `1px solid ${K.bdr}${ALPHA.hair}`,
-            background: row.key === team ? K.acc + ALPHA.wash : "transparent",
-          }}>
-            <span style={{ fontSize: FS.small, fontWeight: 800, color: row.key === team ? K.acc : K.t1, width: 28, flexShrink: 0 }}>{row.label}</span>
-            <span style={{ flex: 1, minWidth: 0, fontSize: FS.micro, color: K.t3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-              {teamPlayers(sc.teams, row.key, players).map(shortName).join(", ")}
-            </span>
-            <span style={{ fontSize: FS.micro, color: K.t3, flexShrink: 0 }}>{row.thru > 0 ? `Thru ${row.thru}` : "—"}</span>
-            <span style={{
-              fontSize: FS.small, fontWeight: 800, width: 34, textAlign: "right", flexShrink: 0,
-              color: row.toPar == null ? K.t3 : row.toPar < 0 ? K.under : K.t2,
-            }}>{fmtPar(row.toPar)}</span>
-          </div>
-        ))}
+        <div style={{
+          display: "grid", gridTemplateColumns: MINI_COLS, gap: 8, alignItems: "center",
+          padding: "7px 12px", borderBottom: `1px solid ${K.bdr}`,
+          fontSize: FS.micro, fontWeight: 700, color: K.t3, letterSpacing: "0.08em",
+        }}>
+          <span />
+          <span>Team</span>
+          <span style={{ textAlign: "right" }}>Thru</span>
+          <span style={{ textAlign: "right" }}>±</span>
+        </div>
+        {standings.map((row, i) => {
+          const mine = row.key === team;
+          return (
+            <button key={row.key} onClick={() => { cancelAdvance(); setTeam(row.key); }}
+              aria-label={`Show the ${row.label} card`} style={{
+              display: "grid", gridTemplateColumns: MINI_COLS, gap: 8, alignItems: "center",
+              width: "100%", padding: "10px 12px", textAlign: "left", cursor: "pointer",
+              background: mine ? K.acc + ALPHA.wash : "transparent",
+              border: "none", borderTop: i === 0 ? "none" : `1px solid ${K.bdr}${ALPHA.hair}`,
+            }}>
+              {/* A team with nothing posted has no position to hold. */}
+              <span style={{ fontSize: FS.label, fontWeight: 700, color: K.t3 }}>{row.thru > 0 ? i + 1 : "—"}</span>
+              <span style={{ minWidth: 0 }}>
+                <span style={{ display: "block", fontSize: FS.small, fontWeight: 800, color: mine ? K.acc : K.t1 }}>{row.label}</span>
+                <span style={{ display: "block", fontSize: FS.micro, color: K.t3, marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {teamPlayers(sc.teams, row.key, players).map(shortName).join(", ") || "No players"}
+                </span>
+              </span>
+              <span style={{ fontSize: FS.micro, color: K.t3, textAlign: "right" }}>{row.thru > 0 ? `Thru ${row.thru}` : "—"}</span>
+              <span style={{
+                fontSize: FS.body, fontWeight: 800, textAlign: "right",
+                color: row.toPar == null ? K.t3 + ALPHA.line : row.toPar < 0 ? K.under : K.t2,
+              }}>{fmtPar(row.toPar)}</span>
+            </button>
+          );
+        })}
       </Card>
 
       {/* Full scorecard — all three teams, all eighteen holes. The tournament

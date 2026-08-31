@@ -32,7 +32,7 @@ Most of the hard compliance work is done. Verified in the code, not assumed:
 | Android release signing | Done — `android/app/build.gradle` reads `keystore.properties` or `WBC_KEYSTORE_*` env vars |
 | Android `targetSdk` | 36 — clears Play's API 35 floor for new apps |
 | App icons and splash screens, both platforms | Generated and committed |
-| Tests / lint / build | Green: 1344 tests, 0 lint errors, clean build |
+| Tests / lint / build | Green: 2188 tests, 0 lint errors, clean build (re-run 31 Aug 2026 — the 1344 this row used to claim was two hundred commits out of date) |
 
 ## What this branch changed
 
@@ -273,10 +273,17 @@ lead times and they break silently:
 Then:
 
 4. `npm run ios:sync`
-5. Open `ios/App/App.xcworkspace`. Set **MARKETING_VERSION** to `1.0.0` and
-   **CURRENT_PROJECT_VERSION** to `1`. Confirm `PrivacyInfo.xcprivacy` appears
-   under Build Phases → Copy Bundle Resources (this branch added it; verify
-   rather than trust).
+5. Open `ios/App/App.xcworkspace`. **Nothing to set** — all three were checked
+   in the tracked project on 31 Aug 2026 and are right: `MARKETING_VERSION` is
+   `1.0.0`, `CURRENT_PROJECT_VERSION` is `1`, and `PrivacyInfo.xcprivacy` is in
+   the Resources build phase rather than merely sitting in the folder, which is
+   the failure that ships a manifest doing nothing. `GoogleService-Info.plist`
+   is tracked and in the same phase, and its `REVERSED_CLIENT_ID`,
+   `BUNDLE_ID` and `PROJECT_ID` agree with `Info.plist` and the app.
+
+   The version numbers were a by-hand Xcode edit here for no reason —
+   `project.pbxproj` is a tracked file, so the edit belongs in the repo where
+   it survives a fresh clone and cannot be forgotten at 1am.
 6. Archive, then Distribute → App Store Connect.
 7. **Test the archive through TestFlight on a real iPhone before submitting.**
    Specifically: Sign in with Apple, Sign in with Google, the guest button, and
@@ -419,6 +426,87 @@ What that means concretely:
    copy both fingerprints → Firebase Console → Project settings → the Android
    app → Add fingerprint → **re-download `google-services.json`** into
    `android/app/` and rebuild.
+
+   > **FIXED 31 Aug 2026** — the file now carries all three hashes below, and
+   > `versionCode` moved to 3 because bundle 2 was built before it was. What
+   > follows is the account of what was wrong, kept because the shape of it
+   > recurs and the check at the end is worth running after any change to
+   > signing.
+   >
+   > **The fingerprint in `google-services.json` WAS the debug key.** Confirmed
+   > 31 Aug 2026, not inferred: the file's only Android certificate hash was
+   > `efc2a38c42bb3c69dcefd22ad1e049c74b77939c`, and that is character for
+   > character the SHA-1 of `C:\Users\Aaron\.android\debug.keystore`
+   > (`keytool -list -v -keystore … -storepass android -alias androiddebugkey`).
+   >
+   > So it is neither the upload key nor Play's app-signing certificate, and
+   > the consequence is wider than this step usually is: Google sign-in works
+   > in a DEBUG build on the machine that holds that keystore, and fails in
+   > **every release build** — the local one and the Play install alike. The
+   > file has not been touched since `android/` was created on 12 July, so it
+   > was downloaded before any fingerprint that matters existed.
+   >
+   > **All four values, read off the keystore and the console on 31 Aug 2026.**
+   > Certificates are public — these are fingerprints of them, not keys — so
+   > they belong here where the next person can check rather than re-derive:
+   >
+   > | | |
+   > | --- | --- |
+   > | Upload key SHA-1 | `02:DC:DF:19:2C:16:63:1A:E9:68:FB:68:8F:0E:8F:52:D5:B4:7B:E3` |
+   > | Upload key SHA-256 | `15:C0:3D:03:43:AA:0D:1F:33:D5:19:2F:9E:89:A1:DA:4D:23:68:38:25:1F:B3:55:32:85:31:B6:14:51:96:E3` |
+   > | Play app signing SHA-1 | `16:A4:79:FC:6E:ED:C6:1A:EB:7F:47:CD:D9:BD:81:FC:CC:9C:84:C4` |
+   > | Play app signing SHA-256 | `8C:2F:FF:DF:79:C7:73:CF:27:00:90:34:2C:E5:9E:78:27:A0:08:FA:1D:52:28:B7:19:10:76:86:C6:BB:97:96` |
+   >
+   > The upload key is `C:/dev/keys/wbc-upload.jks`, alias `upload`. Play's
+   > exists because the throwaway `versionCode 1` upload minted it, and it
+   > comes off **Protected with Play → App signing**, under *Classical key* —
+   > NOT off the Digital Asset Links JSON further down that page, which quotes
+   > a different fingerprint and has already sent one investigation the wrong
+   > way.
+   >
+   > What fixes it, in this order, because `google-services.json` is generated
+   > at download time from whatever is registered at that moment:
+   >
+   > 1. All four into Firebase → Project settings → the Android app → Add
+   >    fingerprint. Both certificates, not one.
+   > 2. **Then** re-download `google-services.json` into `android/app/` and
+   >    commit it — the file is tracked here, unlike in The Bourbon Cup.
+   > 3. Check what actually arrived, because this is the step that silently
+   >    did not happen last time:
+   >
+   >    ```
+   >    Select-String -Path android\app\google-services.json -Pattern certificate_hash
+   >    ```
+   >
+   >    Three hashes, and these exact ones:
+   >
+   >    ```
+   >    02dcdf192c16631ae968fb688f0e8f52d5b47be3   upload key
+   >    16a479fc6eedc61aeb7f47cdd9bd81fccc9c84c4   Play app signing key
+   >    efc2a38c42bb3c69dcefd22ad1e049c74b77939c   debug keystore (already there)
+   >    ```
+   >
+   > 4. Rebuild. `npm run android:bundle` refuses until the first two are
+   >    present, and prints `Certificates: 2 release + debug` when they are.
+   >    The bundle built before this is not the one to ship.
+   >
+   > Steps 1–3 were done on 31 Aug 2026 and the three hashes above are what
+   > `Select-String` returned. Only SHA-1 was registered for the two release
+   > certificates, which is what `google-services.json` records and what Google
+   > Sign-In checks; the SHA-256 pairs are still worth adding if WBC ever wants
+   > App Links, which is the thing that uses them.
+   >
+   > The debug hash is harmless to leave registered — it is what makes
+   > sign-in work in `npx cap run android`.
+   >
+   > **`npm run android:bundle` now refuses to build until this is done.** It
+   > counts the certificate hashes in `google-services.json`, subtracts the
+   > debug key (whose fingerprint it computes itself — that keystore's
+   > password is the literal string `android`, a documented constant), and
+   > stops if fewer than two release certificates remain. `WBC_FIRST_UPLOAD=1`
+   > is the escape hatch for the one build that legitimately cannot have
+   > Play's certificate: the throwaway that mints it.
+
 5. Store listing:
    - **Name:** "Wannabe Cup" (30 chars max), same trademark reasoning as Apple.
    - **Screenshots:** 2–8, phone, 9:16. **Feature graphic 1024×500** (required —

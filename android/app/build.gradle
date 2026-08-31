@@ -89,8 +89,17 @@ android {
         // has to carry that certificate's SHA-1 at BUILD time or Google
         // Sign-In fails for everybody who installs from Play while working
         // perfectly for whoever built it. So the first upload exists to mint
-        // the certificate, and this is the one testers actually get.
-        versionCode 2
+        // the certificate.
+        //
+        // 3 because 2 was built anyway, and it was built against a
+        // google-services.json carrying ONE fingerprint: the debug keystore's.
+        // Not Play's, and not even the upload key's — so sign-in in that
+        // bundle worked in `npx cap run android` and nowhere else. Both
+        // certificates were registered in Firebase on 31 Aug 2026 and the file
+        // re-downloaded; it now carries all three hashes, which
+        // `npm run android:bundle` checks before it will build. Bundle 2 is
+        // not to be shipped.
+        versionCode 3
         versionName "1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   differential, wbcIndex, historyFor, indexFor, indexTable, matchHistoryName,
   recentRoundSlots, countingFor, editionRounds, mergeRounds, WINDOW, COUNTING,
+  HISTORY_LAST_YEAR, indexTimeline, yearDeltas,
 } from "./handicap";
 import { WD_SCORE } from "./individualBoard";
 
@@ -568,5 +569,171 @@ describe("indexFor with a just-finished edition", () => {
 
   it("still lets a hand-set index win", () => {
     expect(indexFor("Aaron J", { extraRounds: fresh, override: 20 }).index).toBe(20);
+  });
+});
+
+// ── The yardstick, once a year exists that the bundle has never heard of ──
+// A player's window is compared against the TOURNAMENT's last 12, and until
+// loadLiveRounds existed that list could only be read off the bundled history.
+// So the year everybody had just played was missing from both halves at once:
+// out of the window, and out of the thing the window is measured against.
+describe("recentRoundSlots with a year the bundle has not caught up with", () => {
+  const LAST_YEAR = ["2026-4", "2026-3", "2026-2", "2026-1"];
+
+  it("puts the newer rounds at the front and pushes the oldest out", () => {
+    const slots = recentRoundSlots(WINDOW, LAST_YEAR);
+    expect(slots).toHaveLength(WINDOW);
+    expect(slots.slice(0, 4)).toEqual(LAST_YEAR);
+    expect(slots).not.toContain("2023-4");
+  });
+
+  it("is the bundled history alone when nothing has been played since", () => {
+    expect(recentRoundSlots(WINDOW, [])).toEqual(recentRoundSlots());
+    expect(recentRoundSlots(WINDOW, null)).toEqual(recentRoundSlots());
+  });
+
+  it("counts a round once, however many ways it arrives", () => {
+    const slots = recentRoundSlots(WINDOW, ["2025-4", ...LAST_YEAR]);
+    expect(slots.filter(k => k === "2025-4")).toHaveLength(1);
+  });
+
+  it("knows where the bundled record books stop", () => {
+    expect(HISTORY_LAST_YEAR).toBe(2025);
+  });
+});
+
+// ── The two halves, together ──
+// The bug this is the regression test for: Matt V played the 2026 WBC, a
+// director created 2027, and his index was still built from 2014, 2015 and
+// 2024 — with none of 2026 on the chart, and no mark saying he had missed
+// 2025. `extraRounds` and `recentSlots` travel together for that reason.
+describe("indexFor with the live half of the record", () => {
+  const rounds = (year, diffs) => diffs.map((d, i) => ({
+    year, round: i + 1, key: `${year}-${i + 1}`, differential: d,
+  }));
+  const LAST_YEAR = rounds(2026, [14.2, 15.9, 16.4, 13.8]);
+  const SLOTS = recentRoundSlots(WINDOW, LAST_YEAR.map(r => r.key));
+
+  it("puts a returning player's newest rounds in his window", () => {
+    const p = indexFor("Matt V", { extraRounds: LAST_YEAR, recentSlots: SLOTS });
+    expect(p.window.slice(0, 4).map(r => r.key))
+      .toEqual(["2026-4", "2026-3", "2026-2", "2026-1"]);
+    expect(p.counting.some(r => r.year === 2026)).toBe(true);
+  });
+
+  // He is still asterisked — he has missed years and those rounds reach back a
+  // decade — but he is asterisked for the years he actually missed.
+  it("marks him against a field that played last year", () => {
+    const p = indexFor("Matt V", { extraRounds: LAST_YEAR, recentSlots: SLOTS });
+    expect(p.stale).toBe(true);
+    expect(p.missed).not.toContain("2026-1");
+    expect(p.missed).toContain("2025-1");
+  });
+
+  // And a man who was there for all of it is not marked at all — which he was
+  // not, before, since his own 2026 rounds could not be seen either.
+  it("leaves a player who has been to every one of them unmarked", () => {
+    const p = indexFor("Bob B", { extraRounds: LAST_YEAR, recentSlots: SLOTS });
+    expect(p.window).toHaveLength(WINDOW);
+    expect(p.missed).toEqual([]);
+    expect(p.stale).toBe(false);
+  });
+
+  // The failure the pairing is there to stop: rounds without the yardstick
+  // that goes with them reads as "played every round the tournament did".
+  it("marks a player who missed last year, when the yardstick knows it happened", () => {
+    const missed = indexFor("Bob B", { recentSlots: SLOTS });
+    expect(missed.missed).toEqual(["2026-4", "2026-3", "2026-2", "2026-1"]);
+    expect(missed.stale).toBe(true);
+    expect(indexFor("Bob B").stale).toBe(false);
+  });
+});
+
+// ── The index as it was ──
+// The chart on the detail page draws a line through these, so a career reads
+// as a shape rather than as twelve bars and one number. Each point is the same
+// arithmetic as the headline index, run with only the rounds that had been
+// played by then in front of it.
+describe("indexTimeline", () => {
+  const rd12 = (d) => d.map((x, i) => ({ year: 2020, round: i + 1, key: `2020-${i + 1}`, differential: x }));
+
+  it("gives every round the number the player carried after it", () => {
+    // Three rounds, best 1 of 3 at every step: 20, then 14, then still 14.
+    const line = indexTimeline(rd12([20, 14, 18]));
+    expect(line.map(t => t.key)).toEqual(["2020-3", "2020-2", "2020-1"]);
+    expect(line.map(t => t.index)).toEqual([14, 14, 20]);
+  });
+
+  it("measures a round against what was behind it, never in front of it", () => {
+    // The last round is the best of the career; the first round's point cannot
+    // know that, or the line would be a projection rather than a history.
+    const line = indexTimeline(rd12([18, 17, 2]));
+    expect(line[line.length - 1].index).toBe(18);
+  });
+
+  it("takes a career in any order", () => {
+    const jumbled = [
+      { year: 2020, round: 2, key: "2020-2", differential: 14 },
+      { year: 2019, round: 1, key: "2019-1", differential: 20 },
+      { year: 2020, round: 1, key: "2020-1", differential: 18 },
+    ];
+    expect(indexTimeline(jumbled).map(t => t.key)).toEqual(["2020-2", "2020-1", "2019-1"]);
+  });
+
+  it("keeps an unrated round in its place, on the number it inherited", () => {
+    const line = indexTimeline([
+      { year: 2020, round: 2, key: "2020-2", differential: null },
+      { year: 2020, round: 1, key: "2020-1", differential: 12 },
+    ]);
+    expect(line.map(t => t.index)).toEqual([12, 12]);
+  });
+
+  it("survives being handed nothing", () => {
+    expect(indexTimeline()).toEqual([]);
+    expect(indexTimeline([])).toEqual([]);
+  });
+
+  // Every point on the real chart has to be a number, or the line breaks.
+  it("draws a real career end to end", () => {
+    const line = indexTimeline(indexFor("Bob B").rounds);
+    expect(line.length).toBeGreaterThan(50);
+    expect(line.every(t => typeof t.index === "number")).toBe(true);
+    expect(line[0].index).toBe(indexFor("Bob B").index);
+  });
+});
+
+describe("yearDeltas", () => {
+  const year = (y, diffs) => diffs.map((d, i) => ({
+    year: y, round: i + 1, key: `${y}-${i + 1}`, differential: d,
+  }));
+
+  it("reports where each year finished and how far it moved", () => {
+    const rounds = [...year(2019, [20, 20]), ...year(2020, [12, 12])];
+    const out = yearDeltas(rounds);
+    expect(out.map(d => d.year)).toEqual([2020, 2019]);
+    expect(out[0].index).toBe(12);
+    expect(out[1].index).toBe(20);
+    // Down eight: the index is a handicap, so down is better.
+    expect(out[0].delta).toBe(-8);
+  });
+
+  it("leaves the earliest year with nothing to be measured against", () => {
+    expect(yearDeltas(year(2019, [20]))[0].delta).toBe(null);
+  });
+
+  // A man who misses two WBCs has not been getting worse in the meantime.
+  it("measures against the last year played, not the calendar year before", () => {
+    const rounds = [...year(2015, [20]), ...year(2024, [16])];
+    expect(yearDeltas(rounds)[0].delta).toBe(-4);
+  });
+
+  it("says a year that changed nothing changed nothing", () => {
+    const rounds = [...year(2019, [20]), ...year(2020, [24])];
+    // Best 1 of 2 is still the 20, so the year moved the index not at all.
+    expect(yearDeltas(rounds)[0].delta).toBe(0);
+  });
+
+  it("survives being handed nothing", () => {
+    expect(yearDeltas()).toEqual([]);
   });
 });

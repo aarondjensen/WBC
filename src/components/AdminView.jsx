@@ -23,7 +23,7 @@
 //
 //   DEMO_PLAYERS   the career registry, arriving as the `registry` prop
 //   TOURNAMENT     only its default NAME was wanted; that is in constants now
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import { TOURNAMENT_ID, getTournamentYear } from "../firebase";
 import { accountsUnreadable, membershipForPlayer, playerIsDirector } from "../lib/accounts";
@@ -35,6 +35,7 @@ import { TeeColorSwatch } from "./TeeColorSwatch";
 import { AccessPanel } from "./AccessPanel";
 import { PlayerActivityPanel } from "./PlayerActivityPanel";
 import { resolveTeeColor, TEE_COLOR_MAP } from "../lib/teeColors";
+import { newTeeBox, orderTeesForEdit, unnamedTees, normalizeTees } from "../lib/teeEditor";
 import { useConfirm } from "../lib/useConfirm";
 import { useDirtyForm } from "../lib/useDirtyForm";
 import { pairingScoreImpact, orphanedScores, describeScored, totalHoles, holesEntered } from "../lib/scoreGuard";
@@ -48,11 +49,13 @@ import { localDateISO, fmtRoundDate } from "../lib/format";
 import { SCORING_LEAD_MIN } from "../lib/scoringGate";
 import { NUM_ROUNDS, roundDateChoices } from "../lib/rounds";
 import { toDisplayName, isGeneratedName, shortName, fullName, splitName } from "../lib/playerNames";
-import { missingTees, describeMissingTees, pairingsTrouble } from "../lib/roundSetup";
-import { indexFor, matchHistoryName } from "../lib/handicap";
+import { missingTees, missingTeeNames, pairingsTrouble } from "../lib/roundSetup";
+import { indexFor, matchHistoryName, recentRoundSlots, WINDOW } from "../lib/handicap";
+import { EMPTY_LIVE_ROUNDS } from "../lib/liveHistory";
 import { returningPlayers, returningLine } from "../lib/returningPlayers";
 import { deleteVerdict, deletionLines } from "../lib/playerDelete";
 import { getDefaultTee } from "../lib/defaultTee";
+import { chDeltasFor, CH_DELTA_MS } from "../lib/chDeltas";
 import { TROPHY_SVG_URL, ROUND_CHOICES, clampRounds, SIDE_GAME_KEYS, SIDE_GAME_LABELS, defaultTournamentName } from "../constants";
 
 // Gap the tee sheet fills in with when the director types one group's time and
@@ -82,6 +85,17 @@ const CoursePreviewPortal = ({ children }) => {
   if (typeof document === "undefined") return null;
   return createPortal(children, document.body);
 };
+
+// Width of the HI and CH columns in the player-tee list. Wide enough for a
+// two-digit index with a decimal ("18.4") at the name's own size, so the
+// numbers line up down the list instead of drifting with the name beside them.
+const CH_COL_W = 40;
+
+// The per-player tee buttons. Written down because the column heads above the
+// list reserve exactly this much room to sit clear of them — a gap changed in
+// one place and not the other slides HI and CH off their columns.
+const TEE_BTN_W = 34;
+const TEE_BTN_GAP = 6;
 
 const TEE_PALETTE = ["#60a5fa","#f59e0b","#a78bfa","#34d399","#fb923c","#f472b6","#38bdf8","#e879f9"];
 
@@ -575,29 +589,40 @@ function TeeAssigner({ activePlayers, tRounds, courses, teeData, setTeeBulk, fin
   const assignments = (teeData || {})[editRound] || {};
   const [chDeltas, setChDeltas] = useState({});
 
-  const assign = (pid, teeName) => {
-    // Compute delta vs current CH
-    const oldTeeObj = tees.find(t => t.name === (assignments[pid] || getDefaultTee(tees)?.name || tees[0]?.name));
-    const newTeeObj = tees.find(t => t.name === teeName);
-    const player = activePlayers.find(p => p.id === pid);
-    if (oldTeeObj && newTeeObj && player) {
-      const oldCH = calcCH(player.handicap_index, oldTeeObj.slope, oldTeeObj.rating, oldTeeObj.par);
-      const newCH = calcCH(player.handicap_index, newTeeObj.slope, newTeeObj.rating, newTeeObj.par);
-      const delta = newCH - oldCH;
-      if (delta !== 0) {
-        setChDeltas(prev => ({ ...prev, [pid]: delta }));
-        setTimeout(() => setChDeltas(prev => { const n = {...prev}; delete n[pid]; return n; }), 3500);
-      }
-    }
-    setTeeBulk(editRound, { ...assignments, [pid]: teeName });
+  // One timer per player, so a second move for the same player restarts THAT
+  // badge rather than being cut short by the first move's timer still running.
+  const deltaTimers = useRef({});
+  useEffect(() => () => { Object.values(deltaTimers.current).forEach(clearTimeout); }, []);
+
+  // Flash what a move does to every course handicap it changes. Both ways of
+  // moving a tee go through here — one player, or the whole field off a tile —
+  // because they are the same event and the field-wide one is the bigger news.
+  const flashDeltas = (next) => {
+    const deltas = chDeltasFor(activePlayers, tees, assignments, next);
+    const ids = Object.keys(deltas);
+    if (ids.length === 0) return;
+    setChDeltas(prev => ({ ...prev, ...deltas }));
+    ids.forEach(id => {
+      clearTimeout(deltaTimers.current[id]);
+      deltaTimers.current[id] = setTimeout(() => {
+        delete deltaTimers.current[id];
+        setChDeltas(prev => { const n = { ...prev }; delete n[id]; return n; });
+      }, CH_DELTA_MS);
+    });
+  };
+
+  const commit = (next) => {
+    flashDeltas(next);
+    setTeeBulk(editRound, next);
     if (teesSaved && teesSaved[editRound]) onTeesModify && onTeesModify(editRound);
   };
+
+  const assign = (pid, teeName) => commit({ ...assignments, [pid]: teeName });
 
   const setAll = (teeName) => {
     const bulk = {};
     activePlayers.forEach(p => { bulk[p.id] = teeName; });
-    setTeeBulk(editRound, bulk);
-    if (teesSaved && teesSaved[editRound]) onTeesModify && onTeesModify(editRound);
+    commit(bulk);
   };
 
   // Per-player tees are folded away. Almost every field plays the tee the
@@ -692,6 +717,24 @@ function TeeAssigner({ activePlayers, tRounds, courses, teeData, setTeeBulk, fin
           </button>
           <div style={{ overflow: "hidden", display: openTees ? "block" : "none" }}>
             <div>
+            {/* HI and CH are columns, headed once, not a run of prose on every
+                row. The director reads them DOWN — who is off what, who moved
+                — and a label repeated forty times is forty things in the way of
+                that. They read at the name's own size — they were a footnote
+                under it, and they are half of what the row says. */}
+            <div style={{
+              padding: "3px 12px", display: "flex", alignItems: "center", gap: 6,
+              borderBottom: `1px solid ${K.bdr}${ALPHA.hair}`,
+            }}>
+              <span style={{ flex: 1, minWidth: 0 }} />
+              {["HI", "CH"].map(h => (
+                <span key={h} style={{
+                  width: CH_COL_W, textAlign: "right", fontSize: FS.micro, fontWeight: 700,
+                  color: K.t3, textTransform: "uppercase", letterSpacing: "0.06em",
+                }}>{h}</span>
+              ))}
+              <span style={{ width: tees.length * TEE_BTN_W + Math.max(0, tees.length - 1) * TEE_BTN_GAP, flexShrink: 0 }} />
+            </div>
             {activePlayers.map((p, i) => {
               // No fallback to the default tee. This row used to read
               // `assignments[p.id] || defaultTee?.name`, which drew the default
@@ -705,26 +748,40 @@ function TeeAssigner({ activePlayers, tRounds, courses, teeData, setTeeBulk, fin
               const ch = teeObj ? calcCH(p.handicap_index, teeObj.slope, teeObj.rating, teeObj.par) : null;
               return (
                 <div key={p.id} style={{
-                  padding: "5px 12px", display: "flex", justifyContent: "space-between", alignItems: "center",
+                  padding: "5px 12px", display: "flex", alignItems: "center", gap: 6,
                   borderBottom: i < activePlayers.length - 1 ? `1px solid ${K.bdr}${ALPHA.wash}` : "none",
                 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                    <span style={{ fontWeight: 600, fontSize: FS.small, color: teeObj ? K.t1 : K.danger }}>{p.name}</span>
-                    <span style={{ fontSize: FS.micro, color: K.t2, display: "flex", alignItems: "center", gap: 3 }}>
-                      HI {p.handicap_index} · CH {teeObj ? ch : <span style={{ color: K.danger, fontWeight: 700 }}>no tee</span>}
-                      {chDeltas[p.id] !== undefined && (
-                        <span style={{ fontSize: FS.micro, fontWeight: 700, color: chDeltas[p.id] > 0 ? K.ok : K.danger, display: "flex", alignItems: "center", gap: 1 }}>
-                          {chDeltas[p.id] > 0 ? "▲" : "▼"}{Math.abs(chDeltas[p.id])}
-                        </span>
-                      )}
-                    </span>
-                  </div>
-                  <div style={{ display: "flex", gap: 2 }}>
+                  <span style={{
+                    flex: 1, minWidth: 0, fontWeight: 600, fontSize: FS.small, color: teeObj ? K.t1 : K.danger,
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  }}>{p.name}</span>
+                  <span style={{
+                    width: CH_COL_W, flexShrink: 0, textAlign: "right",
+                    fontSize: FS.small, fontWeight: 600, color: K.t2, fontVariantNumeric: "tabular-nums",
+                  }}>{p.handicap_index}</span>
+                  <span style={{
+                    width: CH_COL_W, flexShrink: 0, display: "flex", alignItems: "center",
+                    justifyContent: "flex-end", gap: 2,
+                  }}>
+                    {/* The delta rides inside the CH column so a tee change
+                        moves the number the director is watching, not a note
+                        beside it. */}
+                    {chDeltas[p.id] !== undefined && (
+                      <span style={{ fontSize: FS.micro, fontWeight: 700, color: chDeltas[p.id] > 0 ? K.ok : K.danger, lineHeight: 1 }}>
+                        {chDeltas[p.id] > 0 ? "▲" : "▼"}{Math.abs(chDeltas[p.id])}
+                      </span>
+                    )}
+                    <span style={{
+                      fontSize: FS.small, fontWeight: 700, fontVariantNumeric: "tabular-nums",
+                      color: teeObj ? K.t1 : K.danger,
+                    }}>{teeObj ? ch : "—"}</span>
+                  </span>
+                  <div style={{ display: "flex", gap: TEE_BTN_GAP, flexShrink: 0 }}>
                     {[...tees].sort((a, b) => (parseFloat(b.slope) || 0) - (parseFloat(a.slope) || 0)).map(tee => {
                       const isActive = currentTee === tee.name;
                       return (
                         <button key={tee.name} onClick={() => assign(p.id, tee.name)} style={{
-                          width: 34, padding: "4px 3px 3px", borderRadius: R.sm, cursor: "pointer",
+                          width: TEE_BTN_W, padding: "4px 3px 3px", borderRadius: R.sm, cursor: "pointer",
                           display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
                           background: isActive ? K.acc + ALPHA.tint : K.inp,
                           border: isActive ? `1.5px solid ${K.acc}` : `1px solid ${K.bdr}`,
@@ -808,7 +865,7 @@ function PlayerRow({ player, isLast, onOpen, isDirector, account }) {
 // id off his record rather than deriving one. See lib/returningPlayers.
 function PlayerEditor({ editing, set, onClose, tPlayers, players, memberships, claims, authUid,
                         holeData, numRounds, onSave, onRemove, askDelete, notify, confirm, tournamentStarted,
-                        returning = [] }) {
+                        returning = [], indexOf = indexFor }) {
   if (!editing) return null;
   const isNew = !!editing.isNew;
   const p = isNew ? null : players.find(x => x.id === editing.pid);
@@ -826,9 +883,12 @@ function PlayerEditor({ editing, set, onClose, tPlayers, players, memberships, c
   const wbcRef = (() => {
     const subject = p || { name: editing.nick || defaultNick, first_name: editing.first, last_name: editing.last };
     const histName = matchHistoryName(subject);
-    if (!histName) return null;
-    const idx = indexFor(histName, { override: p?.index_override ?? null });
-    return idx.index == null ? null : idx;
+    // A name the record books have never heard of can still have rounds: last
+    // year's first-timer, whose whole career is in the years the bundled
+    // history has not caught up with. `indexOf` knows about those, so it is
+    // asked even when the name matches nothing — see lib/liveHistory.
+    const idx = indexOf(histName, p?.id, p?.index_override ?? null);
+    return idx?.index == null ? null : idx;
   })();
   const wbcDiffers = !!wbcRef && String(parseFloat(editing.hi) || 0) !== String(wbcRef.index);
   const showPicker = isNew && !editing.linked && returning.length > 0;
@@ -965,7 +1025,12 @@ function PlayerEditor({ editing, set, onClose, tPlayers, players, memberships, c
   // decision is raised from two places — here, and the off-roster list on the
   // Players tab, where a demo player already moved to inactive has to be
   // reachable at all.
-  const canDelete = !isNew && !!askDelete && !matchHistoryName(p);
+  //
+  // "The record books know him" is now two records: the bundled history, and
+  // the WBCs played since it was last generated. A man whose only tournament
+  // is in the second half has a career too — `wbcRef` is what says so — and
+  // deleting him would take it with him.
+  const canDelete = !isNew && !!askDelete && !matchHistoryName(p) && !wbcRef;
 
   const doDelete = async () => {
     const done = await askDelete({
@@ -1546,7 +1611,7 @@ function TournamentPanel({ meta, onSave, notify, confirm, scoredRounds = [] }) {
 
 // AccessPanel moved to components/AccessPanel.jsx — see the header there.
 
-export function AdminView({ registry, activePlayers, marketPool, sideGames, onUpdateSideGames, rebuyIds, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, deletePlayer, editionsHolding, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, roundDates, onSetRoundDate, scoringOpen, onSetScoringOpen, pairingStrategy, onSetPairingStrategy, leaderboard, holeData, finalizedRounds, onFinalizeRound, onUnfinalizeRound, onDiscardRoundScores, notify, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, externalSettingsRound, onExternalSettingsHandled, teesSaved, onTeesSave, teesModified, onTeesModify, memberships, onSetDirector, claims, authUid, tournamentMeta, onSaveTournamentMeta, demoOnly = false }) {
+export function AdminView({ liveRounds = EMPTY_LIVE_ROUNDS, registry, activePlayers, marketPool, sideGames, onUpdateSideGames, rebuyIds, tournament, tPlayers, tRounds, courses, setCourseForRound, addCourse, addPlayerToTournament, updateHI, updateName, removePlayer, deletePlayer, editionsHolding, pairingsData, setPairings, teeData, setTeeBulk, teeTimesData, setTeeTimesData, roundDates, onSetRoundDate, scoringOpen, onSetScoringOpen, pairingStrategy, onSetPairingStrategy, leaderboard, holeData, finalizedRounds, onFinalizeRound, onUnfinalizeRound, onDiscardRoundScores, notify, getPlayerTee, startFresh, externalSettingsOpen, externalSettingsTab, externalSettingsRound, onExternalSettingsHandled, teesSaved, onTeesSave, teesModified, onTeesModify, memberships, onSetDirector, claims, authUid, tournamentMeta, onSaveTournamentMeta, demoOnly = false }) {
   // ── The sandbox administrator ─────────────────────────────────────
   // `demoOnly` is a MEMBER who is an administrator only because of where they
   // are standing — a beta tester or a store reviewer inside the sandbox, see
@@ -1609,9 +1674,22 @@ export function AdminView({ registry, activePlayers, marketPool, sideGames, onUp
   // Who could be added back — the player registry plus the record books, minus
   // this edition's roster. Keyed off tPlayers, which is also what a registry
   // refresh nudges, so a name added on another phone reaches this list.
+  // ── A career index, both halves of it ──
+  // The bundled record books stop at the last export of data/history.js; the
+  // WBCs played in this app since are in `liveRounds`. Every index this console
+  // quotes — the reference beside the handicap field, the one offered for a
+  // returning golfer — is computed through here so the two can never disagree,
+  // and so neither disagrees with the Players tab. See lib/liveHistory.
+  const recentSlots = useMemo(() => recentRoundSlots(WINDOW, liveRounds?.slots), [liveRounds]);
+  const careerIndex = useCallback((historyName, pid, override = null) => indexFor(historyName, {
+    override,
+    extraRounds: (pid && liveRounds?.byPlayer?.[pid]) || [],
+    recentSlots,
+  }), [liveRounds, recentSlots]);
+
   const returningPool = useMemo(
-    () => returningPlayers({ registry, rosterIds: tPlayers.map(t => t.player_id) }),
-    [registry, tPlayers],
+    () => returningPlayers({ registry, rosterIds: tPlayers.map(t => t.player_id), indexOf: careerIndex }),
+    [registry, tPlayers, careerIndex],
   );
 
   // ── Records that exist for no reason ──
@@ -1624,7 +1702,7 @@ export function AdminView({ registry, activePlayers, marketPool, sideGames, onUp
   // editor opens off a ROSTER row, and one of the two ways to end up with junk
   // in the registry is to have moved it to inactive already.
   const deletablePool = useMemo(
-    () => (deletePlayer && editionsHolding ? returningPool.filter(r => !r.historyName) : []),
+    () => (deletePlayer && editionsHolding ? returningPool.filter(r => !r.historyName && !r.rounds) : []),
     [returningPool, deletePlayer, editionsHolding],
   );
 
@@ -2303,7 +2381,25 @@ export function AdminView({ registry, activePlayers, marketPool, sideGames, onUp
       )}
       {editingCourse && (() => {
         const d = editingCourse.draft;
-        const saveEdit = () => { addCourse({ ...editingCourse.draft }); setEditingCourse(null); };
+        // Coerce on the way out. A tee typed in by hand has an empty string in
+        // every number and the write path stores what it is handed, so ""
+        // would land in Firestore as a slope. Refused outright when a tee has
+        // no name: the tee_boxes document id and every tee assignment are
+        // derived from that name, and two blank ones are one document.
+        const saveEdit = () => {
+          if (unnamedTees(d.tee_boxes).length) { notify("Every tee needs a name"); return; }
+          addCourse({ ...d, tee_boxes: normalizeTees(d.tee_boxes, d.par) });
+          setEditingCourse(null);
+        };
+        const addTee = () => {
+          setRefetch({ busy: false, msg: "" });
+          setEditingCourse(prev => ({ ...prev, draft: { ...prev.draft, tee_boxes: [...(prev.draft.tee_boxes || []), newTeeBox()] } }));
+        };
+        const setTee = (i, patch) => setEditingCourse(prev => {
+          const tbs = [...prev.draft.tee_boxes];
+          tbs[i] = { ...tbs[i], ...patch };
+          return { ...prev, draft: { ...prev.draft, tee_boxes: tbs } };
+        });
         const refetchTees = async () => {
           setRefetch({ busy: true, msg: "" });
           const tees = await fetchCourseTees(d.name, d.state);
@@ -2345,19 +2441,71 @@ export function AdminView({ registry, activePlayers, marketPool, sideGames, onUp
                 </button>
               )}
               <div style={{ marginBottom: 16 }}><div style={{ fontSize: FS.label, color: K.t3, fontWeight: 600, textTransform: "uppercase", marginBottom: 4 }}>Course Name</div><input value={d.name || ""} onChange={e => setEditingCourse(prev => ({ ...prev, draft: { ...prev.draft, name: e.target.value } }))} style={{ width: "100%", padding: "9px 10px", background: K.inp, border: `1px solid ${ac}${ALPHA.hair}`, borderRadius: R.sm, color: K.t1, fontSize: FS.lead, boxSizing: "border-box" }} /></div>
-              {/* Pull the tees again. Sits with the tee boxes it refills, under
-                  the name it searches on — edit the name first if the import
-                  got it wrong, and this finds the right course. */}
+              {/* Two ways to fill a tee list, because refetching is not always
+                  one. Refetch sits under the name it searches on — edit the
+                  name first if the import got it wrong, and this finds the
+                  right course. But the APIs are routinely short a tee or two
+                  and a second fetch returns the same short list, so Add tee is
+                  the way out of that: a blank row to type the ones off the
+                  scorecard in the pro shop. */}
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
                 <span style={{ fontSize: FS.label, color: K.t3, fontWeight: 600, textTransform: "uppercase" }}>Tee boxes</span>
-                <Btn variant="secondary" size="sm" onClick={refetchTees} disabled={refetch.busy} style={{ color: ac, borderColor: ac + ALPHA.line }}>
-                  {refetch.busy ? "Fetching\u2026" : "Refetch tees"}
-                </Btn>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <Btn variant="secondary" size="sm" onClick={addTee} style={{ color: ac, borderColor: ac + ALPHA.line }}>+ Add tee</Btn>
+                  <Btn variant="secondary" size="sm" onClick={refetchTees} disabled={refetch.busy} style={{ color: ac, borderColor: ac + ALPHA.line }}>
+                    {refetch.busy ? "Fetching\u2026" : "Refetch tees"}
+                  </Btn>
+                </div>
               </div>
+              {(d.tee_boxes || []).length === 0 && (
+                <div style={{ fontSize: FS.label, color: K.warn, marginBottom: 8 }}>No tees on this course — add them by hand, or refetch.</div>
+              )}
               {refetch.msg && (
                 <div style={{ fontSize: FS.label, color: K.t3, marginBottom: 8 }}>{refetch.msg}</div>
               )}
-              {[...(d.tee_boxes||[])].sort((a,b) => (parseFloat(b.slope)||0)-(parseFloat(a.slope)||0)).map((tb, tbi) => { const sortedTbs = [...(d.tee_boxes||[])].sort((a,b) => (parseFloat(b.slope)||0)-(parseFloat(a.slope)||0)); const origIdx = d.tee_boxes.indexOf(sortedTbs[tbi]); return (<div key={tbi} style={{ background: K.card, border: `1px solid ${K.bdr}`, borderRadius: R.md, padding: "10px 12px", marginBottom: 8 }}><div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}><div style={{ display: "flex", alignItems: "center", gap: 8 }}><TeeColorSwatch color={tb.color} name={tb.name} size={12} /><span style={{ fontWeight: 700, fontSize: FS.body, color: K.t1 }}>{tb.name}</span></div><button onClick={() => setEditingCourse(prev => ({ ...prev, draft: { ...prev.draft, tee_boxes: prev.draft.tee_boxes.filter((_,i) => i !== origIdx) } }))} style={{ background: "transparent", border: "none", color: K.t3, cursor: "pointer", fontSize: FS.lead, lineHeight: 1, padding: "0 4px" }}>✕</button></div><div style={{ display: "flex", gap: 8 }}>{["rating","slope","par"].map(f => (<div key={f} style={{ flex: 1 }}><div style={{ fontSize: FS.micro, color: K.t3, textTransform: "uppercase", marginBottom: 3 }}>{f}</div><input inputMode="decimal" value={tb[f]||""} onChange={e => setEditingCourse(prev => { const tbs = [...prev.draft.tee_boxes]; tbs[origIdx] = {...tbs[origIdx],[f]:e.target.value}; return {...prev,draft:{...prev.draft,tee_boxes:tbs}}; })} style={{ width: "100%", padding: "7px 6px", background: K.inp, border: `1px solid ${ac}${ALPHA.hair}`, borderRadius: R.sm, color: K.t1, fontSize: FS.small, textAlign: "center", boxSizing: "border-box" }} /></div>))}</div></div>); })}
+              {/* Sorted from the tips down, and KEYED by the tee's index in
+                  the draft rather than by its position in that sort. The row a
+                  slope is being typed into moves as it is typed — keyed by
+                  position, the cursor would stay put while the values slid
+                  underneath it. See lib/teeEditor. */}
+              {orderTeesForEdit(d.tee_boxes).map(({ tee: tb, index }) => (
+                <div key={index} style={{ background: K.card, border: `1px solid ${K.bdr}`, borderRadius: R.md, padding: "10px 12px", marginBottom: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                    {/* The swatch IS the colour picker — an invisible select
+                        over it, the same way the manual-entry and preview
+                        editors do it. Naming an unnamed tee off the colour is
+                        the common case: pick Blue, and it is the blues. Going
+                        the other way is the common case too, so a tee with no
+                        colour picked previews the one its NAME resolves to —
+                        type "Gold" and the square is gold, which is what the
+                        card will look like once it saves. */}
+                    <div style={{ position: "relative", width: 16, height: 16, flexShrink: 0 }}>
+                      <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
+                        <TeeColorSwatch color={tb.color || resolveTeeColor({ name: tb.name, color: "" }, index)} name={tb.name} size={16} style={{ width: "100%", height: "100%" }} />
+                      </div>
+                      <select value={Object.entries(TEE_COLOR_MAP).find(([, v]) => v === (tb.color || ""))?.[0] || ""}
+                        onChange={e => { const key = e.target.value; setTee(index, { color: TEE_COLOR_MAP[key] || tb.color || "", name: tb.name || key.charAt(0).toUpperCase() + key.slice(1) }); }}
+                        style={{ position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0, cursor: "pointer", fontSize: FS.small }}>
+                        <option value="">—</option>
+                        {["Black","Blue","White","Gold","Red","Green","Silver","Yellow","Orange","Purple","Maroon","Teal","Platinum"].map(n => <option key={n} value={n.toLowerCase()}>{n}</option>)}
+                      </select>
+                    </div>
+                    <input value={tb.name || ""} onChange={e => setTee(index, { name: e.target.value })} placeholder="Tee name"
+                      style={{ flex: 1, minWidth: 0, padding: "5px 8px", background: K.inp, border: `1px solid ${tb.name ? ac + ALPHA.hair : K.warn}`, borderRadius: R.sm, color: K.t1, fontWeight: 700, fontSize: FS.body, boxSizing: "border-box" }} />
+                    <button onClick={() => setEditingCourse(prev => ({ ...prev, draft: { ...prev.draft, tee_boxes: prev.draft.tee_boxes.filter((_, i) => i !== index) } }))}
+                      style={{ background: "transparent", border: "none", color: K.t3, cursor: "pointer", fontSize: FS.lead, lineHeight: 1, padding: "0 4px", flexShrink: 0 }}>✕</button>
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    {["rating", "slope", "par", "yardage"].map(f => (
+                      <div key={f} style={{ flex: 1 }}>
+                        <div style={{ fontSize: FS.micro, color: K.t3, textTransform: "uppercase", marginBottom: 3 }}>{f === "yardage" ? "yards" : f}</div>
+                        <input inputMode="decimal" value={tb[f] ?? ""} onChange={e => setTee(index, { [f]: e.target.value })}
+                          style={{ width: "100%", padding: "7px 6px", background: K.inp, border: `1px solid ${ac}${ALPHA.hair}`, borderRadius: R.sm, color: K.t1, fontSize: FS.small, textAlign: "center", boxSizing: "border-box" }} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
               {[["Front", 0, 9], ["Back", 9, 9]].map(([label, start, count]) => { const pars = (d.hole_pars||[]).slice(start, start+count); const hcps = (d.hole_handicaps||[]).slice(start, start+count); return (<div key={label} style={{ marginBottom: 8 }}><div style={{ fontSize: FS.label, color: K.t3, fontWeight: 600, textTransform: "uppercase", marginBottom: 4 }}>{label} 9</div><div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 32px`, gap: 2, fontSize: FS.micro }}><div style={{ color: K.t3, fontWeight: 600, padding: "2px 0" }}>Hole</div>{Array.from({length:count},(_,i)=><div key={i} style={{ textAlign:"center", color:K.t2, fontWeight:700, padding:"2px 0" }}>{start+i+1}</div>)}<div /></div><div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 32px`, gap: 2, background: K.inp, borderRadius: R.sm, padding: "2px 0", marginBottom: 2 }}><div style={{ color: K.t3, fontWeight: 600, padding: "3px 2px", fontSize: FS.micro }}>Par</div>{Array.from({length:count},(_,i) => (<input key={i} inputMode="numeric" value={pars[i]??""} onChange={e => setEditingCourse(prev => { const hp=[...(prev.draft.hole_pars||[])]; hp[start+i]=parseInt(e.target.value)||0; return {...prev,draft:{...prev.draft,hole_pars:hp}}; })} style={inpStyle} />))}<div style={{ textAlign:"center", color:ac, fontWeight:800, padding:"3px 0", fontSize: FS.label }}>{pars.reduce((a,b)=>a+(+b||0),0)}</div></div><div style={{ display: "grid", gridTemplateColumns: `28px repeat(${count}, 1fr) 32px`, gap: 2 }}><div style={{ color: K.t3, fontWeight: 600, padding: "2px 2px", fontSize: FS.micro }}>HCP</div>{Array.from({length:count},(_,i) => (<input key={i} inputMode="numeric" value={hcps[i]??""} onChange={e => setEditingCourse(prev => { const hh=[...(prev.draft.hole_handicaps||[])]; hh[start+i]=parseInt(e.target.value)||0; return {...prev,draft:{...prev.draft,hole_handicaps:hh}}; })} style={{...inpStyle, color:K.t3}} />))}<div /></div></div>); })}
             </div>
           </div>
@@ -2393,7 +2541,6 @@ export function AdminView({ registry, activePlayers, marketPool, sideGames, onUp
         const locked = st.finalized;
         const picking = !locked && (!assigned || pickingCourse);
         const closePicker = () => { setPickingCourse(false); doCourseSearch(""); setManualCourse(null); };
-        const unassignedRounds = Array.from({ length: numRounds }, (_, ri) => ri + 1).filter(r => !tRounds.find(t => t.round_number === r && t.course_id));
         return (
           <div style={{ background: K.card, borderRadius: R.lg, border: `1px solid ${assigned ? ac  + ALPHA.hair : K.bdr}`, overflow: "hidden", marginBottom: 12 }}>
 
@@ -2403,16 +2550,15 @@ export function AdminView({ registry, activePlayers, marketPool, sideGames, onUp
                 <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: FS.body, fontWeight: 700, color: K.t1 }}>{assigned.name}</div>
-                    {/* Which rounds still have no course is the one thing the
-                        round pills above do NOT show (their dots are tees and
-                        pairings). The course's city and par used to lead this
-                        line; they are on the scorecard behind Edit, and this
-                        space is better spent on what the event still needs. */}
-                    {(locked || unassignedRounds.length > 0) && (
-                      <div style={{ fontSize: FS.label, color: K.t3 }}>
-                        {locked && <span style={{ fontWeight: 700 }}>Finalized</span>}
-                        {!locked && unassignedRounds.length > 0 && <span style={{ color: K.warn, fontWeight: 700 }}>R{unassignedRounds.join(", R")} unset</span>}
-                      </div>
+                    {/* This line used to also carry an "R4 unset" run naming
+                        every round with no course, on the theory that the round
+                        pills above did not show it. They do: teesDone and
+                        pairingsDone both require a course, so a round without
+                        one wears two hollow red dots and can never do anything
+                        else. The pills are the badge; a second copy of them in
+                        prose, under a different round's course, was noise. */}
+                    {locked && (
+                      <div style={{ fontSize: FS.label, color: K.t3, fontWeight: 700 }}>Finalized</div>
                     )}
                   </div>
                   {!locked && (
@@ -3116,11 +3262,11 @@ export function AdminView({ registry, activePlayers, marketPool, sideGames, onUp
                   <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
                     <span style={{ width: 6, height: 6, borderRadius: "50%", background: K.danger, flexShrink: 0 }} />
                     <span style={{ fontSize: FS.label, fontWeight: 800, color: K.danger, letterSpacing: 0.6, textTransform: "uppercase" }}>
-                      {st.noTee.length} {st.noTee.length === 1 ? "player has" : "players have"} no tee
+                      {st.noTee.length} {st.noTee.length === 1 ? "player has" : "players have"} no tee set
                     </span>
                   </div>
                   <div style={{ fontSize: FS.label, color: K.t2, lineHeight: 1.5 }}>
-                    {describeMissingTees(st.noTee, nameOfPid)}
+                    {missingTeeNames(st.noTee, nameOfPid)}
                   </div>
                   {fixTee && (
                     <button
@@ -3290,6 +3436,7 @@ export function AdminView({ registry, activePlayers, marketPool, sideGames, onUp
         onRemove={removePlayer}
         askDelete={askDelete}
         returning={returningPool}
+        indexOf={careerIndex}
         onSave={async (v) => {
           if (v.isNew) {
             await addPlayerToTournament(v.name, v.hi, { first_name: v.first, last_name: v.last }, v.pid);

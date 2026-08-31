@@ -7,7 +7,7 @@
 // here: not that a course comes back with its tees, but that it comes back
 // with the SAME tees whichever door asked for it.
 import { describe, it, expect } from "vitest";
-import { registryRows, roundRows, courseIdsOf, stitchCourses } from "./staticData";
+import { registryRows, roundRows, courseIdsOf, stitchCourses, mergeCourses } from "./staticData";
 
 describe("registryRows", () => {
   it("applies the display convention, not whatever is stored", () => {
@@ -88,6 +88,30 @@ describe("courseIdsOf", () => {
     expect(courseIdsOf([{ round_number: 1 }, { round_number: 2, course_id: "c1" }])).toEqual(["c1"]);
     expect(courseIdsOf()).toEqual([]);
   });
+
+  // The bug this closes: the scramble's course is on no round, so it was never
+  // fetched, and every phone but the director's showed "No course set for the
+  // scramble" over a course that had been set.
+  it("asks for the scramble's course too, which no round points at", () => {
+    expect(courseIdsOf([{ round_number: 1, course_id: "treetops" }], ["timber_ridge"]))
+      .toEqual(["treetops", "timber_ridge"]);
+  });
+
+  it("does not ask twice when the scramble is played on a round's course", () => {
+    expect(courseIdsOf([{ round_number: 1, course_id: "treetops" }], ["treetops"])).toEqual(["treetops"]);
+  });
+
+  it("ignores a scramble with no course picked", () => {
+    expect(courseIdsOf([{ round_number: 1, course_id: "treetops" }], [null])).toEqual(["treetops"]);
+    expect(courseIdsOf([], [null])).toEqual([]);
+  });
+
+  // A scramble on a course and no rounds set up yet is still a course to
+  // fetch — the early return that used to sit in front of this in App.jsx
+  // meant a scramble-first edition never asked for one.
+  it("asks for the scramble's course with no rounds at all", () => {
+    expect(courseIdsOf([], ["timber_ridge"])).toEqual(["timber_ridge"]);
+  });
 });
 
 describe("stitchCourses", () => {
@@ -130,5 +154,33 @@ describe("stitchCourses", () => {
 
   it("survives being handed nothing", () => {
     expect(stitchCourses()).toEqual([]);
+  });
+});
+
+describe("mergeCourses", () => {
+  // The scramble's course is not on any round, so it is fetched on its own
+  // and folded into a list that has already been built. Twice, in practice:
+  // once off this phone's cache and again off the server.
+  it("adds a course the list does not hold", () => {
+    const out = mergeCourses([{ id: "a", name: "Augusta" }], [{ id: "s", name: "Scramble Hills" }]);
+    expect(out.map(c => c.id)).toEqual(["a", "s"]);
+  });
+
+  it("replaces rather than duplicates when the same course arrives again", () => {
+    const cached = [{ id: "s", name: "Scramble Hills", hole_pars: [] }];
+    const fromServer = [{ id: "s", name: "Scramble Hills", hole_pars: [4, 3, 5] }];
+    const out = mergeCourses(mergeCourses([], cached), fromServer);
+    expect(out).toHaveLength(1);
+    expect(out[0].hole_pars).toEqual([4, 3, 5]);
+  });
+
+  it("leaves the rounds' own courses alone", () => {
+    const list = [{ id: "a", name: "Augusta" }, { id: "b", name: "Bethpage" }];
+    expect(mergeCourses(list, [{ id: "s", name: "Scramble Hills" }]).slice(0, 2)).toEqual(list);
+  });
+
+  it("ignores a row with no id and survives empty arguments", () => {
+    expect(mergeCourses([{ id: "a" }], [{ name: "nameless" }])).toEqual([{ id: "a" }]);
+    expect(mergeCourses()).toEqual([]);
   });
 });

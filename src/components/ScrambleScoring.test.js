@@ -84,6 +84,25 @@ describe("ScrambleScoring renders", () => {
     expect(screen.getByText(/Waiting on your tournament director/)).toBeTruthy();
   });
 
+  // The bug this closes: the scramble's course is on no round, so nothing in
+  // the static load asked for it and every phone but the director's resolved
+  // the id against a list that had never held it. The shell fetches it now
+  // (see App.jsx); until it lands, this screen says it is waiting rather than
+  // telling the field a course that has been set was never set.
+  it("says it is waiting when the course is set but has not loaded", () => {
+    render(h(ScrambleScoring, baseProps({ courses: [] })));
+    expect(screen.getByText(/Loading the scramble/)).toBeTruthy();
+    expect(screen.queryByText("No course set for the scramble")).toBeNull();
+  });
+
+  it("does not send a director to setup for a course that is only still loading", () => {
+    const props = baseProps({ courses: [], user: { id: "aaron_j", isDirector: true } });
+    render(h(ScrambleScoring, props));
+    expect(screen.queryByText(/Tap to set it up/)).toBeNull();
+    fireEvent.click(screen.getByText(/Loading the scramble/));
+    expect(props.onGoToSetup).not.toHaveBeenCalled();
+  });
+
   it("points a director at the setup screen from that empty state", () => {
     const props = baseProps({
       scramble: { ...SCRAMBLE, courseId: null },
@@ -225,5 +244,56 @@ describe("the team switcher", () => {
     expect(holeShown()).toBe("1");
     fireEvent.click(screen.getAllByText("OG")[0]);
     expect(holeShown()).toBe("3");
+  });
+});
+
+// ── The mini leaderboard ───────────────────────────────────────────
+// The scramble's whole field is three rows, which is why it rides under the
+// card rather than getting a Board tab of its own. What it has to get right is
+// the case a three-row board makes obvious: a team that has not teed off.
+describe("the mini leaderboard", () => {
+  it("shows all three teams from the first hole, in order of score", () => {
+    render(h(ScrambleScoring, baseProps({
+      scramble: { ...SCRAMBLE, scores: { og: { 0: 5 }, yg: { 0: 3 }, ng: { 0: 4 } } },
+    })));
+    // Hole 1 is a par 4, so YG is under, NG level, OG over.
+    const rows = screen.getAllByRole("button", { name: /^Show the .. card/ });
+    expect(rows.map(r => r.textContent.slice(1, 3))).toEqual(["YG", "NG", "OG"]);
+  });
+
+  it("gives a team that has not teed off no position and no score", () => {
+    render(h(ScrambleScoring, baseProps({
+      scramble: { ...SCRAMBLE, scores: { og: { 0: 4 }, yg: { 0: 4 } } },
+    })));
+    const ng = screen.getByRole("button", { name: /^Show the NG card/ });
+    // A dash where the position and the score would be — not "1st" and not "E".
+    expect(ng.textContent).toContain("NG");
+    expect(ng.textContent).not.toContain("Thru");
+    expect(ng.textContent).not.toContain("E");
+  });
+
+  it("sorts a team that has not started last, whatever the others are doing", () => {
+    render(h(ScrambleScoring, baseProps({
+      scramble: { ...SCRAMBLE, scores: { og: { 0: 8 }, yg: {}, ng: { 0: 9 } } },
+    })));
+    const rows = screen.getAllByRole("button", { name: /^Show the .. card/ });
+    expect(rows[rows.length - 1].textContent).toContain("YG");
+  });
+
+  it("names the players on each team", () => {
+    render(h(ScrambleScoring, baseProps()));
+    const og = screen.getByRole("button", { name: /^Show the OG card/ });
+    expect(og.textContent).toContain("Aaron");
+    expect(og.textContent).toContain("Dave");
+  });
+
+  it("moves as a score lands", () => {
+    const props = baseProps({ scramble: { ...SCRAMBLE, scores: { og: { 0: 5 }, yg: { 0: 3 }, ng: { 0: 4 } } } });
+    const { rerender } = render(h(ScrambleScoring, props));
+    expect(screen.getAllByRole("button", { name: /^Show the .. card/ })[0].textContent).toContain("YG");
+    rerender(h(ScrambleScoring, baseProps({
+      scramble: { ...SCRAMBLE, scores: { og: { 0: 2 }, yg: { 0: 3 }, ng: { 0: 4 } } },
+    })));
+    expect(screen.getAllByRole("button", { name: /^Show the .. card/ })[0].textContent).toContain("OG");
   });
 });

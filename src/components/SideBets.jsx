@@ -21,8 +21,9 @@ import { K, FONT, FS, R, ALPHA } from "../theme";
 import { Popup } from "./Popup";
 import { SegmentedToggle, Card, Btn } from "./ui";
 import {
-  sideBetError, sortSideBets, sideBetTotals, canDeleteSideBet, inSideBet,
-  settleState, hasSettled, MAX_DETAIL,
+  sideBetError, sortSideBets, sideBetTotals, canDeleteSideBet, canEditSideBet,
+  canRepeatSideBet, repeatSideBetSeed, inSideBet, settleState, hasSettled,
+  settledBy, MAX_DETAIL,
 } from "../lib/sideBets";
 
 const money = (n) => `$${(Number(n) || 0).toFixed(2)}`;
@@ -30,8 +31,17 @@ const money = (n) => `$${(Number(n) || 0).toFixed(2)}`;
 // phone — the same call the skins pot makes, for the same reason.
 const potMoney = (n) => `$${Math.round(Number(n) || 0).toLocaleString()}`;
 
-export function SideBets({ players, bets, user, authUid, onAddBet, onDeleteBet, onSettleBet, confirm }) {
+export function SideBets({ players, bets, user, authUid, onAddBet, onEditBet, onDeleteBet, onSettleBet, confirm }) {
   const [adding, setAdding] = useState(false);
+  // The bet the sheet is open on, or null. The same sheet does both jobs —
+  // an edit form that drifts from the add form is two places for the terms
+  // of a bet to be described differently.
+  const [editing, setEditing] = useState(null);
+  // The terms a rematch starts from, or null. A repeat writes nothing on its
+  // own — it opens the same sheet on the same terms as a NEW bet, because the
+  // one everybody wants to run back is usually the one whose stakes are about
+  // to move. See lib/sideBets repeatSideBetSeed.
+  const [repeating, setRepeating] = useState(null);
   // ALL is the default and the left-hand option. The ledger is the field's,
   // not yours — and a player who has not made a bet yet would otherwise open
   // this tab to an empty list that looks like the feature is broken rather
@@ -175,6 +185,10 @@ export function SideBets({ players, bets, user, authUid, onAddBet, onDeleteBet, 
           {rows.map((b, i) => {
             const mine = inSideBet(b, myPid);
             const deletable = canDeleteSideBet(b, { uid: authUid, isDirector: user?.isDirector === true });
+            // Wider than deletable, and it is the point of the pencil: the
+            // other side of a bet may correct it even though they may not
+            // erase it. See lib/sideBets canEditSideBet.
+            const editable = canEditSideBet(b, { uid: authUid, pid: myPid, isDirector: user?.isDirector === true });
             const state = settleState(b, myPid);
             const done = state === "settled";
             return (
@@ -196,6 +210,16 @@ export function SideBets({ players, bets, user, authUid, onAddBet, onDeleteBet, 
                     <span style={{ fontSize: FS.small, fontWeight: 700, color: K.t1 }}>{nameOf(b.player_b)}</span>
                   </div>
                   <span style={{ fontSize: FS.body, fontWeight: 800, color: K.gold, flexShrink: 0 }}>{money(b.amount)}</span>
+                  {editable && (
+                    <Btn
+                      variant="ghost" size="sm"
+                      aria-label="Edit this bet"
+                      onClick={() => setEditing(b)}
+                      style={{ flexShrink: 0, padding: "2px 0 2px 8px", color: K.t3, lineHeight: 1 }}
+                    >
+                      ✎
+                    </Btn>
+                  )}
                   {deletable && (
                     <Btn
                       variant="ghost" size="sm"
@@ -226,6 +250,12 @@ export function SideBets({ players, bets, user, authUid, onAddBet, onDeleteBet, 
                      reading last year's ledger is neither. */
                   canAct={mine && !!authUid}
                   onToggle={() => settle(b)}
+                  /* Only on a finished bet, and only to the two men who
+                     finished it. A live bet already exists — the button on
+                     it would be a way to have the same wager twice. */
+                  onRepeat={canRepeatSideBet(b, { uid: authUid, pid: myPid })
+                    ? () => setRepeating(repeatSideBetSeed(b))
+                    : null}
                   busy={busyId === b.id}
                 />
               </div>
@@ -235,11 +265,31 @@ export function SideBets({ players, bets, user, authUid, onAddBet, onDeleteBet, 
       )}
 
       {adding && (
-        <AddBetSheet
+        <BetSheet
           players={players}
           me={myPid}
           onCancel={() => setAdding(false)}
           onSave={async (form) => { await onAddBet(form); setAdding(false); }}
+        />
+      )}
+
+      {repeating && (
+        <BetSheet
+          players={players}
+          me={myPid}
+          seed={repeating}
+          onCancel={() => setRepeating(null)}
+          onSave={async (form) => { await onAddBet(form); setRepeating(null); }}
+        />
+      )}
+
+      {editing && (
+        <BetSheet
+          players={players}
+          me={myPid}
+          bet={editing}
+          onCancel={() => setEditing(null)}
+          onSave={async (form) => { await onEditBet(editing, form); setEditing(null); }}
         />
       )}
     </div>
@@ -256,7 +306,7 @@ export function SideBets({ players, bets, user, authUid, onAddBet, onDeleteBet, 
 // Only `confirm` gets a filled button, because it is the only state that asks
 // the reader for something. Everything else is either a claim they already
 // made or somebody else's business.
-function SettleStrip({ state, otherName, markerName, canAct, onToggle, busy }) {
+function SettleStrip({ state, otherName, markerName, canAct, onToggle, onRepeat, busy }) {
   // [ status text, button label, button variant ] per state. `settled` is the
   // one state a bystander also sees, so its button is gated on canAct below
   // rather than on the state — a reader with no stake must not be offered a
@@ -273,7 +323,12 @@ function SettleStrip({ state, otherName, markerName, canAct, onToggle, busy }) {
   }[state] || ["", null, null];
 
   const showButton = canAct && !!label;
-  if (!status && !showButton) return null;
+  // A settled bet's rematch. Offered beside REOPEN rather than instead of it,
+  // and it is the LOUDER of the two on purpose: running it back is the thing
+  // people do on the 18th green, and reopening a bet both men have called
+  // paid is the rare correction.
+  const showRepeat = canAct && typeof onRepeat === "function";
+  if (!status && !showButton && !showRepeat) return null;
 
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 7 }}>
@@ -284,6 +339,14 @@ function SettleStrip({ state, otherName, markerName, canAct, onToggle, busy }) {
       }}>
         {status}
       </span>
+      {showRepeat && (
+        <Btn
+          variant="secondary" size="sm" onClick={onRepeat}
+          style={{ flexShrink: 0, fontSize: FS.micro, fontWeight: 800, letterSpacing: 0.6, padding: "4px 9px", borderRadius: R.sm }}
+        >
+          RUN IT BACK
+        </Btn>
+      )}
       {showButton && (
         <Btn
           variant={variant} size="sm" disabled={busy} onClick={onToggle}
@@ -302,7 +365,17 @@ function SettleStrip({ state, otherName, markerName, canAct, onToggle, busy }) {
 // label so the case that would otherwise dead-end still works: a director
 // with no roster row, or a player writing down two other people's bet at the
 // bar. Somebody has to be able to record it or it goes back on the napkin.
-function AddBetSheet({ players, me, onCancel, onSave }) {
+//
+// ONE SHEET FOR ALL THREE JOBS — a new bet, a correction to one, and a
+// rematch — with `bet` and `seed` deciding which. A separate form per door is
+// a second place for the terms of a bet to be described, and they drift: the
+// add form caps the detail and the edit form does not, and now a bet means
+// something different depending on how it was written.
+//
+// `bet` is a document and patches it in place; `seed` is only starting text
+// for a NEW one, which is what makes a repeat a fresh row rather than the old
+// bet reopened. See lib/sideBets repeatSideBetSeed.
+function BetSheet({ players, me, bet, seed, onCancel, onSave }) {
   // Alphabetical, not roster order. The roster is ordered by whenever the
   // director typed somebody in, which is an order nobody picking a name off a
   // list can predict — so finding a player meant reading all sixteen.
@@ -312,12 +385,27 @@ function AddBetSheet({ players, me, onCancel, onSave }) {
     () => [...players].sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""))),
     [players],
   );
-  const [playerA, setPlayerA] = useState(me || "");
-  const [playerB, setPlayerB] = useState("");
-  const [amount, setAmount] = useState("");
-  const [detail, setDetail] = useState("");
+  // What the fields open on: the bet being corrected, the bet being run back,
+  // or an empty form with side A defaulted to whoever is holding the phone.
+  // `amount` is a string throughout because the input is one — the number
+  // only exists once buildSideBet or buildSideBetEdit makes it one.
+  const start = bet
+    ? { playerA: bet.player_a, playerB: bet.player_b, amount: String(bet.amount ?? ""), detail: String(bet.detail || "") }
+    : seed || { playerA: me || "", playerB: "", amount: "", detail: "" };
+  const [playerA, setPlayerA] = useState(start.playerA);
+  const [playerB, setPlayerB] = useState(start.playerB);
+  const [amount, setAmount] = useState(start.amount);
+  const [detail, setDetail] = useState(start.detail);
   const [err, setErr] = useState(null);
   const [saving, setSaving] = useState(false);
+
+  // buildSideBetEdit drops the paid marks when the money or the players move,
+  // and a settled bet quietly reopening under somebody is the kind of surprise
+  // that gets an app blamed for the argument. So the sheet says it first, and
+  // only while it is actually true of what is currently typed in.
+  const marksWillClear = !!bet && settledBy(bet).length > 0
+    && (playerA !== bet.player_a || playerB !== bet.player_b
+        || Number(amount) !== (Number(bet.amount) || 0));
 
   const submit = async () => {
     const problem = sideBetError({ playerA, playerB, amount });
@@ -369,7 +457,19 @@ function AddBetSheet({ players, me, onCancel, onSave }) {
     // and the classic centred overlay sits under the keyboard.
     <Popup onClose={saving ? undefined : onCancel} maxWidth={400} padding={16} portal viewportFit align="start">
       <div>
-        <div style={{ fontSize: FS.lead, fontWeight: 800, color: K.t1, marginBottom: 14 }}>New side bet</div>
+        <div style={{ fontSize: FS.lead, fontWeight: 800, color: K.t1, marginBottom: 14 }}>
+          {bet ? "Edit side bet" : seed ? "Run it back" : "New side bet"}
+        </div>
+
+        {/* A rematch opening on the old bet's terms looks enough like the old
+            bet to be mistaken for it, and a player who thinks they are editing
+            the settled row would be surprised twice: once by a second bet
+            appearing, and once by the first one still saying SETTLED. */}
+        {seed && (
+          <div style={{ fontSize: FS.small, color: K.t2, marginTop: -8, marginBottom: 14, lineHeight: 1.4 }}>
+            The same bet again, as a new one. Move the stakes if the rematch is for more.
+          </div>
+        )}
 
         <div style={{ marginBottom: 12 }}>
           {label("BETWEEN")}
@@ -405,13 +505,21 @@ function AddBetSheet({ players, me, onCancel, onSave }) {
           {detail.length}/{MAX_DETAIL}
         </div>
 
+        {marksWillClear && (
+          <div style={{ fontSize: FS.small, color: K.t2, marginBottom: 10, lineHeight: 1.4 }}>
+            This changes what was agreed, so the paid marks come off — both sides say it again.
+          </div>
+        )}
+
         {err && (
           <div style={{ fontSize: FS.small, color: K.danger, marginBottom: 10, fontWeight: 600 }}>{err}</div>
         )}
 
         <div style={{ display: "flex", gap: 8 }}>
           <Btn variant="secondary" block onClick={onCancel} disabled={saving}>Cancel</Btn>
-          <Btn block onClick={submit} disabled={saving}>{saving ? "Saving…" : "Add bet"}</Btn>
+          <Btn block onClick={submit} disabled={saving}>
+            {saving ? "Saving…" : bet ? "Save bet" : "Add bet"}
+          </Btn>
         </div>
       </div>
     </Popup>

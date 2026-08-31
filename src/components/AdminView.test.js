@@ -19,7 +19,7 @@
 // So: mount it, click through all four sub-tabs, and mount the states nobody
 // develops against — the empty tournament and the finished one.
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { render, screen, cleanup, fireEvent } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, within } from "@testing-library/react";
 import { createElement as h } from "react";
 
 vi.mock("../firebase", () => ({
@@ -287,6 +287,204 @@ describe("AdminView renders", () => {
     await vi.waitFor(() => expect(notify).toHaveBeenCalled());
     expect(notify.mock.calls[0][0]).toContain("2027");
     expect(deletePlayer).not.toHaveBeenCalled();
+  });
+
+  // ── The tee sheet's two numbers ──
+  // Index and course handicap are what the director is reading on this panel;
+  // they used to be a run of small prose on the end of each name ("HI 12 · CH
+  // 14"). They are columns now, headed once. What this guards is that the
+  // panel still opens and still prints both numbers per player — the heads
+  // and the values are separate elements, so a row that collapsed back into
+  // one string would fail here.
+  it("gives index and course handicap their own columns under Player tees", () => {
+    mount({ teeData: { 1: { aaron_j: "Blue", dave_s: "Blue", matt_r: "White", pete_l: "White", test_one: "Blue" } } });
+    fireEvent.click(screen.getByText("Player tees"));
+    expect(screen.getByText("HI")).toBeTruthy();
+    expect(screen.getByText("CH")).toBeTruthy();
+    // Aaron is a 12 off Blue (130/72.4/72) — the index and the handicap it
+    // computes to are two cells, not one sentence.
+    expect(screen.getByText("12")).toBeTruthy();
+    expect(screen.getByText("14")).toBeTruthy();
+    // Nobody is missing a tee, so no row falls back to the em dash.
+    expect(screen.queryByText("\u2014")).toBeNull();
+  });
+
+  it("prints an em dash for a player with no tee rather than a course handicap", () => {
+    mount({ teeData: { 1: { aaron_j: "Blue" } } });
+    fireEvent.click(screen.getByText("Player tees"));
+    expect(screen.getAllByText("\u2014").length).toBe(4);
+  });
+
+  // ── Set-all says what it did ──
+  // Tapping a tee tile moves the WHOLE field, which is the biggest swing in
+  // strokes the console can make, and it used to happen in silence: only the
+  // per-player buttons flashed the change. The maths is in lib/chDeltas with
+  // its own suite; what this holds is that the tile is wired to it.
+  it("flashes the course-handicap change when the whole field is moved", () => {
+    mount({ teeData: { 1: { aaron_j: "Blue", dave_s: "Blue", matt_r: "White", pete_l: "White" } } });
+    fireEvent.click(screen.getByText("Player tees"));
+    fireEvent.click(screen.getByTitle("Put every player on White"));
+    // Aaron (12) and Dave (8) come off Blue and each drop three strokes.
+    // Matt and Pete are already on White and Test One has no tee, so three of
+    // the five rows say nothing — nothing happened to them.
+    expect(screen.getAllByText("\u25bc3").length).toBe(2);
+  });
+
+  it("says nothing for a set-all onto the tee the field is already playing", () => {
+    mount({ teeData: { 1: { aaron_j: "Blue", dave_s: "Blue", matt_r: "Blue", pete_l: "Blue", test_one: "Blue" } } });
+    fireEvent.click(screen.getByText("Player tees"));
+    fireEvent.click(screen.getByTitle("Put every player on Blue"));
+    expect(screen.queryByText(/[\u25b2\u25bc]\d/)).toBeNull();
+  });
+
+  // ── The two round-setup warnings say the least they can ──
+  // The banner counts and diagnoses; the line under it is the one thing only
+  // it can say. It used to repeat the count, restate the fault and then add an
+  // instruction, burying the names in the middle of three things already on
+  // screen.
+  it("names the players with no tee and says nothing else", () => {
+    // No per-round tee map, so the whole field is missing one.
+    mount({ teeData: {} });
+    expect(screen.getByText("5 players have no tee set")).toBeTruthy();
+    expect(screen.getByText("Test One, Aaron J, Dave S, Matt R, Pete L")).toBeTruthy();
+    // No instruction, no restated fault, no fallback described.
+    expect(screen.queryByText(/Assign a tee|before it starts/i)).toBeNull();
+  });
+
+  it("agrees the count's verb for a single player", () => {
+    mount({ teeData: { 1: { aaron_j: "Blue", dave_s: "Blue", matt_r: "Blue", pete_l: "Blue" } } });
+    const heading = screen.getByText("1 player has no tee set");
+    // Scoped to the banner — "Test One" is also a row in the tee sheet below it.
+    expect(within(heading.closest("div").parentElement).getByText("Test One")).toBeTruthy();
+  });
+
+  it("calls an undrawn round's problem pairings, not groups", () => {
+    mount({ pairingsData: {} });
+    expect(screen.getByText("No pairings set yet")).toBeTruthy();
+    expect(screen.queryByText(/groups drawn/i)).toBeNull();
+  });
+
+  // ── One badge for "this round has no course", not two ──
+  // The card under the round strip used to print "R4 unset" beside the course
+  // name of whichever round was selected — a second copy of what the pills
+  // already say, attached to a different round than the one it was about.
+  // teesDone and pairingsDone both require a course, so a round without one
+  // can only ever wear two hollow red dots, which is the badge.
+  it("leaves an unset round to its pill rather than naming it on the card", () => {
+    // Rounds 1 and 2 exist; round 2 has no course.
+    mount({ tRounds: [{ id: "r1", tournament_id: "wbc_2026", round_number: 1, course_id: "c1" }] });
+    expect(screen.getByText("Treetops")).toBeTruthy();
+    expect(screen.queryByText(/unset/i)).toBeNull();
+  });
+
+  it("still says Finalized on the card for a round that is closed", () => {
+    // Round 1 is closed; the console opens on round 2, so select round 1.
+    mount({ finalizedRounds: { 1: true } });
+    fireEvent.click(screen.getByText(/Rd 1/));
+    expect(screen.getByText("Finalized")).toBeTruthy();
+  });
+
+  // ── The course editor's tee list ──
+  // The APIs are routinely short a tee. A course comes back with three when it
+  // has five, and Refetch returns the same three — so the editor has to let a
+  // director type one in, which for a long time it did not: the only controls
+  // on this screen were Refetch and a per-tee ✕, and a tee the API had never
+  // heard of could not be added from anywhere in the app.
+  const openCourseEditor = (props = {}) => {
+    mount(props);
+    fireEvent.click(screen.getByText("Edit"));
+    return screen.getByText("Edit Course");
+  };
+  // The editor's Save, not the round card's tee sign-off behind it — both say
+  // Save, and only one of them is on screen.
+  const saveCourse = () => fireEvent.click(within(screen.getByText("Edit Course").parentElement).getByText("Save"));
+
+  it("opens the course editor on the round's course", () => {
+    openCourseEditor();
+    expect(screen.getByDisplayValue("Treetops")).toBeTruthy();
+    // Both of the course's tees, sorted from the tips down.
+    expect(screen.getByDisplayValue("Blue")).toBeTruthy();
+    expect(screen.getByDisplayValue("White")).toBeTruthy();
+  });
+
+  it("adds a blank tee for the director to fill in", () => {
+    openCourseEditor();
+    expect(screen.getAllByPlaceholderText("Tee name").length).toBe(2);
+    fireEvent.click(screen.getByText("+ Add tee"));
+    const names = screen.getAllByPlaceholderText("Tee name");
+    expect(names.length).toBe(3);
+    // With no slope yet it sorts last — which is where the button that made
+    // it is. A new row appearing in the middle of the list is a row the
+    // director has to go looking for.
+    expect(names[2].value).toBe("");
+  });
+
+  it("refuses to save a tee with no name", () => {
+    // The tee_boxes document id and every tee assignment are derived from the
+    // name. Two blank ones are one document, and a blank one is a tee no
+    // player can be put on.
+    const addCourse = vi.fn(); const notify = vi.fn();
+    openCourseEditor({ addCourse, notify });
+    fireEvent.click(screen.getByText("+ Add tee"));
+    saveCourse();
+    expect(addCourse).not.toHaveBeenCalled();
+    expect(notify).toHaveBeenCalledWith("Every tee needs a name");
+  });
+
+  it("saves a hand-typed tee with its numbers as numbers", () => {
+    // Every field on a new tee starts empty, and the write path stores what it
+    // is handed — "" would land in Firestore as a slope.
+    const addCourse = vi.fn();
+    openCourseEditor({ addCourse });
+    fireEvent.click(screen.getByText("+ Add tee"));
+    const name = screen.getAllByPlaceholderText("Tee name")[2];
+    fireEvent.change(name, { target: { value: "Gold" } });
+    saveCourse();
+    expect(addCourse).toHaveBeenCalled();
+    const saved = addCourse.mock.calls[0][0].tee_boxes;
+    expect(saved.length).toBe(3);
+    const gold = saved.find(t => t.name === "Gold");
+    expect(gold).toMatchObject({ rating: 72.0, slope: 113, par: 72, yardage: 0 });
+    // And the tees that were already there keep their real numbers.
+    expect(saved.find(t => t.name === "Blue")).toMatchObject({ slope: 130, rating: 72.4 });
+  });
+
+  it("keeps the cursor in the row as a slope is typed into it", () => {
+    // The list sorts by slope descending and re-sorts on every keystroke, so a
+    // tee typed in at the bottom climbs to the top as its slope arrives. Keyed
+    // by POSITION rather than by the tee, the row would stay where it is and
+    // the values would slide under it — the director would be three keystrokes
+    // into 140 and suddenly editing the whites.
+    openCourseEditor();
+    fireEvent.click(screen.getByText("+ Add tee"));
+    const name = screen.getAllByPlaceholderText("Tee name")[2];
+    fireEvent.change(name, { target: { value: "Tips" } });
+    // rating, slope, par, yards — the four boxes under the name on that row.
+    const slope = within(name.closest("div").parentElement).getAllByRole("textbox")[2];
+    slope.focus();
+    fireEvent.change(slope, { target: { value: "140" } });
+    // It sorted to the top...
+    expect(screen.getAllByPlaceholderText("Tee name").map(i => i.value)).toEqual(["Tips", "Blue", "White"]);
+    // ...and the cursor went with it, still in the box holding 140.
+    expect(document.activeElement).toBe(slope);
+    expect(document.activeElement.value).toBe("140");
+    expect(within(slope.closest("div").parentElement.parentElement).getByPlaceholderText("Tee name").value).toBe("Tips");
+  });
+
+  it("removes a tee from the list it saves", () => {
+    const addCourse = vi.fn();
+    openCourseEditor({ addCourse });
+    // The ✕ on the White card — second in the list, sorted from the tips.
+    fireEvent.click(screen.getAllByText("✕")[1]);
+    saveCourse();
+    expect(addCourse.mock.calls[0][0].tee_boxes.map(t => t.name)).toEqual(["Blue"]);
+  });
+
+  it("renders a course the API returned no tees for", () => {
+    openCourseEditor({ courses: [{ ...COURSE, tee_boxes: [] }], getPlayerTee: () => null });
+    expect(screen.getByText(/No tees on this course/)).toBeTruthy();
+    fireEvent.click(screen.getByText("+ Add tee"));
+    expect(screen.getAllByPlaceholderText("Tee name").length).toBe(1);
   });
 
   it("opens on the tab the shell asks for", () => {

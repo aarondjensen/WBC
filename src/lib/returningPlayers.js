@@ -51,6 +51,8 @@ const partsOf = (row) => {
 //              somebody to add, and un-withdrawing is a different action.
 // historyNames the record books. Injectable, with indexOf/matchName, so the
 //              selection can be tested without asserting on real careers.
+//              `indexOf(historyName, playerId)` — see the note where it is
+//              called for why it takes both.
 //
 // Returns one row per addable player, alphabetical:
 //   { id, name, first, last, historyName, index, rounds, lastYear }
@@ -58,7 +60,7 @@ export function returningPlayers({
   registry = [],
   rosterIds = [],
   historyNames = HISTORY_PLAYERS,
-  indexOf = indexFor,
+  indexOf = (name) => indexFor(name),
   matchName = matchHistoryName,
 } = {}) {
   const onRoster = new Set((rosterIds || []).filter(Boolean).map(String));
@@ -86,7 +88,12 @@ export function returningPlayers({
 
   return rows
     .map(r => {
-      const idx = r.historyName ? indexOf(r.historyName) : null;
+      // The id goes with the name because a career now has two halves: the
+      // record books, which are keyed by history name, and the WBCs played
+      // since they were last generated, which are keyed by player_id. A man
+      // whose first tournament was last year has only the second — so the call
+      // is made for him too, rather than only for a name the bundle knows.
+      const idx = indexOf(r.historyName, r.id);
       const rounds = idx?.rounds || [];
       return {
         ...r,

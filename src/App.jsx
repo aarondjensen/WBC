@@ -4,14 +4,14 @@ import { readMembership, isDirectorAccount, resolveMember, setDirector, subscrib
 // The fourth way in — no account, no password, no roster spot, no writes.
 import { guestUser, isGuest, setGuestWrites, GUEST_NOTICE } from "./lib/guestMode";
 import { K, FS, R, ALPHA, MOTION, SHADOW, getTheme, setTheme, entranceBg } from "./theme";
-import { Toggle, SectionLabel, Card, Toast, Btn } from "./components/ui";
+import { Toggle, SectionLabel, Card, Toast, Btn, SegmentedToggle } from "./components/ui";
 import { computeIndividualBoard, rankIndividualBoard, WD_SCORE } from "./lib/individualBoard";
 // Only what the SHELL still needs — the rest went to the Betting tab with it.
 import { fieldFor, computeSkins, toggleIn } from "./lib/sideGames";
 import { normalizeLots, openingSharesLeft, marketWindows, eligibleBets, rebuyers, teeOffAt, roundComplete, marketOutsiders } from "./lib/market";
 // Which books this phone may hold, and when a director publishes the reveal.
 import { betsToHold, shouldPublish, betsSignature } from "./lib/marketSeal";
-import { SIDE_BETS_COL, sideBetId, buildSideBet, toggleSettled } from "./lib/sideBets";
+import { SIDE_BETS_COL, sideBetId, buildSideBet, buildSideBetEdit, toggleSettled } from "./lib/sideBets";
 import { SyncBanner } from "./components/SyncBanner";
 import { LeaderboardView } from "./components/LeaderboardView";
 import { GateScreen } from "./components/GateScreen";
@@ -34,25 +34,30 @@ import { NotificationPrompt } from "./components/NotificationPrompt";
 import { registerForPush, getCachedSubscriptionStatus, getNotificationPermissionState, isStandalonePWA } from "./lib/notifications";
 import { PAIR_KEY, encodePairing, decodePairing, readPairParam, stripPairParam, pairingUrl } from "./lib/authPairing";
 import { shouldPromptForPush, wasPrompted, markPrompted, PUSH_PROMPT_DELAY_MS } from "./lib/notificationPrompt";
+import { pendingAttestations } from "./lib/pendingAttest";
+import { AttestBanner } from "./components/AttestBanner";
 import { rowsToPairings, dedupeGroups } from "./lib/pairings";
 import { EditionBanner } from "./components/EditionBanner";
-import { warmEditions, cachedEditions } from "./lib/editions";
+import { warmEditions, cachedEditions, loadLiveRounds, cachedLiveRounds } from "./lib/editions";
+import { liveRoundsHere, mergeLiveRounds } from "./lib/liveHistory";
 import { lockNotice, isEditionLocked, canAdminEdition, demoOnlyAdmin } from "./lib/editionLock";
 import { editionClosedToMembers } from "./lib/editionLifecycle";
 import { liveEdition, editionBannerShowing } from "./lib/editionHome";
 import { holdForAuth } from "./lib/authHold";
 import { docIds } from "./lib/editionId";
+import { resolvePin, OVERRIDE_KEY, ctpLedger } from "./lib/ctp";
 // The one-round team game, and the button it puts in the header — see
 // lib/scramble.
-import { mergeScramble, scrambleLive, SCRAMBLE_BUTTON } from "./lib/scramble";
+import { mergeScramble, scrambleLive, opensOnScramble } from "./lib/scramble";
 import { scopeFor, scopedRegistry } from "./lib/playerScope";
 // The small conversions every screen does — see lib/format.
 import { teeTimeToMinutes } from "./lib/format";
 // How many rounds this event plays — a live binding. See lib/rounds.
 import { NUM_ROUNDS, setRoundCount } from "./lib/rounds";
 import { db, writes } from "./lib/db";
-import { registryRows, roundRows, courseIdsOf, stitchCourses } from "./lib/staticData";
+import { registryRows, roundRows, courseIdsOf, stitchCourses, mergeCourses } from "./lib/staticData";
 import { getDefaultTee } from "./lib/defaultTee";
+import { teeBoxDocId, staleTeeBoxIds } from "./lib/teeEditor";
 import { missingTees } from "./lib/roundSetup";
 import { indexFor, matchHistoryName } from "./lib/handicap";
 import { groupKey as groupKeyOf, roundOfGroupKey, liveRound, roundFinalized, switchableGroups, groupProgress, unfinalizeKeys, isGroupKey } from "./lib/groupSwitch";
@@ -106,10 +111,10 @@ const AdminView = lazy(() => import("./components/AdminView").then(m => ({ defau
 // ── The scramble, in two chunks nobody fetches unless there is one ──
 // Neither screen exists for most tournaments and neither is on the critical
 // path: the setup console is a director's, reached from the More menu, and the
-// card is reached from a header button that is not on screen until the switch
-// is thrown. The setup screen is warmed with the other menu sheets; the card
-// is warmed the moment the scramble goes on, which is a whole round's warning
-// before anybody stands on a tee box with it.
+// card is one half of the Scoring tab that is not drawn until a director
+// throws the switch. The setup screen is warmed with the other menu sheets;
+// the card is warmed the moment the scramble goes on, which is a whole round's
+// warning before anybody stands on a tee box with it.
 const ScrambleSetup = lazy(() => import("./components/ScrambleSetup").then(m => ({ default: m.ScrambleSetup })));
 const ScrambleScoring = lazy(() => import("./components/ScrambleScoring").then(m => ({ default: m.ScrambleScoring })));
 import { photoUploadsAllowed, uploadsDisabledReason } from "./lib/media";
@@ -266,31 +271,39 @@ const rowsToCourseHandicaps = (rows) => {
 // CTP is TOURNAMENT-WIDE: exactly one winner per par-3 per round, held by whichever
 // group has tagged the closest ball so far. Later groups see the standing tag as the
 // number to beat and can claim it — see the CTP prompt in OnCourseScoring.
+// A row carries one CLAIM PER GROUP now, and the winner is derived from them
+// rather than stored — see lib/ctp for why a pin four phones write to cannot
+// hold the answer itself. `legacy` is the flat winner the document used to
+// carry, which still stands for pins tagged before this and for imported
+// years, and every field below it names is the shape those documents have.
+//
+// A row with NO winner is kept, which it was not before: a hole every group
+// passed on has no player and is still an answer, and dropping it made it
+// indistinguishable from a hole the prompt never reached.
 const rowsToCtp = (rows) => {
   const cd = {};
-  (rows || []).filter(r => r.skin_type === "ctp" && r.player_id).forEach(r => {
+  (rows || []).filter(r => r.skin_type === "ctp").forEach(r => {
     const rnd = roundOf(r);
     if (!cd[rnd]) cd[rnd] = {};
     const ft = (r.distance_ft === 0 || r.distance_ft) ? r.distance_ft : null;
-    cd[rnd][r.hole_number] = {
-      playerId: r.player_id,
-      distanceFt: ft,
-      distance: r.distance || (ft ? `${ft} ft` : ""),
-      taggedByName: r.tagged_by_name || "",
-      // WHICH GROUP tagged it, and where that group tees off. The name alone
-      // says who typed; this says where they were in the field, which is the
-      // only way a group entering late can be told that the number in front
-      // of them came from BEHIND them. Null on a director's override and on
-      // any tag written before this was recorded — see lib/ctp, where an
-      // unknown order deliberately says nothing.
-      taggedGroupKey: r.tagged_group_key || null,
-      taggedGroupOrder: Number.isInteger(r.tagged_group_order) ? r.tagged_group_order : null,
-      // Who has walked off this green, seen the standing tag and let it
-      // stand. See onConfirmCtp — it is the other half of the on-course
-      // prompt, and the only record that a group answered rather than
-      // never being asked.
-      confirmedBy: Array.isArray(r.confirmed_by) ? r.confirmed_by : [],
-    };
+    cd[rnd][r.hole_number] = resolvePin({
+      claims: r.claims,
+      legacy: {
+        playerId: r.player_id || null,
+        distanceFt: ft,
+        distance: r.distance || (ft ? `${ft} ft` : ""),
+        taggedByName: r.tagged_by_name || "",
+        // WHICH GROUP tagged it, and where that group tees off. The name alone
+        // says who typed; this says where they were in the field, which is the
+        // only way a group entering late can be told that the number in front
+        // of them came from BEHIND them. Null on a director's override and on
+        // any tag written before this was recorded — see lib/ctp, where an
+        // unknown order deliberately says nothing.
+        taggedGroupKey: r.tagged_group_key || null,
+        taggedGroupOrder: Number.isInteger(r.tagged_group_order) ? r.tagged_group_order : null,
+        confirmedBy: Array.isArray(r.confirmed_by) ? r.confirmed_by : [],
+      },
+    });
   });
   return cd;
 };
@@ -386,6 +399,11 @@ const BettingView = lazy(() => import("./components/BettingView"));
 
 
 // GateScreen moved to components/GateScreen.jsx — see the header there.
+
+// The tab the app opens on. Named because two things have to agree about it:
+// the state below starts here, and the scramble landing asks whether the phone
+// is still on it — see opensOnScramble in lib/scramble.
+const BOOT_VIEW = "leaderboard";
 
 const sortCoursesByRound = (list, rounds) => {
   return [...list].sort((a, b) => {
@@ -751,10 +769,25 @@ export default function WBCApp() {
       document.removeEventListener("visibilitychange", onVis);
     };
   }, []);
-  const [view, setView] = useState("leaderboard");
-  // Where the OG/YG/NG button was tapped from, so tapping it again puts the
-  // app back rather than dropping somebody on the leaderboard.
-  const scrambleReturn = useRef("leaderboard");
+  const [view, setView] = useState(BOOT_VIEW);
+  // Where the app has been pointed since it opened, readable from inside a
+  // subscription callback — which is registered once at mount and would
+  // otherwise close over the view this app opened on forever. Both of these
+  // exist for the scramble landing below: it must not overrule a notification
+  // tap, and it must not overrule a tab somebody has already tapped.
+  const viewRef = useRef(BOOT_VIEW);
+  useEffect(() => { viewRef.current = view; }, [view]);
+  const deepLinked = useRef(false);
+  // ── Which card the Scoring tab is showing ──────────────────────────
+  // Read only while a scramble is running; the switch that sets it is not
+  // rendered otherwise, and neither is the scramble card.
+  //
+  // It opens on the SCRAMBLE, because the day there is one is the day it is
+  // being played — and it is remembered for the rest of the session, because
+  // somebody still entering yesterday's card should not have to flip back to
+  // the tournament on every visit to the tab. State on the app shell, which
+  // never unmounts, is exactly a session.
+  const [scoringMode, setScoringMode] = useState("scramble");
   const [round, setRound] = useState(1);
   // ── The director's crown ──
   // Which group the Scoring tab is pointed at, reported up by OnCourseScoring,
@@ -900,6 +933,13 @@ export default function WBCApp() {
   // half-written one. See lib/scramble for what it holds and why it is filed
   // there rather than in a collection of its own.
   const [scramble, setScramble] = useState(() => mergeScramble(null));
+  // The scramble's course, held on its own because it is the one course NO
+  // round points at — see the fetch under the static load. In a ref as well as
+  // in state, because loadStaticData is built once and would otherwise close
+  // over the value the scramble had at mount, which is none.
+  const scrambleCourseId = scramble.courseId;
+  const scrambleCourseRef = useRef(null);
+  useEffect(() => { scrambleCourseRef.current = scrambleCourseId; }, [scrambleCourseId]);
   const [pairingsData, setPairingsData] = useState({});
   const [teeData, setTeeData] = useState({});
   // Recorded course handicaps, for imported editions only — empty for the
@@ -1075,10 +1115,14 @@ export default function WBCApp() {
     }
 
     const rounds = roundRows(trRows);
-    if (!rounds.length) return scoped;
-    setTRounds(rounds);
+    if (rounds.length) setTRounds(rounds);
 
-    const courseIds = courseIdsOf(rounds);
+    // The four rounds' courses, plus the scramble's. The scramble's is on no
+    // round — it is an id on tournament_state.scramble — so asking only what
+    // the rounds are played on left it out of every list but the director's,
+    // and a refresh would have dropped it back out of theirs. See the fetch
+    // below, which is what covers the scramble arriving after this has run.
+    const courseIds = courseIdsOf(rounds, [scrambleCourseRef.current]);
     if (!courseIds.length) return scoped;
     const [cRows, tbRows] = await Promise.all([
       read("courses", [{ field: "id", op: "in", value: courseIds }]),
@@ -1089,6 +1133,53 @@ export default function WBCApp() {
   }, []);
 
   const refreshStaticData = useCallback(() => loadStaticData(db.get), [loadStaticData]);
+
+  // ── The one course no round is played on ─────────────────────────
+  // The static load above asks for the courses the four ROUNDS use. A
+  // scramble is not one of the four: the director picks its course on the
+  // scramble console and what is stored is an id on tournament_state.scramble,
+  // which arrives here over a subscription long after that load has run.
+  //
+  // So on every phone but the director's — who has the course in state from
+  // the moment they added it — that id resolved against a list that had never
+  // been asked for it, and the scramble card read "No course set for the
+  // scramble" over a course that had been set for hours. This is what fetches
+  // it: the moment a scramble course id turns up that the list does not hold.
+  //
+  // Cache first and the server behind it, the same two passes the mount load
+  // makes, so a phone that has read this course before draws the card with no
+  // round trip at all and still takes the server's copy when it lands.
+  const scrambleCourseFetch = useRef(null);
+  useEffect(() => {
+    const id = scrambleCourseId;
+    if (!id || scrambleCourseFetch.current === id) return;
+    if (courseList.some(c => c.id === id)) return;
+    scrambleCourseFetch.current = id;
+    let alive = true;
+    (async () => {
+      try {
+        const pull = async (read) => {
+          const [cRows, tbRows] = await Promise.all([
+            read("courses", [{ field: "id", op: "==", value: id }]),
+            read("tee_boxes", [{ field: "course_id", op: "==", value: id }]),
+          ]);
+          if (!cRows?.length || !alive) return;
+          const found = stitchCourses(cRows, tbRows || []);
+          setCourseList(prev => sortCoursesByRound(mergeCourses(prev, found), tRounds));
+        };
+        await pull(db.getCached);
+        if (alive) await pull(db.get);
+      } catch (e) {
+        console.error("Scramble course load failed:", e);
+      } finally {
+        // Cleared whatever happened, so a course that could not be read — an
+        // offline launch, a document written a second ago — is asked for again
+        // on the next pull rather than never again this session.
+        if (scrambleCourseFetch.current === id) scrambleCourseFetch.current = null;
+      }
+    })();
+    return () => { alive = false; };
+  }, [scrambleCourseId, courseList, tRounds]);
 
   const { pullY, refreshing: pullRefreshing, PULL_THRESHOLD } = usePullToRefresh({
     hasNewBundle,
@@ -1231,6 +1322,10 @@ export default function WBCApp() {
     // to seal and no advantage in reading one. See lib/sideBets.
     unsubs.push(db.subscribe(SIDE_BETS_COL, [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], setSideBets));
 
+    // Has the tournament's own document landed yet? The scramble landing below
+    // is the difference between "there is a scramble on" and "a scramble has
+    // just been switched on", and those are the same value arriving twice.
+    const firstStateSnapshot = { current: true };
     unsubs.push(db.subscribe("tournament_state", [{ field: "tournament_id", op: "==", value: TOURNAMENT_ID }], (docs) => {
       if (docs?.length) {
         if (docs[0].finalized_rounds) setFinalizedRounds(docs[0].finalized_rounds);
@@ -1243,7 +1338,30 @@ export default function WBCApp() {
         if (docs[0].meta) setTournamentMeta(docs[0].meta);
         if (docs[0].side_games) setSideGames(mergeSideGames(docs[0].side_games));
         if (docs[0].scramble) setScramble(mergeScramble(docs[0].scramble));
+        // ── A scramble day opens on the Scoring tab ──────────────
+        // Not the leaderboard: a scramble is ONE round, switched on only while
+        // it is being played, so everybody opening the app during one is
+        // opening it to post a score. The Scoring tab already opens onto the
+        // scramble card rather than the tournament one (see scoringMode), so
+        // this is the whole of it.
+        //
+        // Only on the FIRST snapshot, and lib/scramble is where the rest of
+        // the guards are written down — the one that matters is that a
+        // director throwing the switch mid-round moves nobody off the card
+        // they are entering.
+        if (opensOnScramble(docs[0].scramble, {
+          firstSnapshot: firstStateSnapshot.current,
+          deepLinked: deepLinked.current,
+          atBootView: viewRef.current === BOOT_VIEW,
+        })) {
+          setScoringMode("scramble");
+          setView("scoring");
+        }
       }
+      // Outside the guard above: a tournament with no state document yet has
+      // no scramble either, and the one that turns up a minute later is a
+      // switch being thrown rather than a launch.
+      firstStateSnapshot.current = false;
     }));
 
     // Sign/attest lives in its own collection (one doc per group) so the
@@ -1415,6 +1533,35 @@ export default function WBCApp() {
 
   const [photosOpened, setPhotosOpened] = useState(false);
   useEffect(() => { if (view === "photos") setPhotosOpened(true); }, [view]);
+
+  // ── The rounds the bundled history has not caught up with ──
+  // data/history.js stops at the last export of data/rounds.csv; the WBCs
+  // played in this app since then are in Firestore. The Players tab and the
+  // player editor both compute a career index, and without these they compute
+  // it off a record that is a year or more out of date — which is how a man
+  // who played last year could open next year's edition and find none of it on
+  // his chart.
+  //
+  // The PAST years are read from Firestore — once per device, then one count
+  // query a year to check they have not moved. Loaded on the first open of a
+  // screen that shows an index, and seeded synchronously from what this device
+  // already knows, so the chart paints on the frame the tab opens.
+  //
+  // The year being PLAYED is not in that read. Its scores are already on this
+  // phone, and `liveRounds` below folds them in for no reads at all — which is
+  // the half that matters most, because the app opens into the live tournament
+  // for everybody but a director building next year. See lib/liveHistory.
+  const [pastRounds, setPastRounds] = useState(cachedLiveRounds);
+  const [careerOpened, setCareerOpened] = useState(false);
+  useEffect(() => { if (view === "players" || view === "admin") setCareerOpened(true); }, [view]);
+  useEffect(() => {
+    if (!careerOpened) return;
+    let live = true;
+    loadLiveRounds()
+      .then(r => { if (live) setPastRounds(r); })
+      .catch(e => console.error("Live rounds load failed:", e));
+    return () => { live = false; };
+  }, [careerOpened]);
 
   // ── The scoring screen mounts on its first open, and never unmounts ──
   // It is rendered under `display: none` rather than unmounted, so that a
@@ -1784,26 +1931,65 @@ export default function WBCApp() {
     registerForPush(user.id);
   }, [user]);
 
-  // App badge = scorecards this player still owes an attestation on. This is
-  // the source of truth that reconciles the SW's optimistic badge increments.
+  // ── What this player still owes, and the badge that counts it ──
+  //
+  // ONE list, from lib/pendingAttest, feeding both the app badge and the
+  // AttestBanner. It used to be counted right here by a rule of its own, and
+  // that rule was not the rule the Scoring screen uses to decide whether to
+  // put an attest button on the screen at all — so the icon could carry a red
+  // bubble for a card that was finalized, in a round the app had moved past,
+  // or belonging to a player who had since withdrawn, none of which the app
+  // could show anybody anywhere. That module's header lists all three.
+  //
+  // Deriving both from the same call is what makes them agree: the number on
+  // the home screen is now, by construction, the number of rows the app can
+  // put on screen — and the banner is how you clear it.
+  const attestTodo = useMemo(() => (
+    user && !user.isGuest
+      ? pendingAttestations({ scorecardSigs, finalizedRounds, playerId: user.id, tPlayers })
+      : []
+  ), [scorecardSigs, finalizedRounds, user, tPlayers]);
+
+  // The badge itself. This is also what reconciles the service worker's
+  // optimistic increments — the SW adds one per attest_ready push without
+  // knowing what has been attested or finalized since, and this corrects it.
+  //
+  // A guest or a signed-out phone now clears to ZERO rather than returning
+  // early: bailing left the badge sitting on the icon with nothing behind it
+  // that could ever take it off again.
   useEffect(() => {
-    if (!user || user.isGuest) return;
-    let count = 0;
-    Object.values(scorecardSigs || {}).forEach(s => {
-      if ((s.present || []).includes(user.id) && s.signedBy !== user.id && !(s.attestedBy || []).includes(user.id)) count++;
-    });
+    const count = attestTodo.length;
     try {
       if (navigator.setAppBadge) { count > 0 ? navigator.setAppBadge(count) : (navigator.clearAppBadge && navigator.clearAppBadge()); }
-      navigator.serviceWorker?.controller?.postMessage({ type: "SET_BADGE", count });
+      // `ready`, not `controller`. A page is not controlled until a worker has
+      // claimed it, which on a cold start has not happened yet — so this
+      // message went nowhere on exactly the launch that matters, the SW kept
+      // its stale stored count, and the next push incremented from a number
+      // that was already wrong. `ready` resolves with the active worker
+      // whether or not it has claimed us.
+      navigator.serviceWorker?.ready
+        ?.then(reg => reg.active?.postMessage({ type: "SET_BADGE", count }))
+        ?.catch(() => {});
     } catch {}
-  }, [scorecardSigs, user]);
+  }, [attestTodo]);
+
+  // Where the banner's button goes: the round holding the card, with Scoring
+  // on screen. Scoring's own tab button jumps to the first UNFINALIZED round,
+  // which is the reason a card left behind in an earlier round was unreachable
+  // by tapping around — this is the one control that can land on it.
+  const goToAttest = useCallback((rnd) => {
+    if (rnd) setRound(prev => (prev === rnd ? prev : rnd));
+    setView("scoring");
+  }, []);
 
   // Deep-link: a notification tap lands on /#scoring or /#leaderboard.
   useEffect(() => {
     const applyHash = () => {
       const h = (window.location.hash || "").replace("#", "");
       const map = { scoring: "scoring", leaderboard: "leaderboard", board: "leaderboard", pairings: "groups", groups: "groups", betting: "skins", skins: "skins", admin: "admin", photos: "photos" };
-      if (map[h]) setView(map[h]);
+      // A notification names the screen it wants, and nothing the app works
+      // out for itself gets to overrule it. See the scramble landing.
+      if (map[h]) { deepLinked.current = true; setView(map[h]); }
     };
     applyHash();
     window.addEventListener("hashchange", applyHash);
@@ -1823,6 +2009,25 @@ export default function WBCApp() {
   // still see their edit. The difference is that React now knows when it
   // changed.
   const { allPlayers, activePlayers } = useRoster(tPlayers, registry);
+
+  // ── The record, both halves of it ─────────────────────────────────
+  // The years read from Firestore, plus THIS year built out of the cards
+  // already in memory: same shape, no reads. Only complete cards count — a
+  // round is a round when it is over — and a round joins the tournament's
+  // last-12 yardstick only once every man in the field has posted it, so the
+  // first group off the course does not asterisk everybody still out there.
+  //
+  // Gated on a screen that shows an index being on, so a tournament being
+  // scored is not rebuilding a career record on every stroke that lands. The
+  // view is read as well as the latch because the latch is set by an effect,
+  // one render behind — and one render behind is a chart that paints without
+  // this year and then redraws with it.
+  const careerVisible = careerOpened || view === "players" || view === "admin";
+  const liveRounds = useMemo(() => (careerVisible ? mergeLiveRounds(pastRounds, liveRoundsHere({
+    year: getTournamentYear(),
+    holeData, tRounds, courses: courseList, teeData,
+    field: activePlayers.map(p => p.id),
+  })) : pastRounds), [careerVisible, pastRounds, holeData, tRounds, courseList, teeData, activePlayers]);
 
   // ── Who is in the market without playing ──────────────────────────
   // The market is the one buy-in that needs no tee time: it is a bet on who
@@ -2224,7 +2429,7 @@ export default function WBCApp() {
         for (const tb of tee_boxes) {
           const { hole_yards: hy2, _source: _s2, color: _c2, ...tbData2 } = tb;
           const tbPayload2 = {
-            id: `tb_${course.id}_${(tb.name || "default").toLowerCase().replace(/\s+/g,"_")}`,
+            id: teeBoxDocId(course.id, tb.name),
             course_id: course.id,
             color: tb.color || _c2,
             name: tbData2.name, rating: tbData2.rating, slope: tbData2.slope,
@@ -2282,12 +2487,18 @@ export default function WBCApp() {
     // to "Unknown", so no course edit was ever attributed.
     const savedBy = user?.name || "Unknown";
     await db.upsert("courses", { ...courseData, updated_at: now, updated_by: savedBy }, "id");
+    // The tee list is REPLACED, not added to. A course's tees are read back
+    // out of the `tee_boxes` collection rather than off the course row, so a
+    // tee the director deleted in the editor used to reappear on the next
+    // load — gone from the row, still its own document — and a renamed one
+    // came back beside its replacement under the old name. `staleTeeBoxIds`
+    // names those documents and they go in the same batch as the writes, so
+    // the collection is never briefly missing the set. See lib/teeEditor.
     if (tee_boxes?.length) {
-      let tbErrors = 0;
-      for (const tb of tee_boxes) {
+      const rows = tee_boxes.map(tb => {
         const { color: _c, _source: _s, ...tbData } = tb;
         const tbPayload = {
-          id: `tb_${courseId}_${(tb.name || "default").toLowerCase().replace(/\s+/g,"_")}`,
+          id: teeBoxDocId(courseId, tb.name),
           course_id: courseId,
           color: tb.color,
           name: tbData.name,
@@ -2299,15 +2510,15 @@ export default function WBCApp() {
         if (Array.isArray(tb.hole_yards) && tb.hole_yards.some(y => y > 0)) {
           tbPayload.hole_yards = tb.hole_yards;
         }
-        try {
-          await db.upsert("tee_boxes", tbPayload);
-        } catch(tbErr) {
-          console.error("Tee box save failed:", tbErr, tbPayload);
-          tbErrors++;
-        }
-      }
-      if (tbErrors > 0) {
-        notify(`⚠ Course saved but ${tbErrors} tee box${tbErrors > 1 ? "es" : ""} failed to save — open and re-save to retry`);
+        return tbPayload;
+      });
+      // Only prune against a course we already hold — a course being added for
+      // the first time has nothing to prune, and pruning against an empty
+      // previous list would be a no-op anyway.
+      const previous = courseList.find(c => c.id === courseId);
+      const ok = await db.replaceMany("tee_boxes", rows, staleTeeBoxIds(courseId, previous?.tee_boxes, tee_boxes));
+      if (!ok) {
+        notify("⚠ Course saved but its tee boxes did not — open and re-save to retry");
       }
     }
     // Update local state with clean version (always, even if tee saves had errors)
@@ -2569,50 +2780,116 @@ export default function WBCApp() {
     return wins;
   }, [activePlayers, holeData, tRounds, courseList, numRounds, sideGames]);
 
-  // Tag / re-tag the tournament-wide CTP for a par 3. One doc per round+hole, so a
-  // closer ball from a later group overwrites the standing tag.
+  // ── Every par 3 in the event, in play order, with its carry worked out ──
   //
-  // distance_ft is written EXPLICITLY (null when unknown) rather than omitted: db.upsert
-  // uses setDoc(merge:true), so an omitted field would silently retain the previous
-  // player's distance and attach it to the new winner. The tagging GROUP is written the
-  // same way and for the same reason: a director's override off the Betting tab carries
-  // no group, and inheriting the last group's tee order would have the prompt telling
-  // the next group the field is out of order on the strength of a stale field.
-  const onSetCtp = async (rnd, hole, pid, distanceFt = null, taggedGroup = null) => {
-    const ft = (distanceFt === null || distanceFt === undefined || distanceFt === "") ? null : Number(distanceFt);
-    const distance = ft ? `${ft} ft` : "";
-    const taggedByName = user?.name || "";
-    const taggedGroupKey = taggedGroup?.key || null;
-    const taggedGroupOrder = Number.isInteger(taggedGroup?.order) ? taggedGroup.order : null;
-    setCtpData(prev => ({
-      ...prev,
-      [rnd]: { ...(prev[rnd] || {}), [hole]: { playerId: pid, distanceFt: ft, distance, taggedByName, taggedGroupKey, taggedGroupOrder, confirmedBy: [] } },
-    }));
-    // Store CTP as a skin type in the skins table.
-    // tournament_id was previously MISSING — which meant these docs were invisible to
-    // every tournament-scoped query (including Start Fresh's cleanup) and could never
-    // be loaded back. That's why CTPs evaporated on reload.
+  // A pin nobody in the field hit rolls its share onto the next par 3, which is
+  // then worth double — see the note above ctpLedger in lib/ctp. Derived HERE
+  // rather than in the Betting tab because two screens need the answer: the tab
+  // pays it, and the on-course prompt tells the group standing on the green
+  // that this one is worth 2×. Two derivations of one chain is one more than
+  // the number that can be right — the same reason firstTeeAt is a prop.
+  const ctpChain = useMemo(() => {
+    const pins = [];
+    const inField = fieldFor(sideGames?.ctp?.in, activePlayers).map(p => p.id);
+    const everybody = sideGames?.ctp?.in == null;
+    for (let r = 1; r <= numRounds; r++) {
+      const tr = tRounds.find(t => t.round_number === r);
+      const rCourse = tr ? courseList.find(c => c.id === tr.course_id) : null;
+      if (!rCourse) continue;
+      const roundFinal = roundFinalized(finalizedRounds, pairingsData, r);
+      const groupCount = ((pairingsData || {})[r] || []).filter(g => g && g.length > 0).length;
+      (rCourse.hole_pars || []).forEach((par, i) => {
+        if (par !== 3) return;
+        const hole = i + 1;
+        const rec = ((ctpData || {})[r] || {})[hole] || {};
+        pins.push({
+          round: r, hole,
+          playerId: rec.playerId || null,
+          inGame: !rec.playerId || everybody || inField.includes(rec.playerId),
+          answered: (rec.answeredGroups || []).length,
+          groupCount, roundFinal,
+        });
+      });
+    }
+    return ctpLedger(pins);
+  }, [ctpData, tRounds, courseList, numRounds, sideGames, finalizedRounds, pairingsData, activePlayers]);
+
+  // The chain keyed by round and hole, for the two screens that ask about ONE
+  // pin rather than walking the whole event.
+  const ctpByHole = useMemo(() => {
+    const m = {};
+    ctpChain.pins.forEach(p => { (m[p.round] ||= {})[p.hole] = p; });
+    return m;
+  }, [ctpChain]);
+
+  // ── Answering the pin ────────────────────────────────────────────
+  // Every answer a group can give — tag, confirm, pass, and the director's
+  // override — goes through here, and every one of them writes ONE KEY in the
+  // document's `claims` map: the group's own. Firestore merges a map key by
+  // key, so two groups answering the same pin at the same moment write two
+  // different keys and neither can erase the other. The winner is derived from
+  // the claims when they are read back (lib/ctp resolvePin), never stored.
+  //
+  // That is the fix for three things at once, all of which were last-write-
+  // wins on a field four phones write to: a closer ball being overwritten by a
+  // longer one, a confirmation being erased by another group's, and a tie
+  // going to whoever had signal first rather than whoever played the hole
+  // first. See the long note in lib/ctp.
+  //
+  // NOTHING IS AWAITED at the call sites on the scoring screen, and this is
+  // why: setDoc's promise does not settle until the server acknowledges, so a
+  // phone in a hollow with one bar would sit on an open popup with no way past
+  // it. The write queues in the persistent cache and lands when signal does —
+  // the same bargain score entry already makes. See lib/connection.
+  const writeCtpClaim = async (rnd, hole, key, claim) => {
     const tr = tRounds.find(t => t.round_number === rnd);
     await db.upsert("skins", {
       id: docIds.ctp(_e(), rnd, hole),
+      // tournament_id was previously MISSING — which meant these docs were invisible to
+      // every tournament-scoped query (including Start Fresh's cleanup) and could never
+      // be loaded back. That's why CTPs evaporated on reload.
       tournament_id: TOURNAMENT_ID,
       tournament_round_id: tr?.id || null,
       round_number: rnd,
       hole_number: hole,
-      player_id: pid,
       skin_type: "ctp",
-      distance_ft: ft,
-      distance,
-      tagged_by: user?.id || null,
-      tagged_by_name: taggedByName,
-      tagged_group_key: taggedGroupKey,
-      tagged_group_order: taggedGroupOrder,
-      tagged_at: new Date().toISOString(),
-      // Cleared, not merged: a confirmation was agreement with a distance
-      // that has just been beaten, and carrying it onto the new tag would
-      // show groups signing off a number they never saw.
-      confirmed_by: [],
+      claims: {
+        [key]: {
+          ...claim,
+          by: user?.id || null,
+          by_name: user?.name || "",
+          at: new Date().toISOString(),
+        },
+      },
     }, "id");
+  };
+
+  // Apply the same claim to local state so the screen moves before the write
+  // lands. resolvePin is the one that decides what the pin now says — the
+  // group that just tagged does not necessarily hold it.
+  const applyCtpClaim = (rnd, hole, key, claim) => {
+    setCtpData(prev => {
+      const rec = ((prev[rnd] || {})[hole]) || {};
+      const claims = { ...(rec.claims || {}), [key]: { ...claim, by: user?.id || null, by_name: user?.name || "" } };
+      return { ...prev, [rnd]: { ...(prev[rnd] || {}), [hole]: resolvePin({ claims, legacy: rec }) } };
+    });
+  };
+
+  // Tag the pin. `taggedGroup` is the claiming group and its tee order; a
+  // director's override off the Betting tab has neither, and files under the
+  // override key instead — which beats every group claim under it, because
+  // that is what a correction is for.
+  const onSetCtp = async (rnd, hole, pid, distanceFt = null, taggedGroup = null) => {
+    const ft = (distanceFt === null || distanceFt === undefined || distanceFt === "") ? null : Number(distanceFt);
+    const key = taggedGroup?.key || OVERRIDE_KEY;
+    const claim = {
+      kind: taggedGroup?.key ? "tag" : "override",
+      player_id: pid,
+      distance_ft: ft,
+      order: Number.isInteger(taggedGroup?.order) ? taggedGroup.order : null,
+    };
+    applyCtpClaim(rnd, hole, key, claim);
+    await writeCtpClaim(rnd, hole, key, claim);
     // No toast. The prompt closing IS the acknowledgement, and this one fired
     // on a screen the group is about to walk away from — a banner over the
     // next hole's scores telling them what they just did.
@@ -2759,6 +3036,19 @@ export default function WBCApp() {
     if (!saved) throw new Error("That bet wasn't saved.");
   };
 
+  // Correcting one that was written down wrong — the wrong Dave off a list of
+  // sixteen, twenty typed as two hundred, the detail describing the wrong nine.
+  // Open to the two players in the bet as well as its author and a director,
+  // which is wider than deleting deliberately: see lib/sideBets canEditSideBet.
+  //
+  // Throws like the add above, and for the same reason: a sheet that closes on
+  // an amount that was never written is the app showing terms nobody agreed to.
+  const onEditSideBet = async (bet, form) => {
+    if (!bet?.id) throw new Error("That bet wasn't saved.");
+    const saved = await db.upsert(SIDE_BETS_COL, buildSideBetEdit(bet, form));
+    if (!saved) throw new Error("That bet wasn't saved.");
+  };
+
   const onDeleteSideBet = async (bet) => {
     if (bet?.id) await db.deleteDoc(SIDE_BETS_COL, bet.id);
   };
@@ -2778,31 +3068,30 @@ export default function WBCApp() {
     if (!saved) throw new Error("That wasn't recorded.");
   };
 
-  // ── Confirming a standing CTP ────────────────────────────────────
-  // The other answer the on-course prompt can take. A group that walks off a
-  // par 3 without getting inside the standing tag is not saying nothing —
-  // they are saying the tag is right, and that is the only thing that turns
-  // "nobody has been asked" into "everybody has been asked and it stands".
+  // ── The answers that are not a tag ───────────────────────────────
+  // A group that walks off a par 3 without getting inside the standing tag is
+  // not saying nothing — they are saying the tag is right. And a group that
+  // finds a pin untagged and none of them close is not saying nothing either.
+  // Both are what turns "nobody has been asked" into "the field has been
+  // asked", and only the first of them used to be written down at all.
   //
-  // Additive and idempotent, so two phones in the same group confirming at
-  // once converge instead of racing. A merge write of ONLY this field: the
-  // winner, the distance and who tagged it belong to whoever tagged it.
-  const onConfirmCtp = async (rnd, hole, pid) => {
+  // Both file under the GROUP'S key, not the answerer's player id. Keying on
+  // the player was its own quiet bug: a director scoring two groups could only
+  // ever record one answer, because the second was read as a duplicate of the
+  // first and dropped.
+  const onAnswerCtp = async (rnd, hole, group, kind) => {
+    const key = group?.key;
+    if (!key) return;
     const rec = ((ctpData || {})[rnd] || {})[hole];
-    if (!rec?.playerId || !pid) return;
-    if ((rec.confirmedBy || []).includes(pid)) return;
-    const confirmedBy = [...new Set([...(rec.confirmedBy || []), pid])];
-    setCtpData(prev => ({
-      ...prev,
-      [rnd]: { ...(prev[rnd] || {}), [hole]: { ...rec, confirmedBy } },
-    }));
-    await db.upsert("skins", {
-      id: docIds.ctp(_e(), rnd, hole),
-      tournament_id: TOURNAMENT_ID,
-      confirmed_by: confirmedBy,
-    }, "id");
+    if (rec?.claims?.[key]?.kind === kind) return;   // already answered, idempotent
+    const claim = { kind, order: Number.isInteger(group?.order) ? group.order : null };
+    applyCtpClaim(rnd, hole, key, claim);
+    await writeCtpClaim(rnd, hole, key, claim);
     // Same as onSetCtp: the prompt closing is the acknowledgement.
   };
+
+  const onConfirmCtp = (rnd, hole, group) => onAnswerCtp(rnd, hole, group, "confirm");
+  const onPassCtp = (rnd, hole, group) => onAnswerCtp(rnd, hole, group, "pass");
 
   // ── The scorecard: signing, attesting, and calling a round done ──
   //
@@ -3327,65 +3616,12 @@ export default function WBCApp() {
     }).opening.open;
   })();
 
-  // ── The app header's right-hand cluster ────────────────────────────
-  // Two controls, neither of which is always there, so this is built as a list
-  // and handed over only when it has something in it — AppHeader draws its
-  // absolute corner box on `right` being truthy, and an empty fragment is
-  // truthy.
-  //
-  // The scramble button comes FIRST so the director's crown keeps the corner
-  // it has always had; see components/GroupSwitcher for why that one lives up
-  // here at all.
+  // ── Is there a scramble, and which card is the Scoring tab showing? ──
+  // `scrambleOn` gates a control that only exists during a scramble; with it
+  // false the Scoring tab renders exactly what it has always rendered, and the
+  // switch below is not on the screen at all.
   const scrambleOn = scrambleLive(scramble);
-  const onScrambleCard = view === "scrambleScoring";
-  const headerControls = [
-    // ── OG/YG/NG ──
-    // The scramble's only door. It is in the HEADER rather than the nav bar
-    // because the bar is full — five slots, five destinations — and because
-    // this one is temporary: it appears when a director throws the switch and
-    // goes when they throw it back, which is not something a permanent tab
-    // can do. Everybody gets it, not just the director: the whole field scores
-    // the scramble, and the setup screen behind the More menu is the part that
-    // is the director's.
-    //
-    // It is a TOGGLE. The nav bar's five tabs are all still there to leave by,
-    // but the button somebody arrived through is the one their thumb goes back
-    // to, and a second tap that did nothing would read as the app being stuck.
-    scrambleOn ? (
-      <button key="scramble"
-        onClick={() => {
-          if (onScrambleCard) { setView(scrambleReturn.current); return; }
-          scrambleReturn.current = view;
-          setView("scrambleScoring");
-        }}
-        title={onScrambleCard ? "Back" : "Open the scramble card"}
-        aria-label={onScrambleCard ? "Close the scramble card" : "Open the scramble card"}
-        aria-pressed={onScrambleCard}
-        style={{
-          display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-          padding: "6px 8px", borderRadius: R.sm, cursor: "pointer",
-          background: onScrambleCard ? K.acc : K.card,
-          border: `1px solid ${onScrambleCard ? K.acc : K.acc + ALPHA.line}`,
-          color: onScrambleCard ? K.bg : K.acc,
-          fontSize: FS.micro, fontWeight: 800, letterSpacing: 0.5, lineHeight: 1,
-        }}>{SCRAMBLE_BUTTON}</button>
-    ) : null,
-    user.isDirector && view === "scoring" && switchableGroupList.length > 1 ? (
-      <GroupSwitcher
-        key="groups"
-        groups={switchableGroupList}
-        currentKey={scoringGroup ? groupKeyOf(scoringGroup.round, scoringGroup.ids) : null}
-        live={liveRound(finalizedRounds, numRounds)}
-        nameOf={pid => allPlayers.find(p => p.id === pid)?.name || pid}
-        progressOf={g => groupProgress(g.round, g.ids, holeData, finalizedRounds)}
-        onPick={g => {
-          pickSeq.current += 1;
-          setDirectorPick({ seq: pickSeq.current, round: g.round, ids: g.ids });
-          setRound(g.round);
-        }}
-      />
-    ) : null,
-  ].filter(Boolean);
+  const onScrambleCard = scrambleOn && scoringMode === "scramble";
 
   const navItems = [
     { key: "groups", label: "Pairings", icon: "pairings" },
@@ -3515,8 +3751,27 @@ export default function WBCApp() {
            Up here it costs the scoring screen nothing at all — not a row,
            not a corner of one. */
         countdownAt={firstTeeAt}
-        right={headerControls.length ? headerControls : null}
+        right={user.isDirector && view === "scoring" && !onScrambleCard && switchableGroupList.length > 1 && (
+          <GroupSwitcher
+            groups={switchableGroupList}
+            currentKey={scoringGroup ? groupKeyOf(scoringGroup.round, scoringGroup.ids) : null}
+            live={liveRound(finalizedRounds, numRounds)}
+            nameOf={pid => allPlayers.find(p => p.id === pid)?.name || pid}
+            progressOf={g => groupProgress(g.round, g.ids, holeData, finalizedRounds)}
+            onPick={g => {
+              pickSeq.current += 1;
+              setDirectorPick({ seq: pickSeq.current, round: g.round, ids: g.ids });
+              setRound(g.round);
+            }}
+          />
+        )}
       />
+
+      {/* The in-app half of the app-icon badge. Under the header rather than
+          inside a tab, because the badge is not about a tab — it is about the
+          player, and it has to be answerable from wherever the app opened.
+          See components/AttestBanner. */}
+      <AttestBanner items={attestTodo} onGo={goToAttest} />
 
       <MoreMenu
         open={menuOpen}
@@ -3713,7 +3968,7 @@ export default function WBCApp() {
           is ONE round and it is not one of these four, so a strip offering Rd 1
           to Rd 4 above it would be pointing at the tournament while the screen
           under it is not. */}
-      {view !== "admin" && view !== "scramble" && view !== "scrambleScoring" && view !== "scoring" && view !== "leaderboard" && view !== "players" && view !== "photos" && (
+      {view !== "admin" && view !== "scramble" && view !== "scoring" && view !== "leaderboard" && view !== "players" && view !== "photos" && (
       <div style={{ display: "flex", gap: 6, padding: "10px 20px", borderBottom: `1px solid ${K.bdr}` }}>
         {Array.from({ length: NUM_ROUNDS }, (_, i) => i + 1).map(r => {
           const tr = tRounds.find(t => t.round_number === r);
@@ -3747,12 +4002,44 @@ export default function WBCApp() {
         {view === "leaderboard" && <LeaderboardView lb={getLeaderboard} round={round} holeData={holeData} tRounds={tRounds} courses={courseList} tPlayers={tPlayers} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} finalizedRounds={finalizedRounds} skinWins={skinWins} pairingsData={pairingsData} teeTimesData={teeTimesData} loaded={storageLoaded} />}
         {scoringOpened && (
         <div style={{ display: view === "scoring" ? "block" : "none", paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
+          {/* ── Which card ─────────────────────────────────────────
+              Only while a director has a scramble running. It is the whole
+              reason the scramble can live in this tab: the scramble is ONE
+              round of a four-round event, so Rd 1-4 has to stay one tap away
+              all weekend.
+
+              The scramble used to be reached by a button in the app header,
+              which is a place nobody looks for a scorecard — the Scoring tab
+              is where a hand goes to enter a score, and it is where both
+              cards belong. That button is gone; this replaced it. */}
+          {scrambleOn && (
+            <SegmentedToggle
+              options={[["tournament", "Tournament"], ["scramble", "Scramble"]]}
+              value={scoringMode}
+              onChange={setScoringMode}
+              style={{ marginBottom: 10 }}
+            />
+          )}
+          {/* HIDDEN, not unmounted. This screen holds the group it resolved to
+              and the hole it is standing on, and both are expensive to work
+              back out — see the cold-load note in OnCourseScoring. Flipping to
+              the scramble and back must not walk a scorer to hole 1. */}
+          <div style={{ display: onScrambleCard ? "none" : "block" }}>
           <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading scoring…</div>}>
-          <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeTimesData={teeTimesData} roundDates={roundDates} scoringOpen={scoringOpen} setTee={setTee} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={onSignScorecard} onAttestScorecard={onAttestScorecard} onUnsignScorecard={onUnsignScorecard} onFinalizeRound={finalizeGroup} onUnfinalizeRound={unfinalizeRound} onGoToAdminCourses={(rnd) => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); setAdminSettingsRound(rnd || null); }} markPlayerWD={markPlayerWD} ctpData={ctpData} onSetCtp={onSetCtp} onConfirmCtp={onConfirmCtp} directorPick={directorPick} onGroupChange={setScoringGroup} onSetRound={setRound} /* How far the scoring screen's "already scored" bar has to stop short of the right edge to leave the header's live controls tappable: the crown alone, or the crown and the scramble's OG/YG/NG button beside it. */ headerInset={scrambleOn ? 146 : 88} />
+          <OnCourseScoring user={user} players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} tPlayers={tPlayers} onSaveHole={onSaveHole} notify={notify} pairingsData={pairingsData} teeTimesData={teeTimesData} roundDates={roundDates} scoringOpen={scoringOpen} setTee={setTee} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} finalizedRounds={finalizedRounds} scorecardSigs={scorecardSigs} onSignScorecard={onSignScorecard} onAttestScorecard={onAttestScorecard} onUnsignScorecard={onUnsignScorecard} onFinalizeRound={finalizeGroup} onUnfinalizeRound={unfinalizeRound} onGoToAdminCourses={(rnd) => { setView("admin"); setAdminSettingsOpen(true); setAdminSettingsTab("course"); setAdminSettingsRound(rnd || null); }} markPlayerWD={markPlayerWD} ctpData={ctpData} onSetCtp={onSetCtp} onConfirmCtp={onConfirmCtp} onPassCtp={onPassCtp} ctpField={sideGames?.ctp?.in ?? null} ctpByHole={ctpByHole} directorPick={directorPick} onGroupChange={setScoringGroup} onSetRound={setRound} />
           </Suspense>
+          </div>
+          {/* The scramble card, mounted only while it is the one on screen —
+              its chunk is warmed the moment a director throws the switch, so
+              the first flip to it has nothing to fetch. */}
+          {onScrambleCard && (
+            <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading scramble…</div>}>
+              <ScrambleScoring scramble={scramble} players={allPlayers} courses={courseList} user={user} onSaveHole={onSaveScrambleHole} onGoToSetup={() => setView("scramble")} />
+            </Suspense>
+          )}
         </div>
         )}
-        {view === "players" && <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading players…</div>}><PlayersView players={allPlayers} registry={registry} meId={user?.id} year={getTournamentYear()} isDirector={!!user.isDirector} onSetOverride={setIndexOverride} /></Suspense>}
+        {view === "players" && <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading players…</div>}><PlayersView players={allPlayers} registry={registry} meId={user?.id} year={getTournamentYear()} isDirector={!!user.isDirector} onSetOverride={setIndexOverride} liveRounds={liveRounds} /></Suspense>}
         {/* Posting requires a real account: firestore.rules pins uploadedBy to
             the caller's uid, so a guest — who has no uid at all — could never
             have added to the library. It is not shown one either: the menu row
@@ -3762,31 +4049,19 @@ export default function WBCApp() {
             gallery when they logged out would otherwise hand the next guest the
             screen they left open. */}
         {view === "photos" && !isGuest(user) && <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading photos…</div>}><PhotosView items={media} year={getTournamentYear()} uid={fbUser?.uid || null} isDirector={!!user.isDirector} isGuest={!!user.isGuest} canPost={!user.isGuest && !!fbUser?.uid && photoUploadsAllowed(photoConfig)} uploadsBlockedReason={photoUploadsAllowed(photoConfig) ? "" : uploadsDisabledReason(photoConfig)} onUpload={onUploadPhoto} onDelete={onDeletePhoto} notify={notify} /></Suspense>}
-        {view === "skins" && <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading betting…</div>}><BettingView players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} user={user} numRounds={numRounds} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} marketBets={marketBets} onSaveMarketBet={onSaveMarketBet} leaderboard={getLeaderboard} finalizedRounds={finalizedRounds} pairingsData={pairingsData} firstTeeAt={firstTeeAt} marketNudge={marketNudge} teeTimesData={teeTimesData} roundDates={roundDates} inactivePlayers={inactivePlayers} onAddMarketOutsider={user.isDirector ? onAddMarketOutsider : undefined} sideBets={sideBets} authUid={fbUser?.uid || null} onAddSideBet={onAddSideBet} onDeleteSideBet={onDeleteSideBet} onSettleSideBet={onSettleSideBet} /></Suspense>}
+        {view === "skins" && <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading betting…</div>}><BettingView players={allPlayers} round={round} tRounds={tRounds} courses={courseList} holeData={holeData} ctpData={ctpData} onSetCtp={onSetCtp} ctpChain={ctpChain} user={user} numRounds={numRounds} getPlayerTee={getPlayerTee} getPlayerCH={getPlayerCH} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} marketBets={marketBets} onSaveMarketBet={onSaveMarketBet} leaderboard={getLeaderboard} finalizedRounds={finalizedRounds} pairingsData={pairingsData} firstTeeAt={firstTeeAt} marketNudge={marketNudge} teeTimesData={teeTimesData} roundDates={roundDates} inactivePlayers={inactivePlayers} onAddMarketOutsider={user.isDirector ? onAddMarketOutsider : undefined} sideBets={sideBets} authUid={fbUser?.uid || null} onAddSideBet={onAddSideBet} onEditSideBet={onEditSideBet} onDeleteSideBet={onDeleteSideBet} onSettleSideBet={onSettleSideBet} /></Suspense>}
         {view === "groups" && <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading pairings…</div>}><GroupsView players={activePlayers} round={round} tRounds={tRounds} courses={courseList} pairingsData={pairingsData} teeTimesData={teeTimesData} getPlayerTee={getPlayerTee} user={user} /></Suspense>}
         {/* The scramble's console. Director-only, and gated on the same flag
             the Admin tab is: the menu row that leads here is only drawn for a
             director (components/MoreMenu), and `view` survives a sign-out, so
             this is the door that row is not the only way through. */}
-        {view === "scramble" && (canAdminHere ? <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading scramble…</div>}><ScrambleSetup scramble={scramble} onUpdate={onUpdateScramble} onAddCourse={addCourse} players={activePlayers} courses={courseList} notify={notify} onOpenScoring={() => { scrambleReturn.current = "scramble"; setView("scrambleScoring"); }} /></Suspense> : (
+        {view === "scramble" && (canAdminHere ? <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading scramble…</div>}><ScrambleSetup scramble={scramble} onUpdate={onUpdateScramble} onAddCourse={addCourse} players={activePlayers} courses={courseList} notify={notify} onOpenScoring={() => { setScoringMode("scramble"); setView("scoring"); }} /></Suspense> : (
           <div style={{ textAlign: "center", padding: "40px 20px" }}>
             <div style={{ fontSize: FS.jumbo, marginBottom: 12 }}>🔒</div>
             <div style={{ fontSize: FS.lead, fontWeight: 700, color: K.t1 }}>Directors Only</div>
           </div>
         ))}
-        {/* The scramble card. Open to the whole field — that is the point of
-            the header button — but only while the switch is on, because the
-            view outlives the button that opened it: a director turning the
-            scramble off with somebody standing on this screen has to take the
-            screen with it. */}
-        {view === "scrambleScoring" && (scrambleOn ? <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading scramble…</div>}><ScrambleScoring scramble={scramble} players={allPlayers} courses={courseList} user={user} onSaveHole={onSaveScrambleHole} onGoToSetup={() => setView("scramble")} /></Suspense> : (
-          <div style={{ textAlign: "center", padding: "40px 20px" }}>
-            <div style={{ fontSize: FS.jumbo, marginBottom: 12 }}>🏌️</div>
-            <div style={{ fontSize: FS.lead, fontWeight: 700, color: K.t1 }}>No scramble running</div>
-            <div style={{ fontSize: FS.small, color: K.t3, marginTop: 6 }}>Your director has not started one.</div>
-          </div>
-        ))}
-        {view === "admin" && (canAdminHere ? <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading admin…</div>}><AdminView registry={registry} activePlayers={activePlayers} marketPool={marketPool} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} rebuyIds={rebuyIds} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} deletePlayer={deletePlayer} editionsHolding={editionsHolding} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
+        {view === "admin" && (canAdminHere ? <Suspense fallback={<div style={{ padding: 24, textAlign: "center", color: K.t3, fontSize: FS.small }}>Loading admin…</div>}><AdminView liveRounds={liveRounds} registry={registry} activePlayers={activePlayers} marketPool={marketPool} sideGames={sideGames} onUpdateSideGames={onUpdateSideGames} rebuyIds={rebuyIds} tournament={TOURNAMENT} tPlayers={tPlayers} tRounds={tRounds} courses={courseList} setCourseForRound={setCourseForRound} addCourse={addCourse} addPlayerToTournament={addPlayerToTournament} updateHI={updateHI} updateName={updateName} removePlayer={removePlayer} deletePlayer={deletePlayer} editionsHolding={editionsHolding} pairingsData={pairingsData} setPairings={setPairings} teeData={teeData} setTeeBulk={setTeeBulk} teeTimesData={teeTimesData} setTeeTimesData={async (updater) => {
               setTeeTimesData(prev => {
                 const next = typeof updater === "function" ? updater(prev) : updater;
                 // THE SHEET IS SAVED FIRST, and on its own document. Tee times
@@ -3900,6 +4175,7 @@ export default function WBCApp() {
               {navIcon()}
               {(item.key === "more"
                   ? ((adminActionNeeded && user.isDirector) || (notifPerm !== "granted" && !user.isGuest))
+                  : item.key === "scoring" ? attestTodo.length > 0
                   : item.key === "skins" && marketNudge) && (
                 <span aria-hidden="true" style={{
                   position: "absolute", top: 6, right: "50%", marginRight: -14,

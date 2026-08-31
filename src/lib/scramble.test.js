@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
-  SCRAMBLE_TEAMS, SCRAMBLE_TEAM_KEYS, SCRAMBLE_BUTTON, teamLabel,
+  SCRAMBLE_TEAMS, SCRAMBLE_TEAM_KEYS, teamLabel,
   mergeScramble, teamOf, assignToTeam, unassignedIds, teamPlayers, autoSplit,
   teamLine, scrambleStandings, scrambleBlockers, canTurnOn, scrambleLive, emptyTeams,
+  opensOnScramble,
 } from "./scramble";
 
 const PARS = [4, 3, 5, 4, 4, 4, 3, 4, 5, 4, 4, 3, 5, 4, 4, 4, 3, 5];
@@ -18,8 +19,8 @@ const PLAYERS = [
 const card = (n, s = 4) => Object.fromEntries(Array.from({ length: n }, (_, i) => [i, s]));
 
 describe("the three teams", () => {
-  it("names the header button after them, in order", () => {
-    expect(SCRAMBLE_BUTTON).toBe("OG/YG/NG");
+  it("is OG, YG and NG, in that order", () => {
+    expect(SCRAMBLE_TEAMS.map(t => t.label)).toEqual(["OG", "YG", "NG"]);
     expect(SCRAMBLE_TEAM_KEYS).toEqual(["og", "yg", "ng"]);
   });
 
@@ -228,5 +229,40 @@ describe("emptyTeams", () => {
     expect(a).toEqual({ og: [], yg: [], ng: [] });
     a.og.push("x");
     expect(emptyTeams().og).toEqual([]);
+  });
+});
+
+describe("opensOnScramble", () => {
+  // A scramble day opens on the Scoring tab, because the day there is a
+  // scramble on is the day it is being played.
+  const boot = { firstSnapshot: true, deepLinked: false, atBootView: true };
+
+  it("opens onto a scramble that is already running", () => {
+    expect(opensOnScramble({ on: true }, boot)).toBe(true);
+  });
+
+  it("leaves an ordinary day on the leaderboard", () => {
+    expect(opensOnScramble({ on: false }, boot)).toBe(false);
+    expect(opensOnScramble(undefined, boot)).toBe(false);
+  });
+
+  // The one that matters most: the switch is thrown mid-round, with sixteen
+  // phones in sixteen pockets and cards half entered on some of them. Learning
+  // there is a scramble is not the same event as opening the app into one.
+  it("moves nobody when the switch is thrown mid-session", () => {
+    expect(opensOnScramble({ on: true }, { ...boot, firstSnapshot: false })).toBe(false);
+  });
+
+  it("does not overrule a notification tap", () => {
+    expect(opensOnScramble({ on: true }, { ...boot, deepLinked: true })).toBe(false);
+  });
+
+  it("does not overrule a tab somebody has already tapped", () => {
+    expect(opensOnScramble({ on: true }, { ...boot, atBootView: false })).toBe(false);
+  });
+
+  it("decides nothing when handed nothing", () => {
+    expect(opensOnScramble()).toBe(false);
+    expect(opensOnScramble({ on: true })).toBe(false);
   });
 });

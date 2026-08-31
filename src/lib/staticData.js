@@ -73,8 +73,18 @@ export const roundRows = (rows = []) =>
 // The courses this tournament actually plays, deduplicated — two rounds on
 // the same course is one course to fetch, and asking for it twice would spend
 // half of a `where in` clause's room on a repeat.
-export const courseIdsOf = (rounds = []) =>
-  [...new Set((rounds || []).map(r => r?.course_id).filter(Boolean))];
+//
+// `extra` is for the courses nothing points at from a ROUND. There is one: the
+// scramble's, which is chosen on the scramble console and stored as an id on
+// tournament_state.scramble. Left out of this list it was left out of the
+// fetch, and the whole field's scramble card read "No course set" over a
+// course the director had set — so it is passed in here rather than fetched
+// by a second path that could drift from this one.
+export const courseIdsOf = (rounds = [], extra = []) =>
+  [...new Set([
+    ...(rounds || []).map(r => r?.course_id),
+    ...(Array.isArray(extra) ? extra : [extra]),
+  ].filter(Boolean))];
 
 // ── A course and the tees it is played from ────────────────────────
 // Courses and their tee boxes are separate collections, and a round is scored
@@ -93,3 +103,23 @@ export const stitchCourses = (cRows = [], tbRows = []) =>
         par: int(t.par), yardage: int(t.yardage),
       })),
   }));
+
+// ── Folding one course into the list already on screen ─────────────
+// The static load fetches the courses the ROUNDS are played on. The scramble
+// is not one of the four — its course is chosen on the scramble console and
+// stored as an id on tournament_state.scramble — so it arrives separately,
+// after the list has been built, and has to go INTO that list rather than
+// replace it.
+//
+// By id, and replacing rather than appending, because the same course can
+// arrive twice: once from this phone's cache and again from the server a beat
+// later. Appending would file it under its own id twice and the picker would
+// show the same course in two chips.
+export const mergeCourses = (list = [], found = []) => {
+  const incoming = (found || []).filter(c => c?.id);
+  const merged = (list || []).map(c => incoming.find(f => f.id === c?.id) || c);
+  incoming.forEach(c => {
+    if (!(list || []).some(x => x?.id === c.id)) merged.push(c);
+  });
+  return merged;
+};

@@ -23,6 +23,7 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { createElement as h } from "react";
 import { BettingView } from "./BettingView";
+import { ctpLedger } from "../lib/ctp";
 
 afterEach(cleanup);
 
@@ -358,5 +359,132 @@ describe("the skins card mid-round", () => {
     fireEvent.click(screen.getByText("Skins"));
     // The empty-state card, not eighteen columns of zeros.
     expect(scoreCells().filter(t => t.includes("00"))).toHaveLength(0);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════
+//  The CTP board: the carry, and what the pot pays.
+// ══════════════════════════════════════════════════════════════════
+//
+// A par 3 nobody in the field hit rolls its share onto the next one, which is
+// then worth double; two dry pins make the third worth triple. lib/ctp owns
+// the rule and has its own suite — what is checked here is that the board
+// prints the chain it is given, in money, on the right holes.
+//
+// The chain is built in App.jsx because the on-course prompt needs the same
+// answer, so these build it the same way rather than letting the view derive a
+// second one.
+describe("the CTP tab's carry", () => {
+  const openCtp = () => fireEvent.click(screen.getByText("CTP"));
+  const openCtpRound1 = () => { openCtp(); fireEvent.click(screen.getByText("Rd 1")); };
+  const asDirector = { user: { id: "aaron_j", name: "Aaron J", isDirector: true } };
+
+  // COURSE has par 3s at holes 2, 7, 12 and 17, over two rounds — eight pins.
+  const PAR3S = [2, 7, 12, 17];
+  const chainFor = (ctpData, { finalRounds = [], inField = null } = {}) => ctpLedger(
+    [1, 2].flatMap(r => PAR3S.map(hole => {
+      const rec = (ctpData[r] || {})[hole] || {};
+      return {
+        round: r, hole,
+        playerId: rec.playerId || null,
+        inGame: !rec.playerId || inField == null || inField.includes(rec.playerId),
+        answered: (rec.answeredGroups || []).length,
+        groupCount: 1,
+        roundFinal: finalRounds.includes(r),
+      };
+    })));
+  const tagged = (pid) => ({ playerId: pid, distanceFt: 9, distance: "9 ft", confirmedBy: [], answeredGroups: [] });
+  const dry = () => ({ playerId: null, distanceFt: null, confirmedBy: [], answeredGroups: ["1_aaron_j,dave_s"] });
+
+  it("rolls a pin nobody hit onto the next one, at double", () => {
+    const ctpData = { 1: { 2: dry(), 7: tagged("aaron_j") } };
+    mount({ ...asDirector, ctpData, ctpChain: chainFor(ctpData) });
+    openCtpRound1();
+    expect(screen.getByText("2×")).toBeTruthy();
+    expect(screen.getByText(/carried to Rd 1 · Hole 7/)).toBeTruthy();
+    expect(screen.getByText(/1 carried pin rolled into it/)).toBeTruthy();
+  });
+
+  it("stacks two dry pins into a triple", () => {
+    const ctpData = { 1: { 2: dry(), 7: dry(), 12: tagged("aaron_j") } };
+    mount({ ...asDirector, ctpData, ctpChain: chainFor(ctpData) });
+    openCtpRound1();
+    expect(screen.getByText("3×")).toBeTruthy();
+    expect(screen.queryAllByText(/carried to Rd 1 · Hole 12/)).toHaveLength(2);
+  });
+
+  // The pot divides by the par 3s that exist, so one 3× pin is worth three
+  // ordinary ones — the leaders' money column has to follow the shares rather
+  // than the count beside it.
+  it("pays a carried pin its full value on the leaderboard", () => {
+    const ctpData = { 1: { 2: dry(), 7: tagged("aaron_j") } };
+    mount({
+      ...asDirector, ctpData, ctpChain: chainFor(ctpData),
+      // $40 a head over two players is an $80 pot; eight par 3s make a share
+      // worth $10, so aaron's single 2x pin has to read $20 rather than $10.
+      sideGames: { ...baseProps.sideGames, ctp: { amount: 40, in: null, paid: [] } },
+    });
+    openCtp();
+    expect(screen.getByText("$20.00")).toBeTruthy();
+  });
+
+  // He hit it closest and the pin is his. It just pays nobody, and the share
+  // has to go somewhere rather than evaporate.
+  it("carries a pin tagged to somebody who never bought in", () => {
+    const ctpData = { 1: { 2: tagged("greg_b"), 7: tagged("aaron_j") } };
+    const chain = chainFor(ctpData, { inField: ["aaron_j", "dave_s"] });
+    mount({
+      ...asDirector, ctpData, ctpChain: chain,
+      players: [...PLAYERS, { id: "greg_b", name: "Greg B", handicap_index: 10 }],
+      sideGames: { ...baseProps.sideGames, ctp: { amount: 10, in: ["aaron_j", "dave_s"], paid: [] } },
+    });
+    openCtpRound1();
+    expect(screen.getByText(/this pin pays nothing, and its share carries/)).toBeTruthy();
+    expect(screen.getByText("2×")).toBeTruthy();
+  });
+
+  // The last par 3 of the week going dry has nowhere to carry to.
+  it("splits a final carry across the pins that were won", () => {
+    const ctpData = { 1: {}, 2: {} };
+    PAR3S.forEach(h => { ctpData[1][h] = tagged("aaron_j"); ctpData[2][h] = tagged("dave_s"); });
+    delete ctpData[2][17];
+    ctpData[2][17] = dry();
+    mount({ ...asDirector, ctpData, ctpChain: chainFor(ctpData, { finalRounds: [1, 2] }) });
+    openCtp();
+    expect(screen.getByText(/from the last dry pin/)).toBeTruthy();
+    expect(screen.getByText(/split across the 7 pins that were won/)).toBeTruthy();
+  });
+
+  it("says which pin is now worth several while the round is still out", () => {
+    const ctpData = { 1: { 2: dry() } };
+    mount({ ...asDirector, ctpData, ctpChain: chainFor(ctpData) });
+    openCtp();
+    expect(screen.getByText(/Hole 7 is worth 2×/)).toBeTruthy();
+  });
+
+  it("says so plainly when every pin has been taken", () => {
+    const ctpData = { 1: {}, 2: {} };
+    PAR3S.forEach(h => { ctpData[1][h] = tagged("aaron_j"); ctpData[2][h] = tagged("dave_s"); });
+    mount({ ...asDirector, ctpData, ctpChain: chainFor(ctpData) });
+    openCtp();
+    expect(screen.getByText(/All 8 pins taken/)).toBeTruthy();
+    expect(screen.queryByText(/carrying/)).toBeNull();
+  });
+
+  // Every answer the on-course prompt takes files a claim under its group's
+  // key, so the board can say how much of the field has walked off the green.
+  it("says how many groups have been asked", () => {
+    const ctpData = { 1: { 2: { ...tagged("aaron_j"), answeredGroups: ["1_aaron_j,dave_s"] } } };
+    mount({ ctpData, ctpChain: chainFor(ctpData) });
+    openCtpRound1();
+    expect(screen.getByText("Every group asked")).toBeTruthy();
+  });
+
+  it("tells a pin nobody was close to apart from one nobody was asked about", () => {
+    const ctpData = { 1: { 2: dry() } };
+    mount({ ctpData, ctpChain: chainFor(ctpData) });
+    openCtpRound1();
+    expect(screen.getByText("Nobody was close")).toBeTruthy();
+    expect(screen.queryAllByText("No winner yet").length).toBe(3);
   });
 });

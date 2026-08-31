@@ -31,6 +31,7 @@ import { courseHandicapFor, buildStrokesMap, computeRoundLine, WD_SCORE } from "
 import { shortName } from "../lib/playerNames";
 import { fieldFor, potFor, perUnit, computeSkins, allSkins, skinCounts, lowNetRounds, lowNetRoundField } from "../lib/sideGames";
 import { roundFinalized } from "../lib/groupSwitch";
+import { carryLabel } from "../lib/ctp";
 import {
   MARKET_OPENING_SHARES, MARKET_MID_SHARES, marketWindows, totalShares,
   countdown, countdownTick, countdownTone, midRoundFor,
@@ -72,7 +73,7 @@ import {
 // (which is the rule the withdraw dialog states: completed holes count), and
 // lowNetRounds drops a withdrawn card outright.
 export function BettingView({
-  players, round, tRounds, courses, holeData, ctpData, onSetCtp, user, numRounds,
+  players, round, tRounds, courses, holeData, ctpData, onSetCtp, ctpChain, user, numRounds,
   getPlayerTee, getPlayerCH = () => null,
   sideGames, onUpdateSideGames, marketBets, onSaveMarketBet, leaderboard,
   finalizedRounds, pairingsData, firstTeeAt, marketNudge, teeTimesData, roundDates,
@@ -88,7 +89,7 @@ export function BettingView({
   // roster id — it is what firestore.rules pins `created_by` to and what the
   // delete rule compares against, so the screen has to decide who may remove
   // a bet off the same field the rules will judge it by.
-  sideBets = [], authUid = null, onAddSideBet, onDeleteSideBet, onSettleSideBet,
+  sideBets = [], authUid = null, onAddSideBet, onEditSideBet, onDeleteSideBet, onSettleSideBet,
 }) {
   const [tab, setTab] = useState("skins");
   const [expandedPlayer, setExpandedPlayer] = useState(null);
@@ -256,15 +257,25 @@ export function BettingView({
       const rec = (ctpData[r] || {})[hole];
       return rec?.playerId && ctpInSet.has(rec.playerId) ? [{ round: r, hole, ...rec }] : [];
     }));
+  // What each pin actually pays, in shares of the base per-pin value. A dry
+  // par 3 rolls its share onto the next one, so a pin can be worth 2×, 3× or
+  // more — see lib/ctp ctpLedger. Derived in App.jsx because the on-course
+  // prompt needs the same chain.
+  const chain = ctpChain || { pins: [], leftover: 0, bonusPerPin: 0, settled: false };
+  const pinAt = (r, hole) => chain.pins.find(p => p.round === r && p.hole === hole) || null;
+  const sharesAt = (r, hole) => pinAt(r, hole)?.totalShares || 0;
   const ctpLeaders = Object.values(ctpTags.reduce((acc, t) => {
-    const e = acc[t.playerId] || (acc[t.playerId] = { pid: t.playerId, count: 0, best: null });
+    const e = acc[t.playerId] || (acc[t.playerId] = { pid: t.playerId, count: 0, shares: 0, best: null });
     e.count += 1;
+    e.shares += sharesAt(t.round, t.hole);
     if (t.distanceFt != null && (e.best == null || t.distanceFt < e.best)) e.best = t.distanceFt;
     return acc;
   }, {}))
-    // Most pins, then the closest single shot among equals — the tiebreak the
-    // players would use themselves.
-    .sort((a, b) => b.count - a.count || (a.best ?? Infinity) - (b.best ?? Infinity));
+    // Most MONEY, then the closest single shot among equals. It used to be
+    // most pins, and a carry breaks that: one 3× pin beats three ordinary
+    // ones, and a board ordered by count would print the smaller number above
+    // the bigger one.
+    .sort((a, b) => b.shares - a.shares || b.count - a.count || (a.best ?? Infinity) - (b.best ?? Infinity));
   const noPar3s = roundList.every(r => par3sFor(r).length === 0);
   // Every par 3 in the tournament, which is what the pot divides by — see
   // perUnit. It counts the holes on the courses as they are ASSIGNED, so a
@@ -272,6 +283,23 @@ export function BettingView({
   // settles as the schedule fills in.
   const par3Count = roundList.reduce((n, r) => n + par3sFor(r).length, 0);
   const perPin = perUnit(ctpPot, par3Count);
+  // ── What the pot has actually paid out ─────────────────────────
+  // Dividing by the pins that EXIST is right, and it has a consequence nothing
+  // on this screen used to state: a pin nobody claims, and a pin tagged to
+  // somebody who never bought in, are both a share of the pot that is never
+  // assigned to anybody. The board showed every winner what he was owed and
+  // never showed the director that the two columns do not add up — so the
+  // money left over was found by counting cash on Sunday, if at all.
+  // Shares still travelling: dry pins whose money has not yet landed on a
+  // winner. Once the chain runs to the end this is zero — the last carry is
+  // split over the pins that were won, so the pot always finds an owner.
+  const ctpDry = chain.pins.filter(p => p.carriedOut).length;
+  // A dry pin with somewhere to carry to has already found its winner. One
+  // with nowhere yet is money still travelling down the chain.
+  const ctpInFlight = chain.pins.filter(p => p.carriedOut && !p.carriesTo).length;
+  // The biggest pin still to be played for, which is the number worth saying.
+  const ctpNextUp = chain.pins.find(p => p.pending && p.shares > 1) || null;
+  const ctpClaimed = ctpTags.length;
   // A pin is PROVISIONAL while its round is live — a group still out can get
   // inside it — and FINAL the moment the round is done, which is the last
   // group signing its card or the director finalizing from Admin. Derived
@@ -527,7 +555,11 @@ export function BettingView({
   // All three cards open the SAME sheet. The buy-ins were never really three
   // lists; they were one table the director was being made to read a column
   // at a time.
-  const potCard = ({ label, pot, rightTop, rightBottom, summary, typed = false, columns = null }) => (
+  // `note` is a line UNDER the numbers, for the thing a pot card's arithmetic
+  // does not say by itself. CTP is the case it exists for: its pot divides by
+  // the pins that exist, so the winners' column and the pot do not have to
+  // add up, and the difference is money nobody has been assigned.
+  const potCard = ({ label, pot, rightTop, rightBottom, summary, note = null, typed = false, columns = null }) => (
     <>
       <div style={{ background: K.card, borderRadius: R.lg, marginBottom: showBuyIns ? 0 : 10, border: `1px solid ${K.bdr}`, overflow: "hidden" }}>
         <div style={{ padding: "12px 14px", display: "flex", alignItems: "center", gap: 10 }}>
@@ -576,6 +608,11 @@ export function BettingView({
             </div>
           )}
         </div>
+        {note && (
+          <div style={{ padding: "7px 14px", borderTop: `1px solid ${K.bdr}`, fontSize: FS.label, color: K.t3, lineHeight: 1.45 }}>
+            {note}
+          </div>
+        )}
         {user?.isDirector && (
           <div
             onClick={() => setShowBuyIns(v => !v)}
@@ -1062,6 +1099,37 @@ export function BettingView({
                   // progress bar for something nobody is waiting on.
                   rightTop: `${par3Count} total`,
                   rightBottom: `${money(perPin)} / pin`,
+                  // Where the carry is. A dry par 3 rolls its share onto the
+                  // next one, so the useful sentence is not "how much is
+                  // unclaimed" — nothing stays unclaimed any more — but which
+                  // pin is now worth several, and whether the last carry has
+                  // been split out yet.
+                  note: ctpPot <= 0 ? null
+                    : ctpNextUp ? (
+                      <>
+                        <b style={{ color: K.warn, fontWeight: 800 }}>
+                          Rd {ctpNextUp.round} · Hole {ctpNextUp.hole} is worth {carryLabel(ctpNextUp.shares)}
+                        </b>
+                        {` · ${money(ctpNextUp.shares * perPin)} on one pin`}
+                      </>
+                    ) : chain.settled && chain.leftover > 0 && chain.bonusPerPin > 0 ? (
+                      <>
+                        <b style={{ color: K.acc, fontWeight: 800 }}>{money(chain.leftover * perPin)} from the last dry pin</b>
+                        {` · split across the ${ctpClaimed} pins that were won`}
+                      </>
+                    ) : ctpInFlight > 0 ? (
+                      <>
+                        <b style={{ color: K.warn, fontWeight: 800 }}>{money(ctpInFlight * perPin)} carrying</b>
+                        {` · ${ctpDry} ${ctpDry === 1 ? "pin" : "pins"} nobody hit, rolling to the next par 3`}
+                      </>
+                    ) : ctpDry > 0 ? (
+                      <>
+                        <b style={{ color: K.acc, fontWeight: 800 }}>{ctpDry} carried</b>
+                        {` · every share has found a winner`}
+                      </>
+                    ) : (
+                      <><b style={{ color: K.acc, fontWeight: 800 }}>All {par3Count} pins taken</b>{` · the pot is fully assigned`}</>
+                    ),
                 })}
 
                 {/* CTP LEADERS, with each row opening that player's own pins.
@@ -1082,7 +1150,7 @@ export function BettingView({
                       <span style={{ fontSize: FS.micro, color: K.t3, letterSpacing: 0.5, flexShrink: 0, width: 48, textAlign: "center" }}>COUNT</span>
                       <span style={{ fontSize: FS.micro, color: K.t3, letterSpacing: 0.5, flexShrink: 0, width: 66, textAlign: "center" }}>$</span>
                     </div>
-                    {ctpLeaders.map(({ pid, count }) => {
+                    {ctpLeaders.map(({ pid, count, shares }) => {
                       const isOpen = openCtpPlayer === pid;
                       const mine = ctpTags
                         .filter(t => t.playerId === pid)
@@ -1102,7 +1170,7 @@ export function BettingView({
                                 so the row does not have to say "CTPs" once
                                 per line down the column. */}
                             <span style={{ fontSize: FS.body, fontWeight: 700, color: K.acc, flexShrink: 0, width: 48, textAlign: "center" }}>{count}</span>
-                            <span style={{ fontSize: FS.small, color: K.t3, flexShrink: 0, width: 66, textAlign: "center" }}>{money(count * perPin)}</span>
+                            <span style={{ fontSize: FS.small, color: K.t3, flexShrink: 0, width: 66, textAlign: "center" }}>{money(shares * perPin)}</span>
                           </div>
                           {isOpen && (
                             <div style={{ padding: "2px 14px 8px", borderTop: `1px solid ${K.bdr}${ALPHA.tint}` }}>
@@ -1116,6 +1184,13 @@ export function BettingView({
                                       not the same as it being on the lip. */}
                                   <span style={{ fontSize: FS.small, fontWeight: 800, color: t.distanceFt != null ? K.warn : K.t3, flexShrink: 0, minWidth: 44, textAlign: "right" }}>
                                     {t.distanceFt != null ? `${t.distanceFt} ft` : "–"}
+                                  </span>
+                                  {/* A pin that swallowed earlier dry ones is
+                                      worth several, and the row has to say so
+                                      or the money column looks wrong against
+                                      the count beside it. */}
+                                  <span style={{ fontSize: FS.label, fontWeight: 800, color: K.gold, flexShrink: 0, minWidth: 26, textAlign: "right" }}>
+                                    {carryLabel(pinAt(t.round, t.hole)?.shares) || ""}
                                   </span>
                                   {/* A pin in a round still being played can
                                       still be taken off him. */}
@@ -1137,6 +1212,11 @@ export function BettingView({
                 {(() => {
                   const { course } = roundSetup(ctpShownRound);
                   const par3s = par3sFor(ctpShownRound);
+                  // How many groups the round HAS, so "3 of 4 asked" means
+                  // something. Empty slots are skipped the same way the group
+                  // switcher skips them — a group with nobody in it is not a
+                  // group that can answer.
+                  const groupsInRound = ((pairingsData || {})[ctpShownRound] || []).filter(g => g && g.length > 0).length;
                   if (par3s.length === 0) return (
                     <Card style={{ padding: 14, textAlign: "center", color: K.t3, fontSize: FS.small }}>
                       No par 3s on {course?.name || "this course"}.
@@ -1162,19 +1242,49 @@ export function BettingView({
                         const confirmers = (rec?.confirmedBy || [])
                           .map(pid => players.find(p => p.id === pid)?.name)
                           .filter(Boolean);
+                        // How much of the field has actually been asked. Every
+                        // answer the on-course prompt takes — tag, confirm and
+                        // pass alike — files a claim under its group's key, so
+                        // this counts groups that have walked off the green
+                        // rather than groups that agreed. See lib/ctp.
+                        const answered = (rec?.answeredGroups || []).length;
+                        // This pin's place in the carry chain: what it pays,
+                        // what rolled into it, and where its own share went if
+                        // nobody hit the green.
+                        const link = pinAt(ctpShownRound, hole);
                         return (
                           <Card key={hole} style={{ border: `1px solid ${winner ? K.acc + ALPHA.line : K.bdr}` }}>
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-                              <div>
+                              <div style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
                                 <span style={{ fontSize: FS.body, fontWeight: 700 }}>Hole {hole}</span>
-                                <span style={{ fontSize: FS.small, color: K.t3, marginLeft: 8 }}>Par 3</span>
+                                <span style={{ fontSize: FS.small, color: K.t3 }}>Par 3</span>
+                                {/* What this one is worth. Only when it is
+                                    more than a single share — every pin
+                                    carrying a "1×" would be noise on the one
+                                    number that is meant to stand out. */}
+                                {carryLabel(link?.shares) && (
+                                  <span style={{
+                                    fontSize: FS.label, fontWeight: 800, color: K.gold, letterSpacing: 0.5,
+                                    padding: "1px 6px", borderRadius: R.xs, border: `1px solid ${K.gold}${ALPHA.line}`,
+                                    background: K.gold + ALPHA.wash, flexShrink: 0,
+                                  }}>{carryLabel(link.shares)}</span>
+                                )}
                               </div>
                               {winner ? (
                                 <span style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
                                   <span style={{ fontSize: FS.body, fontWeight: 700, color: K.acc, whiteSpace: "nowrap" }}>🎯 {winner.name}</span>
                                   {dist && <span style={{ fontSize: FS.small, fontWeight: 800, color: K.warn }}>{dist}</span>}
                                 </span>
-                              ) : <span style={{ fontSize: FS.small, color: K.t3 }}>No winner yet</span>}
+                              ) : (
+                                /* "No winner yet" and "the field played it and
+                                   nobody was close" used to be the same
+                                   sentence, because a pass wrote nothing down.
+                                   It does now, so the pin can say which of the
+                                   two it is. */
+                                <span style={{ fontSize: FS.small, color: K.t3 }}>
+                                  {answered > 0 && answered >= groupsInRound ? "Nobody was close" : "No winner yet"}
+                                </span>
+                              )}
                             </div>
 
                             {/* The pin's standing. A tagged hole in a live
@@ -1203,13 +1313,49 @@ export function BettingView({
                               </div>
                             )}
 
+                            {/* How much of the field has walked off this green.
+                                A pin standing at 6 ft with one group still out
+                                is a different thing from the same pin with
+                                everybody in, and until now the screen said the
+                                same thing about both. */}
+                            {groupsInRound > 0 && (answered > 0 || winner) && (
+                              <div style={{ fontSize: FS.label, color: answered >= groupsInRound ? K.acc : K.t3, marginTop: 4 }}>
+                                {answered >= groupsInRound
+                                  ? "Every group asked"
+                                  : `${answered} of ${groupsInRound} groups asked`}
+                              </div>
+                            )}
+
+                            {/* The carry, said on the pin it happened to.
+                                A dry hole names where its money went, and a
+                                hole that swallowed one names what it is now
+                                worth — otherwise the two ends of the same
+                                carry appear on the board as unrelated. */}
+                            {link?.carriedOut && (
+                              <div style={{ fontSize: FS.label, color: K.gold, marginTop: 4 }}>
+                                {link.carriesTo
+                                  ? `Nobody hit it — ${money(perPin)} carried to Rd ${link.carriesTo.round} · Hole ${link.carriesTo.hole}`
+                                  : `Nobody hit it — ${money(perPin)} carrying to the next par 3`}
+                              </div>
+                            )}
+                            {link?.carriedIn > 0 && winner && (
+                              <div style={{ fontSize: FS.label, color: K.gold, marginTop: 4 }}>
+                                Pays {money(link.totalShares * perPin)} — {link.carriedIn} carried {link.carriedIn === 1 ? "pin" : "pins"} rolled into it
+                              </div>
+                            )}
+                            {link?.pending && link.shares > 1 && (
+                              <div style={{ fontSize: FS.label, color: K.gold, marginTop: 4 }}>
+                                Worth {money(link.shares * perPin)} to whoever takes it
+                              </div>
+                            )}
+
                             {/* A tag naming somebody who is not in the CTP game
                                 still shows — the document is the hole's answer —
                                 but it wins no money, and saying so here is
                                 cheaper than a director wondering why the board
                                 disagrees with the hole. */}
                             {rec?.playerId && !ctpInSet.has(rec.playerId) && (
-                              <div style={{ fontSize: FS.label, color: K.warn, marginTop: 4 }}>Not in the CTP game — this pin pays nothing</div>
+                              <div style={{ fontSize: FS.label, color: K.warn, marginTop: 4 }}>Not in the CTP game — this pin pays nothing, and its share carries</div>
                             )}
 
                             {/* Tagged-by line — CTP is claimed on-course by whichever group was closest,
@@ -1923,6 +2069,7 @@ export function BettingView({
           user={user}
           authUid={authUid}
           onAddBet={onAddSideBet}
+          onEditBet={onEditSideBet}
           onDeleteBet={onDeleteSideBet}
           onSettleBet={onSettleSideBet}
           confirm={confirm}

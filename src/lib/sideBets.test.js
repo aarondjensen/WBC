@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   sideBetId, sideBetError, buildSideBet, sortSideBets,
-  inSideBet, sideBetTotals, canDeleteSideBet, MAX_DETAIL,
+  inSideBet, sideBetTotals, canDeleteSideBet, canEditSideBet, buildSideBetEdit,
+  canRepeatSideBet, repeatSideBetSeed, MAX_DETAIL,
   settledBy, hasSettled, isSettled, toggleSettled, settleState,
 } from "./sideBets";
 
@@ -219,5 +220,129 @@ describe("canDeleteSideBet", () => {
   });
   it("refuses a signed-out reader", () => {
     expect(canDeleteSideBet(bet(), { uid: null, isDirector: false })).toBe(false);
+  });
+});
+
+// ── Editing ───────────────────────────────────────────────────────
+// Wider than deleting on purpose: correcting a bet you are a side of is an
+// argument held in the open, where erasing one is not. Mirrors the `update`
+// clause in firestore.rules — if these disagree the screen offers a pencil
+// whose write the rules refuse.
+describe("canEditSideBet", () => {
+  const who = (over) => canEditSideBet(bet(), { uid: "uid_z", pid: "gus_p", isDirector: false, ...over });
+
+  it("lets the author fix their own", () => {
+    expect(who({ uid: "uid_a" })).toBe(true);
+  });
+  it("lets a director fix anybody's", () => {
+    expect(who({ isDirector: true })).toBe(true);
+  });
+  // The half that deleting deliberately withholds.
+  it("lets either player in the bet fix it, whoever logged it", () => {
+    expect(who({ pid: "aaron_j" })).toBe(true);
+    expect(who({ pid: "dave_s" })).toBe(true);
+  });
+  it("refuses somebody with no stake in it", () => {
+    expect(who()).toBe(false);
+  });
+  // A roster id with no account behind it cannot write anything, and the
+  // rules would refuse it even where this said yes.
+  it("refuses a signed-out reader who is nonetheless in the bet", () => {
+    expect(who({ uid: null, pid: "aaron_j" })).toBe(false);
+  });
+});
+
+describe("buildSideBetEdit", () => {
+  const edit = (over = {}, from = {}) => buildSideBetEdit(
+    bet({ settled_by: ["aaron_j", "dave_s"], ...from }),
+    { playerA: "aaron_j", playerB: "dave_s", amount: "20", detail: "  front nine  ", ...over },
+  );
+
+  it("addresses the row it is patching", () => {
+    expect(edit().id).toBe("b1");
+  });
+  it("stores the amount as a number and trims the terms", () => {
+    expect(edit({ amount: "45" }).amount).toBe(45);
+    expect(edit().detail).toBe("front nine");
+  });
+  it("caps the terms the same way a new bet does", () => {
+    expect(edit({ detail: "x".repeat(500) }).detail).toHaveLength(MAX_DETAIL);
+  });
+  // The fields nobody editing has any business moving are absent from the
+  // patch rather than written back — a merge cannot carry a stale copy over
+  // the truth if it never carries them at all.
+  it("does not touch the author, the tournament or when it was logged", () => {
+    expect(Object.keys(edit()).sort())
+      .toEqual(["amount", "detail", "id", "player_a", "player_b", "settled_by"]);
+  });
+
+  // A "paid" mark was a claim about a specific amount between two specific
+  // people. Move either and it is a claim about a bet that no longer exists.
+  it("clears the paid marks when the money moves", () => {
+    expect(edit({ amount: "50" }).settled_by).toEqual([]);
+  });
+  it("clears them when a player is swapped out", () => {
+    expect(edit({ playerB: "gus_p" }).settled_by).toEqual([]);
+  });
+  // A typo fix is not a new bet, and un-paying two men over a spelling would
+  // be the app picking an argument nobody was having.
+  it("keeps them when only the wording changed", () => {
+    expect(edit().settled_by).toEqual(["aaron_j", "dave_s"]);
+  });
+  // Always an array, always written — db.upsert merges, and a mark left out
+  // of the patch is a mark that survives the edit that meant to end it.
+  it("writes an empty list rather than leaving the field out", () => {
+    expect(edit({ amount: "50" }, { settled_by: undefined }).settled_by).toEqual([]);
+  });
+  // A mark left over from an earlier edit, belonging to nobody in the bet.
+  it("drops a mark that is not one of the two sides", () => {
+    expect(edit({}, { settled_by: ["aaron_j", "gus_p"] }).settled_by).toEqual(["aaron_j"]);
+  });
+});
+
+// ── Running it back ───────────────────────────────────────────────
+// The money changes hands on the 18th green and somebody says "again
+// tomorrow, double". A repeat is a NEW bet on the old terms — the settled row
+// is the record that the first one was paid and must survive the rematch.
+describe("canRepeatSideBet", () => {
+  const done = (over = {}) => bet({ settled_by: ["aaron_j", "dave_s"], ...over });
+
+  it("offers it to either player once the bet is settled", () => {
+    expect(canRepeatSideBet(done(), { uid: "uid_a", pid: "aaron_j" })).toBe(true);
+    expect(canRepeatSideBet(done(), { uid: "uid_b", pid: "dave_s" })).toBe(true);
+  });
+  // A live bet already exists. A button on it is a way to have the same wager
+  // twice by accident.
+  it("refuses a bet that is not finished", () => {
+    expect(canRepeatSideBet(bet(), { uid: "uid_a", pid: "aaron_j" })).toBe(false);
+    expect(canRepeatSideBet(bet({ settled_by: ["aaron_j"] }), { uid: "uid_a", pid: "aaron_j" })).toBe(false);
+  });
+  // Somebody else's rematch is not yours to arrange — unlike correcting a bet,
+  // which is an argument you are a side of.
+  it("refuses somebody who was not in it", () => {
+    expect(canRepeatSideBet(done(), { uid: "uid_z", pid: "gus_p" })).toBe(false);
+  });
+  it("refuses a signed-out reader", () => {
+    expect(canRepeatSideBet(done(), { uid: null, pid: "aaron_j" })).toBe(false);
+  });
+});
+
+describe("repeatSideBetSeed", () => {
+  const seeded = repeatSideBetSeed(bet({ amount: 20, detail: "front nine", settled_by: ["aaron_j", "dave_s"] }));
+
+  it("carries the same two players and the same terms", () => {
+    expect(seeded).toEqual({ playerA: "aaron_j", playerB: "dave_s", amount: "20", detail: "front nine" });
+  });
+  // The form holds an amount as a string; the number is buildSideBet's job.
+  it("hands the amount over as the form's own kind of value", () => {
+    expect(seeded.amount).toBe("20");
+  });
+  // Nothing of the settled bet's own identity comes along — the rematch is a
+  // new row, and a stray id or a stray mark would make it the old one.
+  it("carries no id, no author and no paid marks", () => {
+    expect(Object.keys(seeded).sort()).toEqual(["amount", "detail", "playerA", "playerB"]);
+  });
+  it("survives a bet with no terms written on it", () => {
+    expect(repeatSideBetSeed(bet({ detail: undefined })).detail).toBe("");
   });
 });

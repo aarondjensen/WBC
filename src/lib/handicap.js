@@ -120,6 +120,15 @@ export function differential({ gross, rating, slope }) {
 // its four rounds 1, 2, 3, 5 in the source data, which sorts correctly anyway.
 const newestFirst = (a, b) => b.year - a.year || b.round - a.round;
 
+// ── HISTORY_LAST_YEAR ──────────────────────────────────────────────
+// The last year the bundled history covers. Every WBC played since is in
+// FIRESTORE rather than in data/history.js — the bundle only moves when
+// data/rounds.csv is re-exported and `npm run build:history` is run — so this
+// is the line between the two halves of the record. lib/liveHistory reads the
+// half on the far side of it.
+export const HISTORY_LAST_YEAR =
+  HISTORY_ROUNDS.reduce((y, r) => Math.max(y, Number(r.year) || 0), 0);
+
 // ── recentRoundSlots ───────────────────────────────────────────────
 // The tournament's last `n` rounds — the yardstick every player's window is
 // measured against. Not a player's rounds: the ROUNDS THAT WERE PLAYED, whoever
@@ -127,8 +136,17 @@ const newestFirst = (a, b) => b.year - a.year || b.round - a.round;
 //
 // Derived from the rounds actually scored rather than from the course table, so
 // a round nobody has a card for cannot become a slot everybody is missing.
-export function recentRoundSlots(n = WINDOW) {
-  return [...new Set(HISTORY_ROUNDS.map(r => `${r.year}-${r.round}`))]
+//
+// `extraKeys` is the same fact for the years the bundle has not caught up with:
+// the slots of editions still living in Firestore. They belong in the yardstick
+// for the same reason they belong in a player's window — a man who missed last
+// year's WBC is measured against a field that played it, and leaving those
+// rounds out would quietly tell him he had missed nothing.
+export function recentRoundSlots(n = WINDOW, extraKeys = []) {
+  return [...new Set([
+    ...HISTORY_ROUNDS.map(r => `${r.year}-${r.round}`),
+    ...(extraKeys || []),
+  ])]
     .map(key => { const [year, round] = key.split("-").map(Number); return { key, year, round }; })
     .sort(newestFirst)
     .slice(0, n)
@@ -229,6 +247,68 @@ export function wbcIndex(rounds = [], { recentSlots = recentRoundSlots() } = {})
   };
 }
 
+// ── indexTimeline ──────────────────────────────────────────────────
+// What the index WAS, after each round of a career. Newest first, one entry
+// per round:  { key, year, round, index }
+//
+// The same arithmetic as `wbcIndex`, run again for every round with only that
+// round and the ones before it in front of it — which is what makes it a
+// history rather than a projection. A round is only ever measured against
+// rounds that had already been played when it was, so the number attached to a
+// round in 2015 is the number the player actually carried in 2015: window,
+// taper and all.
+//
+// `rounds` is a whole career, in any order; historyFor's shape, or indexFor's
+// `rounds`. An unrated round keeps its place and its index, which is the one it
+// inherited from the round before — it changed nothing, because it could not be
+// scored.
+//
+// recentSlots is deliberately empty: this asks what the number was, and the
+// asterisk — whether the window matches the tournament's own last twelve — is
+// a question about TODAY that means nothing at a point in the past. Passing it
+// also keeps a career of sixty rounds from deriving the tournament's slots
+// sixty times over.
+export function indexTimeline(rounds = []) {
+  const all = [...rounds].sort(newestFirst);
+  return all.map((r, i) => ({
+    key: r.key,
+    year: r.year,
+    round: r.round,
+    index: wbcIndex(all.slice(i), { recentSlots: [] }).index,
+  }));
+}
+
+// ── yearDeltas ─────────────────────────────────────────────────────
+// Where the index stood at the end of each year a player turned up, and how
+// far it moved over that year. Newest first:  { year, index, delta }
+//
+// The baseline is the last year they PLAYED, not the calendar year before —
+// somebody who misses two WBCs has not been getting quietly worse in the
+// meantime, and a delta against a year with no rounds in it would be dividing
+// three years of change into one. `delta` is null for the earliest year, which
+// has nothing to be measured against.
+//
+// A NEGATIVE delta is an improvement: the index is a handicap and the low
+// number is the better golfer. The view colours it accordingly.
+export function yearDeltas(rounds = []) {
+  const years = [];
+  const seen = new Set();
+  // Newest first, so the FIRST entry for a year is that year's last round —
+  // the index it finished on.
+  for (const r of indexTimeline(rounds)) {
+    if (seen.has(r.year)) continue;
+    seen.add(r.year);
+    years.push({ year: r.year, index: r.index });
+  }
+  return years.map((y, i) => {
+    const before = years[i + 1];
+    return {
+      ...y,
+      delta: y.index == null || before?.index == null ? null : tenth(y.index - before.index),
+    };
+  });
+}
+
 // ── editionRounds ──────────────────────────────────────────────────
 // A finished edition's rounds, in the shape the index math wants.
 //
@@ -321,9 +401,17 @@ export function editionRounds({ year, holeScores = [], tRounds = [], courses = [
 // The cases it exists for: a first-timer with no rounds at all, somebody whose
 // real index is known from a home club, and the year a career's data is plainly
 // not describing the golfer any more.
-export function indexFor(name, { override = null, extraRounds = [] } = {}) {
+//
+// `extraRounds` are this player's rounds from a year the bundled history has
+// not caught up with, and `recentSlots` is the tournament-wide yardstick those
+// same years belong in. They travel together: a caller handing in one without
+// the other gets a window holding last year's rounds measured against a
+// yardstick that has never heard of them — which reads as "played every round
+// and missed nothing" for a man who was there and "missed nothing" for a man
+// who was not. See lib/liveHistory, which produces both from one load.
+export function indexFor(name, { override = null, extraRounds = [], recentSlots = undefined } = {}) {
   const rounds = mergeRounds(historyFor(name), extraRounds);
-  const board = wbcIndex(rounds);
+  const board = wbcIndex(rounds, recentSlots ? { recentSlots } : {});
   // An empty string is a cleared field, not a scratch player. `Number("")` is
   // 0 and 0 is a legal index, so the blank has to be rejected before the number
   // check rather than by it — and 0 has to survive, which a falsy test would

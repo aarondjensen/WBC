@@ -38,11 +38,6 @@ export const SCRAMBLE_TEAMS = [
 
 export const SCRAMBLE_TEAM_KEYS = SCRAMBLE_TEAMS.map(t => t.key);
 
-// The label on the button the scramble puts in the app header — the three team
-// names, in order, which is the only thing that could name a screen holding all
-// three cards. Built from the list above so the two can never disagree.
-export const SCRAMBLE_BUTTON = SCRAMBLE_TEAMS.map(t => t.label).join("/");
-
 export const SCRAMBLE_HOLES = 18;
 
 export const teamLabel = (key) => (SCRAMBLE_TEAMS.find(t => t.key === key) || {}).label || "";
@@ -204,3 +199,32 @@ export function canTurnOn(scramble) {
 
 // Whether the header button should be on screen at all.
 export const scrambleLive = (scramble) => mergeScramble(scramble).on;
+
+// ── Where the app opens on a scramble day ──────────────────────────
+// The app opens on the leaderboard, which is right on all but one kind of
+// day. A scramble is ONE round and it is only ever switched on while it is
+// being played, so on that day the tab everybody wants is Scoring: they are
+// standing on a tee box with a ball to post, not looking up a total.
+//
+// Three guards, and each of them is a way this could go wrong rather than a
+// hypothetical:
+//
+//   FIRST SNAPSHOT ONLY. The scramble flag arrives over a subscription, so it
+//   changes twice for two completely different reasons — once when the app
+//   learns what is already true, and again when a director throws the switch
+//   with sixteen phones in sixteen pockets. Only the first is a landing. The
+//   second must move nobody: pulling a man off the card he is entering to show
+//   him a screen he did not ask for is the worst thing this could do.
+//
+//   NOT OVER A DEEP LINK. A notification tap names the screen it wants. The
+//   app is not entitled to overrule it.
+//
+//   NOT OVER A TAP. If the phone has already been pointed somewhere in the
+//   beat before the snapshot landed, that is a person choosing, and it wins.
+//
+// `atBootView` is the caller's answer to the last of those — it knows what it
+// opened on and where it is now.
+export function opensOnScramble(scramble, { firstSnapshot = false, deepLinked = false, atBootView = false } = {}) {
+  if (!firstSnapshot || deepLinked || !atBootView) return false;
+  return scrambleLive(scramble);
+}

@@ -82,13 +82,20 @@ export default defineConfig({
   // and only the tests fall over.
   esbuild: { jsx: 'automatic', jsxImportSource: 'react' },
   test: {
-    // Unit tests only. firestore.rules.test.mjs is an INTEGRATION test — it
-    // needs the Firestore emulator listening on 127.0.0.1:8080 and fails with
-    // ECONNREFUSED without it, which would make `npm test` red by default and
-    // train everyone to ignore it.
+    // Unit tests only. The two root-level `firestore.*.test.mjs` files are
+    // INTEGRATION tests — they need the Firestore emulator listening on
+    // 127.0.0.1:8080 and fail with ECONNREFUSED without it, which would make
+    // `npm test` red by default and train everyone to ignore it.
     //
-    // Run the rules suite deliberately, with the emulator up:
-    //   firebase emulators:exec --only firestore "npx vitest run firestore.rules.test.mjs"
+    // They are NOT vitest suites. Each is a plain node script with its own
+    // check() runner and a process.exit at the end, so `vitest run
+    // firestore.rules.test.mjs` never ran them — the filter matched nothing
+    // against the include below, and on the day that was noticed the rules
+    // suite had been unrunnable by its own documented command for months.
+    // Run them the way they are written, with `npm run test:rules` and
+    // `npm run test:ctp-claims`, or by hand:
+    //   firebase emulators:exec --only firestore --project wbc-rules-test \
+    //     "FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 node firestore.rules.test.mjs"
     //
     // `scripts/` is included for one test that needs no emulator and no
     // credential: import-history.smoke.test.js executes the import script under
