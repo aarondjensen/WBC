@@ -458,6 +458,14 @@ What that means concretely:
    >
    > The debug hash is harmless to leave registered — it is what makes
    > sign-in work in `npx cap run android`.
+   >
+   > **`npm run android:bundle` now refuses to build until this is done.** It
+   > counts the certificate hashes in `google-services.json`, subtracts the
+   > debug key (whose fingerprint it computes itself — that keystore's
+   > password is the literal string `android`, a documented constant), and
+   > stops if fewer than two release certificates remain. `WBC_FIRST_UPLOAD=1`
+   > is the escape hatch for the one build that legitimately cannot have
+   > Play's certificate: the throwaway that mints it.
 
 5. Store listing:
    - **Name:** "Wannabe Cup" (30 chars max), same trademark reasoning as Apple.
