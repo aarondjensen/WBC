@@ -427,29 +427,38 @@ What that means concretely:
    app → Add fingerprint → **re-download `google-services.json`** into
    `android/app/` and rebuild.
 
-   > **CHECK THIS BEFORE THE NEXT UPLOAD.** The committed
-   > `android/app/google-services.json` carries exactly ONE Android
-   > certificate hash, `efc2a38c…`, and it has not been touched since the
-   > commit that created `android/` on 12 July 2026 — which is before any
-   > bundle had been uploaded and therefore before Play's signing certificate
-   > existed. So on the evidence in this repo that hash is the LOCAL upload
-   > key, and the re-download half of this step never happened. If that is
-   > right, `versionCode 2` ships with a Google sign-in that works on your
-   > machine and fails for all sixteen testers.
+   > **THE FINGERPRINT IN `google-services.json` IS THE DEBUG KEY.** Confirmed
+   > 31 Aug 2026, not inferred: the file's only Android certificate hash is
+   > `efc2a38c42bb3c69dcefd22ad1e049c74b77939c`, and that is character for
+   > character the SHA-1 of `C:\Users\Aaron\.android\debug.keystore`
+   > (`keytool -list -v -keystore … -storepass android -alias androiddebugkey`).
    >
-   > Thirty seconds settles it, and it cannot be settled from the repo:
+   > So it is neither the upload key nor Play's app-signing certificate, and
+   > the consequence is wider than this step usually is: Google sign-in works
+   > in a DEBUG build on the machine that holds that keystore, and fails in
+   > **every release build** — the local one and the Play install alike. The
+   > file has not been touched since `android/` was created on 12 July, so it
+   > was downloaded before any fingerprint that matters existed.
    >
-   > ```sh
-   > keytool -list -v -keystore <your upload keystore> | grep SHA1
-   > ```
+   > What fixes it, in this order, because `google-services.json` is generated
+   > at download time from whatever is registered at that moment:
    >
-   > Compare that against `efc2a38c42bb3c69dcefd22ad1e049c74b77939c` in
-   > `google-services.json`, and against the app-signing SHA-1 in Play Console
-   > → Release → Setup → App signing. If the file matches your keystore rather
-   > than Play, do this step. **Register both** while you are there — one
-   > fingerprint each is what keeps a local release build and a Play install
-   > both able to sign in, and the re-downloaded file will then carry two
-   > entries where it now carries one.
+   > 1. `keytool -list -v -keystore C:/dev/keys/wbc-upload.jks` → the upload
+   >    key's SHA-1 and SHA-256.
+   > 2. Play Console → Release → Setup → App integrity → App signing → the
+   >    **app signing** key's SHA-1 and SHA-256. It exists: the throwaway
+   >    upload that `versionCode 2` refers to is what minted it.
+   > 3. Both pairs into Firebase → Project settings → the Android app → Add
+   >    fingerprint. Both, not one: the upload key is what a local release
+   >    build presents, Play's is what an installed app presents.
+   > 4. **Then** re-download `google-services.json` into `android/app/` and
+   >    commit it. It should come back carrying three certificate hashes, or
+   >    at least the two that matter.
+   > 5. Rebuild. The bundle built before this is not the one to ship.
+   >
+   > The debug hash is harmless to leave registered — it is what makes
+   > sign-in work in `npx cap run android`.
+
 5. Store listing:
    - **Name:** "Wannabe Cup" (30 chars max), same trademark reasoning as Apple.
    - **Screenshots:** 2–8, phone, 9:16. **Feature graphic 1024×500** (required —
