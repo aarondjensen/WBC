@@ -32,7 +32,7 @@ Most of the hard compliance work is done. Verified in the code, not assumed:
 | Android release signing | Done — `android/app/build.gradle` reads `keystore.properties` or `WBC_KEYSTORE_*` env vars |
 | Android `targetSdk` | 36 — clears Play's API 35 floor for new apps |
 | App icons and splash screens, both platforms | Generated and committed |
-| Tests / lint / build | Green: 1344 tests, 0 lint errors, clean build |
+| Tests / lint / build | Green: 2188 tests, 0 lint errors, clean build (re-run 31 Aug 2026 — the 1344 this row used to claim was two hundred commits out of date) |
 
 ## What this branch changed
 
@@ -273,10 +273,17 @@ lead times and they break silently:
 Then:
 
 4. `npm run ios:sync`
-5. Open `ios/App/App.xcworkspace`. Set **MARKETING_VERSION** to `1.0.0` and
-   **CURRENT_PROJECT_VERSION** to `1`. Confirm `PrivacyInfo.xcprivacy` appears
-   under Build Phases → Copy Bundle Resources (this branch added it; verify
-   rather than trust).
+5. Open `ios/App/App.xcworkspace`. **Nothing to set** — all three were checked
+   in the tracked project on 31 Aug 2026 and are right: `MARKETING_VERSION` is
+   `1.0.0`, `CURRENT_PROJECT_VERSION` is `1`, and `PrivacyInfo.xcprivacy` is in
+   the Resources build phase rather than merely sitting in the folder, which is
+   the failure that ships a manifest doing nothing. `GoogleService-Info.plist`
+   is tracked and in the same phase, and its `REVERSED_CLIENT_ID`,
+   `BUNDLE_ID` and `PROJECT_ID` agree with `Info.plist` and the app.
+
+   The version numbers were a by-hand Xcode edit here for no reason —
+   `project.pbxproj` is a tracked file, so the edit belongs in the repo where
+   it survives a fresh clone and cannot be forgotten at 1am.
 6. Archive, then Distribute → App Store Connect.
 7. **Test the archive through TestFlight on a real iPhone before submitting.**
    Specifically: Sign in with Apple, Sign in with Google, the guest button, and
@@ -419,6 +426,30 @@ What that means concretely:
    copy both fingerprints → Firebase Console → Project settings → the Android
    app → Add fingerprint → **re-download `google-services.json`** into
    `android/app/` and rebuild.
+
+   > **CHECK THIS BEFORE THE NEXT UPLOAD.** The committed
+   > `android/app/google-services.json` carries exactly ONE Android
+   > certificate hash, `efc2a38c…`, and it has not been touched since the
+   > commit that created `android/` on 12 July 2026 — which is before any
+   > bundle had been uploaded and therefore before Play's signing certificate
+   > existed. So on the evidence in this repo that hash is the LOCAL upload
+   > key, and the re-download half of this step never happened. If that is
+   > right, `versionCode 2` ships with a Google sign-in that works on your
+   > machine and fails for all sixteen testers.
+   >
+   > Thirty seconds settles it, and it cannot be settled from the repo:
+   >
+   > ```sh
+   > keytool -list -v -keystore <your upload keystore> | grep SHA1
+   > ```
+   >
+   > Compare that against `efc2a38c42bb3c69dcefd22ad1e049c74b77939c` in
+   > `google-services.json`, and against the app-signing SHA-1 in Play Console
+   > → Release → Setup → App signing. If the file matches your keystore rather
+   > than Play, do this step. **Register both** while you are there — one
+   > fingerprint each is what keeps a local release build and a Play install
+   > both able to sign in, and the re-downloaded file will then carry two
+   > entries where it now carries one.
 5. Store listing:
    - **Name:** "Wannabe Cup" (30 chars max), same trademark reasoning as Apple.
    - **Screenshots:** 2–8, phone, 9:16. **Feature graphic 1024×500** (required —
