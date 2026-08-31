@@ -440,21 +440,49 @@ What that means concretely:
    > file has not been touched since `android/` was created on 12 July, so it
    > was downloaded before any fingerprint that matters existed.
    >
+   > **All four values, read off the keystore and the console on 31 Aug 2026.**
+   > Certificates are public — these are fingerprints of them, not keys — so
+   > they belong here where the next person can check rather than re-derive:
+   >
+   > | | |
+   > | --- | --- |
+   > | Upload key SHA-1 | `02:DC:DF:19:2C:16:63:1A:E9:68:FB:68:8F:0E:8F:52:D5:B4:7B:E3` |
+   > | Upload key SHA-256 | `15:C0:3D:03:43:AA:0D:1F:33:D5:19:2F:9E:89:A1:DA:4D:23:68:38:25:1F:B3:55:32:85:31:B6:14:51:96:E3` |
+   > | Play app signing SHA-1 | `16:A4:79:FC:6E:ED:C6:1A:EB:7F:47:CD:D9:BD:81:FC:CC:9C:84:C4` |
+   > | Play app signing SHA-256 | `8C:2F:FF:DF:79:C7:73:CF:27:00:90:34:2C:E5:9E:78:27:A0:08:FA:1D:52:28:B7:19:10:76:86:C6:BB:97:96` |
+   >
+   > The upload key is `C:/dev/keys/wbc-upload.jks`, alias `upload`. Play's
+   > exists because the throwaway `versionCode 1` upload minted it, and it
+   > comes off **Protected with Play → App signing**, under *Classical key* —
+   > NOT off the Digital Asset Links JSON further down that page, which quotes
+   > a different fingerprint and has already sent one investigation the wrong
+   > way.
+   >
    > What fixes it, in this order, because `google-services.json` is generated
    > at download time from whatever is registered at that moment:
    >
-   > 1. `keytool -list -v -keystore C:/dev/keys/wbc-upload.jks` → the upload
-   >    key's SHA-1 and SHA-256.
-   > 2. Play Console → Release → Setup → App integrity → App signing → the
-   >    **app signing** key's SHA-1 and SHA-256. It exists: the throwaway
-   >    upload that `versionCode 2` refers to is what minted it.
-   > 3. Both pairs into Firebase → Project settings → the Android app → Add
-   >    fingerprint. Both, not one: the upload key is what a local release
-   >    build presents, Play's is what an installed app presents.
-   > 4. **Then** re-download `google-services.json` into `android/app/` and
-   >    commit it. It should come back carrying three certificate hashes, or
-   >    at least the two that matter.
-   > 5. Rebuild. The bundle built before this is not the one to ship.
+   > 1. All four into Firebase → Project settings → the Android app → Add
+   >    fingerprint. Both certificates, not one.
+   > 2. **Then** re-download `google-services.json` into `android/app/` and
+   >    commit it — the file is tracked here, unlike in The Bourbon Cup.
+   > 3. Check what actually arrived, because this is the step that silently
+   >    did not happen last time:
+   >
+   >    ```
+   >    Select-String -Path android\app\google-services.json -Pattern certificate_hash
+   >    ```
+   >
+   >    Three hashes, and these exact ones:
+   >
+   >    ```
+   >    02dcdf192c16631ae968fb688f0e8f52d5b47be3   upload key
+   >    16a479fc6eedc61aeb7f47cdd9bd81fccc9c84c4   Play app signing key
+   >    efc2a38c42bb3c69dcefd22ad1e049c74b77939c   debug keystore (already there)
+   >    ```
+   >
+   > 4. Rebuild. `npm run android:bundle` refuses until the first two are
+   >    present, and prints `Certificates: 2 release + debug` when they are.
+   >    The bundle built before this is not the one to ship.
    >
    > The debug hash is harmless to leave registered — it is what makes
    > sign-in work in `npx cap run android`.
