@@ -427,8 +427,14 @@ What that means concretely:
    app → Add fingerprint → **re-download `google-services.json`** into
    `android/app/` and rebuild.
 
-   > **THE FINGERPRINT IN `google-services.json` IS THE DEBUG KEY.** Confirmed
-   > 31 Aug 2026, not inferred: the file's only Android certificate hash is
+   > **FIXED 31 Aug 2026** — the file now carries all three hashes below, and
+   > `versionCode` moved to 3 because bundle 2 was built before it was. What
+   > follows is the account of what was wrong, kept because the shape of it
+   > recurs and the check at the end is worth running after any change to
+   > signing.
+   >
+   > **The fingerprint in `google-services.json` WAS the debug key.** Confirmed
+   > 31 Aug 2026, not inferred: the file's only Android certificate hash was
    > `efc2a38c42bb3c69dcefd22ad1e049c74b77939c`, and that is character for
    > character the SHA-1 of `C:\Users\Aaron\.android\debug.keystore`
    > (`keytool -list -v -keystore … -storepass android -alias androiddebugkey`).
@@ -483,6 +489,12 @@ What that means concretely:
    > 4. Rebuild. `npm run android:bundle` refuses until the first two are
    >    present, and prints `Certificates: 2 release + debug` when they are.
    >    The bundle built before this is not the one to ship.
+   >
+   > Steps 1–3 were done on 31 Aug 2026 and the three hashes above are what
+   > `Select-String` returned. Only SHA-1 was registered for the two release
+   > certificates, which is what `google-services.json` records and what Google
+   > Sign-In checks; the SHA-256 pairs are still worth adding if WBC ever wants
+   > App Links, which is the thing that uses them.
    >
    > The debug hash is harmless to leave registered — it is what makes
    > sign-in work in `npx cap run android`.
